@@ -1,0 +1,30 @@
+{
+  "name": "side-quest-v27-5-active-workout-persistence",
+  "version": "27.5.0",
+  "private": true,
+  "packageManager": "pnpm@10.16.1",
+  "scripts": {
+    "dev": "pnpm --dir apps/mobile start",
+    "ios": "pnpm --dir apps/mobile ios",
+    "android": "pnpm --dir apps/mobile android",
+    "web": "pnpm --dir apps/mobile web",
+    "validate:exercises": "pnpm --dir packages/exercise-content validate",
+    "typecheck": "pnpm --recursive --if-present run typecheck",
+    "test": "pnpm --recursive --if-present run test",
+    "check": "pnpm check:v24 && pnpm check:v23 && pnpm check:v22 && pnpm check:v20 && pnpm check:v19 && pnpm check:v18 && pnpm validate:exercises && pnpm validate:media && node scripts/validate-v21.mjs && pnpm typecheck && pnpm test && pnpm check:runtime-core",
+    "demo:generate": "tsx packages/generator/src/demo.ts",
+    "validate:media": "node packages/exercise-content/scripts/validate-media-coverage.mjs",
+    "check:v18": "node scripts/validate-v18.mjs && node scripts/validate-v18-1.mjs && node scripts/validate-v18-2.mjs && node scripts/validate-v18-3.mjs && node scripts/validate-v18-4.mjs && node scripts/validate-v18-5.mjs && node scripts/validate-v18-6-1.mjs && node scripts/validate-v18-7.mjs && node scripts/validate-v18-8.mjs && node scripts/validate-v18-9.mjs && node scripts/validate-v18-10.mjs && node scripts/validate-v18-10-1.mjs && node scripts/validate-v18-10-2.mjs && node scripts/validate-v18-11-1.mjs && node scripts/validate-v18-11-2.mjs && node scripts/validate-v18-11-3.mjs && node scripts/validate-v18-11-4.mjs && node scripts/validate-v18-11-5.mjs && node scripts/validate-v18-11-5-1.mjs && node scripts/validate-v18-12.mjs && node scripts/validate-v18-13.mjs",
+    "check:v19": "node scripts/validate-v19.mjs && node scripts/validate-v19-1.mjs && node scripts/validate-v19-2.mjs",
+    "check:v20": "node scripts/validate-v20.mjs && node scripts/validate-v20-1.mjs && node scripts/validate-v20-2.mjs",
+    "check:v22": "node scripts/validate-v22.mjs && node scripts/validate-v22-1.mjs && node scripts/validate-v22-2.mjs && node scripts/validate-v22-3.mjs && node scripts/validate-v22-4.mjs && node scripts/validate-v22-4-1.mjs && node scripts/validate-v22-4-2.mjs",
+    "check:v23": "node scripts/validate-v23.mjs",
+    "check:v24": "node scripts/validate-v24.mjs && node scripts/validate-v24-1.mjs && node scripts/validate-v24-2.mjs && node scripts/validate-v24-3.mjs && node scripts/validate-v24-4.mjs && node scripts/validate-v24-5.mjs && node scripts/validate-v24-6.mjs && node scripts/validate-v24-7.mjs && node scripts/validate-v24-8.mjs && node scripts/validate-v24-9.mjs && node scripts/validate-v25.mjs && node scripts/validate-v25-1.mjs && node scripts/validate-v25-2.mjs && node scripts/validate-v25-3.mjs && node scripts/validate-v25-4.mjs && node scripts/validate-v25-5.mjs && node scripts/validate-v25-6.mjs && node scripts/validate-v25-7.mjs && node scripts/validate-v26.mjs && node scripts/validate-v26-0-3.mjs && node scripts/validate-v26-1.mjs && node scripts/validate-v26-2.mjs && node scripts/validate-v26-3.mjs && node scripts/validate-v26-4-3.mjs && node scripts/validate-v26-5.mjs",
+    "check:runtime-core": "node scripts/validate-v31-1-runtime-core.mjs"
+  },
+  "devDependencies": {
+    "tsx": "4.23.1",
+    "typescript": "~6.0.3",
+    "vitest": "4.1.10"
+  }
+}

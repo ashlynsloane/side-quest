@@ -1,0 +1,17 @@
+[functions.strava-oauth-start]
+verify_jwt = true
+
+[functions.strava-oauth-callback]
+verify_jwt = false
+
+[functions.strava-sync]
+verify_jwt = true
+
+[functions.strava-webhook]
+verify_jwt = false
+
+[functions.strava-disconnect]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = false

@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+const failures=[];
+const read=(path)=>{if(!fs.existsSync(path)){failures.push(`Missing ${path}`);return '';}return fs.readFileSync(path,'utf8');};
+const expect=(path,tokens)=>{const text=read(path);for(const token of tokens)if(!text.includes(token))failures.push(`${path} is missing ${token}`);};
+expect('packages/generator/src/index.ts',['Dumbbell Diplomacy','Full-Body Field Trip','workoutName(request, seed)']);
+expect('apps/mobile/src/components/workout-name-modal.tsx',['Make it easy to remember','generateWorkoutNameCandidates','Use this name']);
+expect('apps/mobile/src/components/completed-workout-body-map.tsx',['AREAS TRAINED','Darker fill = more direct work','woman_front__quadriceps.png']);
+expect('apps/mobile/src/components/workout-share-modal.tsx',['Symptoms, restrictions, notes','Body areas trained','Open share sheet']);
+expect('apps/mobile/src/services/workout-summary.ts',['DEFAULT_WORKOUT_SHARE_OPTIONS','includeLoads: false','shareCompletedWorkout','data:image/svg+xml;base64']);
+expect('apps/mobile/src/app/active-workout.tsx',['CompletedWorkoutBodyMap','Share workout summary','WorkoutShareModal']);
+expect('apps/mobile/src/app/workout-preview.tsx',['WorkoutNameModal','Rename']);
+const summary=read('apps/mobile/src/services/workout-summary.ts');
+if(!summary.includes("includeExerciseList: false")||!summary.includes("includeReps: false")||!summary.includes("includeLoads: false")) failures.push('Detailed exercise data, reps, and loads must remain private by default.');
+if(failures.length){console.error(`V24.2 validation failed (${failures.length}):`);for(const failure of failures)console.error(`- ${failure}`);process.exit(1);}console.log('V24.2 validation passed: memorable editable names, actual trained-region summary, privacy-first share controls, and a native visual share payload are present.');

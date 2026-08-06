@@ -1,0 +1,21 @@
+{
+  "name": "@circuit/generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@circuit/domain": "workspace:*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@circuit/exercise-content": "workspace:*",
+    "vitest": "4.1.10",
+    "@types/node": "26.1.1"
+  }
+}

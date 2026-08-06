@@ -1,0 +1,89 @@
+node_modules/
+.expo/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+supabase/.env.v18
+
+apps/mobile/.env
+
+# Local Side Quest installer backups
+.side-quest-backups/
+.sidequest-backups/
+.sidequest-*-backup*/
+.sidequest-*-last-backup/
+.sidequest-2-*-backup*/
+
+# Historical generated update artifacts
+V*_UPDATE_NOTES.md
+CHECK_RESULTS.txt
+MANIFEST.txt
+MANIFEST_DESCRIPTION.txt
+PACKAGE_CONTENTS.txt
+
+# Local backups and generated safety copies
+code_safety_backups/
+.side-quest-backups/
+.sidequest-backups/
+.sidequest-*-backup*/
+.sidequest-*-last-backup/
+.sidequest-2-*-backup*/
+
+# Common generated folders
+node_modules/
+.expo/
+dist/
+build/
+coverage/
+
+# Historical generated update artifacts
+V*_UPDATE_NOTES.md
+CHECK_RESULTS.txt
+MANIFEST.txt
+MANIFEST_DESCRIPTION.txt
+PACKAGE_CONTENTS.txt
+
+# Local backups and generated safety copies
+code_safety_backups/
+.side-quest-backups/
+.sidequest-backups/
+.sidequest-*-backup*/
+.sidequest-*-last-backup/
+.sidequest-2-*-backup*/
+
+# Common generated folders
+node_modules/
+.expo/
+dist/
+build/
+coverage/
+
+# Historical generated update artifacts
+V*_UPDATE_NOTES.md
+CHECK_RESULTS.txt
+MANIFEST.txt
+MANIFEST_DESCRIPTION.txt
+PACKAGE_CONTENTS.txt
+
+# Local backups and generated safety copies
+code_safety_backups/
+.side-quest-backups/
+.sidequest-backups/
+.sidequest-*-backup*/
+.sidequest-*-last-backup/
+.sidequest-2-*-backup*/
+
+# Common generated folders
+node_modules/
+.expo/
+dist/
+build/
+coverage/
+
+# Historical hotfix notes
+V*_HOTFIX_NOTES.md

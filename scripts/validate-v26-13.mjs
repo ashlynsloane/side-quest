@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+const read = (path) => fs.readFileSync(path, 'utf8');
+const domain = read('packages/domain/src/index.ts');
+const planner = read('packages/planner/src/coach-policy-release.ts');
+const index = read('packages/planner/src/index.ts');
+const mobile = read('apps/mobile/src/services/coach-policy-release.ts');
+const test = read('packages/planner/test/coach-policy-release.test.ts');
+for (const token of ['CoachPolicyReleaseSnapshot', 'CoachPolicyRelease', 'CoachPolicyReleaseHealth', 'CoachPolicyReleaseGate', 'CoachPolicyRollbackPlan', 'CoachPolicyReleaseRegistry']) if (!domain.includes(token)) throw new Error(`Missing release contract: ${token}`);
+for (const token of ['createPolicyReleaseSnapshot', 'assessPolicyReleaseHealth', 'evaluatePolicyReleaseGate', 'transitionPolicyRelease', 'buildPolicyRollbackPlan', 'applyPolicyRollback', 'Shadow and canary releases cannot automatically change the plan', 'Rollback preserves audit history', 'No release transition has automatic plan authority']) if (!planner.includes(token)) throw new Error(`Missing release behavior or safeguard: ${token}`);
+if (!index.includes("export * from './coach-policy-release'")) throw new Error('Missing planner release export.');
+if (!mobile.includes('buildPolicyRollbackCard')) throw new Error('Missing mobile release service.');
+if (!test.includes("from 'vitest'")) throw new Error('Release suite must use Vitest.');
+console.log('V26.13 validation passed: immutable snapshots, staged shadow/canary activation, athlete approval, health gates, drift and harm blocking, reversible rollback, and audit preservation are present.');

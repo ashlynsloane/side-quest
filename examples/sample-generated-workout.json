@@ -1,0 +1,1644 @@
+{
+  "id": "workout_2d7c9218",
+  "name": "40-Minute Hamstrings + Calves + Ankles Strength-Cardio",
+  "createdAt": "2026-07-17T12:00:00.000Z",
+  "randomSeed": "v1-sample-hamstrings",
+  "request": {
+    "workMinutes": 40,
+    "allowedStationMinutes": [
+      4,
+      8,
+      12
+    ],
+    "restSeconds": 60,
+    "exercisesPerStation": "mixed",
+    "focusTargets": [
+      {
+        "region": "hamstrings",
+        "emphasis": "strong"
+      },
+      {
+        "region": "feet_ankles",
+        "emphasis": "light"
+      }
+    ],
+    "excludedRegions": [
+      "shoulders",
+      "shoulder"
+    ],
+    "excludedMovementTags": [
+      "shoulder_weight_bearing",
+      "overhead"
+    ],
+    "availableEquipment": [
+      "dumbbell",
+      "kettlebell",
+      "long_band",
+      "mini_band",
+      "bench",
+      "box",
+      "bosu",
+      "stability_ball",
+      "slider"
+    ],
+    "workoutStyle": "strength_cardio_amrap",
+    "difficulty": "intermediate",
+    "maximumImpact": 3,
+    "recoveryAware": true,
+    "avoidPreviousWorkoutExercises": true,
+    "favorFamiliarExercises": false,
+    "allowUnfamiliarExercises": true,
+    "minimizeEquipmentChanges": false,
+    "randomSeed": "v1-sample-hamstrings"
+  },
+  "stations": [
+    {
+      "id": "station_1",
+      "order": 1,
+      "durationSeconds": 720,
+      "format": "amrap",
+      "purpose": "Hamstring-dominant hinge strength",
+      "exercises": [
+        {
+          "exerciseId": "ex_bosu_single_leg_romanian_deadlift",
+          "exerciseSnapshot": {
+            "id": "ex_bosu_single_leg_romanian_deadlift",
+            "slug": "bosu-single-leg-romanian-deadlift",
+            "name": "BOSU Single-Leg Romanian Deadlift",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "BOSU balance and posterior chain",
+            "shortDescription": "A single-leg hip hinge performed while standing on a BOSU.",
+            "instructions": {
+              "setup": [
+                "Balance on one foot at the center of the BOSU."
+              ],
+              "execution": [
+                "Hinge at the hip while extending the free leg backward, then return to standing."
+              ],
+              "cues": [
+                "Keep the pelvis square.",
+                "Use a small range before progressing."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "hamstrings",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "feet_ankles",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 3
+              },
+              {
+                "region": "core_rotation",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "ankle",
+                "load": 3
+              },
+              {
+                "region": "hip",
+                "load": 3
+              },
+              {
+                "region": "lumbar_spine",
+                "load": 1
+              }
+            ],
+            "movementPatterns": [
+              "hinge",
+              "balance"
+            ],
+            "avoidanceTags": [
+              "unstable_surface",
+              "single_leg_loading",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "stability",
+              "secondary_strength"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bosu",
+                "label": "BOSU",
+                "items": [
+                  {
+                    "equipmentId": "bosu",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "bosu-single-leg-romanian-deadlift_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 8,
+                "unit": "per_side",
+                "estimatedSeconds": 50,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 4,
+            "cardiovascularDemand": 2,
+            "technicalComplexity": 4,
+            "suitableForAmrap": true,
+            "suitableForTravel": false,
+            "suitableForBeginners": false,
+            "substitutionGroupIds": [
+              "bosu_single_leg_strength"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bosu",
+          "prescriptionId": "bosu-single-leg-romanian-deadlift_amrap_default",
+          "target": 8,
+          "unit": "per_side",
+          "order": 1
+        },
+        {
+          "exerciseId": "ex_controlled_lateral_step_down",
+          "exerciseSnapshot": {
+            "id": "ex_controlled_lateral_step_down",
+            "slug": "controlled-lateral-step-down",
+            "name": "Controlled Lateral Step-Down",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "Single-leg control",
+            "shortDescription": "Lower one heel toward the floor from the side of a step.",
+            "instructions": {
+              "setup": [
+                "Stand on one leg at the edge of a low box or step."
+              ],
+              "execution": [
+                "Bend the stance leg to lower the opposite heel toward the floor, then return to standing."
+              ],
+              "cues": [
+                "Keep pelvis level.",
+                "Track the knee over the foot."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "quadriceps",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 3
+              },
+              {
+                "region": "feet_ankles",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "knee",
+                "load": 4
+              },
+              {
+                "region": "hip",
+                "load": 3
+              },
+              {
+                "region": "ankle",
+                "load": 2
+              }
+            ],
+            "movementPatterns": [
+              "squat",
+              "balance"
+            ],
+            "avoidanceTags": [
+              "single_leg_loading",
+              "deep_knee_flexion",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "secondary_strength",
+              "stability"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "box",
+                "label": "Box",
+                "items": [
+                  {
+                    "equipmentId": "box",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "controlled-lateral-step-down_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 8,
+                "unit": "per_side",
+                "estimatedSeconds": 50,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 4,
+            "cardiovascularDemand": 2,
+            "technicalComplexity": 3,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": false,
+            "substitutionGroupIds": [
+              "step_down"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "box",
+          "prescriptionId": "controlled-lateral-step-down_amrap_default",
+          "target": 8,
+          "unit": "per_side",
+          "order": 2
+        },
+        {
+          "exerciseId": "ex_alternating_pogo_hop",
+          "exerciseSnapshot": {
+            "id": "ex_alternating_pogo_hop",
+            "slug": "alternating-pogo-hop",
+            "name": "Alternating Pogo Hop",
+            "aliases": [],
+            "status": "active",
+            "classification": "bodyweight",
+            "category": "Plyometrics and ankle stiffness",
+            "shortDescription": "Rapid alternating ankle-dominant hops.",
+            "instructions": {
+              "setup": [
+                "Stand tall and shift into a light alternating rhythm."
+              ],
+              "execution": [
+                "Hop from foot to foot with short ground contact and minimal knee bend."
+              ],
+              "cues": [
+                "Stay springy.",
+                "Keep the pelvis level."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "gastrocnemius",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "soleus",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "feet_ankles",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 1
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "ankle",
+                "load": 3
+              },
+              {
+                "region": "foot",
+                "load": 3
+              },
+              {
+                "region": "knee",
+                "load": 1
+              }
+            ],
+            "movementPatterns": [
+              "jump_hop",
+              "locomotion"
+            ],
+            "avoidanceTags": [
+              "jumping",
+              "high_impact",
+              "single_leg_loading"
+            ],
+            "laterality": "alternating",
+            "stationRoles": [
+              "power",
+              "conditioning"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bodyweight",
+                "label": "Bodyweight",
+                "items": [
+                  {
+                    "equipmentId": "bodyweight",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "alternating-pogo-hop_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 20,
+                "unit": "total",
+                "estimatedSeconds": 25,
+                "loadGuidance": "Use controlled repetitions and stop before technique deteriorates."
+              }
+            ],
+            "impactLevel": 3,
+            "balanceDemand": 3,
+            "cardiovascularDemand": 3,
+            "technicalComplexity": 1,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "pogo"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bodyweight",
+          "prescriptionId": "alternating-pogo-hop_amrap_default",
+          "target": 20,
+          "unit": "total",
+          "order": 3
+        }
+      ]
+    },
+    {
+      "id": "station_2",
+      "order": 2,
+      "durationSeconds": 480,
+      "format": "amrap",
+      "purpose": "Single-leg posterior-chain strength and balance",
+      "exercises": [
+        {
+          "exerciseId": "ex_weighted_bulgarian_split_squat",
+          "exerciseSnapshot": {
+            "id": "ex_weighted_bulgarian_split_squat",
+            "slug": "weighted-bulgarian-split-squat",
+            "name": "Weighted Bulgarian Split Squat",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "Lunges and split squats",
+            "shortDescription": "A rear-foot-elevated split squat performed with external load.",
+            "instructions": {
+              "setup": [
+                "Place the rear foot on a bench and establish a stable split stance while holding weights."
+              ],
+              "execution": [
+                "Lower through the front leg and stand without losing alignment."
+              ],
+              "cues": [
+                "Keep the front foot fully grounded.",
+                "Control the bottom position."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "quadriceps",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hamstrings",
+                "role": "secondary",
+                "load": 2
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "knee",
+                "load": 4
+              },
+              {
+                "region": "hip",
+                "load": 3
+              },
+              {
+                "region": "ankle",
+                "load": 2
+              }
+            ],
+            "movementPatterns": [
+              "lunge",
+              "squat",
+              "balance"
+            ],
+            "avoidanceTags": [
+              "single_leg_loading",
+              "deep_knee_flexion",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "primary_strength"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "dumbbells-and-bench",
+                "label": "Dumbbells and bench",
+                "items": [
+                  {
+                    "equipmentId": "dumbbell",
+                    "quantity": 2
+                  },
+                  {
+                    "equipmentId": "bench",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "weighted-bulgarian-split-squat_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 5,
+                "unit": "per_side",
+                "estimatedSeconds": 45,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 4,
+            "cardiovascularDemand": 3,
+            "technicalComplexity": 3,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": false,
+            "substitutionGroupIds": [
+              "split_squat"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "dumbbells-and-bench",
+          "prescriptionId": "weighted-bulgarian-split-squat_amrap_default",
+          "target": 5,
+          "unit": "per_side",
+          "order": 1
+        },
+        {
+          "exerciseId": "ex_bosu_single_leg_clock_reach",
+          "exerciseSnapshot": {
+            "id": "ex_bosu_single_leg_clock_reach",
+            "slug": "bosu-single-leg-clock-reach",
+            "name": "BOSU Single-Leg Clock Reach",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "BOSU balance and ankle stability",
+            "shortDescription": "Reach the free leg in multiple directions while balancing on a BOSU.",
+            "instructions": {
+              "setup": [
+                "Stand on one leg near the center of the BOSU."
+              ],
+              "execution": [
+                "Reach the free foot toward several clock positions and return to center after each reach."
+              ],
+              "cues": [
+                "Keep the stance foot active.",
+                "Control each return."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "feet_ankles",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hip_abductors",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 2
+              },
+              {
+                "region": "core_lateral",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "ankle",
+                "load": 3
+              },
+              {
+                "region": "knee",
+                "load": 2
+              },
+              {
+                "region": "hip",
+                "load": 2
+              }
+            ],
+            "movementPatterns": [
+              "balance",
+              "lunge"
+            ],
+            "avoidanceTags": [
+              "unstable_surface",
+              "single_leg_loading",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "stability",
+              "accessory"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bosu",
+                "label": "BOSU",
+                "items": [
+                  {
+                    "equipmentId": "bosu",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "bosu-single-leg-clock-reach_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 5,
+                "unit": "per_side",
+                "estimatedSeconds": 50,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 4,
+            "cardiovascularDemand": 1,
+            "technicalComplexity": 4,
+            "suitableForAmrap": true,
+            "suitableForTravel": false,
+            "suitableForBeginners": false,
+            "substitutionGroupIds": [
+              "bosu_balance"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bosu",
+          "prescriptionId": "bosu-single-leg-clock-reach_amrap_default",
+          "target": 5,
+          "unit": "per_side",
+          "order": 2
+        }
+      ]
+    },
+    {
+      "id": "station_3",
+      "order": 3,
+      "durationSeconds": 480,
+      "format": "amrap",
+      "purpose": "Lower-body strength with complementary stability",
+      "exercises": [
+        {
+          "exerciseId": "ex_lateral_step_up_with_knee_drive",
+          "exerciseSnapshot": {
+            "id": "ex_lateral_step_up_with_knee_drive",
+            "slug": "lateral-step-up-with-knee-drive",
+            "name": "Lateral Step-Up with Knee Drive",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "Single-leg strength",
+            "shortDescription": "Step laterally onto a box and finish with the opposite knee driving upward.",
+            "instructions": {
+              "setup": [
+                "Stand beside a stable box with one foot on top."
+              ],
+              "execution": [
+                "Drive through the box-side leg to stand and lift the opposite knee, then lower with control."
+              ],
+              "cues": [
+                "Keep the stance knee aligned.",
+                "Avoid pushing excessively from the floor leg."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "quadriceps",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 3
+              },
+              {
+                "region": "feet_ankles",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "knee",
+                "load": 3
+              },
+              {
+                "region": "hip",
+                "load": 3
+              },
+              {
+                "region": "ankle",
+                "load": 2
+              }
+            ],
+            "movementPatterns": [
+              "squat",
+              "balance",
+              "locomotion"
+            ],
+            "avoidanceTags": [
+              "single_leg_loading",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "primary_strength",
+              "stability"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "box",
+                "label": "Box",
+                "items": [
+                  {
+                    "equipmentId": "box",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "lateral-step-up-with-knee-drive_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 8,
+                "unit": "per_side",
+                "estimatedSeconds": 50,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 4,
+            "cardiovascularDemand": 3,
+            "technicalComplexity": 1,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "step_up"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "box",
+          "prescriptionId": "lateral-step-up-with-knee-drive_amrap_default",
+          "target": 8,
+          "unit": "per_side",
+          "order": 1
+        },
+        {
+          "exerciseId": "ex_glute_bridge_heel_walkout",
+          "exerciseSnapshot": {
+            "id": "ex_glute_bridge_heel_walkout",
+            "slug": "glute-bridge-heel-walkout",
+            "name": "Glute-Bridge Heel Walkout",
+            "aliases": [
+              "Glute Bridge March Out"
+            ],
+            "status": "active",
+            "classification": "bodyweight",
+            "category": "Hamstrings and glutes",
+            "shortDescription": "Walk the heels away from and back toward a raised glute bridge.",
+            "instructions": {
+              "setup": [
+                "Lie on the back, lift into a glute bridge, and keep the hips elevated."
+              ],
+              "execution": [
+                "Take small heel steps away until the legs are nearly long, then walk them back."
+              ],
+              "cues": [
+                "Keep the hips lifted.",
+                "Use short controlled steps."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "hamstrings",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "core_anterior",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "knee",
+                "load": 2
+              },
+              {
+                "region": "lumbar_spine",
+                "load": 1,
+                "notes": "Stabilization demand."
+              }
+            ],
+            "movementPatterns": [
+              "hinge",
+              "anti_extension"
+            ],
+            "avoidanceTags": [
+              "floor_required"
+            ],
+            "laterality": "bilateral",
+            "stationRoles": [
+              "secondary_strength",
+              "core"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bodyweight",
+                "label": "Bodyweight",
+                "items": [
+                  {
+                    "equipmentId": "bodyweight",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "glute-bridge-heel-walkout_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 8,
+                "unit": "total",
+                "estimatedSeconds": 45,
+                "loadGuidance": "Use controlled repetitions and stop before technique deteriorates."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 1,
+            "cardiovascularDemand": 2,
+            "technicalComplexity": 1,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "hamstring_bodyweight"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bodyweight",
+          "prescriptionId": "glute-bridge-heel-walkout_amrap_default",
+          "target": 8,
+          "unit": "total",
+          "order": 2
+        }
+      ]
+    },
+    {
+      "id": "station_4",
+      "order": 4,
+      "durationSeconds": 480,
+      "format": "amrap",
+      "purpose": "Athletic power and strength-cardio conditioning",
+      "exercises": [
+        {
+          "exerciseId": "ex_double_leg_pogo_hop",
+          "exerciseSnapshot": {
+            "id": "ex_double_leg_pogo_hop",
+            "slug": "double-leg-pogo-hop",
+            "name": "Double-Leg Pogo Hop",
+            "aliases": [],
+            "status": "active",
+            "classification": "bodyweight",
+            "category": "Plyometrics and ankle stiffness",
+            "shortDescription": "Small rapid vertical hops using both ankles.",
+            "instructions": {
+              "setup": [
+                "Stand tall with feet under the hips and knees softly bent."
+              ],
+              "execution": [
+                "Perform quick low hops with short ground contact."
+              ],
+              "cues": [
+                "Bounce through the ankles.",
+                "Land quietly."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "gastrocnemius",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "soleus",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "feet_ankles",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "quadriceps",
+                "role": "secondary",
+                "load": 1
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "ankle",
+                "load": 3,
+                "notes": "Repeated elastic loading."
+              },
+              {
+                "region": "foot",
+                "load": 3
+              },
+              {
+                "region": "knee",
+                "load": 1
+              }
+            ],
+            "movementPatterns": [
+              "jump_hop"
+            ],
+            "avoidanceTags": [
+              "jumping",
+              "high_impact"
+            ],
+            "laterality": "bilateral",
+            "stationRoles": [
+              "power",
+              "conditioning"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bodyweight",
+                "label": "Bodyweight",
+                "items": [
+                  {
+                    "equipmentId": "bodyweight",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "double-leg-pogo-hop_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 20,
+                "unit": "total",
+                "estimatedSeconds": 25,
+                "loadGuidance": "Use controlled repetitions and stop before technique deteriorates."
+              }
+            ],
+            "impactLevel": 3,
+            "balanceDemand": 2,
+            "cardiovascularDemand": 3,
+            "technicalComplexity": 1,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "pogo"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bodyweight",
+          "prescriptionId": "double-leg-pogo-hop_amrap_default",
+          "target": 20,
+          "unit": "total",
+          "order": 1
+        },
+        {
+          "exerciseId": "ex_kettlebell_swing",
+          "exerciseSnapshot": {
+            "id": "ex_kettlebell_swing",
+            "slug": "kettlebell-swing",
+            "name": "Kettlebell Swing",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "Posterior-chain power",
+            "shortDescription": "An explosive hip hinge that propels a kettlebell forward.",
+            "instructions": {
+              "setup": [
+                "Stand over a kettlebell, hinge to grip it, and hike it between the legs."
+              ],
+              "execution": [
+                "Snap the hips forward to float the bell, then guide it back into the next hinge."
+              ],
+              "cues": [
+                "Power comes from the hips.",
+                "Keep the arms relaxed."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hamstrings",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "core_anterior",
+                "role": "secondary",
+                "load": 3
+              },
+              {
+                "region": "lower_back",
+                "role": "secondary",
+                "load": 2
+              },
+              {
+                "region": "shoulders",
+                "role": "secondary",
+                "load": 1
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "hip",
+                "load": 4
+              },
+              {
+                "region": "lumbar_spine",
+                "load": 2,
+                "notes": "Rapid hinge stabilization."
+              },
+              {
+                "region": "shoulder",
+                "load": 1,
+                "notes": "Ballistic arm support."
+              }
+            ],
+            "movementPatterns": [
+              "hinge"
+            ],
+            "avoidanceTags": [
+              "complex_coordination"
+            ],
+            "laterality": "bilateral",
+            "stationRoles": [
+              "power",
+              "conditioning"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "kettlebell",
+                "label": "Kettlebell",
+                "items": [
+                  {
+                    "equipmentId": "kettlebell",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "kettlebell-swing_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 12,
+                "unit": "total",
+                "estimatedSeconds": 35,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 1,
+            "cardiovascularDemand": 4,
+            "technicalComplexity": 3,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": false,
+            "substitutionGroupIds": [
+              "ballistic_hinge"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "kettlebell",
+          "prescriptionId": "kettlebell-swing_amrap_default",
+          "target": 12,
+          "unit": "total",
+          "order": 2
+        },
+        {
+          "exerciseId": "ex_single_leg_sit_to_stand",
+          "exerciseSnapshot": {
+            "id": "ex_single_leg_sit_to_stand",
+            "slug": "single-leg-sit-to-stand",
+            "name": "Single-Leg Sit-to-Stand",
+            "aliases": [],
+            "status": "active",
+            "classification": "bodyweight",
+            "category": "Single-leg strength",
+            "shortDescription": "Stand from a chair or bench using one leg.",
+            "instructions": {
+              "setup": [
+                "Sit near the edge of a stable bench with one foot planted."
+              ],
+              "execution": [
+                "Lean slightly forward, stand using the planted leg, and sit back down with control."
+              ],
+              "cues": [
+                "Keep the knee aligned.",
+                "Use the lowest seat height that preserves control."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "quadriceps",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 3
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 2
+              },
+              {
+                "region": "feet_ankles",
+                "role": "secondary",
+                "load": 1
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "knee",
+                "load": 3
+              },
+              {
+                "region": "hip",
+                "load": 3
+              }
+            ],
+            "movementPatterns": [
+              "squat",
+              "balance"
+            ],
+            "avoidanceTags": [
+              "single_leg_loading",
+              "deep_knee_flexion",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "primary_strength",
+              "stability"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bench",
+                "label": "Bench",
+                "items": [
+                  {
+                    "equipmentId": "bench",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "single-leg-sit-to-stand_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 6,
+                "unit": "per_side",
+                "estimatedSeconds": 45,
+                "loadGuidance": "Use controlled repetitions and stop before technique deteriorates."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 3,
+            "cardiovascularDemand": 2,
+            "technicalComplexity": 2,
+            "suitableForAmrap": true,
+            "suitableForTravel": false,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "single_leg_squat"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bench",
+          "prescriptionId": "single-leg-sit-to-stand_amrap_default",
+          "target": 6,
+          "unit": "per_side",
+          "order": 3
+        }
+      ]
+    },
+    {
+      "id": "station_5",
+      "order": 5,
+      "durationSeconds": 240,
+      "format": "amrap",
+      "purpose": "Core strength, balance, and movement control",
+      "exercises": [
+        {
+          "exerciseId": "ex_butterfly_sit_up",
+          "exerciseSnapshot": {
+            "id": "ex_butterfly_sit_up",
+            "slug": "butterfly-sit-up",
+            "name": "Butterfly Sit-Up",
+            "aliases": [],
+            "status": "active",
+            "classification": "bodyweight",
+            "category": "Core flexion",
+            "shortDescription": "A sit-up performed with the soles of the feet together and knees open.",
+            "instructions": {
+              "setup": [
+                "Sit with soles together, knees open, and lower the torso to the floor."
+              ],
+              "execution": [
+                "Sit up and reach forward toward or beyond the feet, then lower with control."
+              ],
+              "cues": [
+                "Exhale as you sit up.",
+                "Avoid pulling on the neck."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "core_anterior",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hip_flexors",
+                "role": "primary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "lumbar_spine",
+                "load": 2,
+                "notes": "Repeated spinal flexion."
+              },
+              {
+                "region": "hip",
+                "load": 1
+              }
+            ],
+            "movementPatterns": [
+              "trunk_flexion"
+            ],
+            "avoidanceTags": [
+              "spinal_flexion",
+              "floor_required"
+            ],
+            "laterality": "bilateral",
+            "stationRoles": [
+              "core",
+              "conditioning"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "bodyweight",
+                "label": "Bodyweight",
+                "items": [
+                  {
+                    "equipmentId": "bodyweight",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "butterfly-sit-up_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 10,
+                "unit": "total",
+                "estimatedSeconds": 35,
+                "loadGuidance": "Use controlled repetitions and stop before technique deteriorates."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 1,
+            "cardiovascularDemand": 2,
+            "technicalComplexity": 1,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "sit_up"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "bodyweight",
+          "prescriptionId": "butterfly-sit-up_amrap_default",
+          "target": 10,
+          "unit": "total",
+          "order": 1
+        },
+        {
+          "exerciseId": "ex_single_leg_romanian_deadlift",
+          "exerciseSnapshot": {
+            "id": "ex_single_leg_romanian_deadlift",
+            "slug": "single-leg-romanian-deadlift",
+            "name": "Single-Leg Romanian Deadlift",
+            "aliases": [],
+            "status": "active",
+            "classification": "equipment",
+            "category": "Hamstrings and single-leg stability",
+            "shortDescription": "A single-leg hip hinge performed with one or more weights.",
+            "instructions": {
+              "setup": [
+                "Stand on one leg holding a dumbbell or kettlebell."
+              ],
+              "execution": [
+                "Hinge at the hip while the free leg extends behind, then return to standing."
+              ],
+              "cues": [
+                "Keep the pelvis square.",
+                "Reach the free leg long behind you."
+              ],
+              "commonMistakes": [
+                "Moving too quickly to maintain control.",
+                "Using a range of motion that changes the intended movement."
+              ]
+            },
+            "bodyRegions": [
+              {
+                "region": "hamstrings",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "glutes",
+                "role": "primary",
+                "load": 4
+              },
+              {
+                "region": "hip_abductors",
+                "role": "secondary",
+                "load": 3
+              },
+              {
+                "region": "feet_ankles",
+                "role": "secondary",
+                "load": 2
+              },
+              {
+                "region": "core_rotation",
+                "role": "secondary",
+                "load": 2
+              }
+            ],
+            "jointLoads": [
+              {
+                "region": "hip",
+                "load": 4
+              },
+              {
+                "region": "ankle",
+                "load": 2,
+                "notes": "Single-leg balance."
+              },
+              {
+                "region": "lumbar_spine",
+                "load": 2,
+                "notes": "Anti-rotation stabilization."
+              }
+            ],
+            "movementPatterns": [
+              "hinge",
+              "balance"
+            ],
+            "avoidanceTags": [
+              "single_leg_loading",
+              "high_balance_demand"
+            ],
+            "laterality": "unilateral",
+            "stationRoles": [
+              "primary_strength",
+              "stability"
+            ],
+            "equipmentOptions": [
+              {
+                "id": "one-dumbbell",
+                "label": "One dumbbell",
+                "items": [
+                  {
+                    "equipmentId": "dumbbell",
+                    "quantity": 1
+                  }
+                ]
+              },
+              {
+                "id": "one-kettlebell",
+                "label": "One kettlebell",
+                "items": [
+                  {
+                    "equipmentId": "kettlebell",
+                    "quantity": 1
+                  }
+                ]
+              }
+            ],
+            "prescriptions": [
+              {
+                "id": "single-leg-romanian-deadlift_amrap_default",
+                "style": "amrap",
+                "mode": "reps",
+                "target": 8,
+                "unit": "per_side",
+                "estimatedSeconds": 50,
+                "loadGuidance": "Use a resistance that preserves controlled technique throughout the station."
+              }
+            ],
+            "impactLevel": 0,
+            "balanceDemand": 4,
+            "cardiovascularDemand": 2,
+            "technicalComplexity": 3,
+            "suitableForAmrap": true,
+            "suitableForTravel": true,
+            "suitableForBeginners": true,
+            "substitutionGroupIds": [
+              "single_leg_hinge"
+            ],
+            "compatibility": {
+              "preferredPairingPatterns": [],
+              "avoidPairingPatterns": [],
+              "maximumAppearancesPerWorkout": 1
+            },
+            "media": [],
+            "defaultEnabled": true,
+            "contentVersion": 1,
+            "createdAt": "2026-07-17T00:00:00.000Z",
+            "updatedAt": "2026-07-17T00:00:00.000Z"
+          },
+          "equipmentOptionId": "one-dumbbell",
+          "prescriptionId": "single-leg-romanian-deadlift_amrap_default",
+          "target": 8,
+          "unit": "per_side",
+          "order": 2
+        }
+      ]
+    }
+  ],
+  "totalWorkSeconds": 2400,
+  "totalRestSeconds": 240,
+  "estimatedElapsedSeconds": 2640,
+  "requiredEquipment": [
+    "bench",
+    "bosu",
+    "box",
+    "dumbbell",
+    "kettlebell"
+  ],
+  "targetRegions": [
+    "hamstrings",
+    "feet_ankles"
+  ],
+  "recentLoadAdjustments": [
+    "Shoulders loading was reduced based on the previous 72 hours."
+  ],
+  "source": "generated"
+}

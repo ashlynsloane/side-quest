@@ -1,0 +1,409 @@
+[
+  {
+    "id": "adductor_core",
+    "label": "Adductor Core"
+  },
+  {
+    "id": "ankle_band",
+    "label": "Ankle Band"
+  },
+  {
+    "id": "anti_extension_core",
+    "label": "Anti Extension Core"
+  },
+  {
+    "id": "anti_rotation_core",
+    "label": "Anti Rotation Core"
+  },
+  {
+    "id": "ballistic_hinge",
+    "label": "Ballistic Hinge"
+  },
+  {
+    "id": "banded_lateral_walk",
+    "label": "Banded Lateral Walk"
+  },
+  {
+    "id": "bilateral_hinge",
+    "label": "Bilateral Hinge"
+  },
+  {
+    "id": "bilateral_squat",
+    "label": "Bilateral Squat"
+  },
+  {
+    "id": "bosu_balance",
+    "label": "Bosu Balance"
+  },
+  {
+    "id": "bosu_single_leg_strength",
+    "label": "Bosu Single Leg Strength"
+  },
+  {
+    "id": "bosu_step_up",
+    "label": "Bosu Step Up"
+  },
+  {
+    "id": "burpee_box",
+    "label": "Burpee Box"
+  },
+  {
+    "id": "calf_bent_knee",
+    "label": "Calf Bent Knee"
+  },
+  {
+    "id": "calf_straight_knee",
+    "label": "Calf Straight Knee"
+  },
+  {
+    "id": "deadlift_to_pull",
+    "label": "Deadlift To Pull"
+  },
+  {
+    "id": "dynamic_plank_mobility",
+    "label": "Dynamic Plank Mobility"
+  },
+  {
+    "id": "foot_intrinsic",
+    "label": "Foot Intrinsic"
+  },
+  {
+    "id": "front_loaded_squat",
+    "label": "Front Loaded Squat"
+  },
+  {
+    "id": "glute_bridge",
+    "label": "Glute Bridge"
+  },
+  {
+    "id": "hamstring_bodyweight",
+    "label": "Hamstring Bodyweight"
+  },
+  {
+    "id": "hamstring_knee_flexion",
+    "label": "Hamstring Knee Flexion"
+  },
+  {
+    "id": "hanging_core",
+    "label": "Hanging Core"
+  },
+  {
+    "id": "hip_abductor_accessory",
+    "label": "Hip Abductor Accessory"
+  },
+  {
+    "id": "hip_adduction",
+    "label": "Hip Adduction"
+  },
+  {
+    "id": "horizontal_press",
+    "label": "Horizontal Press"
+  },
+  {
+    "id": "horizontal_row",
+    "label": "Horizontal Row"
+  },
+  {
+    "id": "kettlebell_pass",
+    "label": "Kettlebell Pass"
+  },
+  {
+    "id": "landing_control",
+    "label": "Landing Control"
+  },
+  {
+    "id": "lateral_hop",
+    "label": "Lateral Hop"
+  },
+  {
+    "id": "lateral_lower_body",
+    "label": "Lateral Lower Body"
+  },
+  {
+    "id": "loaded_carry",
+    "label": "Loaded Carry"
+  },
+  {
+    "id": "loaded_jump",
+    "label": "Loaded Jump"
+  },
+  {
+    "id": "lunge_rotation",
+    "label": "Lunge Rotation"
+  },
+  {
+    "id": "medicine_ball_core",
+    "label": "Medicine Ball Core"
+  },
+  {
+    "id": "medicine_ball_power",
+    "label": "Medicine Ball Power"
+  },
+  {
+    "id": "medicine_ball_rotational_power",
+    "label": "Medicine Ball Rotational Power"
+  },
+  {
+    "id": "overhead_core",
+    "label": "Overhead Core"
+  },
+  {
+    "id": "plank_anti_rotation",
+    "label": "Plank Anti Rotation"
+  },
+  {
+    "id": "plank_conditioning",
+    "label": "Plank Conditioning"
+  },
+  {
+    "id": "plank_row",
+    "label": "Plank Row"
+  },
+  {
+    "id": "pogo",
+    "label": "Pogo"
+  },
+  {
+    "id": "prone_posterior_chain",
+    "label": "Prone Posterior Chain"
+  },
+  {
+    "id": "pullover",
+    "label": "Pullover"
+  },
+  {
+    "id": "push_up",
+    "label": "Push Up"
+  },
+  {
+    "id": "rear_shoulder",
+    "label": "Rear Shoulder"
+  },
+  {
+    "id": "rollout",
+    "label": "Rollout"
+  },
+  {
+    "id": "rotational_core",
+    "label": "Rotational Core"
+  },
+  {
+    "id": "rotator_cuff",
+    "label": "Rotator Cuff"
+  },
+  {
+    "id": "rotator_cuff_scapular",
+    "label": "Rotator Cuff Scapular"
+  },
+  {
+    "id": "scapular_pull",
+    "label": "Scapular Pull"
+  },
+  {
+    "id": "scapular_y_raise",
+    "label": "Scapular Y Raise"
+  },
+  {
+    "id": "serratus_control",
+    "label": "Serratus Control"
+  },
+  {
+    "id": "shoulder_raise",
+    "label": "Shoulder Raise"
+  },
+  {
+    "id": "side_plank",
+    "label": "Side Plank"
+  },
+  {
+    "id": "single_leg_balance",
+    "label": "Single Leg Balance"
+  },
+  {
+    "id": "single_leg_hinge",
+    "label": "Single Leg Hinge"
+  },
+  {
+    "id": "single_leg_squat",
+    "label": "Single Leg Squat"
+  },
+  {
+    "id": "sit_up",
+    "label": "Sit Up"
+  },
+  {
+    "id": "split_squat",
+    "label": "Split Squat"
+  },
+  {
+    "id": "split_squat_jump",
+    "label": "Split Squat Jump"
+  },
+  {
+    "id": "squat_to_pull",
+    "label": "Squat To Pull"
+  },
+  {
+    "id": "step_down",
+    "label": "Step Down"
+  },
+  {
+    "id": "step_up",
+    "label": "Step Up"
+  },
+  {
+    "id": "tibialis",
+    "label": "Tibialis"
+  },
+  {
+    "id": "vertical_press",
+    "label": "Vertical Press"
+  },
+  {
+    "id": "vertical_press_core",
+    "label": "Vertical Press Core"
+  },
+  {
+    "id": "vertical_pull",
+    "label": "Vertical Pull"
+  },
+  {
+    "id": "weighted_lunge",
+    "label": "Weighted Lunge"
+  },
+  {
+    "id": "bosu_squat_to_balance_hold",
+    "name": "Bosu Squat To Balance Hold",
+    "description": "Variations serving the same primary purpose as BOSU Squat to Balance Hold."
+  },
+  {
+    "id": "single_leg_squat_ladder",
+    "name": "Single Leg Squat Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Single-Leg Squat."
+  },
+  {
+    "id": "split_squat_ladder",
+    "name": "Split Squat Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Rear-Foot-Elevated Split Squat."
+  },
+  {
+    "id": "bosu_lateral_lunge_to_balance",
+    "name": "Bosu Lateral Lunge To Balance",
+    "description": "Variations serving the same primary purpose as BOSU Lateral Lunge to Balance."
+  },
+  {
+    "id": "hinge_reach_ladder",
+    "name": "Hinge Reach Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Hip Hinge Reach."
+  },
+  {
+    "id": "single_leg_rdl_ladder",
+    "name": "Single Leg Rdl Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Single-Leg Romanian Deadlift Reach."
+  },
+  {
+    "id": "bridge_march_ladder",
+    "name": "Bridge March Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Glute Bridge March."
+  },
+  {
+    "id": "plank_ladder",
+    "name": "Plank Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Forearm Plank Rock."
+  },
+  {
+    "id": "side_plank_ladder",
+    "name": "Side Plank Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Side Plank Hip Abduction."
+  },
+  {
+    "id": "dead_bug_ladder",
+    "name": "Dead Bug Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Dead Bug Press."
+  },
+  {
+    "id": "renegade_row_ladder",
+    "name": "Renegade Row Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Renegade Row."
+  },
+  {
+    "id": "pallof_ladder",
+    "name": "Pallof Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Tall-Kneeling Pallof Press."
+  },
+  {
+    "id": "overhead_press_ladder",
+    "name": "Overhead Press Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Half-Kneeling Overhead Press."
+  },
+  {
+    "id": "bear_plank_ladder",
+    "name": "Bear Plank Ladder",
+    "description": "Variations serving the same primary purpose as BOSU Bear Plank Shoulder Tap."
+  },
+  {
+    "id": "step_down_ladder",
+    "name": "Step Down Ladder",
+    "description": "Variations serving the same primary purpose as Crossover Step-Down."
+  },
+  {
+    "id": "curtsy_lunge_ladder",
+    "name": "Curtsy Lunge Ladder",
+    "description": "Variations serving the same primary purpose as Curtsy Lunge to Lateral Knee Drive."
+  },
+  {
+    "id": "lateral_lunge_ladder",
+    "name": "Lateral Lunge Ladder",
+    "description": "Variations serving the same primary purpose as Lateral Lunge with Contralateral Reach."
+  },
+  {
+    "id": "lunge_matrix",
+    "name": "Lunge Matrix",
+    "description": "Variations serving the same primary purpose as Three-Way Lunge Matrix."
+  },
+  {
+    "id": "balance_reach_ladder",
+    "name": "Balance Reach Ladder",
+    "description": "Variations serving the same primary purpose as Single-Leg Balance Clock Reach."
+  },
+  {
+    "id": "loaded_balance_ladder",
+    "name": "Loaded Balance Ladder",
+    "description": "Variations serving the same primary purpose as Single-Leg Medicine-Ball Around-the-World."
+  },
+  {
+    "id": "suitcase_carry_ladder",
+    "name": "Suitcase Carry Ladder",
+    "description": "Variations serving the same primary purpose as Offset Suitcase March."
+  },
+  {
+    "id": "loaded_march_ladder",
+    "name": "Loaded March Ladder",
+    "description": "Variations serving the same primary purpose as Cross-Body Kettlebell March."
+  },
+  {
+    "id": "lateral_band_walk_ladder",
+    "name": "Lateral Band Walk Ladder",
+    "description": "Variations serving the same primary purpose as Mini-Band Lateral Step with Reach."
+  },
+  {
+    "id": "lateral_deceleration_ladder",
+    "name": "Lateral Deceleration Ladder",
+    "description": "Variations serving the same primary purpose as Lateral Shuffle to Single-Leg Stick."
+  },
+  {
+    "id": "single_arm_row_ladder",
+    "name": "Single Arm Row Ladder",
+    "description": "Variations serving the same primary purpose as Half-Kneeling Single-Arm Band Row."
+  },
+  {
+    "id": "lat_pulldown_ladder",
+    "name": "Lat Pulldown Ladder",
+    "description": "Variations serving the same primary purpose as Tall-Kneeling Band Lat Pulldown."
+  },
+  {
+    "id": "lunge_press_ladder",
+    "name": "Lunge Press Ladder",
+    "description": "Variations serving the same primary purpose as Reverse Lunge with Single-Arm Overhead Press."
+  }
+]

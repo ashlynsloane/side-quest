@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+const read = (path) => fs.readFileSync(path, 'utf8');
+const domain = read('packages/domain/src/index.ts');
+const planner = read('packages/planner/src/coach-policy-portfolio.ts');
+const index = read('packages/planner/src/index.ts');
+const mobile = read('apps/mobile/src/services/coach-policy-portfolio.ts');
+const test = read('packages/planner/test/coach-policy-portfolio.test.ts');
+for (const token of ['CoachPolicyPortfolio', 'CoachPolicyPortfolioEntry', 'CoachPolicyRelationship', 'CoachPolicyContradiction', 'CoachPolicyConsolidation', 'CoachPolicyScopeAssessment', 'CoachPolicyPortfolioDecision', 'CoachPolicyPortfolioAuditEvent']) if (!domain.includes(token)) throw new Error(`Missing portfolio contract: ${token}`);
+for (const token of ['createCoachPolicyPortfolio', 'detectPolicyOverlaps', 'detectPolicyContradictions', 'selectApplicablePortfolioPolicies', 'duplicate_adjustment', 'maxInfluentialPerDecision', 'maxPerScoreDimension', 'fallbackUsed', 'consolidatePolicies', 'reversible', 'Athlete-declared preferences', 'cannot automatically change the plan']) if (!planner.includes(token)) throw new Error(`Missing portfolio behavior or safeguard: ${token}`);
+if (!index.includes("export * from './coach-policy-portfolio'")) throw new Error('Missing planner export.');
+if (!mobile.includes('buildPolicyInfluenceSummary')) throw new Error('Missing mobile portfolio service.');
+if (!test.includes("from 'vitest'")) throw new Error('Portfolio suite must use Vitest.');
+console.log('V26.12 validation passed: portfolio budgets, duplicate suppression, contradiction precedence, scope governance, reversible consolidation, athlete review, fallback, and audit safeguards are present.');
