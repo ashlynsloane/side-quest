@@ -8,7 +8,8 @@
     "./whole-athlete-week": "./src/whole-athlete-week.ts",
     "./multisport": "./src/multisport.ts",
     "./multisport-governance": "./src/multisport-governance.ts",
-    "./endurance-prescription": "./src/endurance-prescription.ts"
+    "./endurance-prescription": "./src/endurance-prescription.ts",
+    "./coach-message-adaptation": "./src/coach-message-adaptation.ts"
   },
   "dependencies": {
     "@circuit/domain": "workspace:*",
