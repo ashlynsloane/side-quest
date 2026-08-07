@@ -39,7 +39,8 @@ export function CoachClosedLoopPanel({
   const undoable = summary.latestUndoable;
   const cue = summary.proactiveCue;
   if (!followUp && !undoable && !cue) return null;
-  const symptomFollowUp = followUp?.followUp.promptKind === 'safety_check';
+  const promptKind = followUp?.followUp.promptKind;
+  const symptomFollowUp = promptKind === 'safety_check' || promptKind === 'symptom_check';
 
   return (
     <View style={styles.stack}>
