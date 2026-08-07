@@ -103,7 +103,8 @@ export async function applyCoachMessageProposalClosedLoop(
   const summary = getCoachClosedLoopSummary();
   const fingerprint = fingerprintCoachIntervention(proposal.sessionDiscipline, proposal.adaptation, option);
   const pattern = findCoachInterventionEffectPattern(fingerprint, summary.patterns);
-  const decisionExplanation = proposal.decisionExplanation ?? buildCoachDecisionExplanation({
+  const canReuseProposalExplanation = option.id === proposal.adaptation.adjustment.recommendedOptionId && proposal.decisionExplanation;
+  const decisionExplanation = canReuseProposalExplanation ?? buildCoachDecisionExplanation({
     discipline: proposal.sessionDiscipline,
     adaptation: proposal.adaptation,
     option,
@@ -198,15 +199,17 @@ export async function undoLatestCoachIntervention(): Promise<CoachUndoResult> {
     const events = await getTrainingCalendarEventsForSource(COACH_AD_HOC_SOURCE_ID);
     const current = events.find((event) => event.id === intervention.target.sessionId);
     if (!current) throw new Error('The coach-created session is no longer present, so there is nothing to undo.');
-    const remaining = events.filter((event) => event.id !== current.id);
-    await replaceTrainingCalendarEvents(COACH_AD_HOC_SOURCE_ID, remaining);
+    const restoredEvents = [
+      ...events.filter((event) => event.id !== current.id),
+      ...(intervention.previousAdHocEvent ? [intervention.previousAdHocEvent] : []),
+    ];
+    await replaceTrainingCalendarEvents(COACH_AD_HOC_SOURCE_ID, restoredEvents);
     rollback = async () => {
       const latest = await getTrainingCalendarEventsForSource(COACH_AD_HOC_SOURCE_ID);
       await replaceTrainingCalendarEvents(COACH_AD_HOC_SOURCE_ID, [...latest.filter((event) => event.id !== current.id), current]);
     };
   }
 
-  let replanWarning: string | undefined;
   try {
     await refreshLatestWholeAthletePlan();
   } catch (caught) {
@@ -220,7 +223,7 @@ export async function undoLatestCoachIntervention(): Promise<CoachUndoResult> {
   markCoachInterventionReverted(intervention.id);
   const message = `${intervention.optionTitle} was undone. Side Quest restored only that coach change and replanned the week around the current remaining edits.`;
   recordCoachReverted(loadCoachConversationState(block.id), intervention.snapshotId, message);
-  return { interventionId: intervention.id, optionTitle: intervention.optionTitle, conversationMessage: message, replanWarning };
+  return { interventionId: intervention.id, optionTitle: intervention.optionTitle, conversationMessage: message };
 }
 
 function targetFromProposal(proposal: CoachMessageProposal) {
