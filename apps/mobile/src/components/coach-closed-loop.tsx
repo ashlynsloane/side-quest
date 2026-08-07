@@ -1,7 +1,7 @@
 import type { CoachDecisionExplanation } from '@circuit/planner/coach-closed-loop';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { CoachClosedLoopSummary, CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
+import { exportCoachClosedLoopState, type CoachClosedLoopSummary, type CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
 import { useTheme } from '@/state/theme-context';
 
 export function CoachDecisionExplanationPanel({ explanation }: { explanation?: CoachDecisionExplanation }) {
@@ -38,7 +38,10 @@ export function CoachClosedLoopPanel({
   const followUp = summary.dueFollowUp;
   const undoable = summary.latestUndoable;
   const cue = summary.proactiveCue;
-  if (!followUp && !undoable && !cue) return null;
+  const historyState = exportCoachClosedLoopState();
+  const outcomeById = new Map(historyState.outcomes.map((item) => [item.id, item]));
+  const recent = [...historyState.interventions].sort((a, b) => b.appliedAt.localeCompare(a.appliedAt)).slice(0, 3);
+  if (!followUp && !undoable && !cue && !recent.length) return null;
   const promptKind = followUp?.followUp.promptKind;
   const symptomFollowUp = promptKind === 'safety_check' || promptKind === 'symptom_check';
 
@@ -78,6 +81,35 @@ export function CoachClosedLoopPanel({
           </Pressable>
         </View>
       ) : null}
+
+      {recent.length ? (
+        <View style={styles.historyCard}>
+          <Text style={styles.eyebrow}>RECENT COACH DECISIONS</Text>
+          {recent.map((item) => {
+            const outcome = item.outcomeObservationId ? outcomeById.get(item.outcomeObservationId) : undefined;
+            const status = item.status === 'reverted'
+              ? 'undone'
+              : outcome?.rating === 'helped'
+                ? 'helped'
+                : outcome?.rating === 'hurt'
+                  ? 'didn’t help'
+                  : outcome?.rating === 'neutral'
+                    ? 'neutral'
+                    : outcome?.rating === 'not_completed'
+                      ? 'not completed'
+                      : 'awaiting outcome';
+            return (
+              <View key={item.id} style={styles.historyRow}>
+                <View style={styles.historyCopy}>
+                  <Text style={styles.historyTitle}>{item.optionTitle}</Text>
+                  <Text style={styles.historyBody}>{item.target.sessionDiscipline} · {item.target.sessionDate} · {item.explanation.headline}</Text>
+                </View>
+                <Text style={styles.historyStatus}>{status}</Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -115,6 +147,12 @@ function makeStyles(tokens: ReturnType<typeof useTheme>['tokens']) {
     undoBody: { color: tokens.textMuted, fontSize: 11, lineHeight: 16 },
     undoButton: { borderWidth: 1, borderColor: tokens.border, borderRadius: 12, paddingHorizontal: 14, minHeight: 38, alignItems: 'center', justifyContent: 'center' },
     undoButtonText: { color: tokens.text, fontSize: 12, fontWeight: '800' },
+    historyCard: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, paddingTop: 12, gap: 8 },
+    historyRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4 },
+    historyCopy: { flex: 1, gap: 2 },
+    historyTitle: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '800' },
+    historyBody: { color: tokens.textMuted, fontSize: 11, lineHeight: 15 },
+    historyStatus: { color: tokens.textMuted, fontSize: 10, lineHeight: 14, fontWeight: '800', textTransform: 'uppercase' },
     pressed: { opacity: 0.7 },
     disabled: { opacity: 0.45 },
   });
