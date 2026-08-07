@@ -1,5 +1,5 @@
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
-import { decideCoachClarification } from '@circuit/planner/coach-clarification';
+import { decideCoachClarification, resolveCoachClarificationAnswer } from '@circuit/planner/coach-clarification';
 import {
   buildCoachDecisionExplanation,
   findCoachInterventionEffectPattern,
@@ -25,7 +25,9 @@ import {
 } from './coach-message-adaptation';
 import {
   appendCoachConversationTurn,
+  clearCoachClarification,
   loadCoachConversationState,
+  recordCoachClarification,
   recordCoachReverted,
   saveCoachConversationState,
   type CoachConversationState,
@@ -70,27 +72,62 @@ export async function buildCoachMessageProposalClosedLoop(
   message: string,
   quickSignal?: CoachQuickSignal,
 ): Promise<CoachClosedLoopProposalResult> {
-  const preview = interpretCoachMessage(message, quickSignal);
-  const clarification = decideCoachClarification(message, preview);
   const saved = await getLatestTrainingBlock();
   const existingConversation = saved?.block ? loadCoachConversationState(saved.block.id) : null;
+  let effectiveMessage = message;
+  let rewriteAthleteTurn = false;
+
+  if (existingConversation?.pendingClarification) {
+    const pending = existingConversation.pendingClarification;
+    const resolution = resolveCoachClarificationAnswer(pending.kind, pending.originalMessage, message);
+    if (!resolution.resolved) {
+      let conversation = appendCoachConversationTurn(existingConversation, 'athlete', 'message', message.trim());
+      conversation = appendCoachConversationTurn(conversation, 'coach', 'system', pending.question);
+      return { ok: false, reason: 'needs_clarification', message: pending.question, conversation };
+    }
+    if (resolution.noTrainingChange) {
+      let conversation = clearCoachClarification(existingConversation);
+      conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
+      const coachResponse = resolution.coachResponse ?? 'Got it. Side Quest will keep the current plan unless new information changes the call.';
+      conversation = appendCoachConversationTurn(conversation, 'coach', 'system', coachResponse);
+      return { ok: false, reason: 'needs_clarification', message: coachResponse, conversation };
+    }
+    effectiveMessage = resolution.effectiveMessage ?? message;
+    rewriteAthleteTurn = effectiveMessage !== message;
+    clearCoachClarification(existingConversation);
+  }
+
+  const preview = interpretCoachMessage(effectiveMessage, quickSignal);
+  const clarification = decideCoachClarification(effectiveMessage, preview);
+  const refreshedConversation = saved?.block ? loadCoachConversationState(saved.block.id) : existingConversation;
   const activeThread = Boolean(
-    existingConversation
-    && (existingConversation.pendingProposal || existingConversation.activeTarget || existingConversation.lastInterpretation)
-    && existingConversation.turns.length > 0,
+    refreshedConversation
+    && (refreshedConversation.pendingProposal || refreshedConversation.activeTarget || refreshedConversation.lastInterpretation)
+    && refreshedConversation.turns.length > 0,
   );
   const clarificationCanInheritThread = activeThread
     && (clarification.kind === 'target_session' || clarification.kind === 'constraint');
 
-  if (clarification.required && clarification.question && !clarificationCanInheritThread && saved?.block) {
-    let conversation = existingConversation ?? loadCoachConversationState(saved.block.id);
+  if (clarification.required && clarification.question && clarification.kind !== 'none' && !clarificationCanInheritThread && saved?.block) {
+    let conversation = refreshedConversation ?? loadCoachConversationState(saved.block.id);
     conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
     conversation = appendCoachConversationTurn(conversation, 'coach', 'system', clarification.question);
+    conversation = recordCoachClarification(conversation, {
+      kind: clarification.kind,
+      originalMessage: effectiveMessage,
+      question: clarification.question,
+    });
     return { ok: false, reason: 'needs_clarification', message: clarification.question, conversation };
   }
 
-  const result = await buildCoachMessageProposal(message, quickSignal);
+  const result = await buildCoachMessageProposal(effectiveMessage, quickSignal);
   if (!result.ok) return result;
+  if (rewriteAthleteTurn) {
+    const turns = [...result.conversation.turns];
+    const lastAthleteIndex = turns.map((turn) => turn.role).lastIndexOf('athlete');
+    if (lastAthleteIndex >= 0) turns[lastAthleteIndex] = { ...turns[lastAthleteIndex]!, text: message.trim() };
+    result.conversation = saveCoachConversationState({ ...result.conversation, pendingClarification: undefined, turns });
+  }
   const optionId = result.conversation.selectedOptionId ?? result.proposal.adaptation.adjustment.recommendedOptionId;
   const option = result.proposal.adaptation.adjustment.options.find((candidate) => candidate.id === optionId);
   if (!option) return result;
@@ -104,7 +141,7 @@ export async function buildCoachMessageProposalClosedLoop(
     learnedPattern: pattern,
   });
   const proposal: CoachMessageProposal = { ...result.proposal, decisionExplanation };
-  const conversation = saveCoachConversationState({ ...result.conversation, pendingProposal: proposal });
+  const conversation = saveCoachConversationState({ ...result.conversation, pendingClarification: undefined, pendingProposal: proposal });
   return { ...result, proposal, conversation };
 }
 
@@ -155,6 +192,7 @@ export async function applyCoachMessageProposalClosedLoop(
     optionId: option.id,
     optionTitle: option.title,
     optionAction: option.action,
+    selectedOption: option,
     snapshotId: applied.snapshotId,
     appliedAt,
     fingerprint,
