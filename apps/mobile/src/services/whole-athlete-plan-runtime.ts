@@ -1,4 +1,5 @@
 import type { PerformanceGoal } from '@circuit/domain';
+import Storage from 'expo-sqlite/kv-store';
 
 import {
   getActiveTrainingCheckIn,
@@ -23,22 +24,12 @@ const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
   lifeStress: 'low',
 };
 
-type StorageLike = {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-};
-
-function storage(): StorageLike | null {
-  const candidate = (globalThis as typeof globalThis & { localStorage?: StorageLike }).localStorage;
-  return candidate ?? null;
-}
-
 export function getDefaultWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
   return { ...DEFAULT_HEALTH_PREFERENCES };
 }
 
 export function loadWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
-  const saved = storage()?.getItem(HEALTH_PREFERENCES_KEY);
+  const saved = Storage.getItemSync(HEALTH_PREFERENCES_KEY);
   if (!saved) return getDefaultWholeAthleteHealthPreferences();
   try {
     const parsed = JSON.parse(saved) as Partial<WholeAthleteHealthPreferences>;
@@ -54,7 +45,7 @@ export function loadWholeAthleteHealthPreferences(): WholeAthleteHealthPreferenc
 }
 
 export function saveWholeAthleteHealthPreferences(preferences: WholeAthleteHealthPreferences): void {
-  storage()?.setItem(HEALTH_PREFERENCES_KEY, JSON.stringify(preferences));
+  Storage.setItemSync(HEALTH_PREFERENCES_KEY, JSON.stringify(preferences));
 }
 
 export async function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
