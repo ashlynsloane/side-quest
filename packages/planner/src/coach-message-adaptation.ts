@@ -10,7 +10,7 @@ import {
   type RequestedAdjustment,
   type SessionAdjustmentRequest,
 } from './daily-adjustment';
-import { normalizeStrengthSession, type UnifiedTrainingSession } from './unified-training';
+import type { UnifiedDiscipline, UnifiedTrainingSession } from './unified-training';
 
 export type CoachQuickSignal =
   | 'legs_sore'
@@ -22,6 +22,7 @@ export type CoachQuickSignal =
 
 export type CoachAffectedArea = 'lower_body' | 'upper_body' | 'general' | 'unknown';
 export type CoachInterpretationConfidence = 'low' | 'moderate' | 'high';
+export type CoachTargetDiscipline = 'swim' | 'bike' | 'run' | 'strength';
 
 export const COACH_QUICK_SIGNALS: ReadonlyArray<{ id: CoachQuickSignal; label: string }> = [
   { id: 'legs_sore', label: 'Legs sore' },
@@ -41,6 +42,7 @@ export interface CoachMessageInterpretation {
   availableMinutes?: number;
   athletePrefersRecovery?: boolean;
   affectedArea: CoachAffectedArea;
+  targetDiscipline?: CoachTargetDiscipline;
   confidence: CoachInterpretationConfidence;
   signals: string[];
   summary: string;
@@ -49,9 +51,10 @@ export interface CoachMessageInterpretation {
 export interface BuildCoachMessageAdaptationInput {
   message?: string;
   quickSignal?: CoachQuickSignal;
-  session: PlannedStrengthSession;
+  session: UnifiedTrainingSession;
   weekSessions: UnifiedTrainingSession[];
   availableDates: string[];
+  availableDisciplines?: UnifiedDiscipline[];
   recentFatigueTrend?: 'stable' | 'worsening' | 'improving';
   recentBoneStress?: boolean;
   returnToRun?: boolean;
@@ -116,6 +119,12 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     }
   }
 
+  const targetDiscipline = parseTargetDiscipline(text);
+  if (targetDiscipline) {
+    matched += 1;
+    signals.push(`Targets ${targetDiscipline}`);
+  }
+
   const lowerBody = /\b(legs?|quads?|quadriceps|hamstrings?|calves?|calf|glutes?|hips?|knees?|ankles?|feet|foot)\b/.test(text);
   const upperBody = /\b(arms?|shoulders?|back|chest|lats?|biceps|triceps|wrists?|hands?)\b/.test(text);
   if (lowerBody) affectedArea = 'lower_body';
@@ -123,12 +132,15 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
 
   const illness = /\b(sick|ill|fever|flu|chills|vomit|vomiting|nausea|nauseous|infection)\b/.test(text);
   const pain = /\b(pain|painful|hurt|hurts|hurting|sharp|injur|injured|injury|twinge|niggle)\b/.test(text);
-  const soreness = /\b(sore|soreness|aching|achy|stiff|stiffness)\b/.test(text);
+  const soreness = /\b(sore|soreness|aching|achy|stiff|stiffness|tight|tightness)\b/.test(text);
   const heavyLegs = /\bheavy\s+legs?\b|\blegs?\s+(?:feel\s+)?heavy\b/.test(text);
   const lowEnergy = /\b(tired|fatigued|fatigue|exhausted|drained|wiped|low\s+energy|no\s+energy|poor\s+sleep|bad\s+sleep|sleepy)\b/.test(text);
   const lowMotivation = /\b(not\s+feeling\s+(?:it|this)|don['’]?t\s+want\s+to|dont\s+want\s+to|unmotivated|no\s+motivation|dreading)\b/.test(text);
   const scheduleChanged = /\b(schedule\s+changed|plans?\s+changed|can['’]?t\s+(?:do|make)\s+(?:it|this|today)|cannot\s+(?:do|make)|meeting|travel|travelling|traveling|busy|move\s+(?:it|this)|later\s+today|another\s+day)\b/.test(text);
   const explicitRecovery = /\b(rest\s+day|take\s+(?:today|the\s+day)\s+off|skip\s+(?:it|this|today)|need\s+to\s+rest|rather\s+rest)\b/.test(text);
+  const accessProblem = /\b(pool\s+(?:is\s+)?closed|gym\s+(?:is\s+)?closed|no\s+(?:pool|bike|trainer|treadmill|equipment)|equipment\s+(?:is\s+)?unavailable|can['’]?t\s+get\s+to\s+the\s+(?:pool|gym))\b/.test(text);
+  const weatherProblem = /\b(rain|raining|storm|storming|snow|snowing|ice|icy|heat|hot|smoke|smoky|wind|windy|weather)\b/.test(text)
+    && /\b(can['’]?t|cannot|unsafe|outside|outdoors|ride|run|running|bike|cycling)\b/.test(text);
 
   availableMinutes = parseAvailableMinutes(text);
   if (availableMinutes !== undefined) {
@@ -182,6 +194,16 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     reason = 'time';
     requestedAction = 'shorter';
     signals.push('Time constraint');
+  } else if (accessProblem) {
+    matched += 2;
+    reason = 'access';
+    requestedAction = 'different';
+    signals.push('Training access changed');
+  } else if (weatherProblem) {
+    matched += 2;
+    reason = 'weather';
+    requestedAction = 'different';
+    signals.push('Weather constraint');
   } else if (scheduleChanged) {
     matched += 2;
     reason = 'preference';
@@ -198,7 +220,7 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
 
   const confidence: CoachInterpretationConfidence = matched >= 3 ? 'high' : matched >= 1 ? 'moderate' : 'low';
   const uniqueSignals = [...new Set(signals)];
-  const summary = buildInterpretationSummary(reason, requestedAction, affectedArea, availableMinutes);
+  const summary = buildInterpretationSummary(reason, requestedAction, affectedArea, availableMinutes, targetDiscipline);
 
   return {
     reason,
@@ -209,6 +231,7 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     availableMinutes,
     athletePrefersRecovery: athletePrefersRecovery || undefined,
     affectedArea,
+    targetDiscipline,
     confidence,
     signals: uniqueSignals.length ? uniqueSignals : ['General workout preference'],
     summary,
@@ -222,6 +245,7 @@ export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationIn
     reason: interpretation.reason,
     requestedAction: interpretation.requestedAction,
     availableMinutes: interpretation.availableMinutes,
+    availableDisciplines: input.availableDisciplines,
     fatigueKind: interpretation.fatigueKind,
     symptomSeverity: interpretation.symptomSeverity,
     focalPain: interpretation.focalPain,
@@ -229,7 +253,7 @@ export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationIn
   };
 
   const adjustment = buildDailyAdjustmentOptions(request, {
-    plannedSession: normalizeStrengthSession(input.session),
+    plannedSession: input.session,
     weekSessions: input.weekSessions,
     availableDates: input.availableDates,
     recentFatigueTrend: input.recentFatigueTrend,
@@ -290,6 +314,16 @@ export function applyCoachStrengthAdjustment(
   };
 }
 
+function parseTargetDiscipline(text: string): CoachTargetDiscipline | undefined {
+  const matches: CoachTargetDiscipline[] = [];
+  if (/\b(swim|swimming|pool)\b/.test(text)) matches.push('swim');
+  if (/\b(bike|biking|cycle|cycling|cyclist|ride|riding|trainer)\b/.test(text)) matches.push('bike');
+  if (/\b(run|running|runner|jog|jogging|treadmill)\b/.test(text)) matches.push('run');
+  if (/\b(strength|lift|lifting|weights?|gym\s+workout)\b/.test(text)) matches.push('strength');
+  const unique = [...new Set(matches)];
+  return unique.length === 1 ? unique[0] : undefined;
+}
+
 function parseAvailableMinutes(text: string): number | undefined {
   const minuteMatch = text.match(/\b(\d{1,3})\s*(?:min|mins|minute|minutes)\b/);
   if (minuteMatch?.[1]) return clampMinutes(Number(minuteMatch[1]));
@@ -312,13 +346,17 @@ function buildInterpretationSummary(
   requestedAction: RequestedAdjustment,
   affectedArea: CoachAffectedArea,
   availableMinutes?: number,
+  targetDiscipline?: CoachTargetDiscipline,
 ): string {
   const area = affectedArea === 'lower_body' ? 'lower-body ' : affectedArea === 'upper_body' ? 'upper-body ' : '';
-  if (reason === 'pain' || reason === 'illness') return `Protect against ${area}${reason} before preserving training load.`;
-  if (reason === 'fatigue') return `${area}fatigue is limiting today’s training stress.`;
-  if (reason === 'time') return `${availableMinutes ? `${availableMinutes} minutes` : 'Less time'} is available, so preserve the highest-priority work.`;
-  if (requestedAction === 'move') return 'The schedule changed, so find a cleaner place for the session.';
-  return 'The planned session does not fit today; adapt it without compensating elsewhere.';
+  const target = targetDiscipline ? `${targetDiscipline} session: ` : '';
+  if (reason === 'pain' || reason === 'illness') return `${target}protect against ${area}${reason} before preserving training load.`;
+  if (reason === 'fatigue') return `${target}${area}fatigue is limiting today’s training stress.`;
+  if (reason === 'time') return `${target}${availableMinutes ? `${availableMinutes} minutes` : 'Less time'} is available, so preserve the highest-priority work.`;
+  if (reason === 'access') return `${target}training access changed, so preserve the week without forcing the unavailable session.`;
+  if (reason === 'weather') return `${target}weather changed the safe training options, so adapt the session without adding compensatory load.`;
+  if (requestedAction === 'move') return `${target}the schedule changed, so find a cleaner place for the session.`;
+  return `${target}the planned session does not fit today; adapt it without compensating elsewhere.`;
 }
 
 function downshiftLoad(value: PlannedStrengthSession['intendedLoad']): PlannedStrengthSession['intendedLoad'] {
