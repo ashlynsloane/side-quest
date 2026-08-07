@@ -1,3 +1,9 @@
+import type {
+  PainExperienceKind,
+  PainFunctionalInterference,
+  PainProtectionLevel,
+  ProtectiveTrainingRequestDecision,
+} from './athlete-context-intelligence';
 import type { RecommendationConfidence, SessionPriority, UnifiedDiscipline, UnifiedTrainingSession } from './unified-training';
 
 export type AdjustmentReason = 'fatigue' | 'time' | 'access' | 'weather' | 'pain' | 'illness' | 'preference' | 'travel' | 'other';
@@ -15,6 +21,11 @@ export interface SessionAdjustmentRequest {
   fatigueKind?: FatigueKind;
   symptomSeverity?: 0 | 1 | 2 | 3 | 4 | 5;
   focalPain?: boolean;
+  painKind?: PainExperienceKind;
+  painFunctionalInterference?: PainFunctionalInterference;
+  painProtectionLevel?: PainProtectionLevel;
+  selfReportedPain0to10?: number;
+  protectiveTrainingDecision?: ProtectiveTrainingRequestDecision;
   athletePrefersRecovery?: boolean;
 }
 
@@ -55,25 +66,37 @@ export interface DailyAdjustmentResult {
 
 export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, context: AdjustmentContext): DailyAdjustmentResult {
   const session = context.plannedSession;
+  const hasStructuredPainAssessment = Boolean(request.painProtectionLevel);
+  const legacyPainConcern = !hasStructuredPainAssessment && Boolean(
+    request.focalPain
+    || (request.reason === 'pain' && (request.symptomSeverity ?? 0) >= 3),
+  );
   const safetyConcern = Boolean(
     request.reason === 'illness'
-    || request.focalPain
-    || (request.reason === 'pain' && (request.symptomSeverity ?? 0) >= 3)
+    || request.painProtectionLevel === 'protect'
+    || legacyPainConcern
     || request.fatigueKind === 'illness_like'
-    || (context.recentBoneStress && request.reason === 'pain'),
+    || (context.recentBoneStress && request.reason === 'pain' && request.painKind !== 'menstrual'),
   );
 
   if (safetyConcern) {
     const rest = skipOption(session, 'recommended', [
-      'New focal pain, illness-like symptoms, or worsening symptoms take priority over plan completion.',
+      'Focal, worsening, function-limiting, or illness-like symptoms take priority over plan completion.',
+      typeof request.selfReportedPain0to10 === 'number'
+        ? `The ${request.selfReportedPain0to10}/10 rating is context, not the sole safety threshold.`
+        : 'A numeric pain score is not required for the planner to protect a function-limiting symptom.',
       'The app should pause incompatible progression rather than diagnose the cause.',
     ], ['Today’s training load is removed.', 'The week should be reviewed before impact or heavy loading resumes.']);
     return {
       headline: 'Protect health today',
       recommendedOptionId: rest.id,
       options: [rest],
-      safetyMessage: 'Stop the session. Seek appropriate medical assessment for severe, worsening, or concerning symptoms.',
+      safetyMessage: 'Stop the incompatible session. Severe, worsening, persistent, or otherwise concerning symptoms warrant appropriate medical assessment.',
     };
+  }
+
+  if (request.protectiveTrainingDecision && request.protectiveTrainingDecision.action !== 'allow') {
+    return protectiveEscalationOptions(session, request.protectiveTrainingDecision);
   }
 
   const options: AdjustmentOption[] = [];
@@ -114,6 +137,42 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
     headline: recommended.title,
     recommendedOptionId: recommended.id,
     options: unique.map((option) => ({ ...option, recommendationLevel: option.id === recommended.id ? 'recommended' : option.recommendationLevel })),
+  };
+}
+
+function protectiveEscalationOptions(
+  session: UnifiedTrainingSession,
+  decision: ProtectiveTrainingRequestDecision,
+): DailyAdjustmentResult {
+  const cap = Math.max(15, Math.min(session.durationMinutes, decision.maximumSuggestedDurationMinutes ?? 45));
+  const continuity: AdjustmentOption = {
+    id: `easier_protect_${session.id}_${cap}`,
+    action: 'modify',
+    recommendationLevel: 'recommended',
+    title: decision.action === 'protect' ? `Keep it easy and cap at ${cap} minutes` : `Hold the load and cap at ${cap} minutes`,
+    description: decision.action === 'protect'
+      ? 'Do not use this session to replace or repay the training that was interrupted by pain. Use only a low-load tolerance check if symptoms allow.'
+      : 'Keep the next session below the planned escalation while the recent pain interruption is still relevant.',
+    durationMinutes: cap,
+    rationale: decision.explanations,
+    weeklyConsequences: [
+      'No compensatory intensity or volume is added.',
+      'Progression stays on hold until ordinary training tolerance is re-established.',
+    ],
+    protectsMentalHealth: true,
+    protectsPhysicalHealth: true,
+    requiresApproval: false,
+    confidence: decision.confidence === 'low' ? 'low' : decision.confidence,
+  };
+  const rest = skipOption(session, 'acceptable', [
+    'A recent function-limiting pain event makes recovery a valid choice even if motivation to compensate is high.',
+    ...decision.explanations,
+  ], ['Today’s planned load is removed.', 'Missed training is not compressed into the next day.']);
+  return {
+    headline: decision.action === 'protect' ? 'Do not repay the missed workout with more load' : 'Hold the escalation',
+    recommendedOptionId: continuity.id,
+    options: [continuity, rest],
+    safetyMessage: decision.explanations.join(' '),
   };
 }
 
