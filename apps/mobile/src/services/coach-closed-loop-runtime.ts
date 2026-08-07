@@ -1,4 +1,5 @@
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
+import { decideCoachClarification } from '@circuit/planner/coach-clarification';
 import {
   buildCoachDecisionExplanation,
   findCoachInterventionEffectPattern,
@@ -6,7 +7,7 @@ import {
   scheduleCoachFollowUp,
   type CoachDecisionExplanation,
 } from '@circuit/planner/coach-closed-loop';
-import type { CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
+import { interpretCoachMessage, type CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
 
 import {
   getLatestTrainingBlock,
@@ -27,6 +28,7 @@ import {
   loadCoachConversationState,
   recordCoachReverted,
   saveCoachConversationState,
+  type CoachConversationState,
 } from './coach-conversation-state';
 import {
   getCoachClosedLoopSummary,
@@ -57,10 +59,29 @@ export interface CoachUndoResult {
   replanWarning?: string;
 }
 
+export type CoachClosedLoopProposalResult = CoachMessageProposalResult | {
+  ok: false;
+  reason: 'needs_clarification';
+  message: string;
+  conversation: CoachConversationState;
+};
+
 export async function buildCoachMessageProposalClosedLoop(
   message: string,
   quickSignal?: CoachQuickSignal,
-): Promise<CoachMessageProposalResult> {
+): Promise<CoachClosedLoopProposalResult> {
+  const preview = interpretCoachMessage(message, quickSignal);
+  const clarification = decideCoachClarification(message, preview);
+  if (clarification.required && clarification.question) {
+    const saved = await getLatestTrainingBlock();
+    if (saved?.block) {
+      let conversation = loadCoachConversationState(saved.block.id);
+      conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
+      conversation = appendCoachConversationTurn(conversation, 'coach', 'system', clarification.question);
+      return { ok: false, reason: 'needs_clarification', message: clarification.question, conversation };
+    }
+  }
+
   const result = await buildCoachMessageProposal(message, quickSignal);
   if (!result.ok) return result;
   const optionId = result.conversation.selectedOptionId ?? result.proposal.adaptation.adjustment.recommendedOptionId;
@@ -221,9 +242,9 @@ export async function undoLatestCoachIntervention(): Promise<CoachUndoResult> {
 
   await markPlanSnapshotRestored(intervention.snapshotId);
   markCoachInterventionReverted(intervention.id);
-  const message = `${intervention.optionTitle} was undone. Side Quest restored only that coach change and replanned the week around the current remaining edits.`;
-  recordCoachReverted(loadCoachConversationState(block.id), intervention.snapshotId, message);
-  return { interventionId: intervention.id, optionTitle: intervention.optionTitle, conversationMessage: message };
+  const response = `${intervention.optionTitle} was undone. Side Quest restored only that coach change and replanned the week around the current remaining edits.`;
+  recordCoachReverted(loadCoachConversationState(block.id), intervention.snapshotId, response);
+  return { interventionId: intervention.id, optionTitle: intervention.optionTitle, conversationMessage: response };
 }
 
 function targetFromProposal(proposal: CoachMessageProposal) {
