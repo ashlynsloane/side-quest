@@ -114,6 +114,7 @@ describe('coach conversation resolver', () => {
 
     expect(result.interpretation.reason).toBe('pain');
     expect(result.interpretation.focalPain).toBe(true);
+    expect(result.interpretation.painContext?.kind).toBe('focal_musculoskeletal');
     expect(result.preferredTargetDate).toBe('2026-08-14');
   });
 
@@ -127,8 +128,27 @@ describe('coach conversation resolver', () => {
 
     expect(result.interpretation.reason).toBe('preference');
     expect(result.interpretation.focalPain).toBeUndefined();
+    expect(result.interpretation.painContext).toBeUndefined();
     expect(result.interpretation.requestedAction).toBe('move');
     expect(result.preferredTargetDate).toBe('2026-08-14');
+  });
+
+  it('treats a compensatory cross-sport request as a new request constrained by recent pain rather than current pain', () => {
+    const previous = interpretCoachMessage('I had sharp knee pain and had to quit my track workout.');
+    const result = resolveCoachConversationMessage("I'm frustrated and want to ride a century tomorrow to make up for it.", undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'run',
+      previousSessionDate: '2026-08-10',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.keepPriorTarget).toBe(false);
+    expect(result.interpretation.reason).not.toBe('pain');
+    expect(result.interpretation.painContext).toBeUndefined();
+    expect(result.interpretation.compensatoryTrainingIntent).toBe(true);
+    expect(result.interpretation.requestedLargeTrainingLoad).toBe(true);
+    expect(result.conversationSignals).toContain('New request constrained by recent interruption');
   });
 
   it('recognizes confirmation and cancellation as conversation actions', () => {
