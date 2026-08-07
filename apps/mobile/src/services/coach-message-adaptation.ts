@@ -4,7 +4,6 @@ import { resolveCoachConversationMessage } from '@circuit/planner/coach-conversa
 import {
   applyCoachStrengthAdjustment,
   buildCoachMessageAdaptation,
-  type CoachMessageAdaptation,
   type CoachQuickSignal,
   type CoachTargetDiscipline,
 } from '@circuit/planner/coach-message-adaptation';
@@ -21,7 +20,6 @@ import {
   loadCoachConversationState,
   recordCoachApplied,
   recordCoachProposal,
-  saveCoachConversationState,
   updateCoachSelectedOption,
   type CoachConversationState,
   type PersistedCoachProposal,
@@ -30,12 +28,14 @@ import { saveSideQuestPlanSessionOverride } from './side-quest-plan-overrides';
 import { isSideQuestGeneratedPlanEvent } from './whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
+const CONTINUITY_WINDOW_HOURS = 48;
+
 export type CoachMessageTargetKind = 'strength' | 'endurance';
 export type CoachMessageProposal = PersistedCoachProposal;
 
 export type CoachMessageProposalResult =
   | { ok: true; proposal: CoachMessageProposal; autoApply?: boolean; conversation: CoachConversationState }
-  | { ok: false; reason: 'empty_input' | 'no_plan' | 'no_adjustable_session' | 'cancelled'; message: string; conversation?: CoachConversationState };
+  | { ok: false; reason: 'empty_input' | 'no_plan' | 'no_adjustable_session' | 'cancelled' | 'no_pending_proposal'; message: string; conversation?: CoachConversationState };
 
 export interface AppliedCoachMessageAdaptation {
   targetKind: CoachMessageTargetKind;
@@ -81,18 +81,19 @@ export async function buildCoachMessageProposal(
     return { ok: false, reason: 'no_adjustable_session', message: 'The active plan does not contain an adjustable training week.' };
   }
 
-  let conversation = loadCoachConversationState(block.id);
-  conversation = appendCoachConversationTurn(
-    conversation,
+  const previousConversation = loadCoachConversationState(block.id);
+  const continuePriorContext = hasFreshConversationContext(previousConversation);
+  let conversation = appendCoachConversationTurn(
+    previousConversation,
     'athlete',
     'message',
     message.trim() || quickSignalLabel(quickSignal),
   );
 
   const resolution = resolveCoachConversationMessage(message, quickSignal, {
-    previousInterpretation: conversation.lastInterpretation,
-    previousTargetDiscipline: conversation.activeTarget?.sessionDiscipline,
-    previousSessionDate: conversation.activeTarget?.sessionDate,
+    previousInterpretation: continuePriorContext ? previousConversation.lastInterpretation : undefined,
+    previousTargetDiscipline: continuePriorContext ? previousConversation.activeTarget?.sessionDiscipline : undefined,
+    previousSessionDate: continuePriorContext ? previousConversation.activeTarget?.sessionDate : undefined,
     referenceDate: localDate(),
   });
 
@@ -101,13 +102,18 @@ export async function buildCoachMessageProposal(
     return { ok: false, reason: 'cancelled', message: 'Keeping the original plan.', conversation };
   }
 
-  if (resolution.confirmProposal && conversation.pendingProposal) {
-    return {
-      ok: true,
-      proposal: conversation.pendingProposal,
-      autoApply: true,
-      conversation,
-    };
+  if (resolution.confirmProposal) {
+    if (previousConversation.pendingProposal) {
+      return {
+        ok: true,
+        proposal: previousConversation.pendingProposal,
+        autoApply: true,
+        conversation,
+      };
+    }
+    const messageText = 'There is no pending coach change to apply.';
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', messageText);
+    return { ok: false, reason: 'no_pending_proposal', message: messageText, conversation };
   }
 
   try {
@@ -120,7 +126,7 @@ export async function buildCoachMessageProposal(
     from: `${firstWeek.weekStartDate}T00:00:00.000Z`,
     to: `${addDays(lastWeek.weekStartDate, 6)}T23:59:59.999Z`,
   });
-  const preferredSessionId = resolution.keepPriorTarget ? conversation.activeTarget?.sessionId : undefined;
+  const preferredSessionId = resolution.keepPriorTarget && continuePriorContext ? previousConversation.activeTarget?.sessionId : undefined;
   const target = selectAdjustableTarget(block, calendar, resolution.targetDiscipline, preferredSessionId);
   if (!target) {
     const discipline = resolution.targetDiscipline ? `${resolution.targetDiscipline} ` : '';
@@ -214,23 +220,16 @@ export async function applyCoachMessageProposal(
   const option = proposal.adaptation.adjustment.options.find((candidate) => candidate.id === optionId);
   if (!option) throw new Error('The selected adaptation is no longer available.');
 
-  const snapshot = await savePlanSnapshot(block, snapshotReason(proposal, option.title));
-  let updatedSession: PlannedStrengthSession | undefined;
+  let currentStrength: PlannedStrengthSession | undefined;
+  let currentEndurance: TrainingCalendarEvent | undefined;
 
   if (proposal.targetKind === 'strength') {
-    const session = block.weeks.flatMap((week) => week.sessions).find((candidate) => candidate.id === proposal.sessionId);
-    if (!session) throw new Error('The planned strength session changed before this adaptation could be applied.');
+    currentStrength = block.weeks.flatMap((week) => week.sessions).find((candidate) => candidate.id === proposal.sessionId);
+    if (!currentStrength) throw new Error('The planned strength session changed before this adaptation could be applied.');
+    if (currentStrength.date !== proposal.sessionDate || currentStrength.title !== proposal.sessionTitle) {
+      throw new Error('The plan changed after this proposal was created. Send the update again so Side Quest can re-check the current week.');
+    }
     if (option.action === 'replace') throw new Error('Cross-sport replacement is only available for Side Quest endurance sessions.');
-
-    updatedSession = applyCoachStrengthAdjustment(session, option);
-    const updatedBlock: TrainingBlockPlan = {
-      ...block,
-      weeks: block.weeks.map((week) => ({
-        ...week,
-        sessions: week.sessions.map((candidate) => candidate.id === session.id ? updatedSession! : candidate),
-      })),
-    };
-    await saveTrainingBlock(updatedBlock);
   } else {
     const calendarEventId = proposal.calendarEventId;
     if (!calendarEventId) throw new Error('The endurance session reference is missing.');
@@ -241,11 +240,30 @@ export async function applyCoachMessageProposal(
       from: `${firstWeek.weekStartDate}T00:00:00.000Z`,
       to: `${addDays(lastWeek.weekStartDate, 6)}T23:59:59.999Z`,
     });
-    const event = calendar.find((candidate) => candidate.id === calendarEventId);
-    if (!event || !isAdjustableEnduranceEvent(event)) {
+    currentEndurance = calendar.find((candidate) => candidate.id === calendarEventId);
+    if (!currentEndurance || !isAdjustableEnduranceEvent(currentEndurance)) {
       throw new Error('The Side Quest endurance session changed before this adaptation could be applied.');
     }
-    saveSideQuestPlanSessionOverride(event, option);
+    if (currentEndurance.startAt.slice(0, 10) !== proposal.sessionDate || currentEndurance.discipline !== proposal.sessionDiscipline) {
+      throw new Error('The plan changed after this proposal was created. Send the update again so Side Quest can re-check the current week.');
+    }
+  }
+
+  const snapshot = await savePlanSnapshot(block, snapshotReason(proposal, option.title));
+  let updatedSession: PlannedStrengthSession | undefined;
+
+  if (currentStrength) {
+    updatedSession = applyCoachStrengthAdjustment(currentStrength, option);
+    const updatedBlock: TrainingBlockPlan = {
+      ...block,
+      weeks: block.weeks.map((week) => ({
+        ...week,
+        sessions: week.sessions.map((candidate) => candidate.id === currentStrength!.id ? updatedSession! : candidate),
+      })),
+    };
+    await saveTrainingBlock(updatedBlock);
+  } else if (currentEndurance) {
+    saveSideQuestPlanSessionOverride(currentEndurance, option);
   }
 
   let replanWarning: string | undefined;
@@ -347,6 +365,14 @@ function datesInWeekExcept(weekStart: string, weekEnd: string, sessionDate: stri
     dates.push(candidate);
   }
   return dates;
+}
+
+function hasFreshConversationContext(state: CoachConversationState): boolean {
+  if (state.pendingProposal) return true;
+  const lastTurn = state.turns.at(-1);
+  if (!lastTurn) return false;
+  const ageMs = Date.now() - new Date(lastTurn.createdAt).getTime();
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= CONTINUITY_WINDOW_HOURS * 60 * 60 * 1000;
 }
 
 function snapshotReason(proposal: CoachMessageProposal, optionTitle: string): string {
