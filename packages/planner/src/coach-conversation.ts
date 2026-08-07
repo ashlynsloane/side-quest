@@ -53,7 +53,9 @@ export function resolveCoachConversationMessage(
   const preferredReplacementDiscipline = parseReplacementPreference(text);
   const explicitMove = Boolean(preferredTargetDate) || /\b(move|reschedule|shift|push|tomorrow|tonight|later)\b/.test(text);
   const explicitDuration = fresh.availableMinutes !== undefined;
-  const explicitReplacement = Boolean(preferredReplacementDiscipline) || /\b(instead|rather|replace|swap\s+(?:it|this))\b/.test(text);
+  const replacementLanguage = /\b(rather|replace|swap\s+(?:it|this))\b/.test(text)
+    || (/\binstead\b/.test(text) && !explicitMove);
+  const explicitReplacement = Boolean(preferredReplacementDiscipline) || replacementLanguage;
   const explicitNewSafety = fresh.reason === 'pain' || fresh.reason === 'illness';
   const lowInformationFollowUp = fresh.confidence === 'low' || isEllipticalFollowUp(text);
 
