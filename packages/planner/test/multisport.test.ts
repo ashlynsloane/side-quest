@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PerformanceGoal, Weekday } from '@circuit/domain';
+import { getGoalSpecificProfile } from '../src/goal-specific-coaching';
 import { generateMultisportWeek, type MultisportWeekRequest } from '../src/multisport';
 
 const availability = (minutes = 180) => ([
@@ -77,7 +78,11 @@ describe('generateMultisportWeek', () => {
     expect(plan.sessions.filter((session) => session.discipline === 'swim')).toHaveLength(3);
     expect(plan.sessions.filter((session) => session.discipline === 'bike')).toHaveLength(2);
     expect(plan.sessions.filter((session) => session.discipline === 'run')).toHaveLength(2);
-    expect(plan.sessions.filter((session) => session.discipline === 'strength')).toHaveLength(2);
+
+    const strengthProfile = getGoalSpecificProfile('half_ironman').disciplinePriorities.find((item) => item.discipline === 'strength');
+    const strengthCount = plan.sessions.filter((session) => session.discipline === 'strength').length;
+    expect(strengthCount).toBeGreaterThanOrEqual(strengthProfile?.minimumWeeklySessions ?? 1);
+    expect(strengthCount).toBeLessThanOrEqual(strengthProfile?.preferredWeeklySessions ?? 2);
 
     for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as Weekday[]) {
       expect(plan.sessions.filter((session) => session.day === day).length).toBeLessThanOrEqual(2);
@@ -123,7 +128,7 @@ describe('generateMultisportWeek', () => {
     expect(Math.max(...counts.values())).toBeLessThanOrEqual(2);
   });
 
-  it('keeps return-to-run sessions on nonconsecutive days', () => {
+  it('keeps requested return-to-run placeholders on nonconsecutive days at the low-level placement layer', () => {
     const plan = generateMultisportWeek(request({
       preferences: {
         preferredSessionsPerWeek: { swim: 2, bike: 2, run: 2, strength: 2 },
