@@ -89,9 +89,7 @@ export function buildCoachDecisionExplanation(input: {
   protectiveDecision?: ProtectiveTrainingRequestDecision;
   learnedPattern?: CoachInterventionEffectPattern;
 }): CoachDecisionExplanation {
-  const protection = input.protectiveDecision?.action === 'protect'
-    || input.adaptation.painAssessment?.level === 'protect'
-    || Boolean(input.adaptation.adjustment.safetyMessage);
+  const protection = isProtectiveCoachingCall(input.adaptation, input.option, input.protectiveDecision);
   const tier: CoachExplanationTier = protection ? 'protection' : 'adaptation';
   const interpretation = input.adaptation.interpretation;
   const pain = interpretation.painContext;
@@ -102,14 +100,18 @@ export function buildCoachDecisionExplanation(input: {
   const protecting = protection
     ? input.protectiveDecision?.explanations.at(-1)
       ?? input.adaptation.adjustment.safetyMessage
-      ?? 'This keeps the next training decision below the current safety ceiling until normal tolerance is clearer.'
+      ?? (interpretation.compensatoryTrainingIntent
+        ? 'The missed session is not training debt. This keeps frustration from turning one interrupted workout into an unplanned load escalation.'
+        : 'This keeps the next training decision below the current safety ceiling until normal tolerance is clearer.')
     : input.option.weeklyConsequences[0]
       ?? 'This keeps the change local instead of creating unnecessary training debt elsewhere in the week.';
   const whatWouldChangeTheCall = pain
     ? 'A clear change in symptoms or function should trigger a fresh check; a lower or higher pain number alone is not enough.'
-    : interpretation.reason === 'fatigue'
-      ? 'If energy or soreness changes materially, Side Quest should re-check the session rather than carrying this adjustment forward automatically.'
-      : 'New schedule, recovery, pain, or completion information should trigger a fresh planner check.';
+    : protection
+      ? 'New evidence that normal training tolerance has returned should trigger a fresh planner check; frustration or a desire to make up missed work does not count as that evidence.'
+      : interpretation.reason === 'fatigue'
+        ? 'If energy or soreness changes materially, Side Quest should re-check the session rather than carrying this adjustment forward automatically.'
+        : 'New schedule, recovery, pain, or completion information should trigger a fresh planner check.';
   const learnedContext = input.learnedPattern && input.learnedPattern.confidence !== 'low'
     ? input.learnedPattern.summary
     : undefined;
@@ -132,9 +134,7 @@ export function scheduleCoachFollowUp(input: {
   adaptation: CoachMessageAdaptation;
   option: AdjustmentOption;
 }): CoachFollowUpPlan {
-  const isSafety = input.adaptation.painAssessment?.level === 'protect'
-    || input.adaptation.interpretation.reason === 'pain'
-    || input.adaptation.interpretation.reason === 'illness';
+  const isSafety = isProtectiveCoachingCall(input.adaptation, input.option);
   const sessionDayFollowUp = new Date(`${input.option.targetDate ?? input.sessionDate}T20:00:00.000Z`).getTime();
   const appliedTime = new Date(input.appliedAt).getTime();
   const minimumDelay = isSafety ? 12 : 18;
@@ -233,6 +233,21 @@ export function outcomeRatingFromFollowUp(response: 'better' | 'same' | 'worse' 
   if (response === 'same') return { rating: 'neutral', symptomResponse: 'same', completedAsPlanned: true };
   if (response === 'worse') return { rating: 'hurt', symptomResponse: 'worse', completedAsPlanned: true };
   return { rating: 'not_completed', symptomResponse: 'not_applicable', completedAsPlanned: false };
+}
+
+function isProtectiveCoachingCall(
+  adaptation: CoachMessageAdaptation,
+  option: AdjustmentOption,
+  protectiveDecision?: ProtectiveTrainingRequestDecision,
+): boolean {
+  return Boolean(
+    protectiveDecision?.action === 'protect'
+    || adaptation.painAssessment?.level === 'protect'
+    || adaptation.adjustment.safetyMessage
+    || ((adaptation.interpretation.compensatoryTrainingIntent || adaptation.interpretation.requestedLargeTrainingLoad)
+      && option.recommendationLevel === 'recommended'
+      && option.protectsPhysicalHealth),
+  );
 }
 
 function interventionKey(fingerprint: CoachInterventionFingerprint): string {
