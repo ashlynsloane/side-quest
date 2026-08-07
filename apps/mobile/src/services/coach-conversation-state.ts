@@ -1,3 +1,4 @@
+import type { CoachDecisionExplanation } from '@circuit/planner/coach-closed-loop';
 import type {
   CoachMessageAdaptation,
   CoachMessageInterpretation,
@@ -24,6 +25,7 @@ export interface PersistedCoachTarget {
 
 export interface PersistedCoachProposal extends PersistedCoachTarget {
   adaptation: CoachMessageAdaptation;
+  decisionExplanation?: CoachDecisionExplanation;
 }
 
 export interface CoachConversationTurn {
