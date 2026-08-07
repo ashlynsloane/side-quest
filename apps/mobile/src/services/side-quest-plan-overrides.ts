@@ -77,6 +77,27 @@ export function resolveSideQuestPlanOverrideEvent(
     };
   }
 
+  if (option.action === 'modify' && option.id.startsWith('cycle_indoor_') && baseEvent.discipline === 'bike') {
+    return {
+      ...baseEvent,
+      startAt,
+      endAt,
+      title: option.title,
+      location: 'Indoor / trainer',
+      description: `Side Quest cycle-aware adaptation · ${option.title}\n${option.description}`,
+    };
+  }
+
+  if (option.action === 'modify' && option.id.startsWith('cycle_easy_run_') && baseEvent.discipline === 'run') {
+    return {
+      ...baseEvent,
+      startAt,
+      endAt,
+      title: 'Easy run',
+      description: `Side Quest cycle-aware adaptation · ${option.title}\n${option.description}`,
+    };
+  }
+
   if (option.action === 'modify' && option.id.startsWith('easier_')) {
     const discipline = baseEvent.discipline === 'swim' || baseEvent.discipline === 'bike' || baseEvent.discipline === 'run'
       ? baseEvent.discipline
