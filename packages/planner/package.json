@@ -12,6 +12,7 @@
     "./coach-message-adaptation": "./src/coach-message-adaptation.ts",
     "./coach-conversation": "./src/coach-conversation.ts",
     "./athlete-context-intelligence": "./src/athlete-context-intelligence.ts",
+    "./coach-closed-loop": "./src/coach-closed-loop.ts",
     "./frequency-suppression": "./src/frequency-suppression.ts"
   },
   "dependencies": {
