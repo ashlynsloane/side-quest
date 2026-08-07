@@ -196,14 +196,7 @@ export function findCoachInterventionEffectPattern(
   fingerprint: CoachInterventionFingerprint,
   patterns: CoachInterventionEffectPattern[],
 ): CoachInterventionEffectPattern | undefined {
-  const exact = patterns.find((pattern) => pattern.key === interventionKey(fingerprint));
-  if (exact) return exact;
-  return patterns.find((pattern) =>
-    pattern.fingerprint.discipline === fingerprint.discipline
-    && pattern.fingerprint.reason === fingerprint.reason
-    && pattern.fingerprint.action === fingerprint.action
-    && pattern.fingerprint.menstrual === fingerprint.menstrual,
-  );
+  return patterns.find((pattern) => pattern.key === interventionKey(fingerprint));
 }
 
 export function buildProactiveCoachCue(pattern: CoachInterventionEffectPattern): ProactiveCoachCue | null {
