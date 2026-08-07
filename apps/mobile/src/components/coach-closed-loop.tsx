@@ -2,6 +2,7 @@ import type { CoachDecisionExplanation } from '@circuit/planner/coach-closed-loo
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { exportCoachClosedLoopState, type CoachClosedLoopSummary, type CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
+import { loadCoachObservedOutcomes } from '@/services/coach-observed-outcomes';
 import { useTheme } from '@/state/theme-context';
 
 export function CoachDecisionExplanationPanel({ explanation }: { explanation?: CoachDecisionExplanation }) {
@@ -39,7 +40,9 @@ export function CoachClosedLoopPanel({
   const undoable = summary.latestUndoable;
   const cue = summary.proactiveCue;
   const historyState = exportCoachClosedLoopState();
+  const observedState = loadCoachObservedOutcomes();
   const outcomeById = new Map(historyState.outcomes.map((item) => [item.id, item]));
+  const observedByIntervention = new Map(observedState.map((item) => [item.interventionId, item]));
   const recent = [...historyState.interventions].sort((a, b) => b.appliedAt.localeCompare(a.appliedAt)).slice(0, 3);
   if (!followUp && !undoable && !cue && !recent.length) return null;
   const promptKind = followUp?.followUp.promptKind;
@@ -87,6 +90,7 @@ export function CoachClosedLoopPanel({
           <Text style={styles.eyebrow}>RECENT COACH DECISIONS</Text>
           {recent.map((item) => {
             const outcome = item.outcomeObservationId ? outcomeById.get(item.outcomeObservationId) : undefined;
+            const observed = observedByIntervention.get(item.id);
             const status = item.status === 'reverted'
               ? 'undone'
               : outcome?.rating === 'helped'
@@ -97,7 +101,15 @@ export function CoachClosedLoopPanel({
                     ? 'neutral'
                     : outcome?.rating === 'not_completed'
                       ? 'not completed'
-                      : 'awaiting outcome';
+                      : observed?.execution.status === 'followed'
+                        ? 'completed as adjusted'
+                        : observed?.execution.status === 'exceeded_prescription'
+                          ? 'exceeded adjustment'
+                          : observed?.execution.status === 'partial'
+                            ? 'partially completed'
+                            : observed?.execution.status === 'different_session'
+                              ? 'different workout'
+                              : 'awaiting outcome';
             return (
               <View key={item.id} style={styles.historyRow}>
                 <View style={styles.historyCopy}>
