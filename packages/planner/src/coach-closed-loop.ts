@@ -56,7 +56,7 @@ export interface CoachDecisionExplanation {
 export interface CoachFollowUpPlan {
   dueAt: string;
   question: string;
-  promptKind: 'safety_check' | 'adaptation_outcome' | 'completion_check';
+  promptKind: 'safety_check' | 'symptom_check' | 'adaptation_outcome' | 'completion_check';
   priority: 'normal' | 'high';
 }
 
@@ -135,24 +135,34 @@ export function scheduleCoachFollowUp(input: {
   adaptation: CoachMessageAdaptation;
   option: AdjustmentOption;
 }): CoachFollowUpPlan {
-  const isSafety = isProtectiveCoachingCall(input.adaptation, input.option);
+  const protective = isProtectiveCoachingCall(input.adaptation, input.option);
+  const symptomRelevant = Boolean(
+    input.adaptation.interpretation.painContext
+    || input.adaptation.interpretation.menstrualContext?.active
+    || input.adaptation.interpretation.reason === 'illness',
+  );
   const sessionDayFollowUp = new Date(`${input.option.targetDate ?? input.sessionDate}T20:00:00.000Z`).getTime();
   const appliedTime = new Date(input.appliedAt).getTime();
-  const minimumDelay = isSafety ? 12 : 18;
-  const maximumDelay = isSafety ? 30 : 48;
+  const minimumDelay = protective ? 12 : 18;
+  const maximumDelay = protective ? 30 : 48;
   const earliest = appliedTime + minimumDelay * 3_600_000;
   const latest = appliedTime + maximumDelay * 3_600_000;
   const dueMs = sessionDayFollowUp > latest
     ? sessionDayFollowUp
     : Math.min(latest, Math.max(earliest, sessionDayFollowUp));
   const discipline = input.adaptation.interpretation.targetDiscipline ?? 'session';
+  const symptomQuestion = `How did your symptoms and function respond after the ${discipline} adjustment?`;
   return {
     dueAt: new Date(dueMs).toISOString(),
-    question: isSafety
-      ? `How did your symptoms and function respond after the ${discipline} adjustment?`
-      : `Did ${input.option.title.toLowerCase()} work well for you?`,
-    promptKind: isSafety ? 'safety_check' : input.option.action === 'skip' ? 'completion_check' : 'adaptation_outcome',
-    priority: isSafety ? 'high' : 'normal',
+    question: symptomRelevant ? symptomQuestion : `Did ${input.option.title.toLowerCase()} work well for you?`,
+    promptKind: protective
+      ? 'safety_check'
+      : symptomRelevant
+        ? 'symptom_check'
+        : input.option.action === 'skip'
+          ? 'completion_check'
+          : 'adaptation_outcome',
+    priority: protective ? 'high' : 'normal',
   };
 }
 
