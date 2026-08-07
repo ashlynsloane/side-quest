@@ -1,3 +1,4 @@
+import type { CoachClarificationKind } from '@circuit/planner/coach-clarification';
 import type { CoachDecisionExplanation } from '@circuit/planner/coach-closed-loop';
 import type {
   CoachMessageAdaptation,
@@ -36,12 +37,20 @@ export interface CoachConversationTurn {
   createdAt: string;
 }
 
+export interface PendingCoachClarification {
+  kind: Exclude<CoachClarificationKind, 'none'>;
+  originalMessage: string;
+  question: string;
+  askedAt: string;
+}
+
 export interface CoachConversationState {
   version: 1;
   blockId: string;
   turns: CoachConversationTurn[];
   activeTarget?: PersistedCoachTarget;
   lastInterpretation?: CoachMessageInterpretation;
+  pendingClarification?: PendingCoachClarification;
   pendingProposal?: PersistedCoachProposal;
   selectedOptionId?: string;
   lastApplied?: {
@@ -70,6 +79,7 @@ export function loadCoachConversationState(blockId: string): CoachConversationSt
       turns: parsed.turns.filter(isValidTurn).slice(-MAX_TURNS),
       activeTarget: isValidTarget(parsed.activeTarget) ? parsed.activeTarget : undefined,
       lastInterpretation: isValidInterpretation(parsed.lastInterpretation) ? parsed.lastInterpretation : undefined,
+      pendingClarification: isValidPendingClarification(parsed.pendingClarification) ? parsed.pendingClarification : undefined,
       pendingProposal: isValidProposal(parsed.pendingProposal) ? parsed.pendingProposal : undefined,
       selectedOptionId: typeof parsed.selectedOptionId === 'string' ? parsed.selectedOptionId : undefined,
       lastApplied: isValidLastApplied(parsed.lastApplied) ? parsed.lastApplied : undefined,
@@ -114,6 +124,23 @@ export function appendCoachConversationTurn(
   });
 }
 
+export function recordCoachClarification(
+  state: CoachConversationState,
+  input: Omit<PendingCoachClarification, 'askedAt'>,
+): CoachConversationState {
+  const askedAt = new Date().toISOString();
+  return saveCoachConversationState({
+    ...state,
+    pendingClarification: { ...input, askedAt },
+    pendingProposal: undefined,
+    selectedOptionId: undefined,
+  });
+}
+
+export function clearCoachClarification(state: CoachConversationState): CoachConversationState {
+  return saveCoachConversationState({ ...state, pendingClarification: undefined });
+}
+
 export function recordCoachProposal(
   state: CoachConversationState,
   proposal: PersistedCoachProposal,
@@ -128,6 +155,7 @@ export function recordCoachProposal(
     ...state,
     activeTarget: target,
     lastInterpretation: proposal.adaptation.interpretation,
+    pendingClarification: undefined,
     pendingProposal: proposal,
     selectedOptionId,
   }, 'coach', 'proposal', coachText);
@@ -149,6 +177,7 @@ export function recordCoachApplied(
     ...state,
     activeTarget: target,
     lastInterpretation: proposal.adaptation.interpretation,
+    pendingClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
     lastApplied: {
@@ -167,6 +196,7 @@ export function recordCoachReverted(
 ): CoachConversationState {
   return appendCoachConversationTurn({
     ...state,
+    pendingClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
     lastApplied: state.lastApplied?.snapshotId === snapshotId ? undefined : state.lastApplied,
@@ -176,6 +206,7 @@ export function recordCoachReverted(
 export function cancelPendingCoachProposal(state: CoachConversationState, message = 'Keeping the original plan.'): CoachConversationState {
   return appendCoachConversationTurn({
     ...state,
+    pendingClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
   }, 'coach', 'cancelled', message);
@@ -245,6 +276,16 @@ function isValidInterpretation(value: unknown): value is CoachMessageInterpretat
     && typeof item.summary === 'string'
     && Array.isArray(item.signals)
     && (item.reason === 'fatigue' || item.reason === 'time' || item.reason === 'access' || item.reason === 'weather' || item.reason === 'pain' || item.reason === 'illness' || item.reason === 'preference' || item.reason === 'travel' || item.reason === 'other'),
+  );
+}
+
+function isValidPendingClarification(value: unknown): value is PendingCoachClarification {
+  const item = value as Partial<PendingCoachClarification> | null | undefined;
+  return Boolean(
+    item?.originalMessage
+    && item.question
+    && item.askedAt
+    && (item.kind === 'function' || item.kind === 'pain_type' || item.kind === 'target_session' || item.kind === 'constraint'),
   );
 }
 
