@@ -34,6 +34,7 @@ export interface CoachAppliedInterventionRecord {
   optionId: string;
   optionTitle: string;
   optionAction: AdjustmentOption['action'];
+  selectedOption?: AdjustmentOption;
   snapshotId: string;
   appliedAt: string;
   fingerprint: CoachInterventionFingerprint;
