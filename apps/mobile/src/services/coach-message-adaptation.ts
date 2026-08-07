@@ -1,9 +1,10 @@
-import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
+import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent, TrainingCalendarSource } from '@circuit/domain';
 import { normalizeCalendarEvent, normalizeStrengthSession, type UnifiedTrainingSession } from '@circuit/planner';
 import {
   buildPainCalibration,
   evaluateProtectiveTrainingRequest,
   interpretAthleteContextMessage,
+  type ProtectiveTrainingRequestDecision,
 } from '@circuit/planner/athlete-context-intelligence';
 import { resolveCoachConversationMessage } from '@circuit/planner/coach-conversation';
 import {
@@ -19,6 +20,8 @@ import {
   getTrainingCalendarEvents,
   savePlanSnapshot,
   saveTrainingBlock,
+  saveTrainingCalendarSource,
+  upsertManualCalendarEvent,
 } from './database';
 import {
   appendCoachConversationTurn,
@@ -35,8 +38,9 @@ import { isSideQuestGeneratedPlanEvent } from './whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
 const CONTINUITY_WINDOW_HOURS = 48;
+const COACH_AD_HOC_SOURCE_ID = 'side_quest_coach_ad_hoc';
 
-export type CoachMessageTargetKind = 'strength' | 'endurance';
+export type CoachMessageTargetKind = 'strength' | 'endurance' | 'ad_hoc';
 export type CoachMessageProposal = PersistedCoachProposal;
 
 export type CoachMessageProposalResult =
@@ -61,6 +65,10 @@ type AdjustableTarget =
   | {
       kind: 'endurance';
       calendarEvent: TrainingCalendarEvent;
+      unified: UnifiedTrainingSession;
+    }
+  | {
+      kind: 'ad_hoc';
       unified: UnifiedTrainingSession;
     };
 
@@ -135,7 +143,10 @@ export async function buildCoachMessageProposal(
     to: `${addDays(lastWeek.weekStartDate, 6)}T23:59:59.999Z`,
   });
   const preferredSessionId = resolution.keepPriorTarget && continuePriorContext ? previousConversation.activeTarget?.sessionId : undefined;
-  const target = selectAdjustableTarget(block, calendar, resolution.targetDiscipline, preferredSessionId);
+  let target = selectAdjustableTarget(block, calendar, resolution.targetDiscipline, preferredSessionId);
+  if (!target) {
+    target = buildProtectedAdHocCandidate(block, resolution.interpretation, resolution.preferredTargetDate, message);
+  }
   if (!target) {
     const discipline = resolution.targetDiscipline ? `${resolution.targetDiscipline} ` : '';
     const messageText = `There is no upcoming Side Quest ${discipline}session available to adjust. Imported calendar workouts stay fixed until you explicitly change their source plan.`;
@@ -158,7 +169,8 @@ export async function buildCoachMessageProposal(
 
   const weekEnd = addDays(owningWeek.weekStartDate, 6);
   const weekCalendar = calendar.filter((event) => event.startAt.slice(0, 10) >= owningWeek.weekStartDate && event.startAt.slice(0, 10) <= weekEnd);
-  const weekSessions = buildUnifiedWeek(owningWeek.sessions, weekCalendar);
+  const baseWeekSessions = buildUnifiedWeek(owningWeek.sessions, weekCalendar);
+  const weekSessions = target.kind === 'ad_hoc' ? [...baseWeekSessions, target.unified] : baseWeekSessions;
   const availableDates = datesInWeekExcept(owningWeek.weekStartDate, weekEnd, sessionDate, localDate());
   const capacity = block.goal.capacityProfile;
   const recentBoneStress = capacity?.boneStressInjuryHistory === 'recent_or_current';
@@ -170,7 +182,7 @@ export async function buildCoachMessageProposal(
     : [];
   const currentPainKind = resolution.interpretation.painContext?.kind;
   const sameKindPain = currentPainKind ? painHistory.filter((item) => item.kind === currentPainKind) : [];
-  const painCalibration = buildPainCalibration(sameKindPain.length >= 3 ? sameKindPain : painHistory);
+  const painCalibration = buildPainCalibration(sameKindPain);
   const protectiveTrainingDecision = evaluateProtectiveTrainingRequest({
     now: new Date().toISOString(),
     recentPain: painHistory,
@@ -181,6 +193,12 @@ export async function buildCoachMessageProposal(
     compensatoryTrainingIntent: resolution.interpretation.compensatoryTrainingIntent,
     headspace: resolution.interpretation.headspace,
   });
+
+  if (target.kind === 'ad_hoc' && protectiveTrainingDecision.action === 'allow') {
+    const messageText = 'Side Quest did not find an existing planned session to edit. Extra training is only auto-created from Coach when a recovery or safety constraint requires a bounded alternative; otherwise add the session to your calendar or plan first.';
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', messageText);
+    return { ok: false, reason: 'no_adjustable_session', message: messageText, conversation };
+  }
 
   const adaptation = buildCoachMessageAdaptation({
     message,
@@ -214,7 +232,7 @@ export async function buildCoachMessageProposal(
   if (freshAthleteContext.pain && !reportsPainResolved(message)) {
     recordPainContextObservation(freshAthleteContext.pain, {
       occurredAt: painOccurredAt(message),
-      discipline: target.unified.discipline as 'swim' | 'bike' | 'run' | 'strength',
+      discipline: painSourceDiscipline(message),
     });
   }
 
@@ -260,7 +278,7 @@ export async function applyCoachMessageProposal(
       throw new Error('The plan changed after this proposal was created. Send the update again so Side Quest can re-check the current week.');
     }
     if (option.action === 'replace') throw new Error('Cross-sport replacement is only available for Side Quest endurance sessions.');
-  } else {
+  } else if (proposal.targetKind === 'endurance') {
     const calendarEventId = proposal.calendarEventId;
     if (!calendarEventId) throw new Error('The endurance session reference is missing.');
     const firstWeek = block.weeks[0];
@@ -277,6 +295,9 @@ export async function applyCoachMessageProposal(
     if (currentEndurance.startAt.slice(0, 10) !== proposal.sessionDate || currentEndurance.discipline !== proposal.sessionDiscipline) {
       throw new Error('The plan changed after this proposal was created. Send the update again so Side Quest can re-check the current week.');
     }
+  } else if (proposal.targetKind === 'ad_hoc') {
+    if (proposal.sessionDiscipline === 'strength') throw new Error('Coach-created ad hoc sessions currently support endurance only.');
+    if (option.action === 'replace') throw new Error('A protected ad hoc request cannot be replaced with another unplanned session.');
   }
 
   const snapshot = await savePlanSnapshot(block, snapshotReason(proposal, option.title));
@@ -294,6 +315,8 @@ export async function applyCoachMessageProposal(
     await saveTrainingBlock(updatedBlock);
   } else if (currentEndurance) {
     saveSideQuestPlanSessionOverride(currentEndurance, option);
+  } else if (proposal.targetKind === 'ad_hoc' && option.action !== 'skip') {
+    await persistCoachApprovedAdHocSession(proposal, option);
   }
 
   let replanWarning: string | undefined;
@@ -358,6 +381,58 @@ function selectAdjustableTarget(
   return filtered.sort((left, right) => compareTargets(right, left))[0] ?? null;
 }
 
+function buildProtectedAdHocCandidate(
+  block: TrainingBlockPlan,
+  interpretation: ReturnType<typeof resolveCoachConversationMessage>['interpretation'],
+  preferredTargetDate: string | undefined,
+  message: string,
+): AdjustableTarget | null {
+  const discipline = interpretation.targetDiscipline;
+  if (discipline !== 'swim' && discipline !== 'bike' && discipline !== 'run') return null;
+  const requestedMinutes = requestedTrainingDurationMinutes(message);
+  const requestedIntensity = requestedTrainingIntensity(message);
+  const isPotentiallyProtectiveRequest = Boolean(
+    interpretation.compensatoryTrainingIntent
+    || interpretation.requestedLargeTrainingLoad
+    || requestedIntensity === 'hard'
+    || requestedIntensity === 'max'
+    || (requestedMinutes ?? 0) >= 120,
+  );
+  if (!isPotentiallyProtectiveRequest) return null;
+
+  const date = preferredTargetDate ?? addDays(localDate(), 1);
+  const firstWeek = block.weeks[0];
+  const lastWeek = block.weeks.at(-1);
+  if (!firstWeek || !lastWeek) return null;
+  if (date < firstWeek.weekStartDate || date > addDays(lastWeek.weekStartDate, 6)) return null;
+
+  const durationMinutes = Math.max(60, Math.min(360, requestedMinutes ?? (interpretation.requestedLargeTrainingLoad ? 180 : 90)));
+  const intensity = requestedIntensity ?? (interpretation.requestedLargeTrainingLoad ? 'hard' as const : 'moderate' as const);
+  const hard = intensity === 'hard' || intensity === 'max';
+  const id = `coach_adhoc_${discipline}_${date}_${stableMessageId(message)}`;
+  return {
+    kind: 'ad_hoc',
+    unified: {
+      id,
+      date,
+      title: `Proposed extra ${disciplineLabel(discipline)}`,
+      discipline,
+      durationMinutes,
+      intensity,
+      cardiovascularDemand: hard ? 'high' : 'moderate',
+      musculoskeletalDemand: discipline === 'run' ? (hard ? 'high' : 'moderate') : discipline === 'bike' ? 'moderate' : 'low',
+      lowerBodyDemand: discipline === 'run' || discipline === 'bike' ? (hard ? 'high' : 'moderate') : 'none',
+      upperBodyDemand: discipline === 'swim' ? (hard ? 'high' : 'moderate') : 'none',
+      impact: discipline === 'run' ? (hard ? 'high' : 'moderate') : 'none',
+      technicalDemand: discipline === 'swim' ? 'high' : 'moderate',
+      recoveryCost: hard ? 4 : 3,
+      priority: 'optional',
+      source: 'manual',
+      keySession: false,
+    },
+  };
+}
+
 function compareTargets(left: AdjustableTarget, right: AdjustableTarget): number {
   return left.unified.date.localeCompare(right.unified.date)
     || priorityRank(left.unified.priority) - priorityRank(right.unified.priority)
@@ -386,6 +461,49 @@ function buildUnifiedWeek(strength: PlannedStrengthSession[], calendar: Training
   return [...strengthSessions, ...calendarSessions];
 }
 
+async function persistCoachApprovedAdHocSession(
+  proposal: CoachMessageProposal,
+  option: CoachMessageProposal['adaptation']['adjustment']['options'][number],
+): Promise<void> {
+  const discipline = proposal.sessionDiscipline;
+  if (discipline !== 'swim' && discipline !== 'bike' && discipline !== 'run') return;
+  const durationMinutes = Math.max(15, option.durationMinutes ?? 45);
+  const date = option.action === 'move' && option.targetDate ? option.targetDate : proposal.sessionDate;
+  const startAt = `${date}T12:00:00.000Z`;
+  const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60_000).toISOString();
+  await saveTrainingCalendarSource(coachAdHocSource());
+  await upsertManualCalendarEvent({
+    id: proposal.sessionId,
+    sourceId: COACH_AD_HOC_SOURCE_ID,
+    title: `Coach-approved easy ${disciplineLabel(discipline)}`,
+    startAt,
+    endAt,
+    allDay: true,
+    discipline,
+    description: [
+      `Side Quest coach-approved ad hoc · ${durationMinutes} min · easy`,
+      option.description,
+      'This bounded session replaced a larger requested training escalation; it does not repay missed training.',
+    ].join('\n'),
+    externalUid: proposal.sessionId,
+  });
+}
+
+function coachAdHocSource(): TrainingCalendarSource {
+  const now = new Date().toISOString();
+  return {
+    id: COACH_AD_HOC_SOURCE_ID,
+    name: 'Side Quest Coach',
+    sourceType: 'manual',
+    active: true,
+    autoRefresh: false,
+    syncStatus: 'success',
+    consecutiveFailures: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function datesInWeekExcept(weekStart: string, weekEnd: string, sessionDate: string, today: string): string[] {
   const dates: string[] = [];
   for (let offset = 0; offset <= 6; offset += 1) {
@@ -409,7 +527,7 @@ function requestedTrainingDurationMinutes(message: string): number | undefined {
   const text = message.toLowerCase();
   const minuteMatch = text.match(/\b(?:do|ride|run|swim|train|workout\s+for|make\s+it)\s+(\d{1,3})\s*(?:min|mins|minute|minutes)\b/);
   if (minuteMatch?.[1]) return Number(minuteMatch[1]);
-  const hourMatch = text.match(/\b(?:do|ride|run|swim|train|workout\s+for)\s+(\d(?:\.\d+)?)\s*(?:hr|hrs|hour|hours)\b/);
+  const hourMatch = text.match(/\b(?:do|ride|run|swim|train|workout\s+for|ride\s+for|run\s+for|swim\s+for)\s+(\d(?:\.\d+)?)\s*(?:hr|hrs|hour|hours)\b/);
   if (hourMatch?.[1]) return Math.round(Number(hourMatch[1]) * 60);
   return undefined;
 }
@@ -429,6 +547,17 @@ function painOccurredAt(message: string): string {
   return new Date().toISOString();
 }
 
+function painSourceDiscipline(message: string): 'swim' | 'bike' | 'run' | 'strength' | undefined {
+  const text = message.toLowerCase();
+  const matches: Array<'swim' | 'bike' | 'run' | 'strength'> = [];
+  if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:swim|swimming|pool)\b/.test(text)) matches.push('swim');
+  if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:bike|ride|cycling|trainer)\b/.test(text)) matches.push('bike');
+  if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:run|running|track\s+workout|track\s+session)\b/.test(text) || /\bquit\s+(?:my\s+|the\s+)?track\s+workout\b/.test(text)) matches.push('run');
+  if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:strength|lifting|lift|gym\s+workout)\b/.test(text)) matches.push('strength');
+  const unique = [...new Set(matches)];
+  return unique.length === 1 ? unique[0] : undefined;
+}
+
 function reportsPainResolved(message: string): boolean {
   return /\b(no\s+(?:more\s+)?pain|pain\s+(?:is\s+)?gone|doesn['’]?t\s+hurt\s+(?:now|anymore)|does\s+not\s+hurt\s+(?:now|anymore)|symptoms?\s+(?:are\s+)?gone)\b/i.test(message);
 }
@@ -441,6 +570,20 @@ function snapshotReason(proposal: CoachMessageProposal, optionTitle: string): st
 function quickSignalLabel(signal?: CoachQuickSignal): string {
   if (!signal) return '';
   return signal.replaceAll('_', ' ');
+}
+
+function disciplineLabel(discipline: 'swim' | 'bike' | 'run'): string {
+  if (discipline === 'bike') return 'ride';
+  return discipline;
+}
+
+function stableMessageId(message: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < message.length; index += 1) {
+    hash ^= message.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash >>> 0).toString(36);
 }
 
 function addDays(value: string, days: number): string {
