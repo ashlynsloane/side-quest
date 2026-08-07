@@ -36,9 +36,21 @@ export function saveSideQuestPlanSessionOverride(
     option,
     createdAt: new Date().toISOString(),
   };
-  const existing = listSideQuestPlanSessionOverrides().filter((item) => item.eventId !== event.id);
-  Storage.setItemSync(OVERRIDES_KEY, JSON.stringify([...existing, override]));
+  setSideQuestPlanSessionOverride(override);
   return override;
+}
+
+export function setSideQuestPlanSessionOverride(override: SideQuestPlanSessionOverride): void {
+  const existing = listSideQuestPlanSessionOverrides().filter((item) => item.eventId !== override.eventId);
+  Storage.setItemSync(OVERRIDES_KEY, JSON.stringify([...existing, override]));
+}
+
+export function restoreSideQuestPlanSessionOverride(
+  eventId: string,
+  previous: SideQuestPlanSessionOverride | null | undefined,
+): void {
+  if (previous) setSideQuestPlanSessionOverride(previous);
+  else clearSideQuestPlanSessionOverride(eventId);
 }
 
 export function clearSideQuestPlanSessionOverride(eventId: string): void {
