@@ -623,7 +623,7 @@ export async function saveCompletedWorkout({
       JSON.stringify(stationRounds),
       notes ?? null,
       plannedSessionId ?? null,
-      relationToPlan ?? (plannedSessionId ? 'replaced_planned' : 'unrelated'),
+      relationToPlan ?? (plannedSessionId ? 'completed_planned' : 'unrelated'),
       completedAt,
       new Date().toISOString(),
     );
@@ -1774,7 +1774,7 @@ export async function getRaceChecklistState(goalId: string): Promise<Record<stri
 
 export type LoadBasis = 'each_hand' | 'single_implement' | 'total' | 'bodyweight' | 'assisted' | 'band_level' | 'not_recorded';
 export type WorkoutLedgerSource = 'side_quest' | 'external' | 'class' | 'custom' | 'workout_together';
-export type WorkoutPlanRelation = 'replaced_planned' | 'additional' | 'unrelated';
+export type WorkoutPlanRelation = 'completed_planned' | 'replaced_planned' | 'additional' | 'unrelated';
 
 export interface LoggedSet {
   id: string;

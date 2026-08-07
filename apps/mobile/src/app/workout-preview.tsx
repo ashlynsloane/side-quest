@@ -1,10 +1,12 @@
 import type { Exercise, ExerciseSwapReason, GeneratedWorkout } from '@circuit/domain';
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { useRouter, type Href } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
+import { CoachInsights } from '@/components/coach-insights';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
 import { ExerciseSwapModal } from '@/components/exercise-swap-modal';
 import { KeyboardSafeScreen } from '@/components/keyboard-safe-screen';
@@ -31,8 +33,18 @@ export default function WorkoutPreviewScreen() {
   const { user, cloudEnabled } = useAuth();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { previewWorkout, setPreviewWorkout, beginWorkout } = useWorkoutContext();
+  const {
+    previewWorkout,
+    previewExplanation,
+    previewPlannedSession,
+    previewModifiedFromPlan,
+    activeWorkout,
+    activePlanLink,
+    updatePreviewWorkout,
+    beginWorkout,
+  } = useWorkoutContext();
   const originalWorkout = useRef<GeneratedWorkout | null>(previewWorkout ? cloneWorkout(previewWorkout) : null);
+  const originalWorkoutId = useRef<string | null>(previewWorkout?.id ?? null);
   const [demoExercise, setDemoExercise] = useState<Exercise | null>(null);
   const [swapTarget, setSwapTarget] = useState<{ stationId: string; exercise: Exercise } | null>(null);
   const [swapBusy, setSwapBusy] = useState(false);
@@ -41,6 +53,12 @@ export default function WorkoutPreviewScreen() {
   const [roomBusy, setRoomBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [naming, setNaming] = useState(false);
+
+  useEffect(() => {
+    if (!previewWorkout || originalWorkoutId.current === previewWorkout.id) return;
+    originalWorkout.current = cloneWorkout(previewWorkout);
+    originalWorkoutId.current = previewWorkout.id;
+  }, [previewWorkout]);
 
   function openExerciseOptions(stationId: string, exercise: Exercise) {
     Alert.alert(exercise.name, 'Choose an action.', [
@@ -81,13 +99,38 @@ export default function WorkoutPreviewScreen() {
       const exercisePreferences = await listExercisePreferences();
       const result = swapExerciseInWorkout({ workout, stationId: swapTarget.stationId, exerciseId: swapTarget.exercise.id, reason, candidateId, context: { exercises, exercisePreferences } });
       if (!result.ok) { setMessage(result.message); return; }
-      setPreviewWorkout(result.workout);
+      updatePreviewWorkout(result.workout);
       if (reason === 'dislike') await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       setSwapTarget(null);
     } finally { setSwapBusy(false); }
   }
 
-  function start() { beginWorkout(workout); router.push('/active-workout' as Href); }
+  const activeMatchesPreview = Boolean(
+    activeWorkout
+      && activeWorkout.id === workout.id
+      && (activePlanLink?.sessionId ?? null) === (previewPlannedSession?.id ?? null),
+  );
+
+  function start() {
+    if (!activeWorkout) {
+      beginWorkout(workout);
+      router.push('/active-workout' as Href);
+      return;
+    }
+    if (activeMatchesPreview) {
+      router.push('/active-workout' as Href);
+      return;
+    }
+    Alert.alert(
+      'Replace the active workout?',
+      `${activeWorkout.name} is paused and saved. Starting this workout will replace that active session.`,
+      [
+        { text: 'Keep current workout', style: 'cancel' },
+        { text: 'Resume current', onPress: () => router.push('/active-workout' as Href) },
+        { text: 'Replace and start', style: 'destructive', onPress: () => { beginWorkout(workout); router.push('/active-workout' as Href); } },
+      ],
+    );
+  }
 
   async function startTogether() {
     if (!user || user.mode !== 'cloud' || !cloudEnabled) {
@@ -106,7 +149,19 @@ export default function WorkoutPreviewScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
       <KeyboardSafeScreen contentContainerStyle={styles.content}>
+        {activeWorkout ? <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink} onResume={() => router.push('/active-workout' as Href)} compact /> : null}
         <V23PageIntro label="WORKOUT PREVIEW" title={workout.name} body={`${Math.round(workout.totalWorkSeconds / 60)} min work · ${workout.stations.length} stations · ${Math.round(workout.estimatedElapsedSeconds / 60)} min total`} compact />
+        {previewPlannedSession ? <V23Card tone="accent" style={styles.planLinkCard}>
+          <View style={styles.planLinkHeader}>
+            <View style={styles.planLinkCopy}>
+              <Text style={styles.planLinkEyebrow}>PLANNED SESSION</Text>
+              <Text style={styles.planLinkTitle}>{previewPlannedSession.title}</Text>
+              <Text style={styles.planLinkDate}>{formatPlanDate(previewPlannedSession.date)}</Text>
+            </View>
+            <V23Chip tone={previewModifiedFromPlan ? 'warm' : 'accent'}>{previewModifiedFromPlan ? 'Customized' : 'Linked to plan'}</V23Chip>
+          </View>
+          <Text style={styles.planLinkBody}>Completing this workout will close this exact session in your plan{previewModifiedFromPlan ? ', while preserving the edits you made here' : ''}.</Text>
+        </V23Card> : null}
         <View style={styles.headerActions}>
           <Pressable onPress={() => setNaming(true)} style={styles.nameButton}><Text style={styles.nameButtonText}>Rename</Text></Pressable>
           <Pressable onPress={() => setEditing(true)} style={styles.editButton}><V23Icon name="log" color={tokens.accent} size={18} /><Text style={styles.editButtonText}>Edit workout</Text></Pressable>
@@ -124,6 +179,8 @@ export default function WorkoutPreviewScreen() {
             {workout.variantLabel ? <V23Chip tone="warm">{workout.variantLabel}</V23Chip> : null}
           </View>
         </V23Card>
+
+        {previewExplanation ? <CoachInsights explanation={previewExplanation} /> : null}
 
         {workout.recentLoadAdjustments.length ? <V23Card tone="muted" style={styles.adjustmentCard}>{workout.recentLoadAdjustments.map((item) => <Text key={item} style={styles.adjustment}>• {item}</Text>)}</V23Card> : null}
         {message ? <Text style={styles.error}>{message}</Text> : null}
@@ -149,19 +206,19 @@ export default function WorkoutPreviewScreen() {
 
         <View style={styles.startPanel}>
           <View><Text style={styles.startTitle}>Ready when you are</Text><Text style={styles.startBody}>Edits and swaps are saved for this session.</Text></View>
-          <V23PrimaryButton onPress={start} icon="play">Start workout</V23PrimaryButton>
+          <V23PrimaryButton onPress={start} icon="play">{activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
           <Pressable onPress={() => void startTogether()} disabled={roomBusy} style={[styles.togetherButton, roomBusy && styles.disabled]}><Text style={styles.togetherButtonText}>{roomBusy ? 'Creating room…' : 'Start this workout together'}</Text></Pressable>
         </View>
       </KeyboardSafeScreen>
 
-      <WorkoutNameModal workout={workout} visible={naming} onClose={() => setNaming(false)} onSave={(name) => { setPreviewWorkout({ ...workout, name }); setNaming(false); setSaved(false); }} />
+      <WorkoutNameModal workout={workout} visible={naming} onClose={() => setNaming(false)} onSave={(name) => { updatePreviewWorkout({ ...workout, name }); setNaming(false); setSaved(false); }} />
       <WorkoutEditorModal
         workout={workout}
         originalWorkout={originalWorkout.current ?? workout}
         exercises={exercises}
         visible={editing}
         onClose={() => setEditing(false)}
-        onSave={(edited) => { setPreviewWorkout(edited); setEditing(false); setSaved(false); }}
+        onSave={(edited) => { updatePreviewWorkout(edited); setEditing(false); setSaved(false); }}
       />
       <ExerciseDemoModal exercise={demoExercise} visible={Boolean(demoExercise)} onClose={() => setDemoExercise(null)} />
       <ExerciseSwapModal exercise={swapTarget?.exercise ?? null} visible={Boolean(swapTarget)} busy={swapBusy} onClose={() => setSwapTarget(null)} onLoadCandidates={loadSwapCandidates} onChooseCandidate={(reason, candidateId) => void swap(reason, candidateId)} onPain={() => { setSwapTarget(null); router.push('/today-check-in' as Href); }} />
@@ -176,9 +233,11 @@ function formatPrescription(target: number, unit: 'total' | 'per_side' | 'second
 }
 function cloneWorkout(workout: GeneratedWorkout): GeneratedWorkout { return JSON.parse(JSON.stringify(workout)) as GeneratedWorkout; }
 function formatRegion(value: string): string { return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function formatPlanDate(value: string): string { return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date(`${value}T12:00:00`)); }
 
 function makeStyles(tokens: DesignTokens) { return StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: tokens.canvas }, content: { padding: 18, paddingBottom: 80, gap: 14 }, missing: { flex: 1, justifyContent: 'center', padding: 24, gap: 18 }, missingTitle: { color: tokens.text, fontSize: 28, fontWeight: '800' },
+  planLinkCard: { gap: 9 }, planLinkHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 }, planLinkCopy: { flex: 1, minWidth: 0 }, planLinkEyebrow: { color: tokens.accent, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 }, planLinkTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '800', marginTop: 3 }, planLinkDate: { color: tokens.textMuted, fontSize: 13, lineHeight: 18, marginTop: 2 }, planLinkBody: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
   headerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, nameButton: { minHeight: 48, paddingHorizontal: 14, borderRadius: 15, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' }, nameButtonText: { color: tokens.accent, fontSize: 13, fontWeight: '800' }, editButton: { flex: 1, minHeight: 48, borderRadius: 15, backgroundColor: tokens.accentSoft, borderWidth: 1, borderColor: tokens.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }, editButtonText: { color: tokens.accent, fontSize: 14, fontWeight: '800' }, iconAction: { minWidth: 70, minHeight: 48, borderRadius: 15, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center', gap: 2 }, iconActionText: { color: tokens.textMuted, fontSize: 10.5, fontWeight: '700' },
   overviewCard: { gap: 8 }, overviewEyebrow: { color: tokens.accent, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 }, overviewTitle: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '800' }, overviewBody: { color: tokens.textMuted, fontSize: 14, lineHeight: 20 }, overviewChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 2 },
   adjustmentCard: { gap: 4 }, adjustment: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 }, error: { color: tokens.danger, fontSize: 14, fontWeight: '700' },

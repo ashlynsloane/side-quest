@@ -1,5 +1,13 @@
-import type { ActiveWorkoutCheckpoint, ActiveWorkoutPersistenceWrite, ActiveWorkoutRestoreResult } from '@circuit/domain';
+import 'expo-sqlite/localStorage/install';
+
+import type {
+  ActiveWorkoutCheckpoint,
+  ActiveWorkoutPersistenceWrite,
+  ActiveWorkoutRestoreResult,
+  GeneratedWorkout,
+} from '@circuit/domain';
 import { buildActiveWorkoutPersistenceWrite, restoreActiveWorkoutCheckpoint } from '@circuit/planner';
+
 
 export const ACTIVE_WORKOUT_INDEX_KEY = 'sidequest.active-workout.current';
 
@@ -28,4 +36,132 @@ export async function clearPersistedActiveWorkout(storage: ActiveWorkoutStorageA
   await storage.removeItem(`sidequest.active-workout.${workoutId}`);
   const current = await storage.getItem(ACTIVE_WORKOUT_INDEX_KEY);
   if (current === `sidequest.active-workout.${workoutId}`) await storage.removeItem(ACTIVE_WORKOUT_INDEX_KEY);
+}
+
+// Live mobile adapter. The planner checkpoint remains available for domain-level flows;
+// this snapshot also preserves timer and rest-entry UI state needed by the routed workout screen.
+export type LiveWorkoutPhase = 'work' | 'rest';
+export interface ActiveWorkoutPlanLink {
+  sessionId: string;
+  sessionDate: string;
+  sessionTitle: string;
+  modifiedFromPlan: boolean;
+}
+export type LiveWorkoutLoadValue = { value: number; unit: 'lb' | 'kg'; name: string };
+export type LiveWorkoutRestEntry = { reps: string; load: string; unit: 'lb' | 'kg'; skipped: boolean };
+export type LiveWorkoutLoadBasis = 'each_hand' | 'single_implement' | 'total' | 'bodyweight' | 'assisted' | 'band_level' | 'not_recorded';
+export interface LiveWorkoutLoggedSet {
+  id: string;
+  reps?: number;
+  seconds?: number;
+  loadValue?: number;
+  loadUnit?: 'lb' | 'kg';
+  loadBasis: LiveWorkoutLoadBasis;
+  effort?: number;
+  completed: boolean;
+}
+
+export interface LiveWorkoutSessionSnapshot {
+  schemaVersion: 1;
+  savedAt: string;
+  workout: GeneratedWorkout;
+  startedAt: string;
+  stationIndex: number;
+  phase: LiveWorkoutPhase;
+  remainingSeconds: number;
+  running: boolean;
+  stationRounds: Record<string, number>;
+  exerciseLoads: Record<string, LiveWorkoutLoadValue>;
+  exerciseSets: Record<string, LiveWorkoutLoggedSet[]>;
+  restEntries: Record<string, LiveWorkoutRestEntry>;
+  restRounds: number;
+  restLoadUnit: 'lb' | 'kg';
+  planLink?: ActiveWorkoutPlanLink;
+}
+
+const LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
+
+type StorageLike = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+function getLocalStorage(): StorageLike | null {
+  return (globalThis as unknown as { localStorage?: StorageLike }).localStorage ?? null;
+}
+
+
+function isActiveWorkoutPlanLink(value: unknown): value is ActiveWorkoutPlanLink {
+  if (!value || typeof value !== 'object') return false;
+  const link = value as Partial<ActiveWorkoutPlanLink>;
+  return typeof link.sessionId === 'string'
+    && typeof link.sessionDate === 'string'
+    && typeof link.sessionTitle === 'string'
+    && typeof link.modifiedFromPlan === 'boolean';
+}
+
+function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<LiveWorkoutSessionSnapshot>;
+  return snapshot.schemaVersion === 1
+    && Boolean(snapshot.workout?.id)
+    && typeof snapshot.startedAt === 'string'
+    && Number.isInteger(snapshot.stationIndex)
+    && (snapshot.phase === 'work' || snapshot.phase === 'rest')
+    && typeof snapshot.remainingSeconds === 'number';
+}
+
+export function createInitialLiveWorkoutSession(
+  workout: GeneratedWorkout,
+  startedAt = new Date().toISOString(),
+  planLink?: ActiveWorkoutPlanLink,
+): LiveWorkoutSessionSnapshot {
+  return {
+    schemaVersion: 1,
+    savedAt: startedAt,
+    workout,
+    startedAt,
+    stationIndex: 0,
+    phase: 'work',
+    remainingSeconds: workout.stations[0]?.durationSeconds ?? 0,
+    running: true,
+    stationRounds: {},
+    exerciseLoads: {},
+    exerciseSets: {},
+    restEntries: {},
+    restRounds: 1,
+    restLoadUnit: 'lb',
+    planLink,
+  };
+}
+
+export async function saveLiveWorkoutSession(snapshot: LiveWorkoutSessionSnapshot): Promise<void> {
+  getLocalStorage()?.setItem(LIVE_SESSION_KEY, JSON.stringify(snapshot));
+}
+
+export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapshot | null> {
+  const storage = getLocalStorage();
+  const serialized = storage?.getItem(LIVE_SESSION_KEY);
+  if (!serialized) return null;
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (!isLiveWorkoutSession(parsed)) {
+      storage?.removeItem(LIVE_SESSION_KEY);
+      return null;
+    }
+    return {
+      ...parsed,
+      stationIndex: Math.max(0, parsed.stationIndex),
+      remainingSeconds: Math.max(0, parsed.remainingSeconds),
+      planLink: isActiveWorkoutPlanLink(parsed.planLink) ? parsed.planLink : undefined,
+    };
+  } catch {
+    storage?.removeItem(LIVE_SESSION_KEY);
+    return null;
+  }
+}
+
+export async function clearLiveWorkoutSession(): Promise<void> {
+  getLocalStorage()?.removeItem(LIVE_SESSION_KEY);
 }

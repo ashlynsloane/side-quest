@@ -1,16 +1,40 @@
-import type { GeneratedWorkout } from '@circuit/domain';
+import type { GeneratedWorkout, PlannedStrengthSession, WorkoutRecommendationExplanation } from '@circuit/domain';
+import { explainPlannedStrengthSession, type RecommendationExplanationContext } from '@circuit/planner';
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
 
+import {
+  clearLiveWorkoutSession,
+  createInitialLiveWorkoutSession,
+  loadLiveWorkoutSession,
+  saveLiveWorkoutSession,
+  type ActiveWorkoutPlanLink,
+} from '@/services/active-workout-persistence';
+
+type PlannedPreviewSource = {
+  session: PlannedStrengthSession;
+  context: RecommendationExplanationContext;
+  modifiedFromPlan: boolean;
+};
+
 type WorkoutContextValue = {
   previewWorkout: GeneratedWorkout | null;
+  previewExplanation: WorkoutRecommendationExplanation | null;
+  previewPlannedSession: PlannedStrengthSession | null;
+  previewModifiedFromPlan: boolean;
   activeWorkout: GeneratedWorkout | null;
+  activePlanLink: ActiveWorkoutPlanLink | null;
+  workoutSessionReady: boolean;
+  restoredActiveWorkout: boolean;
   setPreviewWorkout: (workout: GeneratedWorkout | null) => void;
+  updatePreviewWorkout: (workout: GeneratedWorkout) => void;
+  openPlannedWorkoutPreview: (session: PlannedStrengthSession, context?: RecommendationExplanationContext) => void;
   beginWorkout: (workout: GeneratedWorkout) => void;
   updateActiveWorkout: (workout: GeneratedWorkout) => void;
   clearActiveWorkout: () => void;
@@ -18,24 +42,88 @@ type WorkoutContextValue = {
 
 const WorkoutContext = createContext<WorkoutContextValue | null>(null);
 
+function buildPlanLink(source: PlannedPreviewSource | null): ActiveWorkoutPlanLink | null {
+  if (!source) return null;
+  return {
+    sessionId: source.session.id,
+    sessionDate: source.session.date,
+    sessionTitle: source.session.title,
+    modifiedFromPlan: source.modifiedFromPlan,
+  };
+}
+
 export function WorkoutProvider({ children }: { children: ReactNode }) {
-  const [previewWorkout, setPreviewWorkout] = useState<GeneratedWorkout | null>(null);
+  const [previewWorkout, setPreviewWorkoutState] = useState<GeneratedWorkout | null>(null);
+  const [previewExplanation, setPreviewExplanation] = useState<WorkoutRecommendationExplanation | null>(null);
+  const [plannedPreviewSource, setPlannedPreviewSource] = useState<PlannedPreviewSource | null>(null);
   const [activeWorkout, setActiveWorkout] = useState<GeneratedWorkout | null>(null);
+  const [activePlanLink, setActivePlanLink] = useState<ActiveWorkoutPlanLink | null>(null);
+  const [workoutSessionReady, setWorkoutSessionReady] = useState(false);
+  const [restoredActiveWorkout, setRestoredActiveWorkout] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void loadLiveWorkoutSession().then((snapshot) => {
+      if (!live) return;
+      if (snapshot) {
+        setActiveWorkout(snapshot.workout);
+        setActivePlanLink(snapshot.planLink ?? null);
+        setRestoredActiveWorkout(true);
+      }
+      setWorkoutSessionReady(true);
+    });
+    return () => { live = false; };
+  }, []);
 
   const value = useMemo<WorkoutContextValue>(() => ({
     previewWorkout,
+    previewExplanation,
+    previewPlannedSession: plannedPreviewSource?.session ?? null,
+    previewModifiedFromPlan: plannedPreviewSource?.modifiedFromPlan ?? false,
     activeWorkout,
-    setPreviewWorkout,
+    activePlanLink,
+    workoutSessionReady,
+    restoredActiveWorkout,
+    setPreviewWorkout(workout) {
+      setPreviewWorkoutState(workout);
+      setPreviewExplanation(null);
+      setPlannedPreviewSource(null);
+    },
+    updatePreviewWorkout(workout) {
+      setPreviewWorkoutState(workout);
+      if (!plannedPreviewSource) return;
+      const nextSource = {
+        ...plannedPreviewSource,
+        session: { ...plannedPreviewSource.session, workout },
+        modifiedFromPlan: true,
+      };
+      setPlannedPreviewSource(nextSource);
+      setPreviewExplanation(explainPlannedStrengthSession(nextSource.session, nextSource.context));
+    },
+    openPlannedWorkoutPreview(session, context = {}) {
+      const source: PlannedPreviewSource = { session, context, modifiedFromPlan: false };
+      setPreviewWorkoutState(session.workout);
+      setPlannedPreviewSource(source);
+      setPreviewExplanation(explainPlannedStrengthSession(session, context));
+    },
     beginWorkout(workout) {
+      const planLink = buildPlanLink(plannedPreviewSource);
+      const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
       setActiveWorkout(workout);
+      setActivePlanLink(planLink);
+      setRestoredActiveWorkout(false);
+      void saveLiveWorkoutSession(snapshot);
     },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
     },
     clearActiveWorkout() {
       setActiveWorkout(null);
+      setActivePlanLink(null);
+      setRestoredActiveWorkout(false);
+      void clearLiveWorkoutSession();
     },
-  }), [activeWorkout, previewWorkout]);
+  }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady]);
 
   return <WorkoutContext.Provider value={value}>{children}</WorkoutContext.Provider>;
 }

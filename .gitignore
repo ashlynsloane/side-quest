@@ -87,3 +87,18 @@ coverage/
 
 # Historical hotfix notes
 V*_HOTFIX_NOTES.md
+
+# Side Quest local installer backups
+.sq2-today-backups/
+
+# Local environment and generated files
+.env
+.env.*
+!.env.example
+node_modules/
+.expo/
+dist/
+build/
+*.log
+.DS_Store
+ios/Pods/

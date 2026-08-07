@@ -1718,3 +1718,5 @@ export * from './visible-plan-workspace';
 export * from './visible-progress-workspace';
 
 export * from './visible-you-workspace';
+
+export * from './recommendation-explanation';

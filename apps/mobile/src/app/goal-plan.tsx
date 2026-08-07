@@ -18,7 +18,7 @@ import type {
 } from '@circuit/domain';
 import { createWorkoutVariant } from '@circuit/generator';
 import { adaptTrainingBlock, generateTrainingBlock, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
-import { useFocusEffect, useRouter, type Href } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import {
   Alert,
@@ -198,23 +198,21 @@ const TERRAIN_OPTIONS: Array<{ id: GoalTerrain; label: string }> = [
 
 export default function GoalPlanScreen() {
   const { exercises } = useExerciseCatalog();
+  const onboardingParams = useLocalSearchParams<{ onboarding?: string; goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string }>();
+  const fromOnboarding = onboardingParams.onboarding === '1';
 
   const router = useRouter();
   const { setPreviewWorkout, beginWorkout } = useWorkoutContext();
-  const [goalType, setGoalType] = useState<PerformanceGoalType>('ironman_70_3');
+  const [goalType, setGoalType] = useState<PerformanceGoalType>(() => isGoalType(onboardingParams.goal) ? onboardingParams.goal : 'ironman_70_3');
   const [eventDateText, setEventDateText] = useState(() => dateFromWeeks(12));
-  const [priority, setPriority] = useState<PerformanceGoal['priority']>('perform');
+  const [priority, setPriority] = useState<PerformanceGoal['priority']>(() => isPriority(onboardingParams.priority) ? onboardingParams.priority : 'perform');
   const [terrain, setTerrain] = useState<GoalTerrain>('rolling');
-  const [capacity, setCapacity] = useState<AthleteCapacityProfile>({ totalWeeklyHours: 10, currentEnduranceHours: 6, runStatus: 'normal', maxRunMilesLast12Weeks: 20, boneStressInjuryHistory: 'none', swimProficiency: 'average', bikeProficiency: 'average', runProficiency: 'average', strengthExperience: 'intermediate' });
+  const [capacity, setCapacity] = useState<AthleteCapacityProfile>({ totalWeeklyHours: parseHours(onboardingParams.hours), currentEnduranceHours: Math.max(0, parseHours(onboardingParams.hours) - 4), runStatus: 'normal', maxRunMilesLast12Weeks: 20, boneStressInjuryHistory: 'none', swimProficiency: 'average', bikeProficiency: 'average', runProficiency: 'average', strengthExperience: 'intermediate' });
   const [planLength, setPlanLength] = useState<TrainingBlockLength>(4);
   const [equipment, setEquipment] = useState<EquipmentId[]>(DEFAULT_EQUIPMENT);
   const [equipmentProfiles, setEquipmentProfiles] = useState<EquipmentProfile[]>([]);
   const [selectedEquipmentProfileId, setSelectedEquipmentProfileId] = useState<string | null>(null);
-  const [preferredStrengthDays, setPreferredStrengthDays] = useState<Weekday[]>([
-    'tuesday',
-    'thursday',
-    'saturday',
-  ]);
+  const [preferredStrengthDays, setPreferredStrengthDays] = useState<Weekday[]>(() => parsePreferredDays(onboardingParams.days));
   const [enduranceSchedule, setEnduranceSchedule] = useState<EnduranceSchedule>({
     keySwim: 'tuesday',
     keyBike: 'saturday',
@@ -254,7 +252,7 @@ export default function GoalPlanScreen() {
       ensureDefaultEquipmentProfiles(),
     ]).then(([goal, savedBlock, savedPTProfile, savedCheckIn, savedCalendarEvents, savedEquipmentProfiles]) => {
       if (cancelled) return;
-      if (goal) {
+      if (goal && !fromOnboarding) {
         setGoalType(goal.type);
         setEventDateText(goal.eventDate ?? dateFromWeeks(goal.weeksUntilEvent));
         setPriority(goal.priority);
@@ -270,13 +268,16 @@ export default function GoalPlanScreen() {
       setActiveCheckIn(savedCheckIn);
       setCalendarEvents(savedCalendarEvents);
       setEquipmentProfiles(savedEquipmentProfiles);
-      const defaultProfile = savedEquipmentProfiles.find((profile) => profile.isDefault) ?? savedEquipmentProfiles[0];
-      if (defaultProfile && !savedBlock) { setSelectedEquipmentProfileId(defaultProfile.id); setEquipment(defaultProfile.equipment); }
+      const requestedKind = onboardingParams.equipment === 'full_gym' ? 'full_gym' : onboardingParams.equipment === 'travel' ? 'travel' : onboardingParams.equipment === 'home' ? 'home' : null;
+      const requestedProfile = requestedKind ? savedEquipmentProfiles.find((profile) => profile.kind === requestedKind) : null;
+      const defaultProfile = requestedProfile ?? savedEquipmentProfiles.find((profile) => profile.isDefault) ?? savedEquipmentProfiles[0];
+      if (onboardingParams.equipment === 'bodyweight' && !savedBlock) { setSelectedEquipmentProfileId(null); setEquipment(['bodyweight']); }
+      else if (defaultProfile && !savedBlock) { setSelectedEquipmentProfileId(defaultProfile.id); setEquipment(defaultProfile.equipment); }
     });
     return () => {
       cancelled = true;
     };
-  }, []));
+  }, [fromOnboarding, onboardingParams.equipment]));
 
   function chooseGoal(type: PerformanceGoalType) {
     setGoalType(type);
@@ -1145,3 +1146,20 @@ const styles = StyleSheet.create({
   primaryButton: { flex: 1, backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 11, alignItems: 'center' },
   primaryButtonText: { color: '#FFFFFF', fontWeight: '700' },
 });
+
+function isGoalType(value: string | undefined): value is PerformanceGoalType {
+  return ['ironman_70_3', 'triathlon_olympic', 'road_half_marathon', 'road_marathon', 'trail_50k', 'general_offseason'].includes(value ?? '');
+}
+function isPriority(value: string | undefined): value is PerformanceGoal['priority'] {
+  return value === 'finish' || value === 'perform' || value === 'race';
+}
+function parseHours(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(25, Math.max(3, Math.round(parsed))) : 10;
+}
+function parsePreferredDays(value: string | undefined): Weekday[] {
+  const weekdays: Weekday[] = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+  const parsed = (value ?? '').split(',').map(Number).filter((item) => Number.isInteger(item) && item >= 0 && item < 7).map((item) => weekdays[item]).filter((item): item is Weekday => Boolean(item));
+  return parsed.length ? parsed : ['tuesday','thursday','saturday'];
+}
+

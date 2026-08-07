@@ -14,6 +14,7 @@ import { useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   Alert,
+  AppState,
   Modal,
   Pressable,
   StyleSheet,
@@ -45,6 +46,13 @@ import {
   type LoggedSet,
 } from '@/services/database';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
+import {
+  clearLiveWorkoutSession,
+  loadLiveWorkoutSession,
+  saveLiveWorkoutSession,
+  type LiveWorkoutLoadValue as LoadValue,
+  type LiveWorkoutRestEntry as RestEntry,
+} from '@/services/active-workout-persistence';
 import { publishWorkoutActivity } from '@/services/social';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import {
@@ -59,8 +67,6 @@ import type { DesignTokens } from '@/theme';
 
 // Legacy validation contract: REST + RECORD · Rounds completed · Log what you did
 type Phase = 'work' | 'rest' | 'complete';
-type LoadValue = { value: number; unit: 'lb' | 'kg'; name: string };
-type RestEntry = { reps: string; load: string; unit: 'lb' | 'kg'; skipped: boolean };
 
 export default function ActiveWorkoutScreen() {
   const { exercises } = useExerciseCatalog();
@@ -72,11 +78,13 @@ export default function ActiveWorkoutScreen() {
 
   useKeepAwake();
   const router = useRouter();
-  const { activeWorkout: workout, updateActiveWorkout, clearActiveWorkout } = useWorkoutContext();
+  const { activeWorkout: workout, activePlanLink, updateActiveWorkout, clearActiveWorkout, workoutSessionReady, restoredActiveWorkout } = useWorkoutContext();
   const [stationIndex, setStationIndex] = useState(0);
   const [phase, setPhase] = useState<Phase>('work');
   const [remainingSeconds, setRemainingSeconds] = useState(workout?.stations[0]?.durationSeconds ?? 0);
-  const [running, setRunning] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [sessionHydrated, setSessionHydrated] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const [stationRounds, setStationRounds] = useState<Record<string, number>>({});
   const [exerciseLoads, setExerciseLoads] = useState<Record<string, LoadValue>>({});
   const [exerciseSets, setExerciseSets] = useState<Record<string, LoggedSet[]>>({});
@@ -102,6 +110,49 @@ export default function ActiveWorkoutScreen() {
   const savedCompletion = useRef(false);
   const cueKey = useRef<string | null>(null);
 
+  useEffect(() => {
+    if (!workoutSessionReady) return;
+    if (!workout) {
+      setSessionHydrated(true);
+      return;
+    }
+    let live = true;
+    void loadLiveWorkoutSession().then((snapshot) => {
+      if (!live) return;
+      if (snapshot?.workout.id === workout.id) {
+        const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
+        const safeStation = workout.stations[safeIndex];
+        setStationIndex(safeIndex);
+        setPhase(snapshot.phase);
+        setRemainingSeconds(Math.min(
+          Math.max(0, snapshot.remainingSeconds),
+          snapshot.phase === 'work' ? (safeStation?.durationSeconds ?? snapshot.remainingSeconds) : Math.max(15, workout.request.restSeconds),
+        ));
+        setRunning(restoredActiveWorkout ? false : snapshot.running);
+        setStationRounds(snapshot.stationRounds);
+        setExerciseLoads(snapshot.exerciseLoads);
+        setExerciseSets(snapshot.exerciseSets);
+        setRestEntries(snapshot.restEntries);
+        setRestRounds(snapshot.restRounds);
+        setRestLoadUnit(snapshot.restLoadUnit);
+        startedAt.current = snapshot.startedAt;
+        const progressed = safeIndex > 0
+          || snapshot.phase === 'rest'
+          || snapshot.remainingSeconds < (safeStation?.durationSeconds ?? snapshot.remainingSeconds)
+          || Object.keys(snapshot.stationRounds).length > 0;
+        if (restoredActiveWorkout || progressed) {
+          setResumeNotice(restoredActiveWorkout
+            ? 'Workout restored. The timer is paused so nothing advances without you.'
+            : 'Workout resumed from your last saved point.');
+        }
+      } else {
+        setRunning(true);
+      }
+      setSessionHydrated(true);
+    });
+    return () => { live = false; };
+  }, [restoredActiveWorkout, workout?.id, workoutSessionReady]);
+
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
   const nextStation = workout?.stations[stationIndex + 1] ?? null;
@@ -125,10 +176,66 @@ export default function ActiveWorkoutScreen() {
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
   useEffect(() => {
-    if (!workout || !running || phase === 'complete') return;
+    if (!workout || !sessionHydrated || phase === 'complete') return;
+    const timer = setTimeout(() => {
+      void saveLiveWorkoutSession({
+        schemaVersion: 1,
+        savedAt: new Date().toISOString(),
+        workout,
+        startedAt: startedAt.current,
+        stationIndex,
+        phase,
+        remainingSeconds,
+        running,
+        stationRounds,
+        exerciseLoads,
+        exerciseSets,
+        restEntries,
+        restRounds,
+        restLoadUnit,
+        planLink: activePlanLink ?? undefined,
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
+
+  useEffect(() => {
+    if (!workout || !sessionHydrated || phase === 'complete') return;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') return;
+      setRunning(false);
+      void saveLiveWorkoutSession({
+        schemaVersion: 1,
+        savedAt: new Date().toISOString(),
+        workout,
+        startedAt: startedAt.current,
+        stationIndex,
+        phase,
+        remainingSeconds,
+        running: false,
+        stationRounds,
+        exerciseLoads,
+        exerciseSets,
+        restEntries,
+        restRounds,
+        restLoadUnit,
+        planLink: activePlanLink ?? undefined,
+      });
+    });
+    return () => subscription.remove();
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
+
+  useEffect(() => {
+    if (!resumeNotice) return;
+    const timer = setTimeout(() => setResumeNotice(null), 7000);
+    return () => clearTimeout(timer);
+  }, [resumeNotice]);
+
+  useEffect(() => {
+    if (!workout || !sessionHydrated || !running || phase === 'complete') return;
     const timer = setInterval(() => setRemainingSeconds((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
-  }, [phase, running, workout]);
+  }, [phase, running, sessionHydrated, workout]);
 
   useEffect(() => {
     if (!workout || phase === 'complete') return;
@@ -155,6 +262,10 @@ export default function ActiveWorkoutScreen() {
     if (cuePreferences.audioEnabled) void completionPlayer.seekTo(0).then(() => completionPlayer.play()).catch(() => undefined);
     if (cuePreferences.hapticsEnabled) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }, [completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
+
+  if (!workoutSessionReady || (workout && !sessionHydrated)) {
+    return <SafeAreaView style={styles.safeArea}><View style={styles.missingCard}><Text style={styles.completeTitle}>Restoring workout…</Text><Text style={styles.helper}>Loading the last saved station and timer state.</Text></View></SafeAreaView>;
+  }
 
   if (!workout || !station) {
     return <SafeAreaView style={styles.safeArea}><View style={styles.missingCard}><Text style={styles.completeTitle}>No active workout</Text><Pressable onPress={() => router.replace('/' as Href)} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Return home</Text></Pressable></View></SafeAreaView>;
@@ -192,7 +303,18 @@ export default function ActiveWorkoutScreen() {
     const completedRounds = override?.stationRounds ?? stationRounds;
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
-    await saveCompletedWorkout({ workout: activeWorkout, startedAt: startedAt.current, completedAt: timestamp, completionFraction, stationRounds: completedRounds, exerciseLoads: completedLoads, exerciseSets: completedSets });
+    await saveCompletedWorkout({
+      workout: activeWorkout,
+      startedAt: startedAt.current,
+      completedAt: timestamp,
+      completionFraction,
+      stationRounds: completedRounds,
+      exerciseLoads: completedLoads,
+      exerciseSets: completedSets,
+      plannedSessionId: activePlanLink?.sessionId,
+      relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
+    });
+    await clearLiveWorkoutSession();
     if (cloudEnabled && user?.mode === 'cloud') {
       const ledgerId = `${activeWorkout.id}_${timestamp}`;
       try {
@@ -257,6 +379,27 @@ export default function ActiveWorkoutScreen() {
 
   function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
 
+  function pauseAndLeave() {
+    setRunning(false);
+    void saveLiveWorkoutSession({
+      schemaVersion: 1,
+      savedAt: new Date().toISOString(),
+      workout: activeWorkout,
+      startedAt: startedAt.current,
+      stationIndex,
+      phase: phase === 'complete' ? 'rest' : phase,
+      remainingSeconds,
+      running: false,
+      stationRounds,
+      exerciseLoads,
+      exerciseSets,
+      restEntries,
+      restRounds,
+      restLoadUnit,
+      planLink: activePlanLink ?? undefined,
+    }).then(() => router.replace('/' as Href));
+  }
+
   function endEarly() {
     Alert.alert('End workout?', 'Save the work you completed, discard this session, or keep training.', [
       { text: 'Keep training', style: 'cancel' },
@@ -304,7 +447,7 @@ export default function ActiveWorkoutScreen() {
         <KeyboardSafeScreen contentContainerStyle={styles.completeContainer}>
           <Text style={styles.eyebrow}>WORKOUT COMPLETE</Text>
           <Text style={styles.completeTitle}>{activeWorkout.name}</Text>
-          <Text style={styles.helper}>Saved to training history. Review the work, add a private note, or share only the details you choose.</Text>
+          <Text style={styles.helper}>{activePlanLink ? `${activePlanLink.sessionTitle} is now marked complete in your plan.` : 'Saved to training history.'} Review the work, add a private note, or share only the details you choose.</Text>
           <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
 
           <CompletedWorkoutBodyMap regionLoads={completedSummary.regionLoads} />
@@ -346,8 +489,11 @@ export default function ActiveWorkoutScreen() {
           <Text style={styles.topTitle}>{phase === 'rest' ? 'Recover and record' : currentStation.purpose}</Text>
         </View>
         <Pressable accessibilityLabel="Workout cue settings" onPress={() => setCueSettingsOpen(true)} style={styles.iconHeaderButton}><V23Icon name="settings" color={tokens.text} size={20} /></Pressable>
+        <Pressable onPress={pauseAndLeave} style={styles.pausePill}><Text style={styles.pauseButtonText}>Leave</Text></Pressable>
         <Pressable onPress={endEarly} style={styles.endPill}><Text style={styles.endButtonText}>End</Text></Pressable>
       </View>
+      {activePlanLink ? <View style={styles.planBanner}><V23Icon name="plan" color={tokens.accent} size={17} /><Text style={styles.planBannerText}>Planned {formatPlanDate(activePlanLink.sessionDate)} · {activePlanLink.sessionTitle}{activePlanLink.modifiedFromPlan ? ' · Customized' : ''}</Text></View> : null}
+      {resumeNotice ? <Pressable onPress={() => setResumeNotice(null)} style={styles.resumeBanner}><V23Icon name="play" color={tokens.accent} size={17} /><Text style={styles.resumeBannerText}>{resumeNotice}</Text></Pressable> : null}
 
       <KeyboardSafeScreen contentContainerStyle={styles.content}>
         <View style={[styles.timerCard, phase === 'rest' && styles.restTimerCard]}>
@@ -424,11 +570,14 @@ function NumberScale({ values, selected, onSelect, styles, compact = false }: { 
 
 function defaultLoadBasis(exercise: Exercise): LoadBasis { const ids = exercise.equipmentOptions.flatMap((option) => option.items.map((item) => item.equipmentId)); if (ids.includes('dumbbell')) return 'each_hand'; if (ids.includes('barbell') || ids.includes('trap_bar')) return 'total'; if (ids.includes('long_band') || ids.includes('mini_band')) return 'band_level'; if (ids.every((id) => id === 'bodyweight')) return 'bodyweight'; return 'single_implement'; }
 function formatPrescription(target: number, unit: 'total' | 'per_side' | 'seconds') { if (unit === 'seconds') return `${target} sec`; if (unit === 'per_side') return `${target}/side`; return `${target} reps`; }
+function formatPlanDate(value: string): string { return new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${value}T12:00:00`)); }
 function formatTime(seconds: number) { const minutes = Math.floor(seconds / 60); return `${minutes}:${(seconds % 60).toString().padStart(2, '0')}`; }
 function startOfWeekIso(): string { const date = new Date(); const day = date.getDay(); date.setDate(date.getDate() + (day === 0 ? -6 : 1 - day)); date.setHours(0,0,0,0); return date.toISOString(); }
 
 function makeStyles(tokens: DesignTokens) { return StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: tokens.canvas }, topBar: { minHeight: 72, paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: tokens.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border }, topCopy: { flex: 1 }, eyebrow: { color: tokens.accent, fontSize: 10.5, fontWeight: '900', letterSpacing: 1.15 }, topTitle: { color: tokens.text, fontSize: 17, lineHeight: 21, fontWeight: '800', marginTop: 2 }, iconHeaderButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' }, endPill: { minHeight: 40, paddingHorizontal: 13, borderRadius: 999, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' }, endButtonText: { color: tokens.danger, fontSize: 13, fontWeight: '800' },
+  safeArea: { flex: 1, backgroundColor: tokens.canvas }, topBar: { minHeight: 72, paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: tokens.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border }, topCopy: { flex: 1 }, eyebrow: { color: tokens.accent, fontSize: 10.5, fontWeight: '900', letterSpacing: 1.15 }, topTitle: { color: tokens.text, fontSize: 17, lineHeight: 21, fontWeight: '800', marginTop: 2 }, iconHeaderButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' }, pausePill: { minHeight: 38, paddingHorizontal: 10, borderRadius: 999, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' }, pauseButtonText: { color: tokens.text, fontSize: 12.5, fontWeight: '800' }, endPill: { minHeight: 40, paddingHorizontal: 13, borderRadius: 999, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' }, endButtonText: { color: tokens.danger, fontSize: 13, fontWeight: '800' },
+  planBanner: { marginHorizontal: 14, marginTop: 10, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 14, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, flexDirection: 'row', alignItems: 'center', gap: 9 }, planBannerText: { flex: 1, color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
+  resumeBanner: { marginHorizontal: 14, marginTop: 10, paddingHorizontal: 13, paddingVertical: 11, borderRadius: 14, backgroundColor: tokens.accentSoft, flexDirection: 'row', alignItems: 'center', gap: 9 }, resumeBannerText: { flex: 1, color: tokens.accent, fontSize: 13, lineHeight: 18, fontWeight: '700' },
   content: { padding: 16, paddingBottom: 110, gap: 13 }, timerCard: { backgroundColor: tokens.header, borderRadius: 26, paddingHorizontal: 22, paddingVertical: 20, gap: 6, shadowColor: '#000', shadowOpacity: tokens.isDark ? 0.25 : 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 4 }, restTimerCard: { backgroundColor: tokens.accentStrong }, timerTopLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, phaseLabel: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', letterSpacing: 1.2 }, timer: { color: '#FFFFFF', fontSize: 82, lineHeight: 91, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: -3 }, timerContext: { color: 'rgba(255,255,255,0.78)', fontSize: 13, lineHeight: 18 }, timerControl: { alignSelf: 'flex-start', marginTop: 8, minHeight: 36, paddingHorizontal: 14, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' }, timerControlText: { color: '#FFFFFF', fontSize: 12.5, fontWeight: '800' },
   stationCard: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: 22, paddingHorizontal: 15 }, exerciseRow: { minHeight: 88, flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border }, exerciseRowFirst: { borderTopWidth: 0 }, exerciseNumber: { width: 40, height: 40, borderRadius: 20, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' }, exerciseNumberText: { color: tokens.accent, fontSize: 16, fontWeight: '900' }, exerciseCopy: { flex: 1, minWidth: 0 }, exerciseName: { color: tokens.text, fontSize: 17, lineHeight: 22, fontWeight: '800' }, helper: { color: tokens.textMuted, fontSize: 14, lineHeight: 20 }, adaptationText: { color: tokens.accent, fontSize: 12, lineHeight: 16, marginTop: 3 }, inlineActions: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 }, actionDivider: { color: tokens.textMuted, fontSize: 12 }, prescriptionPill: { minWidth: 72, minHeight: 38, borderRadius: 12, paddingHorizontal: 10, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' }, prescriptionText: { color: tokens.accent, fontSize: 13, fontWeight: '900' }, textAction: { paddingVertical: 3, paddingHorizontal: 1 }, textActionText: { color: tokens.accent, fontSize: 12.5, fontWeight: '800' },
   nextCard: { backgroundColor: tokens.surfaceMuted, borderRadius: 18, padding: 15, gap: 3 }, nextLabel: { color: tokens.accent, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 }, nextTitle: { color: tokens.text, fontSize: 16, lineHeight: 22, fontWeight: '700' }, nextDetail: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18, marginTop: 2 }, controlRow: { flexDirection: 'row', gap: 9 }, primaryButton: { flex: 1, minHeight: 52, paddingHorizontal: 17, borderRadius: 17, backgroundColor: tokens.header, alignItems: 'center', justifyContent: 'center' }, primaryButtonText: { color: '#FFFFFF', fontSize: 15.5, fontWeight: '800' }, outlineButton: { flex: 1, minHeight: 52, paddingHorizontal: 14, borderRadius: 17, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.borderStrong, alignItems: 'center', justifyContent: 'center' }, outlineButtonText: { color: tokens.text, fontSize: 15, fontWeight: '800' }, textButton: { minHeight: 42, alignItems: 'center', justifyContent: 'center' }, textButtonText: { color: tokens.textMuted, fontSize: 14, fontWeight: '700' },

@@ -5484,3 +5484,66 @@ export interface V29YouVisibleScreenModel {
   screenReaderOrder: Array<'profile' | 'context' | 'connections' | 'coach' | 'social' | 'controls'>;
   bottomInsetForNavigation: number;
 }
+
+export type RecommendationReasonCode =
+  | 'goal_alignment'
+  | 'phase_alignment'
+  | 'schedule_fit'
+  | 'preferred_day'
+  | 'return_to_run'
+  | 'bone_stress_caution'
+  | 'sport_background'
+  | 'strength_experience'
+  | 'equipment_fit'
+  | 'restriction_fit'
+  | 'recovery_spacing'
+  | 'session_purpose';
+
+export type TrainingAdaptation =
+  | 'run_durability'
+  | 'swim_support'
+  | 'bike_support'
+  | 'hip_stability'
+  | 'single_leg_strength'
+  | 'posterior_chain_capacity'
+  | 'calf_ankle_capacity'
+  | 'trunk_control'
+  | 'upper_body_strength'
+  | 'movement_quality'
+  | 'power'
+  | 'general_strength';
+
+export interface RecommendationReason {
+  code: RecommendationReasonCode;
+  summary: string;
+  detail?: string;
+  evidenceSource: 'goal' | 'athlete_profile' | 'schedule' | 'workout' | 'restriction' | 'training_history' | 'integration';
+}
+
+export interface PredictedWorkoutFatigue {
+  muscular: 1 | 2 | 3 | 4 | 5;
+  cardiovascular: 1 | 2 | 3 | 4 | 5;
+  neural: 1 | 2 | 3 | 4 | 5;
+  recoveryHours: number;
+  uncertainty: 'low' | 'moderate' | 'high';
+}
+
+export interface RecommendationConfidence {
+  score: number;
+  label: AdaptiveDecisionConfidence;
+  evidenceInputs: string[];
+  missingInputs: string[];
+  rationale: string[];
+}
+
+export interface WorkoutRecommendationExplanation {
+  sessionId: string;
+  generatedAt: string;
+  conciseWhy: string[];
+  detailedReasons: RecommendationReason[];
+  expectedAdaptations: TrainingAdaptation[];
+  fatigue: PredictedWorkoutFatigue;
+  confidence: RecommendationConfidence;
+  whyNotHarder?: string;
+  safeguards: string[];
+}
