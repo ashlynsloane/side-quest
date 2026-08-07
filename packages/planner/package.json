@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./whole-athlete-week": "./src/whole-athlete-week.ts"
+    "./whole-athlete-week": "./src/whole-athlete-week.ts",
+    "./multisport": "./src/multisport.ts"
   },
   "dependencies": {
     "@circuit/domain": "workspace:*",
