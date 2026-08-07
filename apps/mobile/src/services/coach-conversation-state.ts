@@ -11,7 +11,7 @@ const MAX_STATE_AGE_DAYS = 7;
 
 export type PersistedCoachTargetKind = 'strength' | 'endurance' | 'ad_hoc';
 export type CoachConversationTurnRole = 'athlete' | 'coach';
-export type CoachConversationTurnKind = 'message' | 'proposal' | 'applied' | 'cancelled' | 'system';
+export type CoachConversationTurnKind = 'message' | 'proposal' | 'applied' | 'cancelled' | 'reverted' | 'follow_up' | 'system';
 
 export interface PersistedCoachTarget {
   sessionId: string;
@@ -156,6 +156,19 @@ export function recordCoachApplied(
       appliedAt: new Date().toISOString(),
     },
   }, 'coach', 'applied', message);
+}
+
+export function recordCoachReverted(
+  state: CoachConversationState,
+  snapshotId: string,
+  message: string,
+): CoachConversationState {
+  return appendCoachConversationTurn({
+    ...state,
+    pendingProposal: undefined,
+    selectedOptionId: undefined,
+    lastApplied: state.lastApplied?.snapshotId === snapshotId ? undefined : state.lastApplied,
+  }, 'coach', 'reverted', message);
 }
 
 export function cancelPendingCoachProposal(state: CoachConversationState, message = 'Keeping the original plan.'): CoachConversationState {
