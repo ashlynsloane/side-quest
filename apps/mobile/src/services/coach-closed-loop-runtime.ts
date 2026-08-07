@@ -103,13 +103,14 @@ export async function applyCoachMessageProposalClosedLoop(
   const summary = getCoachClosedLoopSummary();
   const fingerprint = fingerprintCoachIntervention(proposal.sessionDiscipline, proposal.adaptation, option);
   const pattern = findCoachInterventionEffectPattern(fingerprint, summary.patterns);
-  const canReuseProposalExplanation = option.id === proposal.adaptation.adjustment.recommendedOptionId && proposal.decisionExplanation;
-  const decisionExplanation = canReuseProposalExplanation ?? buildCoachDecisionExplanation({
-    discipline: proposal.sessionDiscipline,
-    adaptation: proposal.adaptation,
-    option,
-    learnedPattern: pattern,
-  });
+  const decisionExplanation = option.id === proposal.adaptation.adjustment.recommendedOptionId && proposal.decisionExplanation
+    ? proposal.decisionExplanation
+    : buildCoachDecisionExplanation({
+        discipline: proposal.sessionDiscipline,
+        adaptation: proposal.adaptation,
+        option,
+        learnedPattern: pattern,
+      });
 
   const applied = await applyCoachMessageProposal(proposal, optionId);
   const appliedAt = new Date().toISOString();
