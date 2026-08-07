@@ -123,10 +123,15 @@ export async function generateAndPersistWholeAthleteBlock(
 
     const rawWeekEvents = calendarEvents.filter((event) => inCurrentWeek(event.startAt.slice(0, 10)));
     const weekOverrides = overrides.filter((override) => inCurrentWeek(override.baseEvent.startAt.slice(0, 10)));
+    const overriddenIds = new Set(weekOverrides.map((override) => override.eventId));
+    const untouchedWeekEvents = rawWeekEvents.filter((event) => !overriddenIds.has(event.id));
+    const originalCount = (discipline: 'swim' | 'bike' | 'run') =>
+      untouchedWeekEvents.filter((event) => event.discipline === discipline).length
+      + weekOverrides.filter((override) => override.baseEvent.discipline === discipline).length;
     const originallyPlanned: DisciplineCountMap = {
-      swim: rawWeekEvents.filter((event) => event.discipline === 'swim').length,
-      bike: rawWeekEvents.filter((event) => event.discipline === 'bike').length,
-      run: rawWeekEvents.filter((event) => event.discipline === 'run').length,
+      swim: originalCount('swim'),
+      bike: originalCount('bike'),
+      run: originalCount('run'),
       strength: fixedStrength.length,
     };
     const suppressed: DisciplineCountMap = {
