@@ -24,6 +24,8 @@ const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
   lifeStress: 'low',
 };
 
+let reconciliationQueue: Promise<GeneratedWholeAthleteBlock | null> = Promise.resolve(null);
+
 export function getDefaultWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
   return { ...DEFAULT_HEALTH_PREFERENCES };
 }
@@ -52,7 +54,16 @@ export function clearWholeAthleteHealthPreferences(): void {
   Storage.removeItemSync(HEALTH_PREFERENCES_KEY);
 }
 
-export async function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
+export function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
+  const next = reconciliationQueue.then(runWholeAthleteReconciliation, runWholeAthleteReconciliation);
+  // Keep later requests serial even if this caller observes a rejection. Each queued
+  // reconciliation reads the latest saved block when it begins, so a newer plan
+  // change cannot be overwritten by an older concurrent refresh.
+  reconciliationQueue = next.catch(() => null);
+  return next;
+}
+
+async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlock | null> {
   const saved = await getLatestTrainingBlock();
   if (!saved?.block) {
     await clearSideQuestGeneratedPlanEvents();
