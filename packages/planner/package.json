@@ -11,6 +11,7 @@
     "./endurance-prescription": "./src/endurance-prescription.ts",
     "./coach-message-adaptation": "./src/coach-message-adaptation.ts",
     "./coach-conversation": "./src/coach-conversation.ts",
+    "./athlete-context-intelligence": "./src/athlete-context-intelligence.ts",
     "./frequency-suppression": "./src/frequency-suppression.ts"
   },
   "dependencies": {
