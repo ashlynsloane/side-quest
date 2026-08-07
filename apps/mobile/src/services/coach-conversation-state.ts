@@ -215,8 +215,12 @@ function isValidTarget(value: unknown): value is PersistedCoachTarget {
 }
 
 function isValidProposal(value: unknown): value is PersistedCoachProposal {
-  const item = value as Partial<PersistedCoachProposal> | null | undefined;
-  return Boolean(isValidTarget(item) && item?.adaptation?.adjustment?.recommendedOptionId && item?.adaptation?.interpretation?.summary);
+  if (!isValidTarget(value)) return false;
+  const proposal = value as Partial<PersistedCoachProposal>;
+  return Boolean(
+    proposal.adaptation?.adjustment?.recommendedOptionId
+    && proposal.adaptation?.interpretation?.summary,
+  );
 }
 
 function isValidInterpretation(value: unknown): value is CoachMessageInterpretation {
