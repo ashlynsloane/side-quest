@@ -63,8 +63,7 @@ export default function PlanTab() {
         listTrainingCalendarSources(),
       ]);
       if (!live) return;
-      const wholeWeek = wholeAthlete?.weeks.find((week) => nextAnchor >= week.weekStartDate && nextAnchor <= week.weekEndDate)
-        ?? wholeAthlete?.weeks[0];
+      const wholeWeek = wholeAthlete?.weeks.find((week) => nextAnchor >= week.weekStartDate && nextAnchor <= week.weekEndDate) ?? wholeAthlete?.weeks[0];
       setBlock(nextBlock);
       setAnchorDate(nextAnchor);
       setEvents(calendar);
@@ -83,33 +82,29 @@ export default function PlanTab() {
   const counts = weeklyCounts(days);
 
   const openStrength = (session: PlannedStrengthSession) => {
-    const explanationContext = {
+    openPlannedWorkoutPreview(session, {
       goal: block?.goal,
       previousSessionDate: previousStrengthDate(session, strength),
       nextKeyEnduranceDate: nextEnduranceDate(session, events),
       hasTrainingHistory,
       hasConnectedTrainingData,
       hasReadinessData,
-    };
-    openPlannedWorkoutPreview(session, explanationContext);
+    });
     router.push('/workout-preview' as Href);
   };
 
   return <V23Screen>
     {activeWorkout ? <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink} onResume={() => router.push('/active-workout' as Href)} compact /> : null}
-
     <V23Card elevated style={styles.weekCard}>
       <View style={styles.weekHeading}>
         <Pressable accessibilityLabel="Open full schedule" onPress={() => router.push('/schedule' as Href)} style={styles.arrowButton}><V23Icon name="plan" color={tokens.accent} size={20} /></Pressable>
         <View style={styles.weekTitleCopy}><Text style={styles.weekTitle}>This week</Text><Text style={styles.weekRange}>{formatWeekRange(days)}</Text></View>
         <Pressable onPress={() => router.push('/session-adjustment' as Href)} style={styles.controlButton}><V23Icon name="adjust" color={tokens.accent} size={19} /></Pressable>
       </View>
-
       <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
         <Text style={styles.dayInitial}>{day.weekday}</Text>
         <View style={[styles.dayNumberWrap, index === selectedIndex && styles.dayNumberSelected]}><Text style={[styles.dayNumber, index === selectedIndex && styles.dayNumberSelectedText]}>{day.dayNumber}</Text></View>
       </View>)}</View>
-
       <View style={styles.schedule}>{days.map((day, dayIndex) => {
         const isToday = day.date === today;
         return <View key={day.date} style={[styles.dayRow, isToday && styles.dayRowToday, dayIndex === days.length - 1 && styles.dayRowLast]}>
@@ -120,9 +115,7 @@ export default function PlanTab() {
             return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session)} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
               <V23SportPill kind="strength" />
               <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
-              {item.session.completionStatus === 'completed'
-                ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View>
-                : <View style={[styles.statusDot, { backgroundColor: item.session.completionStatus === 'skipped' ? tokens.textMuted : tokens.accent }]} />}
+              {item.session.completionStatus === 'completed' ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View> : <View style={[styles.statusDot, { backgroundColor: item.session.completionStatus === 'skipped' ? tokens.textMuted : tokens.accent }]} />}
             </Pressable>;
           })() : <Pressable key={item.id} onPress={() => router.push('/schedule' as Href)} style={styles.sessionRow}>
             <V23SportPill kind={normalizeSportKind(item.discipline)} />
@@ -143,7 +136,7 @@ export default function PlanTab() {
       icon={<V23Icon name="heart" color="#FFFFFF" size={18} />}
       tone={planningState === 'recover' ? 'recovery' : planningState === 'protect' ? 'review' : planningState === 'hold' ? 'info' : 'accent'}
       featured
-      onPress={() => router.push((block ? '/adaptive-plan' : '/goal-catalog') as Href)}
+      onPress={() => router.push('/training-guardrails' as Href)}
     />
 
     {block ? <V23Card style={styles.blockSummary}>
@@ -171,28 +164,10 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
     date.setDate(start.getDate() + index);
     const iso = date.toISOString().slice(0, 10);
     const items: DayItem[] = [
-      ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({
-        id: event.id,
-        kind: 'event' as const,
-        title: conciseSessionLabel({ discipline: event.discipline, title: event.title }),
-        meta: eventMeta(event),
-        discipline: event.discipline,
-      })),
-      ...strength.filter((session) => session.date === iso).map((session) => ({
-        id: session.id,
-        kind: 'strength' as const,
-        title: session.title,
-        meta: `${Math.round(session.workout.totalWorkSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`,
-        session,
-      })),
+      ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline })),
+      ...strength.filter((session) => session.date === iso).map((session) => ({ id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.totalWorkSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`, session })),
     ];
-    return {
-      date: iso,
-      label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase() + ` ${date.getDate()}`,
-      weekday: new Intl.DateTimeFormat('en-US', { weekday: 'narrow' }).format(date),
-      dayNumber: date.getDate(),
-      items,
-    };
+    return { date: iso, label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase() + ` ${date.getDate()}`, weekday: new Intl.DateTimeFormat('en-US', { weekday: 'narrow' }).format(date), dayNumber: date.getDate(), items };
   });
 }
 
@@ -207,11 +182,9 @@ function eventMeta(event: TrainingCalendarEvent): string {
 
 function weeklyCounts(days: ReturnType<typeof weekDays>) {
   const counts = { swim: 0, bike: 0, run: 0, strength: 0 };
-  for (const day of days) {
-    for (const item of day.items) {
-      if (item.kind === 'strength') counts.strength += 1;
-      else if (item.discipline === 'swim' || item.discipline === 'bike' || item.discipline === 'run') counts[item.discipline] += 1;
-    }
+  for (const day of days) for (const item of day.items) {
+    if (item.kind === 'strength') counts.strength += 1;
+    else if (item.discipline === 'swim' || item.discipline === 'bike' || item.discipline === 'run') counts[item.discipline] += 1;
   }
   return counts;
 }
@@ -224,94 +197,18 @@ function planningStateBody(state: 'build' | 'hold' | 'protect' | 'recover' | nul
   return 'Swim, bike, run, and strength are being planned together with only a small number of progression targets.';
 }
 
-function strengthStatusLabel(status: PlannedStrengthSession['completionStatus']): string {
-  if (status === 'completed') return 'Completed';
-  if (status === 'skipped') return 'Skipped';
-  if (status === 'modified') return 'Adjusted';
-  return 'Planned';
-}
+function strengthStatusLabel(status: PlannedStrengthSession['completionStatus']): string { if (status === 'completed') return 'Completed'; if (status === 'skipped') return 'Skipped'; if (status === 'modified') return 'Adjusted'; return 'Planned'; }
+function weekRange(anchorDate: string) { const start = new Date(`${anchorDate}T12:00:00`); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); const end = new Date(start); end.setDate(end.getDate() + 7); return { from: start.toISOString(), to: end.toISOString() }; }
+function formatWeekRange(days: ReturnType<typeof weekDays>) { if (!days.length) return ''; const first = new Date(`${days[0]!.date}T12:00:00`); const last = new Date(`${days[days.length - 1]!.date}T12:00:00`); const firstLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(first); const lastLabel = new Intl.DateTimeFormat('en-US', { month: first.getMonth() === last.getMonth() ? undefined : 'short', day: 'numeric' }).format(last); return `${firstLabel} – ${lastLabel}`; }
+function previousStrengthDate(session: PlannedStrengthSession, sessions: PlannedStrengthSession[]): string | undefined { return sessions.filter((candidate) => candidate.id !== session.id && candidate.date < session.date).sort((left, right) => right.date.localeCompare(left.date))[0]?.date; }
+function nextEnduranceDate(session: PlannedStrengthSession, events: TrainingCalendarEvent[]): string | undefined { return events.filter((event) => event.startAt.slice(0, 10) >= session.date && event.discipline !== 'strength' && event.discipline !== 'rest').sort((left, right) => left.startAt.localeCompare(right.startAt))[0]?.startAt.slice(0, 10); }
+function disciplineColor(discipline: string | undefined, accent: string) { if (discipline === 'swim') return '#267BA6'; if (discipline === 'bike') return '#C58322'; if (discipline === 'run') return '#526E9A'; if (discipline === 'strength') return accent; return '#6E7C76'; }
+function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+function addDays(value: string, days: number) { const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10); }
 
-function weekRange(anchorDate: string) {
-  const start = new Date(`${anchorDate}T12:00:00`);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  const end = new Date(start);
-  end.setDate(end.getDate() + 7);
-  return { from: start.toISOString(), to: end.toISOString() };
-}
-
-function formatWeekRange(days: ReturnType<typeof weekDays>) {
-  if (!days.length) return '';
-  const first = new Date(`${days[0]!.date}T12:00:00`);
-  const last = new Date(`${days[days.length - 1]!.date}T12:00:00`);
-  const firstLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(first);
-  const lastLabel = new Intl.DateTimeFormat('en-US', { month: first.getMonth() === last.getMonth() ? undefined : 'short', day: 'numeric' }).format(last);
-  return `${firstLabel} – ${lastLabel}`;
-}
-
-function previousStrengthDate(session: PlannedStrengthSession, sessions: PlannedStrengthSession[]): string | undefined {
-  return sessions.filter((candidate) => candidate.id !== session.id && candidate.date < session.date).sort((left, right) => right.date.localeCompare(left.date))[0]?.date;
-}
-
-function nextEnduranceDate(session: PlannedStrengthSession, events: TrainingCalendarEvent[]): string | undefined {
-  return events.filter((event) => event.startAt.slice(0, 10) >= session.date && event.discipline !== 'strength' && event.discipline !== 'rest').sort((left, right) => left.startAt.localeCompare(right.startAt))[0]?.startAt.slice(0, 10);
-}
-
-function disciplineColor(discipline: string | undefined, accent: string) {
-  if (discipline === 'swim') return '#267BA6';
-  if (discipline === 'bike') return '#C58322';
-  if (discipline === 'run') return '#526E9A';
-  if (discipline === 'strength') return accent;
-  return '#6E7C76';
-}
-
-function localDate() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function addDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00`);
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function makeStyles(tokens: DesignTokens) {
-  return StyleSheet.create({
-    weekCard: { paddingHorizontal: 14, paddingTop: 11, paddingBottom: 5 },
-    weekHeading: { flexDirection: 'row', alignItems: 'center', minHeight: 50 },
-    arrowButton: { width: 34, height: 38, alignItems: 'flex-start', justifyContent: 'center' },
-    weekTitleCopy: { flex: 1 },
-    weekTitle: { color: tokens.text, fontSize: 22, lineHeight: 27, fontWeight: '800' },
-    weekRange: { color: tokens.textMuted, fontSize: 14, lineHeight: 18, marginTop: 1 },
-    controlButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: tokens.surfaceMuted, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' },
-    calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 6, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: tokens.border },
-    calendarDay: { width: 38, alignItems: 'center', gap: 5 },
-    dayInitial: { color: tokens.textMuted, fontSize: 11, lineHeight: 14, fontWeight: '700' },
-    dayNumberWrap: { width: 31, height: 31, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    dayNumberSelected: { backgroundColor: tokens.header },
-    dayNumber: { color: tokens.text, fontSize: 14, fontWeight: '700' },
-    dayNumberSelectedText: { color: '#FFFFFF' },
-    schedule: { paddingTop: 7 },
-    dayRow: { position: 'relative', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 68, paddingHorizontal: 7, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, borderRadius: 15 },
-    dayRowToday: { backgroundColor: tokens.accentSoft },
-    dayRowLast: { borderBottomWidth: 0 },
-    todayMarker: { width: 4, alignSelf: 'stretch', borderRadius: 3, backgroundColor: 'transparent' },
-    todayMarkerActive: { backgroundColor: tokens.accent },
-    dayLabel: { width: 59, color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '800' },
-    dayLabelToday: { color: tokens.accent },
-    sessions: { flex: 1 },
-    sessionRow: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 9 },
-    sessionRowClosed: { opacity: 0.66 },
-    sessionCopy: { flex: 1, minWidth: 0 },
-    sessionTitle: { color: tokens.text, fontSize: 16, lineHeight: 20, fontWeight: '700' },
-    sessionTitleClosed: { textDecorationLine: 'line-through' },
-    sessionMeta: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, marginTop: 1 },
-    statusDot: { width: 7, height: 7, borderRadius: 4 },
-    completedIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
-    blockSummary: { gap: 5 },
-    blockLabel: { color: tokens.accent, fontSize: 11, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05, textTransform: 'uppercase' },
-    blockTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '700' },
-    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 4 },
-  });
-}
+function makeStyles(tokens: DesignTokens) { return StyleSheet.create({
+  weekCard: { paddingHorizontal: 14, paddingTop: 11, paddingBottom: 5 }, weekHeading: { flexDirection: 'row', alignItems: 'center', minHeight: 50 }, arrowButton: { width: 34, height: 38, alignItems: 'flex-start', justifyContent: 'center' }, weekTitleCopy: { flex: 1 }, weekTitle: { color: tokens.text, fontSize: 22, lineHeight: 27, fontWeight: '800' }, weekRange: { color: tokens.textMuted, fontSize: 14, lineHeight: 18, marginTop: 1 }, controlButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: tokens.surfaceMuted, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' },
+  calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 6, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: tokens.border }, calendarDay: { width: 38, alignItems: 'center', gap: 5 }, dayInitial: { color: tokens.textMuted, fontSize: 11, lineHeight: 14, fontWeight: '700' }, dayNumberWrap: { width: 31, height: 31, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, dayNumberSelected: { backgroundColor: tokens.header }, dayNumber: { color: tokens.text, fontSize: 14, fontWeight: '700' }, dayNumberSelectedText: { color: '#FFFFFF' },
+  schedule: { paddingTop: 7 }, dayRow: { position: 'relative', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 68, paddingHorizontal: 7, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, borderRadius: 15 }, dayRowToday: { backgroundColor: tokens.accentSoft }, dayRowLast: { borderBottomWidth: 0 }, todayMarker: { width: 4, alignSelf: 'stretch', borderRadius: 3, backgroundColor: 'transparent' }, todayMarkerActive: { backgroundColor: tokens.accent }, dayLabel: { width: 59, color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '800' }, dayLabelToday: { color: tokens.accent }, sessions: { flex: 1 }, sessionRow: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 9 }, sessionRowClosed: { opacity: 0.66 }, sessionCopy: { flex: 1, minWidth: 0 }, sessionTitle: { color: tokens.text, fontSize: 16, lineHeight: 20, fontWeight: '700' }, sessionTitleClosed: { textDecorationLine: 'line-through' }, sessionMeta: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, marginTop: 1 }, statusDot: { width: 7, height: 7, borderRadius: 4 }, completedIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  blockSummary: { gap: 5 }, blockLabel: { color: tokens.accent, fontSize: 11, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05, textTransform: 'uppercase' }, blockTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '700' }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 4 },
+}); }
