@@ -8,6 +8,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
 import { CoachClosedLoopPanel, CoachDecisionExplanationPanel } from '@/components/coach-closed-loop';
 import { CoachInsights } from '@/components/coach-insights';
+import { CoachOperatingInboxPanel } from '@/components/coach-operating-inbox';
 import { V23Card, V23Chip, V23Icon, V23OutlineButton, V23PrimaryButton, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
 import {
   answerCoachFollowUp,
@@ -17,6 +18,8 @@ import {
   undoLatestCoachIntervention,
 } from '@/services/coach-closed-loop-runtime';
 import type { CoachClosedLoopSummary, CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
+import { refreshCoachObservedOutcomes } from '@/services/coach-observed-outcomes';
+import { buildCoachOperatingInbox, type CoachOperatingInboxItem } from '@/services/coach-operating-inbox';
 import {
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
@@ -51,6 +54,7 @@ export default function CoachTab() {
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<CoachConversationState | null>(null);
   const [closedLoopSummary, setClosedLoopSummary] = useState<CoachClosedLoopSummary | null>(null);
+  const [coachInbox, setCoachInbox] = useState<CoachOperatingInboxItem[]>([]);
   const [coachError, setCoachError] = useState<string | null>(null);
   const [coachResult, setCoachResult] = useState<string | null>(null);
   const [buildingProposal, setBuildingProposal] = useState(false);
@@ -67,14 +71,16 @@ export default function CoachTab() {
     rangeEnd.setDate(rangeEnd.getDate() + 21);
     const historyStart = new Date(now);
     historyStart.setDate(historyStart.getDate() - 90);
-    const [calendar, history, readiness, sources, thread] = await Promise.all([
+    const [calendar, history, readiness, sources, thread, observed] = await Promise.all([
       getTrainingCalendarEvents({ from: rangeStart.toISOString(), to: rangeEnd.toISOString() }),
       listCompletedWorkoutSummaries({ from: historyStart.toISOString(), to: now.toISOString() }),
       getTodayReadinessCheckIn(),
       listTrainingCalendarSources(),
       nextBlock ? loadCurrentCoachConversation() : Promise.resolve(null),
+      nextBlock ? refreshCoachObservedOutcomes() : Promise.resolve([]),
     ]);
     if (!isLive()) return;
+    const summary = nextBlock ? loadCoachClosedLoopDashboard(nextBlock.id) : null;
     setBlock(nextBlock);
     setEvents(calendar);
     setHasTrainingHistory(history.length > 0);
@@ -83,7 +89,8 @@ export default function CoachTab() {
     setConversation(thread);
     setProposal(thread?.pendingProposal ?? null);
     setSelectedOptionId(thread?.selectedOptionId ?? thread?.pendingProposal?.adaptation.adjustment.recommendedOptionId ?? null);
-    setClosedLoopSummary(nextBlock ? loadCoachClosedLoopDashboard(nextBlock.id) : null);
+    setClosedLoopSummary(summary);
+    setCoachInbox(buildCoachOperatingInbox({ block: nextBlock, calendarEvents: calendar, closedLoop: summary, observedOutcomes: observed, now: now.toISOString() }));
   }, []);
 
   useFocusEffect(useCallback(() => {
@@ -130,7 +137,7 @@ export default function CoachTab() {
         setConversation(result.conversation ?? conversation);
         setProposal(null);
         setSelectedOptionId(null);
-        if (result.reason === 'cancelled') {
+        if (result.reason === 'cancelled' || result.reason === 'needs_clarification') {
           setCoachError(null);
           setCoachResult(result.message);
           setMessage('');
@@ -249,6 +256,8 @@ export default function CoachTab() {
         </Text>
       </View>
 
+      <CoachOperatingInboxPanel items={coachInbox} />
+
       <V23Card elevated style={styles.messageCard}>
         <View style={styles.messageHeader}>
           <View style={styles.messageHeaderCopy}>
@@ -312,7 +321,7 @@ export default function CoachTab() {
         >
           {buildingProposal ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.reviewButtonText}>{hasThread ? 'Send update' : 'Review adaptation'}</Text><V23Icon name="chevron" color="#FFFFFF" size={18} /></>}
         </Pressable>
-        <Text style={styles.messageFootnote}>The conversation supplies context. The planner still decides whether a requested move, replacement, or load change actually fits.</Text>
+        <Text style={styles.messageFootnote}>If the signal is ambiguous, Side Quest asks one focused question instead of guessing. The planner still decides whether a requested change actually fits.</Text>
       </V23Card>
 
       {coachError ? <V23Card tone="muted" style={styles.feedbackCard}><Text style={styles.errorText}>{coachError}</Text></V23Card> : null}
