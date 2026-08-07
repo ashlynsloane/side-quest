@@ -83,7 +83,7 @@ export default function CoachTab() {
     setConversation(thread);
     setProposal(thread?.pendingProposal ?? null);
     setSelectedOptionId(thread?.selectedOptionId ?? thread?.pendingProposal?.adaptation.adjustment.recommendedOptionId ?? null);
-    setClosedLoopSummary(loadCoachClosedLoopDashboard());
+    setClosedLoopSummary(nextBlock ? loadCoachClosedLoopDashboard(nextBlock.id) : null);
   }, []);
 
   useFocusEffect(useCallback(() => {
