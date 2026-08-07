@@ -6,7 +6,7 @@ import {
   buildCoachMessageAdaptation,
   interpretCoachMessage,
 } from '../src/coach-message-adaptation';
-import { normalizeStrengthSession } from '../src/unified-training';
+import { normalizeStrengthSession, type UnifiedTrainingSession } from '../src/unified-training';
 
 function strengthSession(overrides: Partial<PlannedStrengthSession> = {}): PlannedStrengthSession {
   return {
@@ -55,6 +55,32 @@ function strengthSession(overrides: Partial<PlannedStrengthSession> = {}): Plann
   };
 }
 
+function enduranceSession(
+  discipline: 'swim' | 'bike' | 'run',
+  overrides: Partial<UnifiedTrainingSession> = {},
+): UnifiedTrainingSession {
+  const hard = overrides.intensity === 'hard';
+  return {
+    id: `${discipline}-1`,
+    date: '2026-08-10',
+    title: discipline === 'swim' ? 'Threshold swim' : discipline === 'bike' ? 'Bike intervals' : 'Tempo run',
+    discipline,
+    durationMinutes: discipline === 'bike' ? 75 : 50,
+    intensity: hard ? 'hard' : 'moderate',
+    cardiovascularDemand: hard ? 'high' : 'moderate',
+    musculoskeletalDemand: discipline === 'run' ? 'moderate' : 'low',
+    lowerBodyDemand: discipline === 'bike' || discipline === 'run' ? 'moderate' : 'none',
+    upperBodyDemand: discipline === 'swim' ? 'moderate' : 'none',
+    impact: discipline === 'run' ? 'moderate' : 'none',
+    technicalDemand: discipline === 'swim' ? 'high' : 'moderate',
+    recoveryCost: hard ? 4 : 2,
+    priority: hard ? 'required' : 'recommended',
+    source: 'calendar',
+    keySession: hard,
+    ...overrides,
+  };
+}
+
 describe('coach message adaptation', () => {
   it('interprets sore legs as lower-body fatigue instead of pain', () => {
     const result = interpretCoachMessage('My legs are really sore from yesterday.');
@@ -62,6 +88,13 @@ describe('coach message adaptation', () => {
     expect(result.requestedAction).toBe('easier');
     expect(result.fatigueKind).toBe('muscle_soreness');
     expect(result.affectedArea).toBe('lower_body');
+    expect(result.focalPain).toBeUndefined();
+  });
+
+  it('treats ordinary tightness as soreness unless pain language is present', () => {
+    const result = interpretCoachMessage('My calves are tight after yesterday.');
+    expect(result.reason).toBe('fatigue');
+    expect(result.fatigueKind).toBe('muscle_soreness');
     expect(result.focalPain).toBeUndefined();
   });
 
@@ -88,13 +121,40 @@ describe('coach message adaptation', () => {
     expect(result.requestedAction).toBe('move');
   });
 
-  it('uses the existing adjustment engine for a message proposal', () => {
-    const session = strengthSession();
-    const unified = normalizeStrengthSession(session);
+  it('targets a bike session when the athlete names the ride', () => {
+    const result = interpretCoachMessage('I only have 30 minutes for my bike ride today.');
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.reason).toBe('time');
+    expect(result.availableMinutes).toBe(30);
+  });
+
+  it('recognizes a pool closure as a swim access problem', () => {
+    const result = interpretCoachMessage('The pool is closed so I cannot swim today.');
+    expect(result.targetDiscipline).toBe('swim');
+    expect(result.reason).toBe('access');
+    expect(result.requestedAction).toBe('different');
+  });
+
+  it('recognizes weather that blocks an outdoor ride', () => {
+    const result = interpretCoachMessage('It is icy and I cannot ride outside today.');
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.reason).toBe('weather');
+    expect(result.requestedAction).toBe('different');
+  });
+
+  it('does not turn low motivation into pain', () => {
+    const result = interpretCoachMessage('I really do not want to do this workout today.');
+    expect(result.reason).toBe('fatigue');
+    expect(result.fatigueKind).toBe('low_motivation');
+    expect(result.focalPain).toBeUndefined();
+  });
+
+  it('uses the existing adjustment engine for a strength message proposal', () => {
+    const session = normalizeStrengthSession(strengthSession());
     const proposal = buildCoachMessageAdaptation({
       message: 'My legs are sore and I am not feeling this workout.',
       session,
-      weekSessions: [unified],
+      weekSessions: [session],
       availableDates: ['2026-08-11', '2026-08-12', '2026-08-13'],
       recentFatigueTrend: 'stable',
     });
@@ -104,7 +164,36 @@ describe('coach message adaptation', () => {
     expect(recommended?.id.startsWith('easier_')).toBe(true);
   });
 
-  it('applies skip and move decisions to the real planned session', () => {
+  it('builds a direct shorter-bike proposal from the same adjustment engine', () => {
+    const bike = enduranceSession('bike', { durationMinutes: 75, intensity: 'hard', keySession: true, priority: 'required' });
+    const proposal = buildCoachMessageAdaptation({
+      message: 'I only have 30 minutes for my bike ride.',
+      session: bike,
+      weekSessions: [bike],
+      availableDates: ['2026-08-11', '2026-08-12'],
+      availableDisciplines: ['swim', 'bike', 'run', 'strength', 'mobility'],
+    });
+
+    const recommended = proposal.adjustment.options.find((option) => option.id === proposal.adjustment.recommendedOptionId);
+    expect(proposal.interpretation.targetDiscipline).toBe('bike');
+    expect(recommended?.action).toBe('modify');
+    expect(recommended?.durationMinutes).toBe(30);
+  });
+
+  it('can propose a safe replacement when swim access disappears', () => {
+    const swim = enduranceSession('swim');
+    const proposal = buildCoachMessageAdaptation({
+      message: 'The pool is closed and I cannot swim.',
+      session: swim,
+      weekSessions: [swim],
+      availableDates: ['2026-08-11', '2026-08-12'],
+      availableDisciplines: ['bike', 'run', 'strength', 'mobility'],
+    });
+
+    expect(proposal.adjustment.options.some((option) => option.action === 'replace' || option.action === 'move')).toBe(true);
+  });
+
+  it('applies skip and move decisions to the real planned strength session', () => {
     const session = strengthSession();
     const skipped = applyCoachStrengthAdjustment(session, {
       id: 'skip_strength-1',
