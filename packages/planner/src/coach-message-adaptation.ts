@@ -55,6 +55,9 @@ export interface BuildCoachMessageAdaptationInput {
   weekSessions: UnifiedTrainingSession[];
   availableDates: string[];
   availableDisciplines?: UnifiedDiscipline[];
+  interpretation?: CoachMessageInterpretation;
+  preferredTargetDate?: string;
+  preferredReplacementDiscipline?: UnifiedDiscipline;
   recentFatigueTrend?: 'stable' | 'worsening' | 'improving';
   recentBoneStress?: boolean;
   returnToRun?: boolean;
@@ -239,13 +242,15 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
 }
 
 export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationInput): CoachMessageAdaptation {
-  const interpretation = interpretCoachMessage(input.message, input.quickSignal);
+  const interpretation = input.interpretation ?? interpretCoachMessage(input.message, input.quickSignal);
   const request: SessionAdjustmentRequest = {
     sessionId: input.session.id,
     reason: interpretation.reason,
     requestedAction: interpretation.requestedAction,
     availableMinutes: interpretation.availableMinutes,
     availableDisciplines: input.availableDisciplines,
+    preferredTargetDate: input.preferredTargetDate,
+    preferredReplacementDiscipline: input.preferredReplacementDiscipline,
     fatigueKind: interpretation.fatigueKind,
     symptomSeverity: interpretation.symptomSeverity,
     focalPain: interpretation.focalPain,
