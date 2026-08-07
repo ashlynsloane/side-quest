@@ -10,6 +10,8 @@ export interface SessionAdjustmentRequest {
   requestedAction: RequestedAdjustment;
   availableMinutes?: number;
   availableDisciplines?: UnifiedDiscipline[];
+  preferredTargetDate?: string;
+  preferredReplacementDiscipline?: UnifiedDiscipline;
   fatigueKind?: FatigueKind;
   symptomSeverity?: 0 | 1 | 2 | 3 | 4 | 5;
   focalPain?: boolean;
@@ -85,11 +87,16 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
   }
 
   if (request.reason === 'access' || request.reason === 'weather' || request.requestedAction === 'different') {
-    const replacement = chooseReplacement(session, request.availableDisciplines ?? [], context);
+    const replacement = chooseReplacement(
+      session,
+      request.availableDisciplines ?? [],
+      context,
+      request.preferredReplacementDiscipline,
+    );
     if (replacement) options.push(replacement);
   }
 
-  const move = chooseMove(session, context);
+  const move = chooseMove(session, context, request.preferredTargetDate);
   if (move) options.push(move);
   options.push(skipOption(session, session.priority === 'optional' || request.athletePrefersRecovery ? 'recommended' : 'acceptable', [
     session.priority === 'optional'
@@ -150,53 +157,97 @@ function easierOption(session: UnifiedTrainingSession, context: AdjustmentContex
   };
 }
 
-function chooseReplacement(session: UnifiedTrainingSession, available: UnifiedDiscipline[], context: AdjustmentContext): AdjustmentOption | null {
+function chooseReplacement(
+  session: UnifiedTrainingSession,
+  available: UnifiedDiscipline[],
+  context: AdjustmentContext,
+  preferred?: UnifiedDiscipline,
+): AdjustmentOption | null {
   const candidates = available.filter((discipline) => discipline !== session.discipline && discipline !== 'rest');
-  const safe = candidates.find((discipline) => {
-    if ((context.returnToRun || context.recentBoneStress) && discipline === 'run') return false;
-    if (session.lowerBodyDemand === 'high' && (discipline === 'run' || discipline === 'strength')) return false;
-    return true;
-  });
+  const ordered = preferred && candidates.includes(preferred)
+    ? [preferred, ...candidates.filter((discipline) => discipline !== preferred)]
+    : candidates;
+  const safe = ordered.find((discipline) => isSafeReplacement(session, discipline, context));
   if (!safe) return null;
+  const honoredPreference = preferred === safe;
   return {
     id: `replace_${session.id}_${safe}`,
     action: 'replace',
     recommendationLevel: session.priority === 'optional' ? 'acceptable' : 'not_recommended',
     title: `Replace with easy ${safe}`,
-    description: `Use a low-load ${safe} session because the planned ${session.discipline} environment is unavailable.`,
+    description: honoredPreference
+      ? `Use an easy ${safe} session because it fits the athlete’s preference without violating the current recovery constraints.`
+      : `Use a low-load ${safe} session because the planned ${session.discipline} environment or preference no longer fits the week.`,
     replacementDiscipline: safe,
     durationMinutes: Math.min(45, session.durationMinutes),
-    rationale: ['The replacement should not imitate the missing session by adding extra intensity.', 'A different sport is only useful when it does not overload the same tissues or compromise the week’s key work.'],
+    rationale: [
+      honoredPreference
+        ? `The requested ${safe} replacement was checked against the rest of the week before being offered.`
+        : 'The requested replacement was unavailable or conflicted with current load constraints, so the planner selected the safest available alternative.',
+      'A replacement should not imitate the missing session by adding extra intensity.',
+      'A different sport is only useful when it does not overload the same tissues or compromise the week’s key work.',
+    ],
     weeklyConsequences: [`${session.discipline} frequency decreases unless the original session is moved.`, `${safe} volume increases modestly without adding a new hard day.`],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
     requiresApproval: session.keySession,
-    confidence: 'moderate',
+    confidence: honoredPreference ? 'high' : 'moderate',
   };
 }
 
-function chooseMove(session: UnifiedTrainingSession, context: AdjustmentContext): AdjustmentOption | null {
+function isSafeReplacement(
+  session: UnifiedTrainingSession,
+  discipline: UnifiedDiscipline,
+  context: AdjustmentContext,
+): boolean {
+  if ((context.returnToRun || context.recentBoneStress) && discipline === 'run') return false;
+  if (session.lowerBodyDemand === 'high' && (discipline === 'run' || discipline === 'strength')) return false;
+  return discipline !== 'rest';
+}
+
+function chooseMove(
+  session: UnifiedTrainingSession,
+  context: AdjustmentContext,
+  preferredTargetDate?: string,
+): AdjustmentOption | null {
   const occupiedHardDates = new Set(context.weekSessions.filter((item) => item.id !== session.id && (item.intensity === 'hard' || item.recoveryCost >= 4)).map((item) => item.date));
   const impactDates = new Set(context.weekSessions.filter((item) => item.id !== session.id && item.impact !== 'none').map((item) => item.date));
-  const target = context.availableDates.find((date) => {
-    if (date === session.date || occupiedHardDates.has(date)) return false;
+  const available = [...new Set(context.availableDates)].filter((date) => date !== session.date);
+  const ordered = preferredTargetDate && available.includes(preferredTargetDate)
+    ? [preferredTargetDate, ...available.filter((date) => date !== preferredTargetDate)]
+    : available;
+  const isSafeDate = (date: string) => {
+    if (occupiedHardDates.has(date)) return false;
     if ((context.returnToRun || context.recentBoneStress) && session.impact !== 'none' && impactDates.has(date)) return false;
     return true;
-  });
+  };
+  const target = ordered.find(isSafeDate);
   if (!target) return null;
+  const honoredPreference = target === preferredTargetDate;
   return {
     id: `move_${session.id}_${target}`,
     action: 'move',
     recommendationLevel: session.keySession ? 'recommended' : 'acceptable',
     title: `Move to ${target}`,
-    description: 'Preserve the original session without creating another hard or impact-heavy day.',
+    description: honoredPreference
+      ? 'The requested date fits the week without creating another hard or impact-heavy cluster.'
+      : preferredTargetDate
+        ? 'The requested date conflicts with the current recovery spacing, so this is the cleaner alternative.'
+        : 'Preserve the original session without creating another hard or impact-heavy day.',
     targetDate: target,
-    rationale: ['Key objectives should be moved only when the new placement is physiologically cleaner than forcing them today.', 'Optional work is dropped before key work is compressed.'],
+    rationale: [
+      honoredPreference
+        ? 'The requested date was checked against hard-session and impact spacing.'
+        : preferredTargetDate
+          ? `The requested date (${preferredTargetDate}) was not used because it did not fit the current spacing constraints.`
+          : 'Key objectives should be moved only when the new placement is physiologically cleaner than forcing them today.',
+      'Optional work is dropped before key work is compressed.',
+    ],
     weeklyConsequences: ['Weekly training dose is preserved.', 'The surrounding sessions should be revalidated after the move.'],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
     requiresApproval: true,
-    confidence: 'moderate',
+    confidence: honoredPreference ? 'high' : 'moderate',
   };
 }
 
@@ -219,6 +270,8 @@ function skipOption(session: UnifiedTrainingSession, level: AdjustmentOption['re
 function selectRecommended(options: AdjustmentOption[], request: SessionAdjustmentRequest, context: AdjustmentContext): AdjustmentOption {
   if (request.athletePrefersRecovery || context.recentFatigueTrend === 'worsening') return options.find((item) => item.action === 'skip' || item.id.startsWith('easier_')) ?? options[0]!;
   if (request.reason === 'time') return options.find((item) => item.action === 'modify' && item.id.startsWith('shorten_')) ?? options[0]!;
+  if (request.requestedAction === 'move') return options.find((item) => item.action === 'move') ?? options[0]!;
+  if (request.requestedAction === 'different' && request.preferredReplacementDiscipline) return options.find((item) => item.action === 'replace') ?? options[0]!;
   if (request.reason === 'access' || request.reason === 'weather') return options.find((item) => item.action === 'move') ?? options.find((item) => item.action === 'replace') ?? options[0]!;
   if (request.reason === 'fatigue') return options.find((item) => item.id.startsWith('easier_')) ?? options.find((item) => item.action === 'skip') ?? options[0]!;
   return options[0]!;
