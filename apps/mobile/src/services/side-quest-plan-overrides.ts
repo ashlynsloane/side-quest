@@ -46,6 +46,10 @@ export function clearSideQuestPlanSessionOverride(eventId: string): void {
   Storage.setItemSync(OVERRIDES_KEY, JSON.stringify(next));
 }
 
+export function clearAllSideQuestPlanSessionOverrides(): void {
+  Storage.setItemSync(OVERRIDES_KEY, JSON.stringify([]));
+}
+
 export function resolveSideQuestPlanOverrideEvent(
   override: SideQuestPlanSessionOverride,
 ): TrainingCalendarEvent | null {
