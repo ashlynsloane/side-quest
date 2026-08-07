@@ -25,9 +25,10 @@ export function buildCoachOperatingInbox(input: {
   now?: string;
 }): CoachOperatingInboxItem[] {
   const now = input.now ?? new Date().toISOString();
+  const nowMs = new Date(now).getTime();
   const items: CoachOperatingInboxItem[] = [];
   const pain = loadPainContextObservations();
-  const recentCutoff = new Date(new Date(now).getTime() - 14 * 86_400_000).toISOString();
+  const recentCutoff = new Date(nowMs - 14 * 86_400_000).toISOString();
   const injuryLike = pain.filter((item) =>
     item.occurredAt >= recentCutoff
     && (item.kind === 'focal_musculoskeletal' || item.kind === 'unknown')
@@ -41,12 +42,16 @@ export function buildCoachOperatingInbox(input: {
   for (const [key, observations] of grouped) {
     if (observations.length < 2) continue;
     const latest = [...observations].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0]!;
+    const ageHours = (nowMs - new Date(latest.occurredAt).getTime()) / 3_600_000;
+    const activeProtectionWindow = Number.isFinite(ageHours) && ageHours >= 0 && ageHours <= 72;
     items.push({
       id: `repeated-pain:${key}`,
-      level: 'protection',
-      title: 'A repeated function-limiting symptom needs attention.',
-      body: `${observations.length} recent ${latest.discipline ?? 'training'} observations affected ${latest.affectedArea.replaceAll('_', ' ')} function. Progression should stay conservative until normal tolerance is clearer.`,
-      reason: 'Repeated functional interruption carries more weight than a single numeric pain score.',
+      level: activeProtectionWindow ? 'protection' : 'suggestion',
+      title: activeProtectionWindow
+        ? 'A repeated function-limiting symptom needs attention.'
+        : 'A recent repeated symptom pattern is worth reviewing.',
+      body: `${observations.length} recent ${latest.discipline ?? 'training'} observations affected ${latest.affectedArea.replaceAll('_', ' ')} function. ${activeProtectionWindow ? 'Progression should stay conservative until normal tolerance is clearer.' : 'Use this history as context if the same symptom returns; do not treat an older alert as proof of a current restriction.'}`,
+      reason: 'Repeated functional interruption carries more weight than a single numeric pain score, but alert severity should decay when there is no new event.',
       actionable: true,
     });
   }
@@ -76,6 +81,15 @@ export function buildCoachOperatingInbox(input: {
       reason: 'Observed execution is useful context, but it does not tell Side Quest whether symptoms felt better or worse.',
       actionable: true,
     });
+  } else if (latestObserved?.execution.status === 'different_session') {
+    items.push({
+      id: `observed:${latestObserved.interventionId}`,
+      level: 'suggestion',
+      title: 'A different workout happened instead of the Coach-adjusted session.',
+      body: latestObserved.execution.evidence.join(' '),
+      reason: 'Side Quest should re-evaluate the remaining week rather than assume the original adjustment was completed.',
+      actionable: true,
+    });
   } else if (latestObserved?.execution.status === 'followed') {
     items.push({
       id: `observed:${latestObserved.interventionId}`,
@@ -95,6 +109,17 @@ export function buildCoachOperatingInbox(input: {
       title: cue.headline,
       body: cue.body,
       reason: cue.evidence,
+      actionable: false,
+    });
+  }
+
+  if (!items.length && input.block) {
+    items.push({
+      id: 'no-current-attention',
+      level: 'info',
+      title: 'No current coaching alert.',
+      body: 'Side Quest does not see a due follow-up, repeated recent functional warning, observed Coach overshoot, or obvious high-cost schedule conflict right now.',
+      reason: 'This reflects only the training information available to the app; it is not a medical clearance or a guarantee that recovery is complete.',
       actionable: false,
     });
   }
