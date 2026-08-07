@@ -34,7 +34,7 @@ export interface MultisportPreferences {
 export interface MultisportHealthConstraints {
   runStatus: 'normal' | 'reduced' | 'return_to_run' | 'not_running';
   boneStressInjuryHistory?: 'none' | 'remote' | 'recent_or_current';
-  maxHardDaysPerWeek?: 2 | 3 | 4;
+  maxHardDaysPerWeek?: 1 | 2 | 3 | 4;
   maxStrengthDaysPerWeek?: 1 | 2 | 3 | 4;
   avoidImpact?: boolean;
 }
