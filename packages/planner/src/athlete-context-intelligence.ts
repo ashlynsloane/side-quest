@@ -280,12 +280,12 @@ export function evaluateProtectiveTrainingRequest(input: ProtectiveTrainingReque
     .map((event) => ({ event, ageHours: (now - new Date(event.occurredAt).getTime()) / 3_600_000 }))
     .filter(({ ageHours }) => ageHours >= 0 && ageHours <= 48)
     .map(({ event }) => ({ event, assessment: assessPainContext(event) }))
-    .filter(({ assessment }) => assessment.level === 'protect' || assessment.report.stoppedSession)
+    .filter(({ assessment }) => isInjuryLikePainKind(assessment.report.kind) && (assessment.level === 'protect' || assessment.report.stoppedSession))
     .sort((left, right) => new Date(right.event.occurredAt).getTime() - new Date(left.event.occurredAt).getTime());
 
   const trigger = recent[0];
   if (!trigger) {
-    return { action: 'allow', confidence: 'moderate', explanations: ['No recent function-limiting pain event conflicts with the requested training load.'] };
+    return { action: 'allow', confidence: 'moderate', explanations: ['No recent function-limiting injury-like pain event conflicts with the requested training load.'] };
   }
 
   const requestIsEscalation = Boolean(
@@ -295,8 +295,7 @@ export function evaluateProtectiveTrainingRequest(input: ProtectiveTrainingReque
     || input.requestedIntensity === 'max'
     || (input.requestedDurationMinutes ?? 0) >= 120,
   );
-  const lowerBodyRequest = input.requestedDiscipline === 'bike' || input.requestedDiscipline === 'run' || input.requestedDiscipline === 'strength';
-  const lowerBodyPain = trigger.event.affectedArea === 'lower_body';
+  const loadsAffectedArea = requestLoadsAffectedArea(input.requestedDiscipline, trigger.event.affectedArea);
   const explanations = [
     `A recent ${trigger.event.kind.replaceAll('_', ' ')} symptom changed or stopped training within the last 48 hours.`,
   ];
@@ -304,7 +303,7 @@ export function evaluateProtectiveTrainingRequest(input: ProtectiveTrainingReque
   if (input.compensatoryTrainingIntent) explanations.push('The requested session appears partly compensatory; missed training should not be repaid with a larger load before the limiting symptom has been re-evaluated.');
   if (input.headspace && input.headspace !== 'neutral') explanations.push(`Current ${input.headspace} headspace is acknowledged, but emotion does not override the recent functional training signal.`);
 
-  if (requestIsEscalation && (!lowerBodyPain || lowerBodyRequest)) {
+  if (requestIsEscalation && (loadsAffectedArea || input.compensatoryTrainingIntent || trigger.event.affectedArea === 'general')) {
     explanations.push('A long or hard escalation immediately after function-limiting pain adds load before there is evidence that normal training tolerance has returned.');
     return {
       action: 'protect',
@@ -312,6 +311,16 @@ export function evaluateProtectiveTrainingRequest(input: ProtectiveTrainingReque
       recentPainEventId: trigger.event.id,
       maximumSuggestedDurationMinutes: 45,
       maximumSuggestedIntensity: 'easy',
+      explanations,
+    };
+  }
+
+  if (!loadsAffectedArea && trigger.event.affectedArea !== 'general') {
+    explanations.push('The requested discipline does not meaningfully load the affected area, so low-load cross-training can remain available; this is not evidence that the injured area is ready for progression.');
+    return {
+      action: 'allow',
+      confidence: 'moderate',
+      recentPainEventId: trigger.event.id,
       explanations,
     };
   }
@@ -325,6 +334,20 @@ export function evaluateProtectiveTrainingRequest(input: ProtectiveTrainingReque
     maximumSuggestedIntensity: 'moderate',
     explanations,
   };
+}
+
+function isInjuryLikePainKind(kind: PainExperienceKind): boolean {
+  return kind === 'focal_musculoskeletal' || kind === 'systemic' || kind === 'unknown';
+}
+
+function requestLoadsAffectedArea(
+  discipline: ProtectiveTrainingRequestInput['requestedDiscipline'],
+  area: PainContextReport['affectedArea'],
+): boolean {
+  if (!discipline || area === 'general' || area === 'unknown') return true;
+  if (area === 'lower_body') return discipline === 'run' || discipline === 'bike' || discipline === 'strength';
+  if (area === 'upper_body') return discipline === 'swim' || discipline === 'strength';
+  return true;
 }
 
 function parsePainContext(text: string, menstrual?: MenstrualContextSignal): PainContextReport | undefined {
