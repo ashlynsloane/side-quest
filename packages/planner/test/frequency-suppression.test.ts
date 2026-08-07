@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyApprovedFrequencySuppression } from '../src/frequency-suppression';
+import type { UnifiedTrainingSession } from '../src/unified-training';
+import { buildWholeAthleteWeek } from '../src/whole-athlete-week';
+
+function bikeSession(id: string, date: string): UnifiedTrainingSession {
+  return {
+    id,
+    date,
+    title: 'Easy bike',
+    discipline: 'bike',
+    durationMinutes: 45,
+    intensity: 'easy',
+    cardiovascularDemand: 'low',
+    musculoskeletalDemand: 'low',
+    lowerBodyDemand: 'moderate',
+    upperBodyDemand: 'none',
+    impact: 'none',
+    technicalDemand: 'moderate',
+    recoveryCost: 1,
+    priority: 'required',
+    source: 'manual',
+    keySession: false,
+  };
+}
 
 describe('approved frequency suppression', () => {
   it('prevents an athlete-approved skipped session from being silently recreated', () => {
@@ -33,5 +56,29 @@ describe('approved frequency suppression', () => {
     );
 
     expect(result.run).toEqual({ min: 0, preferred: 0, max: 0 });
+  });
+
+  it('flows the reduced target into the whole-athlete generator without backfilling the skipped ride', () => {
+    const frequencyTargets = applyApprovedFrequencySuppression(
+      {},
+      { bike: 3 },
+      { bike: 1 },
+    );
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 600,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      fixedSessions: [bikeSession('kept-bike', '2026-08-11')],
+      frequencyTargets,
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'low',
+      },
+    });
+
+    expect(plan.sessions.filter((session) => session.discipline === 'bike')).toHaveLength(2);
+    expect(plan.disciplineSummary.find((summary) => summary.discipline === 'bike')?.targetPreferred).toBe(2);
   });
 });
