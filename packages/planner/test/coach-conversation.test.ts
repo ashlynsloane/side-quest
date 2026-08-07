@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveCoachConversationMessage } from '../src/coach-conversation';
 import { buildDailyAdjustmentOptions } from '../src/daily-adjustment';
-import { interpretCoachMessage } from '../src/coach-message-adaptation';
+import { buildCoachMessageAdaptation, interpretCoachMessage } from '../src/coach-message-adaptation';
 import type { UnifiedTrainingSession } from '../src/unified-training';
 
 function session(overrides: Partial<UnifiedTrainingSession> = {}): UnifiedTrainingSession {
@@ -173,5 +173,29 @@ describe('coach conversation resolver', () => {
     const replacement = result.options.find((option) => option.action === 'replace');
     expect(replacement?.replacementDiscipline).toBe('swim');
     expect(result.recommendedOptionId).toBe(replacement?.id);
+  });
+
+  it('passes resolved follow-up context through the adaptation builder', () => {
+    const planned = session({ lowerBodyDemand: 'moderate' });
+    const previous = interpretCoachMessage('My bike workout does not fit today.');
+    const resolution = resolveCoachConversationMessage('Move it to Friday instead.', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: planned.date,
+      referenceDate: '2026-08-10',
+    });
+    const adaptation = buildCoachMessageAdaptation({
+      message: 'Move it to Friday instead.',
+      session: planned,
+      weekSessions: [planned],
+      availableDates: ['2026-08-13', '2026-08-14', '2026-08-15'],
+      interpretation: resolution.interpretation,
+      preferredTargetDate: resolution.preferredTargetDate,
+      recentFatigueTrend: resolution.recentFatigueTrend,
+    });
+
+    const move = adaptation.adjustment.options.find((option) => option.action === 'move');
+    expect(move?.targetDate).toBe('2026-08-14');
+    expect(adaptation.adjustment.recommendedOptionId).toBe(move?.id);
   });
 });
