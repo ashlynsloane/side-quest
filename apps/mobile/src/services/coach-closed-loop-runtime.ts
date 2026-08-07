@@ -140,8 +140,8 @@ export async function applyCoachMessageProposalClosedLoop(
   return { ...applied, intervention, decisionExplanation };
 }
 
-export function loadCoachClosedLoopDashboard(): CoachClosedLoopSummary {
-  return getCoachClosedLoopSummary();
+export function loadCoachClosedLoopDashboard(blockId?: string): CoachClosedLoopSummary {
+  return getCoachClosedLoopSummary(new Date().toISOString(), blockId);
 }
 
 export async function answerCoachFollowUp(
@@ -161,17 +161,16 @@ export async function answerCoachFollowUp(
   if (saved?.block) {
     appendCoachConversationTurn(loadCoachConversationState(saved.block.id), 'coach', 'follow_up', responseText);
   }
-  return { message: responseText, summary: getCoachClosedLoopSummary() };
+  return { message: responseText, summary: getCoachClosedLoopSummary(new Date().toISOString(), saved?.block.id) };
 }
 
 export async function undoLatestCoachIntervention(): Promise<CoachUndoResult> {
-  const summary = getCoachClosedLoopSummary();
-  const intervention = summary.latestUndoable;
-  if (!intervention) throw new Error('There is no applied coach change available to undo.');
   const saved = await getLatestTrainingBlock();
   const block = saved?.block;
   if (!block) throw new Error('The active training plan is no longer available.');
-  if (intervention.blockId !== block.id) throw new Error('The latest coach change belongs to an older training block and cannot be undone into the current plan.');
+  const summary = getCoachClosedLoopSummary(new Date().toISOString(), block.id);
+  const intervention = summary.latestUndoable;
+  if (!intervention) throw new Error('There is no applied coach change available to undo in the current training block.');
 
   let rollback: (() => Promise<void>) | undefined;
   if (intervention.target.targetKind === 'strength') {
