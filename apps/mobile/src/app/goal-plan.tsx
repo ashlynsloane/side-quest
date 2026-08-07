@@ -27,11 +27,11 @@ function useCanonicalWholeAthletePlan(): void {
         const saved = await getLatestTrainingBlock();
         const signature = blockSignature(saved?.block ?? null);
         if (lastSignature.current === signature) return;
-        lastSignature.current = signature;
         await refreshLatestWholeAthletePlan();
+        if (live) lastSignature.current = signature;
       } catch {
-        // The setup screen owns generation errors. Canonical planning retries on the
-        // next block change, Plan focus, or integration refresh.
+        // Keep the old signature so the next interval retries the canonical rebuild.
+        // The setup screen continues to own user-facing strength-plan errors.
       } finally {
         checking = false;
       }
