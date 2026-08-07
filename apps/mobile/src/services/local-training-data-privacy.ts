@@ -2,6 +2,7 @@ import Storage from 'expo-sqlite/kv-store';
 
 import { ACTIVE_WORKOUT_INDEX_KEY } from './active-workout-persistence';
 import { clearPainContextMemory } from './athlete-context-memory';
+import { clearCoachClosedLoopState, exportCoachClosedLoopState } from './coach-closed-loop-state';
 import { clearCoachConversationState } from './coach-conversation-state';
 import { clearAllSideQuestPlanSessionOverrides } from './side-quest-plan-overrides';
 import { clearWholeAthleteHealthPreferences } from './whole-athlete-plan-runtime';
@@ -16,6 +17,7 @@ export function exportLocalTrainingKeyValueData(): Record<string, unknown> {
   const activeWorkoutStorageKey = Storage.getItemSync(ACTIVE_WORKOUT_INDEX_KEY);
   return {
     coachConversation: parseStored(COACH_CONVERSATION_KEY),
+    coachClosedLoop: exportCoachClosedLoopState(),
     structuredPainContext: parseStored(PAIN_MEMORY_KEY),
     generatedPlanOverrides: parseStored(PLAN_OVERRIDES_KEY),
     wholeAthleteHealthPreferences: parseStored(HEALTH_PREFERENCES_KEY),
@@ -30,6 +32,7 @@ export function clearLocalTrainingKeyValueData(): void {
   Storage.removeItemSync(ACTIVE_WORKOUT_INDEX_KEY);
   Storage.removeItemSync(LIVE_WORKOUT_KEY);
   clearCoachConversationState();
+  clearCoachClosedLoopState();
   clearPainContextMemory();
   clearAllSideQuestPlanSessionOverrides();
   clearWholeAthleteHealthPreferences();
