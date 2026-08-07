@@ -39,6 +39,16 @@ describe('athlete context intelligence', () => {
     expect(assessment.explanations.some((line) => line.includes('session to stop'))).toBe(true);
   });
 
+  it('protects explicit bone-stress context without needing high pain or the literal word pain', () => {
+    const report = interpretAthleteContextMessage('I have a stress fracture in my foot and it is 4/10.').pain!;
+    const assessment = assessPainContext(report);
+
+    expect(report.kind).toBe('focal_musculoskeletal');
+    expect(report.score0to10).toBe(4);
+    expect(report.signals).toContain('Bone-stress/fracture context');
+    expect(assessment.level).toBe('protect');
+  });
+
   it('does not classify familiar non-limiting menstrual pain as a focal musculoskeletal injury signal', () => {
     const context = interpretAthleteContextMessage('My period cramps are 7/10 today but I can train; I would rather ride easier indoors.');
     const assessment = assessPainContext(context.pain!);
@@ -161,7 +171,7 @@ describe('athlete context intelligence', () => {
     expect(decision.explanations.some((line) => line.includes('frustrated'))).toBe(true);
   });
 
-  it('holds progression after a recent pain interruption even when the next request is not an extreme workout', () => {
+  it('holds progression after a recent lower-body pain interruption when the next session loads the same area', () => {
     const decision = evaluateProtectiveTrainingRequest({
       now: '2026-08-08T12:00:00.000Z',
       recentPain: [observation({ occurredAt: '2026-08-07T12:00:00.000Z' })],
@@ -171,5 +181,39 @@ describe('athlete context intelligence', () => {
 
     expect(decision.action).toBe('hold_escalation');
     expect(decision.maximumSuggestedIntensity).toBe('moderate');
+  });
+
+  it('keeps low-load cross-training available when it does not meaningfully load the affected area', () => {
+    const decision = evaluateProtectiveTrainingRequest({
+      now: '2026-08-08T12:00:00.000Z',
+      recentPain: [observation({ occurredAt: '2026-08-07T12:00:00.000Z', affectedArea: 'lower_body' })],
+      requestedDiscipline: 'swim',
+      requestedIntensity: 'easy',
+      requestedDurationMinutes: 40,
+    });
+
+    expect(decision.action).toBe('allow');
+    expect(decision.explanations.some((line) => line.includes('cross-training'))).toBe(true);
+  });
+
+  it('does not route menstrual symptoms through the recent injury-like pain escalation guard', () => {
+    const menstrual = observation({
+      id: 'cycle-1',
+      kind: 'menstrual',
+      focal: false,
+      newOrUnfamiliar: false,
+      functionalInterference: 'stopped_session',
+      affectedArea: 'general',
+      stoppedSession: true,
+      score0to10: 7,
+    });
+    const decision = evaluateProtectiveTrainingRequest({
+      now: '2026-08-08T12:00:00.000Z',
+      recentPain: [menstrual],
+      requestedDiscipline: 'bike',
+      requestedIntensity: 'moderate',
+    });
+
+    expect(decision.action).toBe('allow');
   });
 });
