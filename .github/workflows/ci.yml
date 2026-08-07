@@ -1,0 +1,36 @@
+name: Side Quest CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - sq2-experience-rebuild
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck planner
+        run: pnpm --dir packages/planner typecheck
+
+      - name: Test planner
+        run: pnpm --dir packages/planner test
+
+      - name: Typecheck mobile
+        run: pnpm --dir apps/mobile typecheck
