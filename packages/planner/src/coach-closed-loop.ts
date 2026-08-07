@@ -92,8 +92,7 @@ export function buildCoachDecisionExplanation(input: {
   const protection = input.protectiveDecision?.action === 'protect'
     || input.adaptation.painAssessment?.level === 'protect'
     || Boolean(input.adaptation.adjustment.safetyMessage);
-  const adaptation = input.option.action !== 'keep' || input.adaptation.interpretation.reason !== 'other';
-  const tier: CoachExplanationTier = protection ? 'protection' : adaptation ? 'adaptation' : 'normal';
+  const tier: CoachExplanationTier = protection ? 'protection' : 'adaptation';
   const interpretation = input.adaptation.interpretation;
   const pain = interpretation.painContext;
   const whatChanged = pain?.stoppedSession
@@ -118,9 +117,7 @@ export function buildCoachDecisionExplanation(input: {
     tier,
     headline: tier === 'protection'
       ? 'Protect the next decision, not the missed workout.'
-      : tier === 'adaptation'
-        ? 'Adjust today without breaking the week.'
-        : 'The original plan still fits.',
+      : 'Adjust today without breaking the week.',
     whatChanged,
     whyThis,
     protecting,
