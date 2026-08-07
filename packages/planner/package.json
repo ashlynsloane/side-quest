@@ -10,6 +10,7 @@
     "./multisport-governance": "./src/multisport-governance.ts",
     "./endurance-prescription": "./src/endurance-prescription.ts",
     "./coach-message-adaptation": "./src/coach-message-adaptation.ts",
+    "./coach-conversation": "./src/coach-conversation.ts",
     "./frequency-suppression": "./src/frequency-suppression.ts"
   },
   "dependencies": {
