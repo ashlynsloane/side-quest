@@ -93,11 +93,13 @@ export async function generateAndPersistWholeAthleteBlock(
       .filter((event) => event.startAt.slice(0, 10) >= week.weekStartDate && event.startAt.slice(0, 10) <= weekEnd)
       .filter(isTrainingCalendarCommitment)
       .map((event) => ({ ...normalizeCalendarEvent(event), priority: 'required' as const }));
-    const fixedStrength = week.sessions.map((session) => ({
-      ...normalizeStrengthSession(session),
-      priority: 'required' as const,
-      keySession: session.intendedLoad === 'high',
-    }));
+    const fixedStrength = week.sessions
+      .filter((session) => session.completionStatus !== 'skipped')
+      .map((session) => ({
+        ...normalizeStrengthSession(session),
+        priority: 'required' as const,
+        keySession: session.intendedLoad === 'high',
+      }));
 
     const strengthCount = fixedStrength.length;
     const weekFrequencyTargets = {
