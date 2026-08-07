@@ -76,7 +76,9 @@ export function resolveCoachConversationMessage(
     if (previousWasSafety && (lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening)) {
       interpretation = {
         ...previous,
-        targetDiscipline: fresh.targetDiscipline ?? previous.targetDiscipline,
+        targetDiscipline: explicitReplacement
+          ? previous.targetDiscipline
+          : fresh.targetDiscipline ?? previous.targetDiscipline,
         signals: unique([...previous.signals, ...fresh.signals.filter((signal) => signal !== 'General workout preference')]),
         confidence: previous.confidence === 'high' ? 'high' : 'moderate',
         summary: previous.summary,
@@ -95,7 +97,7 @@ export function resolveCoachConversationMessage(
   if (symptomResolved && previous && (previous.reason === 'pain' || previous.reason === 'illness')) {
     interpretation = {
       ...fresh,
-      reason: explicitMove ? 'preference' : explicitDuration ? 'time' : explicitReplacement ? 'preference' : 'preference',
+      reason: explicitDuration ? 'time' : 'preference',
       requestedAction: explicitMove ? 'move' : explicitDuration ? 'shorter' : explicitReplacement ? 'different' : 'different',
       focalPain: undefined,
       symptomSeverity: undefined,
@@ -128,7 +130,7 @@ export function resolveCoachConversationMessage(
         reason: interpretation.reason === 'fatigue' ? interpretation.reason : 'preference',
         requestedAction: 'different',
         signals: unique([
-          ...interpretation.signals,
+          ...interpretation.signals.filter((signal) => !signal.startsWith('Targets ')),
           preferredReplacementDiscipline ? `Prefers ${preferredReplacementDiscipline}` : 'Prefers a different session',
         ]),
         summary: preferredReplacementDiscipline
@@ -151,14 +153,16 @@ export function resolveCoachConversationMessage(
     }
   }
 
-  const targetDiscipline = fresh.targetDiscipline
-    ?? interpretation.targetDiscipline
-    ?? context.previousTargetDiscipline;
+  const targetDiscipline = explicitReplacement && context.previousTargetDiscipline
+    ? context.previousTargetDiscipline
+    : fresh.targetDiscipline
+      ?? interpretation.targetDiscipline
+      ?? context.previousTargetDiscipline;
   interpretation = { ...interpretation, targetDiscipline };
 
   const keepPriorTarget = Boolean(
     context.previousTargetDiscipline
-    && !fresh.targetDiscipline
+    && (explicitReplacement || !fresh.targetDiscipline)
     && (previous || lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening || improving),
   );
 
@@ -214,11 +218,11 @@ function mergeFatigueFollowUp(
     ...copyDefinedFatigueFields(fresh),
     requestedAction,
     availableMinutes: fresh.availableMinutes ?? previous.availableMinutes,
-    targetDiscipline: fresh.targetDiscipline ?? previous.targetDiscipline,
+    targetDiscipline: flags.explicitReplacement ? previous.targetDiscipline : fresh.targetDiscipline ?? previous.targetDiscipline,
     confidence: flags.worsening ? 'high' : previous.confidence,
     signals: unique([
       ...previous.signals,
-      ...fresh.signals.filter((signal) => signal !== 'General workout preference'),
+      ...fresh.signals.filter((signal) => signal !== 'General workout preference' && !(flags.explicitReplacement && signal.startsWith('Targets '))),
       ...(flags.worsening ? ['Worsening fatigue'] : []),
       ...(flags.improving ? ['Improving fatigue'] : []),
     ]),
