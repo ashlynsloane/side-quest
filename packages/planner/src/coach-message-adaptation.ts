@@ -325,7 +325,7 @@ export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationIn
     athletePrefersRecovery: interpretation.athletePrefersRecovery,
   };
 
-  const adjustment = buildDailyAdjustmentOptions(request, {
+  const baseAdjustment = buildDailyAdjustmentOptions(request, {
     plannedSession: input.session,
     weekSessions: input.weekSessions,
     availableDates: input.availableDates,
@@ -333,6 +333,7 @@ export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationIn
     recentBoneStress: input.recentBoneStress,
     returnToRun: input.returnToRun,
   });
+  const adjustment = applyMenstrualPreferences(baseAdjustment, input.session, interpretation);
 
   return {
     message: input.message?.trim() ?? '',
@@ -375,7 +376,7 @@ export function applyCoachStrengthAdjustment(
   const currentMinutes = Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60));
   const requestedMinutes = option.durationMinutes ?? currentMinutes;
   const level = requestedMinutes <= currentMinutes * 0.55 ? 'minimum' : 'reduced';
-  const easier = option.id.startsWith('easier_');
+  const easier = option.id.startsWith('easier_') || option.id.startsWith('cycle_');
   const workout = createWorkoutVariant(session.workout, level);
 
   return {
@@ -385,6 +386,105 @@ export function applyCoachStrengthAdjustment(
     completionStatus: 'modified',
     rationale: appendText(session.rationale, option.description),
     placementNote: appendText(session.placementNote, note),
+  };
+}
+
+function applyMenstrualPreferences(
+  result: DailyAdjustmentResult,
+  session: UnifiedTrainingSession,
+  interpretation: CoachMessageInterpretation,
+): DailyAdjustmentResult {
+  const cycle = interpretation.menstrualContext;
+  if (!cycle?.active || result.options.length === 0 || result.safetyMessage?.startsWith('Stop the incompatible')) return result;
+  const preferences = cycle.preferredAdjustments;
+
+  if (preferences.includes('rest')) {
+    const skip = result.options.find((option) => option.action === 'skip');
+    if (skip) return recommendOption(result, skip, 'Current cycle symptoms make rest the athlete’s stated preference.');
+  }
+
+  if (session.discipline === 'swim' && preferences.includes('avoid_swim')) {
+    const alternative = result.options.find((option) => option.action === 'replace')
+      ?? result.options.find((option) => option.action === 'move')
+      ?? result.options.find((option) => option.action === 'skip');
+    if (alternative) return recommendOption(result, alternative, 'Current menstrual symptoms make swimming undesirable today; preserve the week without forcing the swim.');
+  }
+
+  if (session.discipline === 'bike' && preferences.includes('indoor_bike')) {
+    const shorter = preferences.includes('shorter');
+    const easier = preferences.includes('easier');
+    const duration = shorter
+      ? Math.min(session.durationMinutes, interpretation.availableMinutes ?? Math.max(20, Math.round(session.durationMinutes * 0.7)))
+      : easier
+        ? Math.max(20, Math.round(session.durationMinutes * 0.8))
+        : session.durationMinutes;
+    const indoor: AdjustmentOption = {
+      id: `cycle_indoor_${session.id}_${duration}`,
+      action: 'modify',
+      recommendationLevel: 'recommended',
+      title: shorter || easier ? `Ride indoors for ${duration} minutes` : 'Ride indoors instead',
+      description: easier
+        ? 'Keep the ride indoors and remove the planned high-intensity demand while symptoms are active.'
+        : 'Change the environment without adding compensatory intensity or volume.',
+      durationMinutes: duration,
+      rationale: [
+        'The athlete explicitly prefers an indoor ride while menstrual symptoms are active.',
+        'Environment and dose are adapted to current symptoms; this is not a phase-based performance rule.',
+      ],
+      weeklyConsequences: [
+        shorter || easier ? 'Bike stress is reduced for this session.' : 'The planned bike duration is preserved in a more comfortable environment.',
+        'The rest of the week is revalidated after approval.',
+      ],
+      protectsMentalHealth: true,
+      protectsPhysicalHealth: true,
+      requiresApproval: false,
+      confidence: 'high',
+    };
+    const others = result.options.filter((option) => option.action !== 'modify');
+    return {
+      ...result,
+      headline: indoor.title,
+      recommendedOptionId: indoor.id,
+      options: [indoor, ...others].slice(0, 3),
+    };
+  }
+
+  if (session.discipline === 'run' && preferences.includes('reduce_run_intensity')) {
+    const easier = result.options.find((option) => option.id.startsWith('easier_'));
+    if (easier) {
+      const cycleRun: AdjustmentOption = {
+        ...easier,
+        id: `cycle_easy_run_${session.id}`,
+        recommendationLevel: 'recommended',
+        title: 'Reduce run intensity',
+        description: 'Keep the run easy and remove the planned quality work while current menstrual symptoms are affecting training.',
+        rationale: [
+          'The athlete explicitly asked to reduce run intensity while symptoms are active.',
+          'The change is symptom-led and individual, not imposed from cycle phase alone.',
+        ],
+      };
+      return {
+        ...result,
+        headline: cycleRun.title,
+        recommendedOptionId: cycleRun.id,
+        options: [cycleRun, ...result.options.filter((option) => option.id !== easier.id)].slice(0, 3),
+      };
+    }
+  }
+
+  return result;
+}
+
+function recommendOption(result: DailyAdjustmentResult, option: AdjustmentOption, reason: string): DailyAdjustmentResult {
+  return {
+    ...result,
+    headline: option.title,
+    recommendedOptionId: option.id,
+    options: result.options.map((candidate) => ({
+      ...candidate,
+      recommendationLevel: candidate.id === option.id ? 'recommended' : candidate.recommendationLevel,
+      rationale: candidate.id === option.id ? [...candidate.rationale, reason] : candidate.rationale,
+    })),
   };
 }
 
@@ -399,14 +499,14 @@ function parseTargetDiscipline(text: string): CoachTargetDiscipline | undefined 
 }
 
 function parseAvailableMinutes(text: string): number | undefined {
-  const minuteMatch = text.match(/\b(\d{1,3})\s*(?:min|mins|minute|minutes)\b/);
+  const minuteMatch = text.match(/\b(?:only\s+have|have|have\s+got|got|can\s+only\s+do|can\s+do|can\s+train\s+for|available\s+for|make\s+(?:it|this)|shorten\s+(?:it|this)\s+to)\s+(?:about\s+)?(\d{1,3})\s*(?:min|mins|minute|minutes)\b/);
   if (minuteMatch?.[1]) return clampMinutes(Number(minuteMatch[1]));
 
-  const hourMatch = text.match(/\b(\d(?:\.\d+)?)\s*(?:hr|hrs|hour|hours)\b/);
+  const hourMatch = text.match(/\b(?:only\s+have|have|have\s+got|got|can\s+only\s+do|can\s+do|can\s+train\s+for|available\s+for|make\s+(?:it|this))\s+(?:about\s+)?(\d(?:\.\d+)?)\s*(?:hr|hrs|hour|hours)\b/);
   if (hourMatch?.[1]) return clampMinutes(Math.round(Number(hourMatch[1]) * 60));
 
-  if (/\bhalf\s+(?:an\s+)?hour\b/.test(text)) return 30;
-  if (/\b(?:an|one)\s+hour\b/.test(text)) return 60;
+  if (/\b(?:only\s+have|have|got|available\s+for)\s+half\s+(?:an\s+)?hour\b/.test(text)) return 30;
+  if (/\b(?:only\s+have|have|got|available\s+for)\s+(?:an|one)\s+hour\b/.test(text)) return 60;
   return undefined;
 }
 
