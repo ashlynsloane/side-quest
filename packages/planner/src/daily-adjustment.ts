@@ -328,9 +328,11 @@ function skipOption(session: UnifiedTrainingSession, level: AdjustmentOption['re
 
 function selectRecommended(options: AdjustmentOption[], request: SessionAdjustmentRequest, context: AdjustmentContext): AdjustmentOption {
   if (request.athletePrefersRecovery || context.recentFatigueTrend === 'worsening') return options.find((item) => item.action === 'skip' || item.id.startsWith('easier_')) ?? options[0]!;
-  if (request.reason === 'time') return options.find((item) => item.action === 'modify' && item.id.startsWith('shorten_')) ?? options[0]!;
+  if (request.requestedAction === 'shorter') return options.find((item) => item.action === 'modify' && item.id.startsWith('shorten_')) ?? options[0]!;
+  if (request.requestedAction === 'easier') return options.find((item) => item.action === 'modify' && item.id.startsWith('easier_')) ?? options[0]!;
   if (request.requestedAction === 'move') return options.find((item) => item.action === 'move') ?? options[0]!;
   if (request.requestedAction === 'different' && request.preferredReplacementDiscipline) return options.find((item) => item.action === 'replace') ?? options[0]!;
+  if (request.reason === 'time') return options.find((item) => item.action === 'modify' && item.id.startsWith('shorten_')) ?? options[0]!;
   if (request.reason === 'access' || request.reason === 'weather') return options.find((item) => item.action === 'move') ?? options.find((item) => item.action === 'replace') ?? options[0]!;
   if (request.reason === 'fatigue') return options.find((item) => item.id.startsWith('easier_')) ?? options.find((item) => item.action === 'skip') ?? options[0]!;
   return options[0]!;
