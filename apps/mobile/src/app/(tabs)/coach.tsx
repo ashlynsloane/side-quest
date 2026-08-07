@@ -18,8 +18,12 @@ import {
 import {
   applyCoachMessageProposal,
   buildCoachMessageProposal,
+  cancelCoachMessageProposal,
+  loadCurrentCoachConversation,
+  saveCoachMessageProposalSelection,
   type CoachMessageProposal,
 } from '@/services/coach-message-adaptation';
+import type { CoachConversationState } from '@/services/coach-conversation-state';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
 import type { DesignTokens } from '@/theme';
@@ -38,6 +42,7 @@ export default function CoachTab() {
   const [quickSignal, setQuickSignal] = useState<CoachQuickSignal | undefined>();
   const [proposal, setProposal] = useState<CoachMessageProposal | null>(null);
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [conversation, setConversation] = useState<CoachConversationState | null>(null);
   const [coachError, setCoachError] = useState<string | null>(null);
   const [coachResult, setCoachResult] = useState<string | null>(null);
   const [buildingProposal, setBuildingProposal] = useState(false);
@@ -53,11 +58,12 @@ export default function CoachTab() {
     rangeEnd.setDate(rangeEnd.getDate() + 21);
     const historyStart = new Date(now);
     historyStart.setDate(historyStart.getDate() - 90);
-    const [calendar, history, readiness, sources] = await Promise.all([
+    const [calendar, history, readiness, sources, thread] = await Promise.all([
       getTrainingCalendarEvents({ from: rangeStart.toISOString(), to: rangeEnd.toISOString() }),
       listCompletedWorkoutSummaries({ from: historyStart.toISOString(), to: now.toISOString() }),
       getTodayReadinessCheckIn(),
       listTrainingCalendarSources(),
+      nextBlock ? loadCurrentCoachConversation() : Promise.resolve(null),
     ]);
     if (!isLive()) return;
     setBlock(nextBlock);
@@ -65,6 +71,9 @@ export default function CoachTab() {
     setHasTrainingHistory(history.length > 0);
     setHasReadinessData(Boolean(readiness));
     setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
+    setConversation(thread);
+    setProposal(thread?.pendingProposal ?? null);
+    setSelectedOptionId(thread?.selectedOptionId ?? thread?.pendingProposal?.adaptation.adjustment.recommendedOptionId ?? null);
   }, []);
 
   useFocusEffect(useCallback(() => {
@@ -108,13 +117,28 @@ export default function CoachTab() {
     try {
       const result = await buildCoachMessageProposal(message, quickSignal);
       if (!result.ok) {
+        setConversation(result.conversation ?? conversation);
         setProposal(null);
         setSelectedOptionId(null);
-        setCoachError(result.message);
+        if (result.reason === 'cancelled') {
+          setCoachError(null);
+          setCoachResult(result.message);
+          setMessage('');
+          setQuickSignal(undefined);
+        } else {
+          setCoachError(result.message);
+        }
         return;
       }
+      setConversation(result.conversation);
+      const optionId = result.conversation.selectedOptionId ?? result.proposal.adaptation.adjustment.recommendedOptionId;
       setProposal(result.proposal);
-      setSelectedOptionId(result.proposal.adaptation.adjustment.recommendedOptionId);
+      setSelectedOptionId(optionId);
+      setMessage('');
+      setQuickSignal(undefined);
+      if (result.autoApply) {
+        await applyProposal(result.proposal, optionId);
+      }
     } catch (caught) {
       setProposal(null);
       setSelectedOptionId(null);
@@ -124,12 +148,13 @@ export default function CoachTab() {
     }
   }
 
-  async function acceptProposal() {
-    if (!proposal || !selectedOptionId || applyingProposal) return;
+  async function applyProposal(proposalToApply: CoachMessageProposal, optionId: string) {
+    if (applyingProposal) return;
     setApplyingProposal(true);
     setCoachError(null);
     try {
-      const applied = await applyCoachMessageProposal(proposal, selectedOptionId);
+      const applied = await applyCoachMessageProposal(proposalToApply, optionId);
+      setConversation(applied.conversation);
       setCoachResult(applied.replanWarning ?? `${applied.optionTitle} applied. The rest of the week was replanned around it.`);
       setProposal(null);
       setSelectedOptionId(null);
@@ -143,7 +168,30 @@ export default function CoachTab() {
     }
   }
 
+  async function acceptProposal() {
+    if (!proposal || !selectedOptionId || applyingProposal) return;
+    await applyProposal(proposal, selectedOptionId);
+  }
+
+  function selectProposalOption(optionId: string) {
+    setSelectedOptionId(optionId);
+    void saveCoachMessageProposalSelection(optionId);
+  }
+
+  async function keepOriginalPlan() {
+    const next = await cancelCoachMessageProposal();
+    setConversation(next);
+    setProposal(null);
+    setSelectedOptionId(null);
+    setMessage('');
+    setQuickSignal(undefined);
+    setCoachError(null);
+    setCoachResult('Keeping the original plan.');
+  }
+
   const selectedOption = proposal?.adaptation.adjustment.options.find((option) => option.id === selectedOptionId) ?? null;
+  const recentTurns = conversation?.turns.slice(-6) ?? [];
+  const hasThread = recentTurns.length > 0;
 
   return (
     <V23Screen contentStyle={styles.page}>
@@ -161,16 +209,34 @@ export default function CoachTab() {
       <V23Card elevated style={styles.messageCard}>
         <View style={styles.messageHeader}>
           <View style={styles.messageHeaderCopy}>
-            <Text style={styles.callLabel}>TELL SIDE QUEST WHAT CHANGED</Text>
-            <Text style={styles.messageTitle}>Don’t rewrite the plan yourself.</Text>
+            <Text style={styles.callLabel}>{hasThread ? 'CONTINUE WITH SIDE QUEST' : 'TELL SIDE QUEST WHAT CHANGED'}</Text>
+            <Text style={styles.messageTitle}>{hasThread ? 'Keep the same coaching thread.' : 'Don’t rewrite the plan yourself.'}</Text>
           </View>
           <View style={styles.messageIcon}><V23Icon name="adjust" color={tokens.accent} size={21} /></View>
         </View>
-        <Text style={styles.callBody}>Say what is different today. Side Quest will turn it into planner inputs, propose a change, and re-check the week after you approve it.</Text>
+        <Text style={styles.callBody}>
+          {hasThread
+            ? 'Reply naturally. Side Quest remembers the session and prior constraint, then re-checks every refinement against the week.'
+            : 'Say what is different today. Side Quest will turn it into planner inputs, propose a change, and re-check the week after you approve it.'}
+        </Text>
+
+        {hasThread ? (
+          <View style={styles.thread}>
+            {recentTurns.map((turn) => (
+              <View key={turn.id} style={[styles.turnRow, turn.role === 'athlete' && styles.turnRowAthlete]}>
+                <View style={[styles.turnBubble, turn.role === 'athlete' ? styles.athleteBubble : styles.coachBubble]}>
+                  <Text style={styles.turnRole}>{turn.role === 'athlete' ? 'YOU' : 'SIDE QUEST'}</Text>
+                  <Text style={styles.turnText}>{turn.text}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <TextInput
           value={message}
           onChangeText={(value) => { setMessage(value); setCoachError(null); }}
-          placeholder="My legs are sore and I’m not feeling this workout…"
+          placeholder={hasThread ? 'Move it to Friday instead…' : 'My legs are sore and I’m not feeling this workout…'}
           placeholderTextColor={tokens.textMuted}
           multiline
           maxLength={500}
@@ -201,9 +267,9 @@ export default function CoachTab() {
             pressed && styles.pressed,
           ]}
         >
-          {buildingProposal ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.reviewButtonText}>Review adaptation</Text><V23Icon name="chevron" color="#FFFFFF" size={18} /></>}
+          {buildingProposal ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.reviewButtonText}>{hasThread ? 'Send update' : 'Review adaptation'}</Text><V23Icon name="chevron" color="#FFFFFF" size={18} /></>}
         </Pressable>
-        <Text style={styles.messageFootnote}>Messages are interpreted as training signals. The planner—not the message itself—decides what changes are appropriate.</Text>
+        <Text style={styles.messageFootnote}>The conversation supplies context. The planner still decides whether a requested move, replacement, or load change actually fits.</Text>
       </V23Card>
 
       {coachError ? <V23Card tone="muted" style={styles.feedbackCard}><Text style={styles.errorText}>{coachError}</Text></V23Card> : null}
@@ -229,7 +295,7 @@ export default function CoachTab() {
               return (
                 <Pressable
                   key={option.id}
-                  onPress={() => setSelectedOptionId(option.id)}
+                  onPress={() => selectProposalOption(option.id)}
                   style={({ pressed }) => [styles.optionCard, selected && styles.optionCardSelected, pressed && styles.pressed]}
                 >
                   <View style={styles.optionTop}>
@@ -249,9 +315,10 @@ export default function CoachTab() {
             })}
           </View>
 
+          <Text style={styles.followUpHint}>You can also reply above: “move it to Friday,” “make it 30 minutes,” “I’d rather swim,” or “actually I feel worse.”</Text>
           {selectedOption ? <Text style={styles.approvalNote}>{selectedOption.requiresApproval ? 'This changes a meaningful part of the plan, so Side Quest will not apply it until you approve.' : 'You are still in control: nothing changes until you approve.'}</Text> : null}
           <V23PrimaryButton onPress={() => void acceptProposal()} icon="check">{applyingProposal ? 'Applying…' : 'Accept this change'}</V23PrimaryButton>
-          <V23OutlineButton onPress={() => { setProposal(null); setSelectedOptionId(null); }}>Keep original plan</V23OutlineButton>
+          <V23OutlineButton onPress={() => void keepOriginalPlan()}>Keep original plan</V23OutlineButton>
         </V23Card>
       ) : null}
 
@@ -360,6 +427,14 @@ function makeStyles(tokens: DesignTokens) {
     messageHeaderCopy: { flex: 1, minWidth: 0 },
     messageTitle: { color: tokens.text, fontSize: 21, lineHeight: 26, fontWeight: '900', marginTop: 3 },
     messageIcon: { width: 44, height: 44, borderRadius: 15, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
+    thread: { gap: 8, borderRadius: 16, backgroundColor: tokens.surfaceMuted, padding: 10 },
+    turnRow: { alignItems: 'flex-start' },
+    turnRowAthlete: { alignItems: 'flex-end' },
+    turnBubble: { maxWidth: '88%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9, gap: 2 },
+    athleteBubble: { backgroundColor: tokens.accentSoft },
+    coachBubble: { backgroundColor: tokens.surface },
+    turnRole: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
+    turnText: { color: tokens.text, fontSize: 13.5, lineHeight: 19 },
     messageInput: { minHeight: 92, borderRadius: 16, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surfaceMuted, color: tokens.text, fontSize: 16, lineHeight: 22, paddingHorizontal: 14, paddingVertical: 12, textAlignVertical: 'top' },
     quickSignals: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
     quickSignal: { minHeight: 36, borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
@@ -392,6 +467,7 @@ function makeStyles(tokens: DesignTokens) {
     consequenceBox: { marginTop: 4, gap: 3 },
     consequenceLabel: { color: tokens.text, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 0.9 },
     consequenceText: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
+    followUpHint: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18, fontStyle: 'italic' },
     approvalNote: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
     nextCard: { gap: 16, padding: 20 },
     nextHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
