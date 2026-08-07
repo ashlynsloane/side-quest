@@ -7,6 +7,7 @@ import type {
   TrainingCheckIn,
 } from '@circuit/domain';
 import { normalizeCalendarEvent, normalizeStrengthSession } from '@circuit/planner';
+import { applyApprovedFrequencySuppression, type DisciplineCountMap } from '@circuit/planner/frequency-suppression';
 import {
   buildWholeAthleteWeek,
   type DisciplineBaseline,
@@ -120,23 +121,27 @@ export async function generateAndPersistWholeAthleteBlock(
         keySession: session.intendedLoad === 'high',
       }));
 
-    const strengthCount = fixedStrength.length;
-    const weekFrequencyTargets: Partial<Record<TrainableDiscipline, { min: number; preferred: number; max: number }>> = {
-      ...frequencyTargets,
-      strength: { min: strengthCount, preferred: strengthCount, max: strengthCount },
-    };
-
-    const weekOverrides = overrides.filter((override) => inCurrentWeek(override.baseEvent.startAt.slice(0, 10)));
     const rawWeekEvents = calendarEvents.filter((event) => inCurrentWeek(event.startAt.slice(0, 10)));
-    for (const discipline of ['swim', 'bike', 'run'] as const) {
-      const suppressed = weekOverrides.filter((override) =>
-        override.baseEvent.discipline === discipline
-        && (override.option.action === 'skip' || override.option.action === 'replace')).length;
-      if (suppressed === 0) continue;
-      const originallyPlanned = rawWeekEvents.filter((event) => event.discipline === discipline).length;
-      const target = Math.max(0, originallyPlanned - suppressed);
-      weekFrequencyTargets[discipline] = { min: target, preferred: target, max: target };
-    }
+    const weekOverrides = overrides.filter((override) => inCurrentWeek(override.baseEvent.startAt.slice(0, 10)));
+    const originallyPlanned: DisciplineCountMap = {
+      swim: rawWeekEvents.filter((event) => event.discipline === 'swim').length,
+      bike: rawWeekEvents.filter((event) => event.discipline === 'bike').length,
+      run: rawWeekEvents.filter((event) => event.discipline === 'run').length,
+      strength: fixedStrength.length,
+    };
+    const suppressed: DisciplineCountMap = {
+      swim: countSuppressed(weekOverrides, 'swim'),
+      bike: countSuppressed(weekOverrides, 'bike'),
+      run: countSuppressed(weekOverrides, 'run'),
+    };
+    const weekFrequencyTargets = applyApprovedFrequencySuppression(
+      {
+        ...frequencyTargets,
+        strength: { min: fixedStrength.length, preferred: fixedStrength.length, max: fixedStrength.length },
+      },
+      originallyPlanned,
+      suppressed,
+    );
 
     const plan = buildWholeAthleteWeek({
       weekStartDate: week.weekStartDate,
@@ -350,6 +355,15 @@ async function sourceMetadata(): Promise<TrainingCalendarSource> {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function countSuppressed(
+  overrides: SideQuestPlanSessionOverride[],
+  discipline: 'swim' | 'bike' | 'run',
+): number {
+  return overrides.filter((override) =>
+    override.baseEvent.discipline === discipline
+    && (override.option.action === 'skip' || override.option.action === 'replace')).length;
 }
 
 function overrideDate(override: SideQuestPlanSessionOverride): string {
