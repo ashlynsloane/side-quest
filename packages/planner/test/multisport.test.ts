@@ -47,7 +47,7 @@ function request(overrides: Partial<MultisportWeekRequest> = {}): MultisportWeek
 }
 
 describe('generateMultisportWeek', () => {
-  it('preserves fixed sessions and fills the remaining disciplines', () => {
+  it('preserves fixed sessions and fills around them without overloading a day', () => {
     const plan = generateMultisportWeek(request({
       fixedSessions: [
         {
@@ -67,14 +67,21 @@ describe('generateMultisportWeek', () => {
           priority: 'key',
         },
       ],
+      preferences: {
+        preferredSessionsPerWeek: { swim: 3, bike: 2, run: 2, strength: 2 },
+      },
     }));
 
     expect(plan.sessions.find((session) => session.sourceSessionId === 'tuesday-swim')?.ownership).toBe('fixed');
     expect(plan.sessions.find((session) => session.sourceSessionId === 'saturday-long-ride')?.ownership).toBe('fixed');
     expect(plan.sessions.filter((session) => session.discipline === 'swim')).toHaveLength(3);
-    expect(plan.sessions.filter((session) => session.discipline === 'bike')).toHaveLength(3);
-    expect(plan.sessions.filter((session) => session.discipline === 'run')).toHaveLength(3);
-    expect(plan.sessions.filter((session) => session.discipline === 'strength')).toHaveLength(3);
+    expect(plan.sessions.filter((session) => session.discipline === 'bike')).toHaveLength(2);
+    expect(plan.sessions.filter((session) => session.discipline === 'run')).toHaveLength(2);
+    expect(plan.sessions.filter((session) => session.discipline === 'strength')).toHaveLength(2);
+
+    for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as Weekday[]) {
+      expect(plan.sessions.filter((session) => session.day === day).length).toBeLessThanOrEqual(2);
+    }
   });
 
   it('does not generate running when running is disabled', () => {
@@ -107,6 +114,33 @@ describe('generateMultisportWeek', () => {
 
     const fridayStrength = plan.sessions.find((session) => session.day === 'friday' && session.discipline === 'strength');
     expect(fridayStrength).toBeUndefined();
+  });
+
+  it('never invents a three-session training day', () => {
+    const plan = generateMultisportWeek(request());
+    const counts = new Map<Weekday, number>();
+    for (const session of plan.sessions) counts.set(session.day, (counts.get(session.day) ?? 0) + 1);
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(2);
+  });
+
+  it('keeps return-to-run sessions on nonconsecutive days', () => {
+    const plan = generateMultisportWeek(request({
+      preferences: {
+        preferredSessionsPerWeek: { swim: 2, bike: 2, run: 2, strength: 2 },
+      },
+      health: {
+        runStatus: 'return_to_run',
+        boneStressInjuryHistory: 'recent_or_current',
+        maxHardDaysPerWeek: 3,
+        maxStrengthDaysPerWeek: 2,
+      },
+    }));
+    const runOffsets = plan.sessions
+      .filter((session) => session.discipline === 'run')
+      .map((session) => ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].indexOf(session.day))
+      .sort((a, b) => a - b);
+    expect(runOffsets).toHaveLength(2);
+    expect(runOffsets[1]! - runOffsets[0]!).toBeGreaterThanOrEqual(2);
   });
 
   it('marks sessions placed on explicit preference days as preferred rather than generated', () => {
