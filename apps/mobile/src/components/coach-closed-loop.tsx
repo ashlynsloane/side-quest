@@ -10,7 +10,7 @@ export function CoachDecisionExplanationPanel({ explanation }: { explanation?: C
   const styles = makeStyles(tokens);
   return (
     <View style={[styles.explanation, explanation.tier === 'protection' && styles.protection]}>
-      <Text style={styles.eyebrow}>{explanation.tier === 'protection' ? 'WHY SIDE QUEST IS PUSHING BACK' : 'WHY THIS CHANGE'}</Text>
+      <Text style={styles.eyebrow}>{explanation.tier === 'protection' ? 'WHY SIDE QUEST IS PUSHING BACK' : 'WHY SIDE QUEST RECOMMENDS THIS'}</Text>
       <Text style={styles.headline}>{explanation.headline}</Text>
       <Reason label="WHAT CHANGED" text={explanation.whatChanged} styles={styles} />
       <Reason label="WHY THIS" text={explanation.whyThis} styles={styles} />
@@ -39,6 +39,7 @@ export function CoachClosedLoopPanel({
   const undoable = summary.latestUndoable;
   const cue = summary.proactiveCue;
   if (!followUp && !undoable && !cue) return null;
+  const symptomFollowUp = followUp?.followUp.promptKind === 'safety_check';
 
   return (
     <View style={styles.stack}>
@@ -48,9 +49,9 @@ export function CoachClosedLoopPanel({
           <Text style={styles.headline}>{followUp.followUp.question}</Text>
           <Text style={styles.body}>Your answer becomes one structured outcome for this exact kind of adjustment. Side Quest will not generalize from a single result.</Text>
           <View style={styles.actions}>
-            <ResponseButton label="Better" disabled={busy} onPress={() => onOutcome(followUp.id, 'better')} styles={styles} />
-            <ResponseButton label="Same" disabled={busy} onPress={() => onOutcome(followUp.id, 'same')} styles={styles} />
-            <ResponseButton label="Worse" disabled={busy} onPress={() => onOutcome(followUp.id, 'worse')} styles={styles} />
+            <ResponseButton label={symptomFollowUp ? 'Better' : 'Worked well'} disabled={busy} onPress={() => onOutcome(followUp.id, 'better')} styles={styles} />
+            <ResponseButton label={symptomFollowUp ? 'Same' : 'Neutral'} disabled={busy} onPress={() => onOutcome(followUp.id, 'same')} styles={styles} />
+            <ResponseButton label={symptomFollowUp ? 'Worse' : 'Didn’t work'} disabled={busy} onPress={() => onOutcome(followUp.id, 'worse')} styles={styles} />
             <ResponseButton label="Didn't do it" disabled={busy} onPress={() => onOutcome(followUp.id, 'not_completed')} styles={styles} />
           </View>
         </View>
