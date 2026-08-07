@@ -110,7 +110,9 @@ export function recordCoachFollowUpOutcome(interventionId: string, response: Coa
     fingerprint: intervention.fingerprint,
     ...mapped,
   };
-  const interventions = state.interventions.map((item) => item.id === interventionId ? { ...item, outcomeObservationId: observation.id } : item);
+  const interventions: CoachAppliedInterventionRecord[] = state.interventions.map((item) =>
+    item.id === interventionId ? { ...item, outcomeObservationId: observation.id } : item,
+  );
   const outcomes = [...state.outcomes.filter((item) => item.id !== observation.id), observation];
   saveCoachClosedLoopState({ ...state, interventions, outcomes });
   return observation;
@@ -120,23 +122,30 @@ export function markCoachInterventionReverted(interventionId: string): CoachAppl
   const state = loadCoachClosedLoopState();
   let changed: CoachAppliedInterventionRecord | null = null;
   const revertedAt = new Date().toISOString();
-  const interventions = state.interventions.map((item) => {
+  const interventions: CoachAppliedInterventionRecord[] = state.interventions.map((item) => {
     if (item.id !== interventionId || item.status === 'reverted') return item;
-    changed = { ...item, status: 'reverted', revertedAt };
-    return changed;
+    const reverted: CoachAppliedInterventionRecord = { ...item, status: 'reverted', revertedAt };
+    changed = reverted;
+    return reverted;
   });
   if (!changed) return null;
   saveCoachClosedLoopState({ ...state, interventions });
   return changed;
 }
 
-export function getCoachClosedLoopSummary(now = new Date().toISOString()): CoachClosedLoopSummary {
+export function getCoachClosedLoopSummary(
+  now = new Date().toISOString(),
+  blockId?: string,
+): CoachClosedLoopSummary {
   const state = loadCoachClosedLoopState();
   const nowMs = new Date(now).getTime();
-  const dueFollowUp = state.interventions
+  const operationalInterventions = blockId
+    ? state.interventions.filter((item) => item.blockId === blockId)
+    : state.interventions;
+  const dueFollowUp = operationalInterventions
     .filter((item) => item.status === 'active' && !item.outcomeObservationId && new Date(item.followUp.dueAt).getTime() <= nowMs)
     .sort((left, right) => priorityRank(right.followUp.priority) - priorityRank(left.followUp.priority) || left.followUp.dueAt.localeCompare(right.followUp.dueAt))[0];
-  const latestUndoable = [...state.interventions]
+  const latestUndoable = [...operationalInterventions]
     .filter((item) => item.status === 'active')
     .sort((left, right) => right.appliedAt.localeCompare(left.appliedAt))[0];
   const patterns = learnCoachInterventionEffects(state.outcomes);
