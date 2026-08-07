@@ -7,6 +7,7 @@ import Storage from 'expo-sqlite/kv-store';
 
 const COACH_CONVERSATION_KEY = 'circuit.coach-conversation.v1';
 const MAX_TURNS = 20;
+const MAX_STATE_AGE_DAYS = 7;
 
 export type PersistedCoachTargetKind = 'strength' | 'endurance';
 export type CoachConversationTurnRole = 'athlete' | 'coach';
@@ -55,7 +56,12 @@ export function loadCoachConversationState(blockId: string): CoachConversationSt
   if (!saved) return emptyState(blockId);
   try {
     const parsed = JSON.parse(saved) as Partial<CoachConversationState>;
-    if (parsed.version !== 1 || parsed.blockId !== blockId || !Array.isArray(parsed.turns)) return emptyState(blockId);
+    if (
+      parsed.version !== 1
+      || parsed.blockId !== blockId
+      || !Array.isArray(parsed.turns)
+      || isExpiredState(parsed.updatedAt)
+    ) return emptyState(blockId);
     return {
       version: 1,
       blockId,
@@ -182,6 +188,14 @@ function targetFromProposal(proposal: PersistedCoachProposal): PersistedCoachTar
     targetKind: proposal.targetKind,
     calendarEventId: proposal.calendarEventId,
   };
+}
+
+function isExpiredState(updatedAt: unknown): boolean {
+  if (typeof updatedAt !== 'string') return true;
+  const timestamp = new Date(updatedAt).getTime();
+  if (!Number.isFinite(timestamp)) return true;
+  const ageMs = Date.now() - timestamp;
+  return ageMs > MAX_STATE_AGE_DAYS * 24 * 60 * 60 * 1000;
 }
 
 function isValidTurn(value: unknown): value is CoachConversationTurn {
