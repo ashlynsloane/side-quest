@@ -6,8 +6,17 @@ import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
+import { CoachClosedLoopPanel, CoachDecisionExplanationPanel } from '@/components/coach-closed-loop';
 import { CoachInsights } from '@/components/coach-insights';
 import { V23Card, V23Chip, V23Icon, V23OutlineButton, V23PrimaryButton, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
+import {
+  answerCoachFollowUp,
+  applyCoachMessageProposalClosedLoop,
+  buildCoachMessageProposalClosedLoop,
+  loadCoachClosedLoopDashboard,
+  undoLatestCoachIntervention,
+} from '@/services/coach-closed-loop-runtime';
+import type { CoachClosedLoopSummary, CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
 import {
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
@@ -16,8 +25,6 @@ import {
   listTrainingCalendarSources,
 } from '@/services/database';
 import {
-  applyCoachMessageProposal,
-  buildCoachMessageProposal,
   cancelCoachMessageProposal,
   loadCurrentCoachConversation,
   saveCoachMessageProposalSelection,
@@ -43,10 +50,12 @@ export default function CoachTab() {
   const [proposal, setProposal] = useState<CoachMessageProposal | null>(null);
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<CoachConversationState | null>(null);
+  const [closedLoopSummary, setClosedLoopSummary] = useState<CoachClosedLoopSummary | null>(null);
   const [coachError, setCoachError] = useState<string | null>(null);
   const [coachResult, setCoachResult] = useState<string | null>(null);
   const [buildingProposal, setBuildingProposal] = useState(false);
   const [applyingProposal, setApplyingProposal] = useState(false);
+  const [closedLoopBusy, setClosedLoopBusy] = useState(false);
 
   const loadCoachData = useCallback(async (isLive: () => boolean = () => true) => {
     const saved = await getLatestTrainingBlock();
@@ -74,6 +83,7 @@ export default function CoachTab() {
     setConversation(thread);
     setProposal(thread?.pendingProposal ?? null);
     setSelectedOptionId(thread?.selectedOptionId ?? thread?.pendingProposal?.adaptation.adjustment.recommendedOptionId ?? null);
+    setClosedLoopSummary(loadCoachClosedLoopDashboard());
   }, []);
 
   useFocusEffect(useCallback(() => {
@@ -110,12 +120,12 @@ export default function CoachTab() {
   }
 
   async function reviewMessage() {
-    if (buildingProposal || applyingProposal) return;
+    if (buildingProposal || applyingProposal || closedLoopBusy) return;
     setBuildingProposal(true);
     setCoachError(null);
     setCoachResult(null);
     try {
-      const result = await buildCoachMessageProposal(message, quickSignal);
+      const result = await buildCoachMessageProposalClosedLoop(message, quickSignal);
       if (!result.ok) {
         setConversation(result.conversation ?? conversation);
         setProposal(null);
@@ -149,13 +159,13 @@ export default function CoachTab() {
   }
 
   async function applyProposal(proposalToApply: CoachMessageProposal, optionId: string) {
-    if (applyingProposal) return;
+    if (applyingProposal || closedLoopBusy) return;
     setApplyingProposal(true);
     setCoachError(null);
     try {
-      const applied = await applyCoachMessageProposal(proposalToApply, optionId);
+      const applied = await applyCoachMessageProposalClosedLoop(proposalToApply, optionId);
       setConversation(applied.conversation);
-      setCoachResult(applied.replanWarning ?? `${applied.optionTitle} applied. The rest of the week was replanned around it.`);
+      setCoachResult(applied.replanWarning ?? `${applied.optionTitle} applied. Side Quest will check how the adjustment worked before learning from it.`);
       setProposal(null);
       setSelectedOptionId(null);
       setMessage('');
@@ -169,7 +179,7 @@ export default function CoachTab() {
   }
 
   async function acceptProposal() {
-    if (!proposal || !selectedOptionId || applyingProposal) return;
+    if (!proposal || !selectedOptionId || applyingProposal || closedLoopBusy) return;
     await applyProposal(proposal, selectedOptionId);
   }
 
@@ -187,6 +197,39 @@ export default function CoachTab() {
     setQuickSignal(undefined);
     setCoachError(null);
     setCoachResult('Keeping the original plan.');
+  }
+
+  async function handleCoachFollowUp(interventionId: string, response: CoachFollowUpResponse) {
+    if (closedLoopBusy || applyingProposal || buildingProposal) return;
+    setClosedLoopBusy(true);
+    setCoachError(null);
+    try {
+      const result = await answerCoachFollowUp(interventionId, response);
+      setCoachResult(result.message);
+      setClosedLoopSummary(result.summary);
+      await loadCoachData();
+    } catch (caught) {
+      setCoachError(caught instanceof Error ? caught.message : 'Side Quest could not save that follow-up.');
+    } finally {
+      setClosedLoopBusy(false);
+    }
+  }
+
+  async function handleUndoCoachChange() {
+    if (closedLoopBusy || applyingProposal || buildingProposal) return;
+    setClosedLoopBusy(true);
+    setCoachError(null);
+    try {
+      const result = await undoLatestCoachIntervention();
+      setCoachResult(result.replanWarning ?? result.conversationMessage);
+      setProposal(null);
+      setSelectedOptionId(null);
+      await loadCoachData();
+    } catch (caught) {
+      setCoachError(caught instanceof Error ? caught.message : 'Side Quest could not safely undo that change.');
+    } finally {
+      setClosedLoopBusy(false);
+    }
   }
 
   const selectedOption = proposal?.adaptation.adjustment.options.find((option) => option.id === selectedOptionId) ?? null;
@@ -260,7 +303,7 @@ export default function CoachTab() {
         <Pressable
           accessibilityRole="button"
           onPress={() => void reviewMessage()}
-          disabled={buildingProposal || applyingProposal || (!message.trim() && !quickSignal)}
+          disabled={buildingProposal || applyingProposal || closedLoopBusy || (!message.trim() && !quickSignal)}
           style={({ pressed }) => [
             styles.reviewButton,
             (!message.trim() && !quickSignal) && styles.reviewButtonDisabled,
@@ -275,6 +318,13 @@ export default function CoachTab() {
       {coachError ? <V23Card tone="muted" style={styles.feedbackCard}><Text style={styles.errorText}>{coachError}</Text></V23Card> : null}
       {coachResult ? <V23Card tone="accent" style={styles.feedbackCard}><Text style={styles.resultText}>{coachResult}</Text></V23Card> : null}
 
+      <CoachClosedLoopPanel
+        summary={closedLoopSummary}
+        busy={closedLoopBusy || applyingProposal || buildingProposal}
+        onOutcome={(interventionId, response) => void handleCoachFollowUp(interventionId, response)}
+        onUndo={() => void handleUndoCoachChange()}
+      />
+
       {proposal ? (
         <V23Card elevated style={styles.proposalCard}>
           <Text style={styles.callLabel}>SIDE QUEST READ THAT AS</Text>
@@ -287,6 +337,7 @@ export default function CoachTab() {
           <Text style={styles.proposalFor}>For {proposal.sessionTitle} · {formatSessionDate(proposal.sessionDate)}</Text>
           <Text style={styles.proposalHeadline}>{proposal.adaptation.adjustment.headline}</Text>
           {proposal.adaptation.adjustment.safetyMessage ? <Text style={styles.safetyText}>{proposal.adaptation.adjustment.safetyMessage}</Text> : null}
+          <CoachDecisionExplanationPanel explanation={proposal.decisionExplanation} />
 
           <View style={styles.optionList}>
             {proposal.adaptation.adjustment.options.map((option) => {
