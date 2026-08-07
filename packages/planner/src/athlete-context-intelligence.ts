@@ -199,7 +199,8 @@ export function assessPainContext(report: PainContextReport, calibration?: PainC
     level = 'protect';
     explanations.push('Systemic or illness-like symptoms take priority over planned training load.');
   } else {
-    const structuralWarning = report.focal && (
+    const boneStressContext = report.signals.includes('Bone-stress/fracture context');
+    const structuralWarning = boneStressContext || report.focal && (
       report.newOrUnfamiliar
       || report.worsening
       || functionRank >= FUNCTION_RANK.modified_session
@@ -209,6 +210,7 @@ export function assessPainContext(report: PainContextReport, calibration?: PainC
     else if (report.focal || functionRank >= FUNCTION_RANK.modified_session) level = 'modify';
     else level = 'monitor';
     explanations.push('Focal musculoskeletal symptoms are weighted by function, novelty, trajectory, and training interruption before numeric intensity.');
+    if (boneStressContext) explanations.push('The athlete explicitly mentioned a bone-stress or fracture context; the numeric pain score does not downgrade that training restriction signal.');
   }
 
   if (typeof report.score0to10 === 'number') {
@@ -327,39 +329,42 @@ export function evaluateProtectiveTrainingRequest(input: ProtectiveTrainingReque
 
 function parsePainContext(text: string, menstrual?: MenstrualContextSignal): PainContextReport | undefined {
   const score0to10 = parsePainScore(text);
-  const lowerBody = /\b(legs?|quads?|quadriceps|hamstrings?|calves?|calf|glutes?|hips?|knees?|ankles?|feet|foot|shins?)\b/.test(text);
+  const lowerBody = /\b(legs?|quads?|quadriceps|hamstrings?|calves?|calf|glutes?|hips?|knees?|ankles?|feet|foot|toes?|shins?)\b/.test(text);
   const upperBody = /\b(arms?|shoulders?|back|chest|lats?|biceps|triceps|wrists?|hands?|elbows?)\b/.test(text);
   const affectedArea = lowerBody ? 'lower_body' as const : upperBody ? 'upper_body' as const : 'unknown' as const;
   const illness = /\b(sick|ill|fever|flu|chills|vomit|vomiting|infection)\b/.test(text);
-  const exertion = /\b(muscles?\s+burning|legs?\s+burning|burn\s+from\s+(?:pushing|intervals?|effort)|lungs?\s+burning|normal\s+workout\s+burn|pushing\s+(?:hard|myself))\b/.test(text);
+  const exertion = /\b(muscles?\s+(?:are\s+)?burning|legs?\s+(?:are\s+)?burning|burn\s+from\s+(?:pushing|intervals?|effort)|lungs?\s+(?:are\s+)?burning|normal\s+workout\s+burn|pushing\s+(?:hard|myself))\b/.test(text);
   const soreness = /\b(doms|delayed\s+onset|muscle\s+soreness|sore|achy|aching|stiff|stiffness)\b/.test(text);
-  const painLanguage = /\b(pain|painful|hurt|hurts|hurting|sharp|twinge|niggle|injur|injured|injury)\b/.test(text);
-  const focalLanguage = /\b(sharp|one\s+spot|specific\s+spot|localized|focal|one\s+(?:knee|foot|ankle|hip|shoulder|side))\b/.test(text) || painLanguage && (lowerBody || upperBody);
+  const boneStressContext = /\b(stress\s+fracture|stress\s+reaction|bone\s+stress|fracture)\b/.test(text);
+  const painLanguage = /\b(pain|painful|hurt|hurts|hurting|sharp|twinge|niggle|injur|injured|injury|sprain|sprained|strain|strained|fracture|stress\s+reaction|bone\s+stress)\b/.test(text);
+  const specificFocalCue = /\b(sharp|one\s+spot|specific\s+spot|localized|focal|one\s+(?:knee|foot|toe|ankle|hip|shoulder|side))\b/.test(text);
+  const focalLanguage = specificFocalCue || Boolean(!exertion && !soreness && !menstrual?.active && painLanguage && (lowerBody || upperBody));
   const stoppedSession = /\b(had\s+to\s+(?:stop|quit)|stopped\s+(?:the\s+)?workout|quit\s+(?:the\s+)?workout|ended\s+(?:the\s+)?workout|cut\s+(?:it|the\s+workout)\s+short|couldn['’]?t\s+finish|could\s+not\s+finish|aborted)\b/.test(text);
   const modifiedSession = /\b(changed\s+(?:my\s+)?form|altered\s+(?:my\s+)?stride|limped|limping|backed\s+off\s+because|had\s+to\s+modify)\b/.test(text);
   const dailyActivity = /\b(hurts?\s+to\s+walk|can['’]?t\s+walk|cannot\s+walk|stairs\s+hurt|affecting\s+(?:daily|normal)\s+activity|limping\s+around)\b/.test(text);
   const restOrNight = /\b(hurts?\s+at\s+rest|resting\s+pain|wakes?\s+me\s+up|night\s+pain|hurts?\s+lying\s+down)\b/.test(text);
   const worsening = /\b(worse|worsening|getting\s+worse|more\s+painful|increasing)\b/.test(text);
-  const newOrUnfamiliar = /\b(new\s+pain|never\s+felt|unfamiliar|different\s+pain|sudden)\b/.test(text);
+  const newOrUnfamiliar = /\b(new\s+pain|never\s+felt|unfamiliar|different\s+pain|sudden|sharp)\b/.test(text);
 
   let functionalInterference: PainFunctionalInterference = 'none';
   if (restOrNight) functionalInterference = 'rest_or_night';
   else if (dailyActivity) functionalInterference = 'daily_activity';
   else if (stoppedSession) functionalInterference = 'stopped_session';
   else if (modifiedSession) functionalInterference = 'modified_session';
-  else if (painLanguage || soreness || menstrual?.active || exertion) functionalInterference = 'noticeable';
+  else if (painLanguage || soreness || menstrual?.active || exertion || typeof score0to10 === 'number') functionalInterference = 'noticeable';
 
   let kind: PainExperienceKind | undefined;
   if (illness) kind = 'systemic';
   else if (menstrual?.active && (painLanguage || menstrual.symptoms.includes('cramps'))) kind = 'menstrual';
-  else if (exertion && !focalLanguage) kind = 'training_exertion';
-  else if (soreness && !focalLanguage) kind = 'post_exercise_soreness';
-  else if (painLanguage || focalLanguage) kind = focalLanguage ? 'focal_musculoskeletal' : 'unknown';
+  else if (exertion && !specificFocalCue && !boneStressContext) kind = 'training_exertion';
+  else if (soreness && !specificFocalCue && !boneStressContext) kind = 'post_exercise_soreness';
+  else if (painLanguage || focalLanguage || boneStressContext) kind = focalLanguage || boneStressContext ? 'focal_musculoskeletal' : 'unknown';
   else if (typeof score0to10 === 'number') kind = 'unknown';
   if (!kind) return undefined;
 
   const signals = [`Pain context: ${kind.replaceAll('_', ' ')}`];
   if (typeof score0to10 === 'number') signals.push(`${score0to10}/10 self-report`);
+  if (boneStressContext) signals.push('Bone-stress/fracture context');
   if (stoppedSession) signals.push('Stopped session');
   else if (functionalInterference !== 'none') signals.push(`Functional impact: ${functionalInterference.replaceAll('_', ' ')}`);
   if (worsening) signals.push('Worsening');
@@ -368,7 +373,7 @@ function parsePainContext(text: string, menstrual?: MenstrualContextSignal): Pai
   return {
     kind,
     score0to10,
-    focal: focalLanguage,
+    focal: focalLanguage || boneStressContext,
     newOrUnfamiliar,
     worsening,
     functionalInterference,
