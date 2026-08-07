@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideCoachClarification } from '../src/coach-clarification';
+import { decideCoachClarification, resolveCoachClarificationAnswer } from '../src/coach-clarification';
 import { interpretCoachMessage } from '../src/coach-message-adaptation';
 
 describe('coach clarification', () => {
@@ -23,5 +23,26 @@ describe('coach clarification', () => {
     const decision = decideCoachClarification(message, interpretation);
     expect(interpretation.painContext?.stoppedSession).toBe(true);
     expect(decision.required).toBe(false);
+  });
+
+  it('turns an affirmative function answer into structured function-limiting context', () => {
+    const resolved = resolveCoachClarificationAnswer('function', 'My hip feels weird today.', 'Yes, I started limping.');
+    expect(resolved.resolved).toBe(true);
+    expect(resolved.effectiveMessage).toContain('modify the workout because of this pain');
+    const interpretation = interpretCoachMessage(resolved.effectiveMessage!);
+    expect(interpretation.reason).toBe('pain');
+    expect(interpretation.painContext?.functionalInterference).toBe('modified_session');
+  });
+
+  it('does not invent a training restriction when function was unaffected', () => {
+    const resolved = resolveCoachClarificationAnswer('function', 'My hip feels weird today.', 'No, I moved and trained normally.');
+    expect(resolved.resolved).toBe(true);
+    expect(resolved.noTrainingChange).toBe(true);
+    expect(resolved.coachResponse).toContain('will not treat that sensation alone');
+  });
+
+  it('keeps asking when the answer does not resolve the ambiguity', () => {
+    const resolved = resolveCoachClarificationAnswer('function', 'My hip feels weird today.', 'I am not sure.');
+    expect(resolved.resolved).toBe(false);
   });
 });
