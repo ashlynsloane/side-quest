@@ -89,6 +89,7 @@ describe('coach message adaptation', () => {
     expect(result.fatigueKind).toBe('muscle_soreness');
     expect(result.affectedArea).toBe('lower_body');
     expect(result.focalPain).toBeUndefined();
+    expect(result.painContext?.kind).toBe('post_exercise_soreness');
   });
 
   it('treats ordinary tightness as soreness unless pain language is present', () => {
@@ -106,6 +107,19 @@ describe('coach message adaptation', () => {
     expect(result.availableMinutes).toBe(25);
   });
 
+  it('recommends the explicit shorter constraint even when fatigue is also present', () => {
+    const session = enduranceSession('bike', { durationMinutes: 75 });
+    const proposal = buildCoachMessageAdaptation({
+      message: 'My legs feel heavy and I only have 25 minutes.',
+      session,
+      weekSessions: [session],
+      availableDates: ['2026-08-11'],
+    });
+
+    expect(proposal.adjustment.recommendedOptionId).toContain('shorten');
+    expect(proposal.adjustment.options.find((option) => option.id === proposal.adjustment.recommendedOptionId)?.durationMinutes).toBe(25);
+  });
+
   it('gives focal pain precedence over ordinary fatigue', () => {
     const result = interpretCoachMessage('I have a sharp pain in my knee and my legs are tired.');
     expect(result.reason).toBe('pain');
@@ -113,6 +127,36 @@ describe('coach message adaptation', () => {
     expect(result.focalPain).toBe(true);
     expect(result.symptomSeverity).toBe(4);
     expect(result.affectedArea).toBe('lower_body');
+  });
+
+  it('protects explicit bone-stress context even with a modest pain number', () => {
+    const run = enduranceSession('run');
+    const proposal = buildCoachMessageAdaptation({
+      message: 'I have a stress fracture in my foot and it is only 4/10.',
+      session: run,
+      weekSessions: [run],
+      availableDates: ['2026-08-11'],
+    });
+
+    expect(proposal.interpretation.painContext?.score0to10).toBe(4);
+    expect(proposal.painAssessment?.level).toBe('protect');
+    expect(proposal.adjustment.options).toHaveLength(1);
+    expect(proposal.adjustment.options[0]?.action).toBe('skip');
+  });
+
+  it('does not equate a higher-number minor focal injury report with bone-stress protection', () => {
+    const run = enduranceSession('run');
+    const proposal = buildCoachMessageAdaptation({
+      message: 'I sprained my pinky toe. It is 6/10 but I can walk normally and it did not stop the workout.',
+      session: run,
+      weekSessions: [run],
+      availableDates: ['2026-08-11', '2026-08-12'],
+    });
+
+    expect(proposal.interpretation.painContext?.score0to10).toBe(6);
+    expect(proposal.painAssessment?.level).toBe('modify');
+    expect(proposal.adjustment.safetyMessage).toBeUndefined();
+    expect(proposal.adjustment.options.some((option) => option.action === 'move' || option.action === 'skip')).toBe(true);
   });
 
   it('turns a changed schedule into a move request', () => {
@@ -126,6 +170,13 @@ describe('coach message adaptation', () => {
     expect(result.targetDiscipline).toBe('bike');
     expect(result.reason).toBe('time');
     expect(result.availableMinutes).toBe(30);
+  });
+
+  it('does not interpret requested training duration as available-time constraint', () => {
+    const result = interpretCoachMessage('I want to ride 3 hours tomorrow.');
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.availableMinutes).toBeUndefined();
+    expect(result.requestedAction).not.toBe('shorter');
   });
 
   it('recognizes a pool closure as a swim access problem', () => {
@@ -191,6 +242,51 @@ describe('coach message adaptation', () => {
     });
 
     expect(proposal.adjustment.options.some((option) => option.action === 'replace' || option.action === 'move')).toBe(true);
+  });
+
+  it('turns an active cycle preference into an indoor bike proposal', () => {
+    const bike = enduranceSession('bike', { durationMinutes: 75, intensity: 'hard' });
+    const proposal = buildCoachMessageAdaptation({
+      message: 'I am on my period with cramps and I would rather ride easy indoors.',
+      session: bike,
+      weekSessions: [bike],
+      availableDates: ['2026-08-11'],
+      availableDisciplines: ['swim', 'run'],
+    });
+
+    const recommended = proposal.adjustment.options.find((option) => option.id === proposal.adjustment.recommendedOptionId);
+    expect(proposal.interpretation.menstrualContext?.active).toBe(true);
+    expect(recommended?.id.startsWith('cycle_indoor_')).toBe(true);
+    expect(recommended?.title.toLowerCase()).toContain('indoors');
+  });
+
+  it('can reduce run intensity for active cycle symptoms without classifying them as injury pain', () => {
+    const run = enduranceSession('run', { intensity: 'hard' });
+    const proposal = buildCoachMessageAdaptation({
+      message: 'I am on my period with cramps and want to run less hard today.',
+      session: run,
+      weekSessions: [run],
+      availableDates: ['2026-08-11'],
+    });
+
+    const recommended = proposal.adjustment.options.find((option) => option.id === proposal.adjustment.recommendedOptionId);
+    expect(proposal.interpretation.painContext?.kind).toBe('menstrual');
+    expect(proposal.interpretation.focalPain).toBeUndefined();
+    expect(recommended?.id.startsWith('cycle_easy_run_')).toBe(true);
+  });
+
+  it('respects an active cycle preference to avoid swimming', () => {
+    const swim = enduranceSession('swim');
+    const proposal = buildCoachMessageAdaptation({
+      message: 'I am on my period and I do not want to swim today.',
+      session: swim,
+      weekSessions: [swim],
+      availableDates: ['2026-08-11'],
+      availableDisciplines: ['bike', 'run'],
+    });
+
+    const recommended = proposal.adjustment.options.find((option) => option.id === proposal.adjustment.recommendedOptionId);
+    expect(recommended?.action === 'replace' || recommended?.action === 'move' || recommended?.action === 'skip').toBe(true);
   });
 
   it('applies skip and move decisions to the real planned strength session', () => {
