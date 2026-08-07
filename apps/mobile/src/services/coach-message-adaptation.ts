@@ -1,5 +1,10 @@
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 import { normalizeCalendarEvent, normalizeStrengthSession, type UnifiedTrainingSession } from '@circuit/planner';
+import {
+  buildPainCalibration,
+  evaluateProtectiveTrainingRequest,
+  interpretAthleteContextMessage,
+} from '@circuit/planner/athlete-context-intelligence';
 import { resolveCoachConversationMessage } from '@circuit/planner/coach-conversation';
 import {
   applyCoachStrengthAdjustment,
@@ -8,6 +13,7 @@ import {
   type CoachTargetDiscipline,
 } from '@circuit/planner/coach-message-adaptation';
 
+import { loadPainContextObservations, recordPainContextObservation } from './athlete-context-memory';
 import {
   getLatestTrainingBlock,
   getTrainingCalendarEvents,
@@ -81,6 +87,8 @@ export async function buildCoachMessageProposal(
     return { ok: false, reason: 'no_adjustable_session', message: 'The active plan does not contain an adjustable training week.' };
   }
 
+  const freshAthleteContext = interpretAthleteContextMessage(message);
+  const painHistory = loadPainContextObservations();
   const previousConversation = loadCoachConversationState(block.id);
   const continuePriorContext = hasFreshConversationContext(previousConversation);
   let conversation = appendCoachConversationTurn(
@@ -160,6 +168,19 @@ export async function buildCoachMessageProposal(
   const availableDisciplines = target.kind === 'endurance'
     ? block.goal.disciplines.filter((discipline) => discipline !== target.unified.discipline)
     : [];
+  const currentPainKind = resolution.interpretation.painContext?.kind;
+  const sameKindPain = currentPainKind ? painHistory.filter((item) => item.kind === currentPainKind) : [];
+  const painCalibration = buildPainCalibration(sameKindPain.length >= 3 ? sameKindPain : painHistory);
+  const protectiveTrainingDecision = evaluateProtectiveTrainingRequest({
+    now: new Date().toISOString(),
+    recentPain: painHistory,
+    requestedDiscipline: target.unified.discipline as 'swim' | 'bike' | 'run' | 'strength',
+    requestedDurationMinutes: requestedTrainingDurationMinutes(message),
+    requestedIntensity: requestedTrainingIntensity(message),
+    requestedLargeTrainingLoad: resolution.interpretation.requestedLargeTrainingLoad,
+    compensatoryTrainingIntent: resolution.interpretation.compensatoryTrainingIntent,
+    headspace: resolution.interpretation.headspace,
+  });
 
   const adaptation = buildCoachMessageAdaptation({
     message,
@@ -171,6 +192,8 @@ export async function buildCoachMessageProposal(
     interpretation: resolution.interpretation,
     preferredTargetDate: resolution.preferredTargetDate,
     preferredReplacementDiscipline: resolution.preferredReplacementDiscipline,
+    painCalibration,
+    protectiveTrainingDecision,
     recentFatigueTrend: fatigueTrend,
     recentBoneStress,
     returnToRun,
@@ -187,6 +210,13 @@ export async function buildCoachMessageProposal(
   };
   const selectedOptionId = adaptation.adjustment.recommendedOptionId;
   conversation = recordCoachProposal(conversation, proposal, selectedOptionId);
+
+  if (freshAthleteContext.pain && !reportsPainResolved(message)) {
+    recordPainContextObservation(freshAthleteContext.pain, {
+      occurredAt: painOccurredAt(message),
+      discipline: target.unified.discipline as 'swim' | 'bike' | 'run' | 'strength',
+    });
+  }
 
   return {
     ok: true,
@@ -373,6 +403,34 @@ function hasFreshConversationContext(state: CoachConversationState): boolean {
   if (!lastTurn) return false;
   const ageMs = Date.now() - new Date(lastTurn.createdAt).getTime();
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= CONTINUITY_WINDOW_HOURS * 60 * 60 * 1000;
+}
+
+function requestedTrainingDurationMinutes(message: string): number | undefined {
+  const text = message.toLowerCase();
+  const minuteMatch = text.match(/\b(?:do|ride|run|swim|train|workout\s+for|make\s+it)\s+(\d{1,3})\s*(?:min|mins|minute|minutes)\b/);
+  if (minuteMatch?.[1]) return Number(minuteMatch[1]);
+  const hourMatch = text.match(/\b(?:do|ride|run|swim|train|workout\s+for)\s+(\d(?:\.\d+)?)\s*(?:hr|hrs|hour|hours)\b/);
+  if (hourMatch?.[1]) return Math.round(Number(hourMatch[1]) * 60);
+  return undefined;
+}
+
+function requestedTrainingIntensity(message: string): 'recovery' | 'easy' | 'moderate' | 'hard' | 'max' | undefined {
+  const text = message.toLowerCase();
+  if (/\b(all\s*out|max(?:imal)?|race\s+effort)\b/.test(text)) return 'max';
+  if (/\b(hard|threshold|vo2|intervals?|hammer|race\s+pace)\b/.test(text)) return 'hard';
+  if (/\b(moderate|steady)\b/.test(text)) return 'moderate';
+  if (/\b(easy|recovery|gentle)\b/.test(text)) return 'easy';
+  return undefined;
+}
+
+function painOccurredAt(message: string): string {
+  const text = message.toLowerCase();
+  if (/\byesterday\b/.test(text)) return `${addDays(localDate(), -1)}T12:00:00.000Z`;
+  return new Date().toISOString();
+}
+
+function reportsPainResolved(message: string): boolean {
+  return /\b(no\s+(?:more\s+)?pain|pain\s+(?:is\s+)?gone|doesn['’]?t\s+hurt\s+(?:now|anymore)|does\s+not\s+hurt\s+(?:now|anymore)|symptoms?\s+(?:are\s+)?gone)\b/i.test(message);
 }
 
 function snapshotReason(proposal: CoachMessageProposal, optionTitle: string): string {
