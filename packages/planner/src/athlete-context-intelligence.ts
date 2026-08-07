@@ -419,7 +419,7 @@ function parseMenstrualContext(text: string): MenstrualContextSignal | undefined
   if (/\b(irritable|mood|emotional)\b/.test(text)) symptoms.push('mood');
 
   const preferredAdjustments: CycleTrainingAdjustment[] = [];
-  if (/\b(indoor|inside|trainer)\b/.test(text) && /\b(bike|ride|cycling)\b/.test(text)) preferredAdjustments.push('indoor_bike');
+  if (/\b(indoors?|inside|trainer)\b/.test(text) && /\b(bike|ride|cycling)\b/.test(text)) preferredAdjustments.push('indoor_bike');
   if (/\b(shorter|shorten|less\s+time|cut\s+short)\b/.test(text)) preferredAdjustments.push('shorter');
   if (/\b(easier|easy|back\s+off|lower\s+intensity)\b/.test(text)) preferredAdjustments.push('easier');
   if (/\b(don['’]?t\s+want\s+to\s+swim|do\s+not\s+want\s+to\s+swim|skip\s+the\s+swim|avoid\s+swim)\b/.test(text)) preferredAdjustments.push('avoid_swim');
