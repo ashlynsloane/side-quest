@@ -2,6 +2,16 @@ import type { PlannedStrengthSession } from '@circuit/domain';
 import { createWorkoutVariant } from '@circuit/generator';
 
 import {
+  assessPainContext,
+  interpretAthleteContextMessage,
+  type MenstrualContextSignal,
+  type PainCalibration,
+  type PainContextAssessment,
+  type PainContextReport,
+  type ProtectiveTrainingRequestDecision,
+  type TrainingHeadspaceSignal,
+} from './athlete-context-intelligence';
+import {
   buildDailyAdjustmentOptions,
   type AdjustmentOption,
   type AdjustmentReason,
@@ -43,6 +53,11 @@ export interface CoachMessageInterpretation {
   athletePrefersRecovery?: boolean;
   affectedArea: CoachAffectedArea;
   targetDiscipline?: CoachTargetDiscipline;
+  painContext?: PainContextReport;
+  menstrualContext?: MenstrualContextSignal;
+  headspace?: TrainingHeadspaceSignal;
+  compensatoryTrainingIntent?: boolean;
+  requestedLargeTrainingLoad?: boolean;
   confidence: CoachInterpretationConfidence;
   signals: string[];
   summary: string;
@@ -58,6 +73,8 @@ export interface BuildCoachMessageAdaptationInput {
   interpretation?: CoachMessageInterpretation;
   preferredTargetDate?: string;
   preferredReplacementDiscipline?: UnifiedDiscipline;
+  painCalibration?: PainCalibration;
+  protectiveTrainingDecision?: ProtectiveTrainingRequestDecision;
   recentFatigueTrend?: 'stable' | 'worsening' | 'improving';
   recentBoneStress?: boolean;
   returnToRun?: boolean;
@@ -68,12 +85,14 @@ export interface CoachMessageAdaptation {
   quickSignal?: CoachQuickSignal;
   sessionId: string;
   interpretation: CoachMessageInterpretation;
+  painAssessment?: PainContextAssessment;
   adjustment: DailyAdjustmentResult;
 }
 
 export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSignal): CoachMessageInterpretation {
   const text = message.trim().toLowerCase();
-  const signals: string[] = [];
+  const athleteContext = interpretAthleteContextMessage(message);
+  const signals: string[] = [...athleteContext.signals];
 
   let reason: AdjustmentReason = 'preference';
   let requestedAction: RequestedAdjustment = 'different';
@@ -83,7 +102,7 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
   let availableMinutes: number | undefined;
   let athletePrefersRecovery = false;
   let affectedArea: CoachAffectedArea = 'unknown';
-  let matched = 0;
+  let matched = athleteContext.signals.length > 0 ? 1 : 0;
 
   if (quickSignal) {
     matched += 2;
@@ -128,13 +147,12 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     signals.push(`Targets ${targetDiscipline}`);
   }
 
-  const lowerBody = /\b(legs?|quads?|quadriceps|hamstrings?|calves?|calf|glutes?|hips?|knees?|ankles?|feet|foot)\b/.test(text);
-  const upperBody = /\b(arms?|shoulders?|back|chest|lats?|biceps|triceps|wrists?|hands?)\b/.test(text);
+  const lowerBody = /\b(legs?|quads?|quadriceps|hamstrings?|calves?|calf|glutes?|hips?|knees?|ankles?|feet|foot|shins?)\b/.test(text);
+  const upperBody = /\b(arms?|shoulders?|back|chest|lats?|biceps|triceps|wrists?|hands?|elbows?)\b/.test(text);
   if (lowerBody) affectedArea = 'lower_body';
   else if (upperBody) affectedArea = 'upper_body';
 
   const illness = /\b(sick|ill|fever|flu|chills|vomit|vomiting|nausea|nauseous|infection)\b/.test(text);
-  const pain = /\b(pain|painful|hurt|hurts|hurting|sharp|injur|injured|injury|twinge|niggle)\b/.test(text);
   const soreness = /\b(sore|soreness|aching|achy|stiff|stiffness|tight|tightness)\b/.test(text);
   const heavyLegs = /\bheavy\s+legs?\b|\blegs?\s+(?:feel\s+)?heavy\b/.test(text);
   const lowEnergy = /\b(tired|fatigued|fatigue|exhausted|drained|wiped|low\s+energy|no\s+energy|poor\s+sleep|bad\s+sleep|sleepy)\b/.test(text);
@@ -151,26 +169,37 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     signals.push(`${availableMinutes} minutes available`);
   }
 
-  if (illness) {
+  const contextualPain = athleteContext.pain;
+  const menstrual = athleteContext.menstrual;
+  if (contextualPain?.kind === 'systemic' || illness) {
     matched += 3;
     reason = 'illness';
     requestedAction = 'skip';
     fatigueKind = 'illness_like';
-    symptomSeverity = /\b(severe|very|really|fever|vomit|chills)\b/.test(text) ? 4 : 3;
+    symptomSeverity = 4;
     affectedArea = 'general';
+    focalPain = false;
     signals.push('Illness-like symptoms');
-  } else if (pain) {
+  } else if (contextualPain?.kind === 'focal_musculoskeletal' || contextualPain?.kind === 'unknown') {
     matched += 3;
     reason = 'pain';
     requestedAction = 'skip';
-    focalPain = true;
-    symptomSeverity = /\b(severe|sharp|worsening|worse|can['’]?t\s+walk|cannot\s+walk)\b/.test(text)
-      ? 4
-      : /\b(mild|little|slight)\b/.test(text)
-        ? 2
-        : 3;
-    signals.push(affectedArea === 'lower_body' ? 'Lower-body pain' : affectedArea === 'upper_body' ? 'Upper-body pain' : 'Pain');
-  } else if (soreness || heavyLegs || lowEnergy || lowMotivation) {
+    focalPain = contextualPain.focal;
+    symptomSeverity = painSeverity0to5(contextualPain);
+    affectedArea = contextualPain.affectedArea;
+    signals.push(contextualPain.affectedArea === 'lower_body' ? 'Lower-body pain' : contextualPain.affectedArea === 'upper_body' ? 'Upper-body pain' : 'Pain');
+  } else if (contextualPain?.kind === 'menstrual' || menstrual?.active) {
+    matched += 2;
+    reason = 'fatigue';
+    affectedArea = 'general';
+    focalPain = false;
+    fatigueKind = menstrual?.symptoms.includes('fatigue') ? 'systemic' : 'unknown';
+    if (menstrual?.preferredAdjustments.includes('rest') || explicitRecovery) requestedAction = 'skip';
+    else if (menstrual?.preferredAdjustments.includes('shorter') || availableMinutes !== undefined) requestedAction = 'shorter';
+    else if (menstrual?.preferredAdjustments.includes('avoid_swim')) requestedAction = 'different';
+    else requestedAction = 'easier';
+    signals.push('Cycle symptoms are training context, not a musculoskeletal injury classification');
+  } else if (contextualPain?.kind === 'post_exercise_soreness' || soreness || heavyLegs || lowEnergy || lowMotivation) {
     matched += 2;
     reason = 'fatigue';
     if (availableMinutes !== undefined) requestedAction = 'shorter';
@@ -180,8 +209,9 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
       fatigueKind = 'heavy_legs';
       affectedArea = 'lower_body';
       signals.push('Heavy legs');
-    } else if (soreness) {
+    } else if (contextualPain?.kind === 'post_exercise_soreness' || soreness) {
       fatigueKind = 'muscle_soreness';
+      affectedArea = contextualPain?.affectedArea ?? affectedArea;
       signals.push(affectedArea === 'lower_body' ? 'Lower-body soreness' : affectedArea === 'upper_body' ? 'Upper-body soreness' : 'Muscle soreness');
     } else if (lowMotivation) {
       fatigueKind = 'low_motivation';
@@ -192,6 +222,13 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
       affectedArea = affectedArea === 'unknown' ? 'general' : affectedArea;
       signals.push('Low energy');
     }
+  } else if (contextualPain?.kind === 'training_exertion') {
+    matched += 2;
+    reason = /\b(too\s+hard|back\s+off|easier|overdid|overdone)\b/.test(text) ? 'fatigue' : 'preference';
+    requestedAction = reason === 'fatigue' ? 'easier' : requestedAction;
+    focalPain = false;
+    affectedArea = contextualPain.affectedArea;
+    signals.push('Expected exertional discomfort');
   } else if (availableMinutes !== undefined || /\b(short\s+on\s+time|less\s+time|only\s+have)\b/.test(text)) {
     matched += 2;
     reason = 'time';
@@ -212,6 +249,13 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     reason = 'preference';
     requestedAction = 'move';
     signals.push('Schedule conflict');
+  } else if (athleteContext.headspace === 'overwhelmed') {
+    matched += 2;
+    reason = 'fatigue';
+    requestedAction = 'easier';
+    fatigueKind = 'systemic';
+    affectedArea = 'general';
+    signals.push('Limited life/mental bandwidth');
   }
 
   if (explicitRecovery) {
@@ -220,10 +264,21 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     signals.push('Prefers recovery today');
     matched += 1;
   }
+  if (athleteContext.compensatoryTrainingIntent) matched += 2;
+  if (athleteContext.requestedLargeTrainingLoad) matched += 1;
 
   const confidence: CoachInterpretationConfidence = matched >= 3 ? 'high' : matched >= 1 ? 'moderate' : 'low';
   const uniqueSignals = [...new Set(signals)];
-  const summary = buildInterpretationSummary(reason, requestedAction, affectedArea, availableMinutes, targetDiscipline);
+  const summary = buildInterpretationSummary(
+    reason,
+    requestedAction,
+    affectedArea,
+    availableMinutes,
+    targetDiscipline,
+    contextualPain,
+    menstrual,
+    athleteContext.compensatoryTrainingIntent,
+  );
 
   return {
     reason,
@@ -235,6 +290,11 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
     athletePrefersRecovery: athletePrefersRecovery || undefined,
     affectedArea,
     targetDiscipline,
+    painContext: contextualPain,
+    menstrualContext: menstrual,
+    headspace: athleteContext.headspace,
+    compensatoryTrainingIntent: athleteContext.compensatoryTrainingIntent || undefined,
+    requestedLargeTrainingLoad: athleteContext.requestedLargeTrainingLoad || undefined,
     confidence,
     signals: uniqueSignals.length ? uniqueSignals : ['General workout preference'],
     summary,
@@ -243,17 +303,25 @@ export function interpretCoachMessage(message = '', quickSignal?: CoachQuickSign
 
 export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationInput): CoachMessageAdaptation {
   const interpretation = input.interpretation ?? interpretCoachMessage(input.message, input.quickSignal);
+  const painAssessment = interpretation.painContext
+    ? assessPainContext(interpretation.painContext, input.painCalibration)
+    : undefined;
   const request: SessionAdjustmentRequest = {
     sessionId: input.session.id,
-    reason: interpretation.reason,
-    requestedAction: interpretation.requestedAction,
+    reason: painAssessment?.level === 'protect' ? 'pain' : interpretation.reason,
+    requestedAction: painAssessment?.level === 'protect' ? 'skip' : interpretation.requestedAction,
     availableMinutes: interpretation.availableMinutes,
     availableDisciplines: input.availableDisciplines,
     preferredTargetDate: input.preferredTargetDate,
     preferredReplacementDiscipline: input.preferredReplacementDiscipline,
     fatigueKind: interpretation.fatigueKind,
     symptomSeverity: interpretation.symptomSeverity,
-    focalPain: interpretation.focalPain,
+    focalPain: painAssessment?.level === 'protect' ? true : interpretation.focalPain,
+    painKind: interpretation.painContext?.kind,
+    painFunctionalInterference: interpretation.painContext?.functionalInterference,
+    painProtectionLevel: painAssessment?.level,
+    selfReportedPain0to10: interpretation.painContext?.score0to10,
+    protectiveTrainingDecision: input.protectiveTrainingDecision,
     athletePrefersRecovery: interpretation.athletePrefersRecovery,
   };
 
@@ -271,6 +339,7 @@ export function buildCoachMessageAdaptation(input: BuildCoachMessageAdaptationIn
     quickSignal: input.quickSignal,
     sessionId: input.session.id,
     interpretation,
+    painAssessment,
     adjustment,
   };
 }
@@ -346,20 +415,36 @@ function clampMinutes(value: number): number | undefined {
   return Math.max(10, Math.min(240, Math.round(value)));
 }
 
+function painSeverity0to5(report: PainContextReport): 0 | 1 | 2 | 3 | 4 | 5 {
+  if (typeof report.score0to10 === 'number') return Math.max(0, Math.min(5, Math.ceil(report.score0to10 / 2))) as 0 | 1 | 2 | 3 | 4 | 5;
+  if (report.functionalInterference === 'rest_or_night' || report.functionalInterference === 'daily_activity') return 5;
+  if (report.stoppedSession || report.worsening) return 4;
+  if (report.functionalInterference === 'modified_session') return 3;
+  return 2;
+}
+
 function buildInterpretationSummary(
   reason: AdjustmentReason,
   requestedAction: RequestedAdjustment,
   affectedArea: CoachAffectedArea,
   availableMinutes?: number,
   targetDiscipline?: CoachTargetDiscipline,
+  painContext?: PainContextReport,
+  menstrualContext?: MenstrualContextSignal,
+  compensatoryTrainingIntent?: boolean,
 ): string {
   const area = affectedArea === 'lower_body' ? 'lower-body ' : affectedArea === 'upper_body' ? 'upper-body ' : '';
   const target = targetDiscipline ? `${targetDiscipline} session: ` : '';
-  if (reason === 'pain' || reason === 'illness') return `${target}protect against ${area}${reason} before preserving training load.`;
+  if (painContext?.kind === 'menstrual' || menstrualContext?.active) return `${target}menstrual symptoms are affecting training; adapt to current symptoms and personal preferences rather than cycle phase alone.`;
+  if (painContext?.kind === 'training_exertion') return `${target}the discomfort sounds exertional rather than focal injury-like pain; adjust only if the effort no longer fits today.`;
+  if (painContext?.kind === 'post_exercise_soreness') return `${target}${area}soreness is a recovery signal; use function and recovery trajectory rather than the numeric pain score alone.`;
+  if (reason === 'pain') return `${target}protect against ${area}pain based on function, focality, and trajectory before relying on the numeric score.`;
+  if (reason === 'illness') return `${target}protect against systemic symptoms before preserving training load.`;
   if (reason === 'fatigue') return `${target}${area}fatigue is limiting today’s training stress.`;
   if (reason === 'time') return `${target}${availableMinutes ? `${availableMinutes} minutes` : 'Less time'} is available, so preserve the highest-priority work.`;
   if (reason === 'access') return `${target}training access changed, so preserve the week without forcing the unavailable session.`;
   if (reason === 'weather') return `${target}weather changed the safe training options, so adapt the session without adding compensatory load.`;
+  if (compensatoryTrainingIntent) return `${target}the athlete wants to compensate for missed or interrupted training; the planner should prevent training debt from becoming an unsafe load spike.`;
   if (requestedAction === 'move') return `${target}the schedule changed, so find a cleaner place for the session.`;
   return `${target}the planned session does not fit today; adapt it without compensating elsewhere.`;
 }
