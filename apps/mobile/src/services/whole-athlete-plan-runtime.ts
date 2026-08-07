@@ -48,6 +48,10 @@ export function saveWholeAthleteHealthPreferences(preferences: WholeAthleteHealt
   Storage.setItemSync(HEALTH_PREFERENCES_KEY, JSON.stringify(preferences));
 }
 
+export function clearWholeAthleteHealthPreferences(): void {
+  Storage.removeItemSync(HEALTH_PREFERENCES_KEY);
+}
+
 export async function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
   const saved = await getLatestTrainingBlock();
   if (!saved?.block) {
