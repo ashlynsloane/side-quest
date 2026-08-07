@@ -19,7 +19,7 @@ export interface CoachObservedOutcomeRecord {
   interventionId: string;
   observedAt: string;
   execution: CoachObservedExecution;
-  source: 'endurance_match' | 'strength_ledger';
+  source: 'endurance_match' | 'endurance_other_match' | 'strength_ledger';
   actualDurationMinutes?: number;
   prescribedDurationMinutes?: number;
 }
@@ -67,7 +67,7 @@ export async function refreshCoachObservedOutcomes(): Promise<CoachObservedOutco
   for (const intervention of candidates) {
     const observation = intervention.target.targetKind === 'strength'
       ? observedStrength(intervention, block, ledger)
-      : observedEndurance(intervention, matches, activityById, calendar);
+      : observedEndurance(intervention, matches, activityById, activities, calendar);
     if (observation) additions.push(observation);
   }
 
@@ -86,7 +86,8 @@ function observedStrength(
     .sort((left, right) => left.completedAt.localeCompare(right.completedAt))[0];
   if (!entry) return null;
   const planned = block?.weeks.flatMap((week) => week.sessions).find((session) => session.id === intervention.target.sessionId);
-  const prescribedDurationMinutes = planned ? Math.round(planned.workout.estimatedElapsedSeconds / 60) : undefined;
+  const prescribedDurationMinutes = intervention.selectedOption?.durationMinutes
+    ?? (planned ? Math.round(planned.workout.estimatedElapsedSeconds / 60) : undefined);
   const actualDurationMinutes = Math.max(1, Math.round((new Date(entry.completedAt).getTime() - new Date(entry.startedAt).getTime()) / 60_000));
   const execution = classifyCoachObservedExecution({
     prescribedDurationMinutes,
@@ -102,25 +103,55 @@ function observedEndurance(
   intervention: CoachAppliedInterventionRecord,
   matches: PlannedCompletedMatch[],
   activityById: Map<string, EnduranceActivity>,
+  activities: EnduranceActivity[],
   calendar: TrainingCalendarEvent[],
 ): CoachObservedOutcomeRecord | null {
   const eventId = intervention.target.calendarEventId ?? intervention.target.sessionId;
   const match = matches
     .filter((item) => item.status === 'matched' && item.calendarEventId === eventId)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-  if (!match) return null;
-  const activity = activityById.get(match.activityId);
-  if (!activity || activity.startAt < intervention.appliedAt) return null;
   const event = calendar.find((item) => item.id === eventId);
-  const prescribedDurationMinutes = eventDurationMinutes(event);
-  const actualDurationMinutes = Math.max(1, Math.round(activity.movingTimeSeconds / 60));
+  const prescribedDurationMinutes = intervention.selectedOption?.durationMinutes ?? eventDurationMinutes(event);
+
+  if (match) {
+    const activity = activityById.get(match.activityId);
+    if (!activity || activity.startAt < intervention.appliedAt) return null;
+    const actualDurationMinutes = Math.max(1, Math.round(activity.movingTimeSeconds / 60));
+    const execution = classifyCoachObservedExecution({
+      prescribedDurationMinutes,
+      actualDurationMinutes,
+      matchedPlannedSession: true,
+      completed: true,
+    });
+    return { interventionId: intervention.id, observedAt: activity.startAt, execution, source: 'endurance_match', actualDurationMinutes, prescribedDurationMinutes };
+  }
+
+  const effectiveDate = intervention.selectedOption?.targetDate ?? intervention.target.sessionDate;
+  const targetDiscipline = intervention.target.sessionDiscipline;
+  const explicitlyMatchedElsewhere = activities
+    .filter((activity) => activity.startAt >= intervention.appliedAt)
+    .filter((activity) => activity.startAt.slice(0, 10) === effectiveDate && activity.discipline === targetDiscipline)
+    .find((activity) => matches.some((item) =>
+      item.status === 'matched'
+      && item.activityId === activity.id
+      && item.calendarEventId !== eventId,
+    ));
+  if (!explicitlyMatchedElsewhere) return null;
+  const actualDurationMinutes = Math.max(1, Math.round(explicitlyMatchedElsewhere.movingTimeSeconds / 60));
   const execution = classifyCoachObservedExecution({
     prescribedDurationMinutes,
     actualDurationMinutes,
-    matchedPlannedSession: true,
+    matchedPlannedSession: false,
     completed: true,
   });
-  return { interventionId: intervention.id, observedAt: activity.startAt, execution, source: 'endurance_match', actualDurationMinutes, prescribedDurationMinutes };
+  return {
+    interventionId: intervention.id,
+    observedAt: explicitlyMatchedElsewhere.startAt,
+    execution,
+    source: 'endurance_other_match',
+    actualDurationMinutes,
+    prescribedDurationMinutes,
+  };
 }
 
 function eventDurationMinutes(event: TrainingCalendarEvent | undefined): number | undefined {
