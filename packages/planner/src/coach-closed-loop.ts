@@ -141,7 +141,9 @@ export function scheduleCoachFollowUp(input: {
   const maximumDelay = isSafety ? 30 : 48;
   const earliest = appliedTime + minimumDelay * 3_600_000;
   const latest = appliedTime + maximumDelay * 3_600_000;
-  const dueMs = Math.min(latest, Math.max(earliest, sessionDayFollowUp));
+  const dueMs = sessionDayFollowUp > latest
+    ? sessionDayFollowUp
+    : Math.min(latest, Math.max(earliest, sessionDayFollowUp));
   const discipline = input.adaptation.interpretation.targetDiscipline ?? 'session';
   return {
     dueAt: new Date(dueMs).toISOString(),
