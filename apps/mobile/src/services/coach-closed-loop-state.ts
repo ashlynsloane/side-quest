@@ -21,6 +21,8 @@ const COACH_CLOSED_LOOP_KEY = 'circuit.coach-closed-loop.v1';
 const MAX_INTERVENTIONS = 200;
 const MAX_OUTCOMES = 300;
 const MAX_AGE_DAYS = 365;
+const FOLLOW_UP_MAX_OVERDUE_DAYS = 7;
+const UNDO_MAX_AGE_DAYS = 7;
 const PROACTIVE_CUE_MAX_AGE_DAYS = 14;
 
 export type CoachFollowUpResponse = 'better' | 'same' | 'worse' | 'not_completed';
@@ -144,11 +146,16 @@ export function getCoachClosedLoopSummary(
   const operationalInterventions = blockId
     ? state.interventions.filter((item) => item.blockId === blockId)
     : state.interventions;
+  const followUpCutoff = nowMs - FOLLOW_UP_MAX_OVERDUE_DAYS * 86_400_000;
   const dueFollowUp = operationalInterventions
-    .filter((item) => item.status === 'active' && !item.outcomeObservationId && new Date(item.followUp.dueAt).getTime() <= nowMs)
+    .filter((item) => {
+      const dueAt = new Date(item.followUp.dueAt).getTime();
+      return item.status === 'active' && !item.outcomeObservationId && dueAt <= nowMs && dueAt >= followUpCutoff;
+    })
     .sort((left, right) => priorityRank(right.followUp.priority) - priorityRank(left.followUp.priority) || left.followUp.dueAt.localeCompare(right.followUp.dueAt))[0];
+  const undoCutoff = nowMs - UNDO_MAX_AGE_DAYS * 86_400_000;
   const latestUndoable = [...operationalInterventions]
-    .filter((item) => item.status === 'active')
+    .filter((item) => item.status === 'active' && new Date(item.appliedAt).getTime() >= undoCutoff)
     .sort((left, right) => right.appliedAt.localeCompare(left.appliedAt))[0];
   const patterns = learnCoachInterventionEffects(state.outcomes);
   const proactiveCutoff = nowMs - PROACTIVE_CUE_MAX_AGE_DAYS * 86_400_000;
