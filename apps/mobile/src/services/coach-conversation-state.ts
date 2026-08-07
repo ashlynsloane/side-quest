@@ -9,7 +9,7 @@ const COACH_CONVERSATION_KEY = 'circuit.coach-conversation.v1';
 const MAX_TURNS = 20;
 const MAX_STATE_AGE_DAYS = 7;
 
-export type PersistedCoachTargetKind = 'strength' | 'endurance';
+export type PersistedCoachTargetKind = 'strength' | 'endurance' | 'ad_hoc';
 export type CoachConversationTurnRole = 'athlete' | 'coach';
 export type CoachConversationTurnKind = 'message' | 'proposal' | 'applied' | 'cancelled' | 'system';
 
@@ -210,7 +210,7 @@ function isValidTarget(value: unknown): value is PersistedCoachTarget {
     && item?.sessionTitle
     && item?.sessionDate
     && (item.sessionDiscipline === 'swim' || item.sessionDiscipline === 'bike' || item.sessionDiscipline === 'run' || item.sessionDiscipline === 'strength')
-    && (item.targetKind === 'strength' || item.targetKind === 'endurance'),
+    && (item.targetKind === 'strength' || item.targetKind === 'endurance' || item.targetKind === 'ad_hoc'),
   );
 }
 
