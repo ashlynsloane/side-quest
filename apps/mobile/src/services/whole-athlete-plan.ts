@@ -28,6 +28,7 @@ import {
 } from './database';
 import type { DailyReadinessCheckIn } from './readiness';
 import {
+  clearAllSideQuestPlanSessionOverrides,
   listSideQuestPlanSessionOverrides,
   resolveSideQuestPlanOverrideEvent,
   type SideQuestPlanSessionOverride,
@@ -84,8 +85,10 @@ export async function generateAndPersistWholeAthleteBlock(
   ]);
 
   const athleteCalendarEvents = calendarEvents.filter((event) => !isSideQuestGeneratedPlanEvent(event));
+  const blockEventPrefix = `${PLAN_EVENT_PREFIX}${safeId(input.block.id)}_`;
   const overrides = listSideQuestPlanSessionOverrides()
     .filter((override) => override.baseEvent.sourceId === SIDE_QUEST_PLAN_SOURCE_ID)
+    .filter((override) => override.eventId.startsWith(blockEventPrefix))
     .filter((override) => overrideDate(override) >= rangeStartDate && overrideDate(override) <= rangeEndDate);
   const approvedGeneratedEvents = overrides
     .map(resolveSideQuestPlanOverrideEvent)
@@ -178,6 +181,7 @@ export async function generateAndPersistWholeAthleteBlock(
 
 export async function clearSideQuestGeneratedPlanEvents(): Promise<void> {
   await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, []);
+  clearAllSideQuestPlanSessionOverrides();
   const existing = await sourceMetadata();
   await saveTrainingCalendarSource({ ...existing, lastEventCount: 0, updatedAt: new Date().toISOString() });
 }
