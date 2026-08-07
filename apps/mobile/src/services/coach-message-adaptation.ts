@@ -73,6 +73,12 @@ export async function buildCoachMessageProposal(
     return { ok: false, reason: 'no_adjustable_session', message: 'The active plan does not contain an adjustable training week.' };
   }
 
+  try {
+    await refreshLatestWholeAthletePlan();
+  } catch {
+    // Proposal building can still use the latest persisted plan if refresh fails.
+  }
+
   const calendar = await getTrainingCalendarEvents({
     from: `${firstWeek.weekStartDate}T00:00:00.000Z`,
     to: `${addDays(lastWeek.weekStartDate, 6)}T23:59:59.999Z`,
