@@ -1,8 +1,10 @@
 import { autoRefreshTrainingCalendars } from './calendar-sync';
+import { refreshCoachObservedOutcomes } from './coach-observed-outcomes';
 import { listCoachAccess, syncAthleteFuturePlan } from './coach';
 import { getLatestTrainingCalendarSource, saveIntegrationSyncState, softDeleteEnduranceActivitiesBySource } from './database';
 import { processReliabilityQueue, queueReliabilityOperation } from './reliability';
 import { getStravaConnection, getStravaSyncState, refreshStravaActivitiesFromCloud, syncStravaActivities } from './strava';
+import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
 let refreshInFlight: Promise<void> | null = null;
 
@@ -53,6 +55,16 @@ async function runRefresh({ cloudEnabled, userId, force }: { cloudEnabled: boole
   }catch(cause){
     const updatedAt=new Date().toISOString();
     await saveIntegrationSyncState({integrationId:'foreground_recovery',status:'error',connected:cloudEnabled,lastAttemptedAt:attemptedAt,lastError:runtimeCode(cause),updatedAt});
+  } finally {
+    // Canonicalize the visible plan after calendar/watch changes and then attach any
+    // newly observed completions to Coach interventions. Neither step may make a
+    // user-approved integration sync fail if local planning state is unavailable.
+    try {
+      await refreshLatestWholeAthletePlan();
+      await refreshCoachObservedOutcomes();
+    } catch {
+      // Plan/Coach screens can retry from their own focus handlers.
+    }
   }
 }
 async function markRuntimeSuccess(attemptedAt:string){const updatedAt=new Date().toISOString();await saveIntegrationSyncState({integrationId:'foreground_recovery',status:'success',connected:true,lastAttemptedAt:attemptedAt,lastSuccessfulAt:updatedAt,updatedAt})}
