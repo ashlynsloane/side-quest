@@ -99,7 +99,7 @@ function makeStyles(tokens: ReturnType<typeof useTheme>['tokens']) {
     protection: { borderColor: tokens.danger },
     explanation: { borderWidth: 1, borderColor: tokens.border, borderRadius: 16, backgroundColor: tokens.surfaceMuted, padding: 14, gap: 10, marginTop: 12 },
     eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1.05 },
-    headline: { color: tokens.text, fontSize: 17, lineHeight: 22, fontWeight: '850' },
+    headline: { color: tokens.text, fontSize: 17, lineHeight: 22, fontWeight: '800' },
     body: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
     reason: { gap: 3 },
     reasonLabel: { color: tokens.text, fontSize: 10, lineHeight: 13, fontWeight: '800', letterSpacing: 0.7 },
