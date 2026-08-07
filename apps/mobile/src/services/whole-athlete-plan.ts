@@ -26,6 +26,11 @@ import {
   saveTrainingCalendarSource,
 } from './database';
 import type { DailyReadinessCheckIn } from './readiness';
+import {
+  listSideQuestPlanSessionOverrides,
+  resolveSideQuestPlanOverrideEvent,
+  type SideQuestPlanSessionOverride,
+} from './side-quest-plan-overrides';
 
 export const SIDE_QUEST_PLAN_SOURCE_ID = 'side_quest_generated_plan';
 const PLAN_EVENT_PREFIX = 'sq_plan_';
@@ -67,7 +72,9 @@ export async function generateAndPersistWholeAthleteBlock(
   const lastWeek = input.block.weeks.at(-1);
   if (!firstWeek || !lastWeek) return { weeks: [], generatedEvents: [] };
 
-  const rangeStart = `${firstWeek.weekStartDate}T00:00:00.000Z`;
+  const rangeStartDate = firstWeek.weekStartDate;
+  const rangeEndDate = addDays(lastWeek.weekStartDate, 6);
+  const rangeStart = `${rangeStartDate}T00:00:00.000Z`;
   const rangeEnd = `${addDays(lastWeek.weekStartDate, 7)}T23:59:59.999Z`;
   const lookbackStart = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString();
   const [calendarEvents, recentActivities] = await Promise.all([
@@ -76,6 +83,13 @@ export async function generateAndPersistWholeAthleteBlock(
   ]);
 
   const athleteCalendarEvents = calendarEvents.filter((event) => !isSideQuestGeneratedPlanEvent(event));
+  const overrides = listSideQuestPlanSessionOverrides()
+    .filter((override) => override.baseEvent.sourceId === SIDE_QUEST_PLAN_SOURCE_ID)
+    .filter((override) => overrideDate(override) >= rangeStartDate && overrideDate(override) <= rangeEndDate);
+  const approvedGeneratedEvents = overrides
+    .map(resolveSideQuestPlanOverrideEvent)
+    .filter((event): event is TrainingCalendarEvent => event !== null);
+
   const baselines = buildDisciplineBaselines(recentActivities, input.capacity, input.goal);
   const health = buildWholeAthleteHealthContext(input);
   const absentGoalDisciplines = (['swim', 'bike', 'run'] as const).filter((discipline) => !input.goal.disciplines.includes(discipline));
@@ -89,8 +103,13 @@ export async function generateAndPersistWholeAthleteBlock(
 
   for (const week of input.block.weeks) {
     const weekEnd = addDays(week.weekStartDate, 6);
+    const inCurrentWeek = (date: string) => date >= week.weekStartDate && date <= weekEnd;
     const fixedCalendar = athleteCalendarEvents
-      .filter((event) => event.startAt.slice(0, 10) >= week.weekStartDate && event.startAt.slice(0, 10) <= weekEnd)
+      .filter((event) => inCurrentWeek(event.startAt.slice(0, 10)))
+      .filter(isTrainingCalendarCommitment)
+      .map((event) => ({ ...normalizeCalendarEvent(event), priority: 'required' as const }));
+    const fixedApprovedEndurance = approvedGeneratedEvents
+      .filter((event) => inCurrentWeek(event.startAt.slice(0, 10)))
       .filter(isTrainingCalendarCommitment)
       .map((event) => ({ ...normalizeCalendarEvent(event), priority: 'required' as const }));
     const fixedStrength = week.sessions
@@ -102,10 +121,22 @@ export async function generateAndPersistWholeAthleteBlock(
       }));
 
     const strengthCount = fixedStrength.length;
-    const weekFrequencyTargets = {
+    const weekFrequencyTargets: Partial<Record<TrainableDiscipline, { min: number; preferred: number; max: number }>> = {
       ...frequencyTargets,
       strength: { min: strengthCount, preferred: strengthCount, max: strengthCount },
     };
+
+    const weekOverrides = overrides.filter((override) => inCurrentWeek(override.baseEvent.startAt.slice(0, 10)));
+    const rawWeekEvents = calendarEvents.filter((event) => inCurrentWeek(event.startAt.slice(0, 10)));
+    for (const discipline of ['swim', 'bike', 'run'] as const) {
+      const suppressed = weekOverrides.filter((override) =>
+        override.baseEvent.discipline === discipline
+        && (override.option.action === 'skip' || override.option.action === 'replace')).length;
+      if (suppressed === 0) continue;
+      const originallyPlanned = rawWeekEvents.filter((event) => event.discipline === discipline).length;
+      const target = Math.max(0, originallyPlanned - suppressed);
+      weekFrequencyTargets[discipline] = { min: target, preferred: target, max: target };
+    }
 
     const plan = buildWholeAthleteWeek({
       weekStartDate: week.weekStartDate,
@@ -113,7 +144,7 @@ export async function generateAndPersistWholeAthleteBlock(
       goalType: input.goal.type,
       phase: week.phase,
       health,
-      fixedSessions: [...fixedCalendar, ...fixedStrength],
+      fixedSessions: [...fixedCalendar, ...fixedApprovedEndurance, ...fixedStrength],
       previousWeek,
       baselines,
       frequencyTargets: weekFrequencyTargets,
@@ -130,8 +161,9 @@ export async function generateAndPersistWholeAthleteBlock(
     }
   }
 
-  await persistGeneratedPlanEvents(generatedEvents);
-  return { weeks, generatedEvents };
+  const persistedEvents = dedupeEvents([...approvedGeneratedEvents, ...generatedEvents]);
+  await persistGeneratedPlanEvents(persistedEvents);
+  return { weeks, generatedEvents: persistedEvents };
 }
 
 export async function clearSideQuestGeneratedPlanEvents(): Promise<void> {
@@ -318,6 +350,17 @@ async function sourceMetadata(): Promise<TrainingCalendarSource> {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function overrideDate(override: SideQuestPlanSessionOverride): string {
+  if (override.option.action === 'move' && override.option.targetDate) return override.option.targetDate;
+  return override.baseEvent.startAt.slice(0, 10);
+}
+
+function dedupeEvents(events: TrainingCalendarEvent[]): TrainingCalendarEvent[] {
+  const byId = new Map<string, TrainingCalendarEvent>();
+  for (const event of events) byId.set(event.id, event);
+  return [...byId.values()].sort((left, right) => left.startAt.localeCompare(right.startAt) || left.id.localeCompare(right.id));
 }
 
 function goalFallbackWeights(goal: PerformanceGoal): Record<'swim' | 'bike' | 'run', number> {
