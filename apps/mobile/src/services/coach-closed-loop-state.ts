@@ -1,6 +1,7 @@
 import type { PlannedStrengthSession, TrainingCalendarEvent } from '@circuit/domain';
 import {
   buildProactiveCoachCue,
+  findCoachInterventionEffectPattern,
   learnCoachInterventionEffects,
   outcomeRatingFromFollowUp,
   type CoachDecisionExplanation,
@@ -20,6 +21,7 @@ const COACH_CLOSED_LOOP_KEY = 'circuit.coach-closed-loop.v1';
 const MAX_INTERVENTIONS = 200;
 const MAX_OUTCOMES = 300;
 const MAX_AGE_DAYS = 365;
+const PROACTIVE_CUE_MAX_AGE_DAYS = 14;
 
 export type CoachFollowUpResponse = 'better' | 'same' | 'worse' | 'not_completed';
 
@@ -149,7 +151,12 @@ export function getCoachClosedLoopSummary(
     .filter((item) => item.status === 'active')
     .sort((left, right) => right.appliedAt.localeCompare(left.appliedAt))[0];
   const patterns = learnCoachInterventionEffects(state.outcomes);
-  const proactiveCue = patterns.map(buildProactiveCoachCue).find((cue): cue is ProactiveCoachCue => Boolean(cue));
+  const proactiveCutoff = nowMs - PROACTIVE_CUE_MAX_AGE_DAYS * 86_400_000;
+  const recentOutcome = [...state.outcomes]
+    .filter((item) => new Date(item.observedAt).getTime() >= proactiveCutoff)
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))[0];
+  const proactivePattern = recentOutcome ? findCoachInterventionEffectPattern(recentOutcome.fingerprint, patterns) : undefined;
+  const proactiveCue = proactivePattern ? buildProactiveCoachCue(proactivePattern) ?? undefined : undefined;
   return { dueFollowUp, latestUndoable, patterns, proactiveCue };
 }
 
