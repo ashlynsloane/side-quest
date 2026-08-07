@@ -58,6 +58,13 @@ export function resolveCoachConversationMessage(
   const explicitReplacement = Boolean(preferredReplacementDiscipline) || replacementLanguage;
   const explicitNewSafety = fresh.reason === 'pain' || fresh.reason === 'illness';
   const lowInformationFollowUp = fresh.confidence === 'low' || isEllipticalFollowUp(text);
+  const distinctCompensatoryRequest = Boolean(
+    previous
+    && (previous.reason === 'pain' || previous.reason === 'illness')
+    && (fresh.compensatoryTrainingIntent || fresh.requestedLargeTrainingLoad)
+    && fresh.targetDiscipline
+    && fresh.targetDiscipline !== previous.targetDiscipline,
+  );
 
   let interpretation = fresh;
   let recentFatigueTrend: CoachConversationResolution['recentFatigueTrend'];
@@ -75,7 +82,17 @@ export function resolveCoachConversationMessage(
 
   if (previous && !explicitNewSafety && !symptomResolved) {
     const previousWasSafety = previous.reason === 'pain' || previous.reason === 'illness';
-    if (previousWasSafety && (lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening)) {
+    if (previousWasSafety && distinctCompensatoryRequest) {
+      interpretation = {
+        ...fresh,
+        focalPain: undefined,
+        symptomSeverity: undefined,
+        painContext: undefined,
+        signals: unique([...fresh.signals, 'Recent pain interruption remains relevant to progression']),
+        confidence: 'high',
+        summary: 'This is a new training request, but the recent pain-related interruption still constrains how much load should be added next.',
+      };
+    } else if (previousWasSafety && (lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening)) {
       interpretation = {
         ...previous,
         targetDiscipline: explicitReplacement
@@ -120,7 +137,7 @@ export function resolveCoachConversationMessage(
   else if (improving) recentFatigueTrend = 'improving';
   else if (interpretation.reason === 'fatigue') recentFatigueTrend = 'stable';
 
-  if (!explicitNewSafety && interpretation.reason !== 'pain' && interpretation.reason !== 'illness') {
+  if (!explicitNewSafety && interpretation.reason !== 'pain' && interpretation.reason !== 'illness' && !distinctCompensatoryRequest) {
     if (explicitDuration && fresh.availableMinutes !== undefined) {
       interpretation = {
         ...interpretation,
@@ -159,21 +176,25 @@ export function resolveCoachConversationMessage(
     }
   }
 
-  const targetDiscipline = explicitReplacement && context.previousTargetDiscipline
-    ? context.previousTargetDiscipline
-    : fresh.targetDiscipline
-      ?? interpretation.targetDiscipline
-      ?? context.previousTargetDiscipline;
+  const targetDiscipline = distinctCompensatoryRequest
+    ? fresh.targetDiscipline
+    : explicitReplacement && context.previousTargetDiscipline
+      ? context.previousTargetDiscipline
+      : fresh.targetDiscipline
+        ?? interpretation.targetDiscipline
+        ?? context.previousTargetDiscipline;
   interpretation = { ...interpretation, targetDiscipline };
 
   const keepPriorTarget = Boolean(
-    context.previousTargetDiscipline
+    !distinctCompensatoryRequest
+    && context.previousTargetDiscipline
     && (explicitReplacement || !fresh.targetDiscipline)
     && (previous || lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening || improving),
   );
 
   const conversationSignals = unique([
     ...(keepPriorTarget ? ['Continues prior session'] : []),
+    ...(distinctCompensatoryRequest ? ['New request constrained by recent interruption'] : []),
     ...(preferredTargetDate ? [`Requested date: ${preferredTargetDate}`] : []),
     ...(preferredReplacementDiscipline ? [`Preferred replacement: ${preferredReplacementDiscipline}`] : []),
     ...(worsening ? ['Condition worsening'] : []),
