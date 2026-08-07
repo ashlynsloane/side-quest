@@ -73,6 +73,19 @@ export interface MultisportWeekPlan {
   decisions: string[];
 }
 
+type GeneratedTask = {
+  discipline: Exclude<MultisportDiscipline, 'recovery' | 'rest'>;
+  ordinal: number;
+  totalMissing: number;
+  role: GeneratedRole;
+};
+
+type GeneratedRole = {
+  title: string;
+  intensity: SessionIntensity;
+  priority: SessionPriority;
+};
+
 const DAYS: Weekday[] = [
   'monday',
   'tuesday',
@@ -84,12 +97,12 @@ const DAYS: Weekday[] = [
 ];
 
 const DAY_INDEX = new Map(DAYS.map((day, index) => [day, index]));
+const LAND_DISCIPLINES = new Set<MultisportDiscipline>(['bike', 'run', 'strength']);
 
 export function generateMultisportWeek(request: MultisportWeekRequest): MultisportWeekPlan {
-  const fixed = normalizeFixedSessions(request);
   const warnings: string[] = [];
   const decisions: string[] = [];
-  const sessions: PlannedMultisportSession[] = [...fixed];
+  const sessions: PlannedMultisportSession[] = normalizeFixedSessions(request);
 
   if (request.health.runStatus === 'not_running' || request.health.avoidImpact) {
     decisions.push('Running generation is disabled by the current impact constraint.');
@@ -98,24 +111,13 @@ export function generateMultisportWeek(request: MultisportWeekRequest): Multispo
     decisions.push('Recent/current bone-stress history keeps impact progression conservative.');
   }
 
-  const targets = sessionTargets(request);
-  const desired: Array<{ discipline: MultisportDiscipline; count: number }> = [
-    { discipline: 'swim', count: targets.swim },
-    { discipline: 'bike', count: targets.bike },
-    { discipline: 'run', count: targets.run },
-    { discipline: 'strength', count: targets.strength },
-  ];
-
-  for (const target of desired) {
-    const existing = sessions.filter((session) => session.discipline === target.discipline).length;
-    const missing = Math.max(0, target.count - existing);
-    for (let index = 0; index < missing; index += 1) {
-      const candidate = placeGeneratedSession(request, sessions, target.discipline, index, missing);
-      if (candidate) {
-        sessions.push(candidate);
-      } else {
-        warnings.push(`Could not place another ${target.discipline} session without violating current availability or spacing rules.`);
-      }
+  const tasks = buildGeneratedTasks(request, sessions);
+  for (const task of tasks) {
+    const candidate = placeGeneratedSession(request, sessions, task);
+    if (candidate) {
+      sessions.push(candidate);
+    } else {
+      warnings.push(`Could not place another ${task.discipline} session without violating current availability, recovery, or spacing rules.`);
     }
   }
 
@@ -155,6 +157,40 @@ function normalizeFixedSessions(request: MultisportWeekRequest): PlannedMultispo
   }));
 }
 
+function buildGeneratedTasks(
+  request: MultisportWeekRequest,
+  existing: PlannedMultisportSession[],
+): GeneratedTask[] {
+  const targets = sessionTargets(request);
+  const disciplines: Array<GeneratedTask['discipline']> = ['swim', 'bike', 'run', 'strength'];
+  const tasks: GeneratedTask[] = [];
+
+  for (const discipline of disciplines) {
+    const existingCount = existing.filter((session) => session.discipline === discipline).length;
+    const target = targets[discipline];
+    const missing = Math.max(0, target - existingCount);
+    for (let ordinal = 0; ordinal < missing; ordinal += 1) {
+      tasks.push({
+        discipline,
+        ordinal,
+        totalMissing: missing,
+        role: generatedRole(request, discipline, ordinal, missing),
+      });
+    }
+  }
+
+  return tasks.sort((left, right) => taskPriority(right) - taskPriority(left));
+}
+
+function taskPriority(task: GeneratedTask): number {
+  let score = 0;
+  if (task.role.priority === 'key') score += 100;
+  if (task.role.intensity === 'hard') score += 40;
+  if (task.discipline === 'bike' || task.discipline === 'run') score += 20;
+  if (task.discipline === 'strength') score += 10;
+  return score;
+}
+
 function sessionTargets(request: MultisportWeekRequest): Record<'swim' | 'bike' | 'run' | 'strength', number> {
   const explicit = request.preferences?.preferredSessionsPerWeek;
   const isTriathlon = request.goal.disciplines.includes('swim')
@@ -163,7 +199,7 @@ function sessionTargets(request: MultisportWeekRequest): Record<'swim' | 'bike' 
 
   let swim = explicit?.swim ?? (request.goal.disciplines.includes('swim') ? (isTriathlon ? 3 : 2) : 0);
   let bike = explicit?.bike ?? (request.goal.disciplines.includes('bike') ? (isTriathlon ? 3 : 2) : 0);
-  let run = explicit?.run ?? (request.goal.disciplines.includes('run') ? (isTriathlon ? 3 : 3) : 0);
+  let run = explicit?.run ?? (request.goal.disciplines.includes('run') ? 3 : 0);
   let strength = explicit?.strength ?? Math.min(
     request.health.maxStrengthDaysPerWeek ?? 3,
     request.goal.phaseStrengthSessions?.[request.phase] ?? request.goal.sessionsPerWeek,
@@ -179,8 +215,7 @@ function sessionTargets(request: MultisportWeekRequest): Record<'swim' | 'bike' 
   }
 
   if (request.health.runStatus === 'not_running' || request.health.avoidImpact) run = 0;
-  if (request.health.runStatus === 'return_to_run') run = Math.min(run, 2);
-  if (request.health.runStatus === 'reduced') run = Math.min(run, 2);
+  if (request.health.runStatus === 'return_to_run' || request.health.runStatus === 'reduced') run = Math.min(run, 2);
 
   return { swim, bike, run, strength };
 }
@@ -188,36 +223,35 @@ function sessionTargets(request: MultisportWeekRequest): Record<'swim' | 'bike' 
 function placeGeneratedSession(
   request: MultisportWeekRequest,
   current: PlannedMultisportSession[],
-  discipline: MultisportDiscipline,
-  ordinal: number,
-  totalMissing: number,
+  task: GeneratedTask,
 ): PlannedMultisportSession | null {
-  const candidates = candidateDays(request, discipline)
-    .filter((day) => canFitOnDay(request, current, discipline, day))
-    .map((day) => ({ day, score: placementScore(request, current, discipline, day, ordinal) }))
+  const candidates = candidateDays(request, task.discipline)
+    .filter((day) => canFitOnDay(request, current, task, day))
+    .map((day) => ({ day, score: placementScore(request, current, task, day) }))
     .sort((left, right) => right.score - left.score || dayOffset(left.day) - dayOffset(right.day));
 
   const selected = candidates[0]?.day;
   if (!selected) return null;
 
-  const role = generatedRole(request, discipline, ordinal, totalMissing);
-  const durationMinutes = generatedDuration(request, discipline, selected, role.priority);
+  const durationMinutes = generatedDuration(request, task.discipline, selected, task.role.priority, current);
   return {
-    id: `generated_${discipline}_${isoDateForDay(request.weekStartDate, selected)}_${ordinal + 1}`,
+    id: `generated_${task.discipline}_${isoDateForDay(request.weekStartDate, selected)}_${task.ordinal + 1}`,
     date: isoDateForDay(request.weekStartDate, selected),
     day: selected,
-    discipline,
-    title: role.title,
+    discipline: task.discipline,
+    title: task.role.title,
     durationMinutes,
-    intensity: role.intensity,
-    priority: role.priority,
-    ownership: preferredDays(request, discipline).includes(selected) ? 'preferred' : 'generated',
-    rationale: placementRationale(request, current, discipline, selected, role),
+    intensity: task.role.intensity,
+    priority: task.role.priority,
+    ownership: preferredDays(request, task.discipline).includes(selected) ? 'preferred' : 'generated',
+    rationale: placementRationale(request, current, task, selected),
   };
 }
 
 function candidateDays(request: MultisportWeekRequest, discipline: MultisportDiscipline): Weekday[] {
-  const available = request.availability.filter((window) => window.available && window.minutes > 0).map((window) => window.day);
+  const available = request.availability
+    .filter((window) => window.available && window.minutes > 0)
+    .map((window) => window.day);
   const avoid = new Set(request.preferences?.avoidDays ?? []);
   const preferred = preferredDays(request, discipline).filter((day) => available.includes(day) && !avoid.has(day));
   const remainder = available.filter((day) => !avoid.has(day) && !preferred.includes(day));
@@ -227,7 +261,7 @@ function candidateDays(request: MultisportWeekRequest, discipline: MultisportDis
 function canFitOnDay(
   request: MultisportWeekRequest,
   current: PlannedMultisportSession[],
-  discipline: MultisportDiscipline,
+  task: GeneratedTask,
   day: Weekday,
 ): boolean {
   const availability = request.availability.find((window) => window.day === day);
@@ -235,21 +269,41 @@ function canFitOnDay(
 
   const onDay = current.filter((session) => session.day === day);
   const usedMinutes = onDay.reduce((sum, session) => sum + session.durationMinutes, 0);
-  const minimum = minimumDuration(discipline);
-  if (availability.minutes < usedMinutes + minimum) return false;
+  if (availability.minutes < usedMinutes + minimumDuration(task.discipline)) return false;
+  if (onDay.some((session) => session.discipline === task.discipline)) return false;
 
-  if (onDay.some((session) => session.discipline === discipline)) return false;
-  if (discipline === 'strength' && onDay.some((session) => session.intensity === 'hard' && (session.discipline === 'bike' || session.discipline === 'run'))) return false;
+  // Side Quest should not invent three-a-days. Two sessions are allowed only for
+  // complementary pairings (most commonly swim + one land-based session).
+  if (onDay.length >= 2) return false;
+  if (LAND_DISCIPLINES.has(task.discipline) && onDay.some((session) => LAND_DISCIPLINES.has(session.discipline))) {
+    return false;
+  }
+  if (task.role.priority === 'key' && onDay.some((session) => session.priority === 'key')) return false;
 
-  if (discipline === 'strength') {
+  if (task.discipline === 'strength') {
     const tomorrow = dayAtOffset(day, 1);
     if (current.some((session) => session.day === tomorrow && session.priority === 'key' && (session.discipline === 'bike' || session.discipline === 'run'))) {
       return false;
     }
   }
 
-  if ((discipline === 'bike' || discipline === 'run') && current.some((session) => session.day === day && session.discipline === 'strength' && session.intensity === 'hard')) {
-    return false;
+  if ((task.discipline === 'bike' || task.discipline === 'run') && task.role.priority === 'key') {
+    const yesterday = dayAtOffset(day, -1);
+    if (current.some((session) => session.day === yesterday && session.discipline === 'strength')) return false;
+  }
+
+  if (task.discipline === 'run') {
+    const previous = dayAtOffset(day, -1);
+    const next = dayAtOffset(day, 1);
+    if (current.some((session) => session.discipline === 'run' && (session.day === previous || session.day === next))) {
+      return false;
+    }
+  }
+
+  if (task.role.intensity === 'hard') {
+    const hardDays = uniqueDays(current.filter((session) => session.intensity === 'hard'));
+    const limit = request.health.maxHardDaysPerWeek ?? 3;
+    if (!hardDays.includes(day) && hardDays.length >= limit) return false;
   }
 
   return true;
@@ -258,36 +312,44 @@ function canFitOnDay(
 function placementScore(
   request: MultisportWeekRequest,
   current: PlannedMultisportSession[],
-  discipline: MultisportDiscipline,
+  task: GeneratedTask,
   day: Weekday,
-  ordinal: number,
 ): number {
   let score = 0;
-  if (preferredDays(request, discipline).includes(day)) score += 40;
-  if (request.preferences?.longRideDay === day && discipline === 'bike' && ordinal === 0) score += 50;
-  if (request.preferences?.longRunDay === day && discipline === 'run' && ordinal === 0) score += 50;
+  const onDay = current.filter((session) => session.day === day);
+
+  if (preferredDays(request, task.discipline).includes(day)) score += 80;
+  if (request.preferences?.longRideDay === day && task.discipline === 'bike' && task.ordinal === 0) score += 100;
+  if (request.preferences?.longRunDay === day && task.discipline === 'run' && task.ordinal === 0) score += 100;
+
+  if (onDay.length === 0) score += 60;
+  else score -= 35 * onDay.length;
 
   const index = dayOffset(day);
   const sameDisciplineDistances = current
-    .filter((session) => session.discipline === discipline)
+    .filter((session) => session.discipline === task.discipline)
     .map((session) => Math.abs(dayOffset(session.day) - index));
-  if (sameDisciplineDistances.length) score += Math.min(...sameDisciplineDistances) * 5;
+  if (sameDisciplineDistances.length) score += Math.min(...sameDisciplineDistances) * 10;
 
-  if (!current.some((session) => session.day === day)) score += 12;
-  if (current.some((session) => session.day === day && session.discipline === 'swim') && discipline === 'strength') score += 5;
-  if (hasAdjacentHardDay(current, day)) score -= 15;
+  if (task.role.priority === 'key' && (day === 'saturday' || day === 'sunday')) score += 12;
+  if (task.discipline === 'strength' && onDay.some((session) => session.discipline === 'swim')) score += 8;
+  if (hasAdjacentHardDay(current, day)) score -= 30;
+
+  const adjacentOccupied = [dayAtOffset(day, -1), dayAtOffset(day, 1)]
+    .filter((adjacent) => current.some((session) => session.day === adjacent)).length;
+  score -= adjacentOccupied * 4;
 
   const availability = request.availability.find((window) => window.day === day)?.minutes ?? 0;
-  score += Math.min(availability, 180) / 30;
+  score += Math.min(availability, 180) / 20;
   return score;
 }
 
 function generatedRole(
   request: MultisportWeekRequest,
-  discipline: MultisportDiscipline,
+  discipline: GeneratedTask['discipline'],
   ordinal: number,
   totalMissing: number,
-): { title: string; intensity: SessionIntensity; priority: SessionPriority } {
+): GeneratedRole {
   const finalGenerated = ordinal === totalMissing - 1;
   if (discipline === 'swim') {
     if (ordinal === 0) return { title: 'Swim · aerobic technique', intensity: 'easy', priority: 'support' };
@@ -305,12 +367,9 @@ function generatedRole(
     if ((request.phase === 'build' || request.phase === 'peak') && finalGenerated) return { title: 'Run · quality intervals', intensity: 'hard', priority: 'key' };
     return { title: 'Run · easy aerobic', intensity: 'easy', priority: 'support' };
   }
-  if (discipline === 'strength') {
-    if (request.phase === 'race_week' || request.phase === 'taper') return { title: 'Strength · race support', intensity: 'easy', priority: 'support' };
-    if (ordinal === 0) return { title: 'Strength · primary development', intensity: 'hard', priority: 'key' };
-    return { title: 'Strength · durability and support', intensity: 'moderate', priority: 'support' };
-  }
-  return { title: 'Recovery', intensity: 'easy', priority: 'support' };
+  if (request.phase === 'race_week' || request.phase === 'taper') return { title: 'Strength · race support', intensity: 'easy', priority: 'support' };
+  if (ordinal === 0) return { title: 'Strength · primary development', intensity: 'hard', priority: 'key' };
+  return { title: 'Strength · durability and support', intensity: 'moderate', priority: 'support' };
 }
 
 function generatedDuration(
@@ -318,8 +377,11 @@ function generatedDuration(
   discipline: MultisportDiscipline,
   day: Weekday,
   priority: SessionPriority,
+  current: PlannedMultisportSession[],
 ): number {
   const available = request.availability.find((window) => window.day === day)?.minutes ?? 60;
+  const used = current.filter((session) => session.day === day).reduce((sum, session) => sum + session.durationMinutes, 0);
+  const remaining = Math.max(minimumDuration(discipline), available - used);
   const base = discipline === 'strength'
     ? request.goal.defaultSessionMinutes
     : discipline === 'swim'
@@ -329,7 +391,7 @@ function generatedDuration(
         : discipline === 'run'
           ? (priority === 'key' ? 75 : 45)
           : 30;
-  return Math.max(minimumDuration(discipline), Math.min(base, available));
+  return Math.max(minimumDuration(discipline), Math.min(base, remaining));
 }
 
 function minimumDuration(discipline: MultisportDiscipline): number {
@@ -343,15 +405,15 @@ function minimumDuration(discipline: MultisportDiscipline): number {
 function placementRationale(
   request: MultisportWeekRequest,
   current: PlannedMultisportSession[],
-  discipline: MultisportDiscipline,
+  task: GeneratedTask,
   day: Weekday,
-  role: { intensity: SessionIntensity; priority: SessionPriority },
 ): string[] {
-  const rationale = [`Side Quest filled an open ${day} slot with ${discipline} to move the ${request.goal.name} plan forward.`];
-  if (preferredDays(request, discipline).includes(day)) rationale.push('This matches one of your preferred days.');
-  if (!current.some((session) => session.day === day)) rationale.push('The day was otherwise open, reducing unnecessary stacking.');
-  if (discipline === 'strength') rationale.push('Strength placement avoids the day immediately before an existing key bike or run session.');
-  if (role.priority === 'key') rationale.push('This is treated as a key session when balancing the rest of the week.');
+  const rationale = [`Side Quest placed ${task.discipline} on ${day} to move the ${request.goal.name} plan forward.`];
+  if (preferredDays(request, task.discipline).includes(day)) rationale.push('This matches one of your preferred days.');
+  if (!current.some((session) => session.day === day)) rationale.push('The day was open, so this placement spreads training load instead of stacking it unnecessarily.');
+  if (task.discipline === 'strength') rationale.push('Strength is kept away from the day immediately before an existing key bike or run session.');
+  if (task.discipline === 'run' && request.health.runStatus === 'return_to_run') rationale.push('Return-to-run sessions are separated by at least one day.');
+  if (task.role.priority === 'key') rationale.push('This is treated as a key session when balancing the rest of the week.');
   return rationale;
 }
 
@@ -361,10 +423,17 @@ function addRecoveryIfNeeded(
   decisions: string[],
 ): void {
   const occupied = new Set(sessions.map((session) => session.day));
-  const openDay = DAYS.find((day) => !occupied.has(day) && request.availability.some((window) => window.day === day));
-  if (!openDay) return;
+  const openDays = DAYS.filter((day) => !occupied.has(day) && request.availability.some((window) => window.day === day && window.available));
+  if (!openDays.length) return;
+
   const hardDays = uniqueDays(sessions.filter((session) => session.intensity === 'hard'));
   if (hardDays.length < 2) return;
+
+  const openDay = openDays
+    .map((day) => ({ day, score: recoveryScore(sessions, day) }))
+    .sort((left, right) => right.score - left.score)[0]?.day;
+  if (!openDay) return;
+
   sessions.push({
     id: `generated_recovery_${isoDateForDay(request.weekStartDate, openDay)}`,
     date: isoDateForDay(request.weekStartDate, openDay),
@@ -375,9 +444,19 @@ function addRecoveryIfNeeded(
     intensity: 'easy',
     priority: 'support',
     ownership: 'generated',
-    rationale: ['Recovery is prescribed deliberately because the week already contains multiple hard training days.'],
+    rationale: ['Recovery is prescribed deliberately after the training week has been distributed, not used as a placeholder while other days are overloaded.'],
   });
-  decisions.push(`Kept ${openDay} as a recovery-focused day rather than filling every available slot.`);
+  decisions.push(`Kept ${openDay} recovery-focused because the week already contains multiple hard training days.`);
+}
+
+function recoveryScore(sessions: PlannedMultisportSession[], day: Weekday): number {
+  let score = 0;
+  const previous = dayAtOffset(day, -1);
+  const next = dayAtOffset(day, 1);
+  if (sessions.some((session) => session.day === previous && session.intensity === 'hard')) score += 30;
+  if (sessions.some((session) => session.day === next && session.intensity === 'hard')) score += 15;
+  if (day === 'friday' && sessions.some((session) => session.day === 'saturday' && session.priority === 'key')) score += 20;
+  return score;
 }
 
 function preferredDays(request: MultisportWeekRequest, discipline: MultisportDiscipline): Weekday[] {
