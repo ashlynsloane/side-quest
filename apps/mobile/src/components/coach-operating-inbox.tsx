@@ -47,7 +47,7 @@ function makeStyles(tokens: ReturnType<typeof useTheme>['tokens']) {
     level: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
     protectionText: { color: tokens.danger },
     action: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '800', letterSpacing: 0.7 },
-    itemTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '850' },
+    itemTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },
     body: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
     reason: { color: tokens.textMuted, fontSize: 11, lineHeight: 16, fontWeight: '700' },
   });
