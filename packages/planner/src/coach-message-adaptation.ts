@@ -392,7 +392,7 @@ function parseTargetDiscipline(text: string): CoachTargetDiscipline | undefined 
   const matches: CoachTargetDiscipline[] = [];
   if (/\b(swim|swimming|pool)\b/.test(text)) matches.push('swim');
   if (/\b(bike|biking|cycle|cycling|cyclist|ride|riding|trainer)\b/.test(text)) matches.push('bike');
-  if (/\b(run|running|runner|jog|jogging|treadmill)\b/.test(text)) matches.push('run');
+  if (/\b(run|running|runner|jog|jogging|treadmill|track(?:\s+workout|\s+session)?)\b/.test(text)) matches.push('run');
   if (/\b(strength|lift|lifting|weights?|gym\s+workout)\b/.test(text)) matches.push('strength');
   const unique = [...new Set(matches)];
   return unique.length === 1 ? unique[0] : undefined;
@@ -416,10 +416,10 @@ function clampMinutes(value: number): number | undefined {
 }
 
 function painSeverity0to5(report: PainContextReport): 0 | 1 | 2 | 3 | 4 | 5 {
-  if (typeof report.score0to10 === 'number') return Math.max(0, Math.min(5, Math.ceil(report.score0to10 / 2))) as 0 | 1 | 2 | 3 | 4 | 5;
   if (report.functionalInterference === 'rest_or_night' || report.functionalInterference === 'daily_activity') return 5;
-  if (report.stoppedSession || report.worsening) return 4;
+  if (report.stoppedSession || report.worsening || report.newOrUnfamiliar) return 4;
   if (report.functionalInterference === 'modified_session') return 3;
+  if (typeof report.score0to10 === 'number') return Math.max(0, Math.min(5, Math.ceil(report.score0to10 / 2))) as 0 | 1 | 2 | 3 | 4 | 5;
   return 2;
 }
 
