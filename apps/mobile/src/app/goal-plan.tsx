@@ -60,7 +60,7 @@ function blockSignature(block: TrainingBlockPlan | null): string {
         load: session.intendedLoad,
         status: session.completionStatus,
         workoutId: session.workout.id,
-        variant: session.workout.variantLevel,
+        duration: session.workout.estimatedElapsedSeconds,
       })),
     })),
   });
