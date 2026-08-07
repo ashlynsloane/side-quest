@@ -104,7 +104,11 @@ export function resolveCoachConversationMessage(
       focalPain: undefined,
       symptomSeverity: undefined,
       fatigueKind: undefined,
-      signals: unique([...fresh.signals.filter((signal) => signal !== 'General workout preference'), 'Prior safety concern reported resolved']),
+      painContext: undefined,
+      signals: unique([
+        ...fresh.signals.filter((signal) => signal !== 'General workout preference' && !signal.startsWith('Pain context:') && !signal.includes('self-report')),
+        'Prior safety concern reported resolved',
+      ]),
       summary: explicitMove
         ? 'The prior safety concern was reported resolved; re-check the requested date against the current week.'
         : 'The prior safety concern was reported resolved; build a fresh option from the current request.',
@@ -237,6 +241,10 @@ function copyDefinedFatigueFields(fresh: CoachMessageInterpretation): Partial<Co
   if (fresh.fatigueKind) output.fatigueKind = fresh.fatigueKind;
   if (fresh.affectedArea !== 'unknown') output.affectedArea = fresh.affectedArea;
   if (fresh.athletePrefersRecovery !== undefined) output.athletePrefersRecovery = fresh.athletePrefersRecovery;
+  if (fresh.menstrualContext) output.menstrualContext = fresh.menstrualContext;
+  if (fresh.headspace && fresh.headspace !== 'neutral') output.headspace = fresh.headspace;
+  if (fresh.compensatoryTrainingIntent !== undefined) output.compensatoryTrainingIntent = fresh.compensatoryTrainingIntent;
+  if (fresh.requestedLargeTrainingLoad !== undefined) output.requestedLargeTrainingLoad = fresh.requestedLargeTrainingLoad;
   return output;
 }
 
