@@ -67,6 +67,13 @@ export interface DailyAdjustmentResult {
 export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, context: AdjustmentContext): DailyAdjustmentResult {
   const session = context.plannedSession;
   const hasStructuredPainAssessment = Boolean(request.painProtectionLevel);
+  const structuredFunctionLimitingPain = hasStructuredPainAssessment
+    && request.reason === 'pain'
+    && (
+      request.painFunctionalInterference === 'stopped_session'
+      || request.painFunctionalInterference === 'daily_activity'
+      || request.painFunctionalInterference === 'rest_or_night'
+    );
   const legacyPainConcern = !hasStructuredPainAssessment && Boolean(
     request.focalPain
     || (request.reason === 'pain' && (request.symptomSeverity ?? 0) >= 3),
@@ -74,6 +81,7 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
   const safetyConcern = Boolean(
     request.reason === 'illness'
     || request.painProtectionLevel === 'protect'
+    || structuredFunctionLimitingPain
     || legacyPainConcern
     || request.fatigueKind === 'illness_like'
     || (context.recentBoneStress && request.reason === 'pain' && request.painKind !== 'menstrual'),
