@@ -1,12 +1,13 @@
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent, WorkoutRecommendationExplanation } from '@circuit/domain';
 import { explainPlannedStrengthSession } from '@circuit/planner';
+import { COACH_QUICK_SIGNALS, type CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
 import { CoachInsights } from '@/components/coach-insights';
-import { V23Card, V23Chip, V23Icon, V23PrimaryButton, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
+import { V23Card, V23Chip, V23Icon, V23OutlineButton, V23PrimaryButton, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
 import {
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
@@ -14,6 +15,11 @@ import {
   listCompletedWorkoutSummaries,
   listTrainingCalendarSources,
 } from '@/services/database';
+import {
+  applyCoachMessageProposal,
+  buildCoachMessageProposal,
+  type CoachMessageProposal,
+} from '@/services/coach-message-adaptation';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
 import type { DesignTokens } from '@/theme';
@@ -28,34 +34,44 @@ export default function CoachTab() {
   const [hasTrainingHistory, setHasTrainingHistory] = useState(false);
   const [hasReadinessData, setHasReadinessData] = useState(false);
   const [hasConnectedTrainingData, setHasConnectedTrainingData] = useState(false);
+  const [message, setMessage] = useState('');
+  const [quickSignal, setQuickSignal] = useState<CoachQuickSignal | undefined>();
+  const [proposal, setProposal] = useState<CoachMessageProposal | null>(null);
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [coachError, setCoachError] = useState<string | null>(null);
+  const [coachResult, setCoachResult] = useState<string | null>(null);
+  const [buildingProposal, setBuildingProposal] = useState(false);
+  const [applyingProposal, setApplyingProposal] = useState(false);
+
+  const loadCoachData = useCallback(async (isLive: () => boolean = () => true) => {
+    const saved = await getLatestTrainingBlock();
+    const nextBlock = saved?.block ?? null;
+    const now = new Date();
+    const rangeStart = new Date(now);
+    rangeStart.setDate(rangeStart.getDate() - 7);
+    const rangeEnd = new Date(now);
+    rangeEnd.setDate(rangeEnd.getDate() + 21);
+    const historyStart = new Date(now);
+    historyStart.setDate(historyStart.getDate() - 90);
+    const [calendar, history, readiness, sources] = await Promise.all([
+      getTrainingCalendarEvents({ from: rangeStart.toISOString(), to: rangeEnd.toISOString() }),
+      listCompletedWorkoutSummaries({ from: historyStart.toISOString(), to: now.toISOString() }),
+      getTodayReadinessCheckIn(),
+      listTrainingCalendarSources(),
+    ]);
+    if (!isLive()) return;
+    setBlock(nextBlock);
+    setEvents(calendar);
+    setHasTrainingHistory(history.length > 0);
+    setHasReadinessData(Boolean(readiness));
+    setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
+  }, []);
 
   useFocusEffect(useCallback(() => {
     let live = true;
-    void (async () => {
-      const saved = await getLatestTrainingBlock();
-      const nextBlock = saved?.block ?? null;
-      const now = new Date();
-      const rangeStart = new Date(now);
-      rangeStart.setDate(rangeStart.getDate() - 7);
-      const rangeEnd = new Date(now);
-      rangeEnd.setDate(rangeEnd.getDate() + 21);
-      const historyStart = new Date(now);
-      historyStart.setDate(historyStart.getDate() - 90);
-      const [calendar, history, readiness, sources] = await Promise.all([
-        getTrainingCalendarEvents({ from: rangeStart.toISOString(), to: rangeEnd.toISOString() }),
-        listCompletedWorkoutSummaries({ from: historyStart.toISOString(), to: now.toISOString() }),
-        getTodayReadinessCheckIn(),
-        listTrainingCalendarSources(),
-      ]);
-      if (!live) return;
-      setBlock(nextBlock);
-      setEvents(calendar);
-      setHasTrainingHistory(history.length > 0);
-      setHasReadinessData(Boolean(readiness));
-      setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
-    })();
+    void loadCoachData(() => live);
     return () => { live = false; };
-  }, []));
+  }, [loadCoachData]));
 
   const sessions = useMemo(() => block?.weeks.flatMap((week) => week.sessions) ?? [], [block]);
   const nextSession = useMemo(() => selectNextSession(sessions), [sessions]);
@@ -84,6 +100,51 @@ export default function CoachTab() {
     router.push('/workout-preview' as Href);
   }
 
+  async function reviewMessage() {
+    if (buildingProposal || applyingProposal) return;
+    setBuildingProposal(true);
+    setCoachError(null);
+    setCoachResult(null);
+    try {
+      const result = await buildCoachMessageProposal(message, quickSignal);
+      if (!result.ok) {
+        setProposal(null);
+        setSelectedOptionId(null);
+        setCoachError(result.message);
+        return;
+      }
+      setProposal(result.proposal);
+      setSelectedOptionId(result.proposal.adaptation.adjustment.recommendedOptionId);
+    } catch (caught) {
+      setProposal(null);
+      setSelectedOptionId(null);
+      setCoachError(caught instanceof Error ? caught.message : 'Side Quest could not build an adaptation proposal.');
+    } finally {
+      setBuildingProposal(false);
+    }
+  }
+
+  async function acceptProposal() {
+    if (!proposal || !selectedOptionId || applyingProposal) return;
+    setApplyingProposal(true);
+    setCoachError(null);
+    try {
+      const applied = await applyCoachMessageProposal(proposal, selectedOptionId);
+      setCoachResult(applied.replanWarning ?? `${applied.optionTitle} applied. The rest of the week was replanned around it.`);
+      setProposal(null);
+      setSelectedOptionId(null);
+      setMessage('');
+      setQuickSignal(undefined);
+      await loadCoachData();
+    } catch (caught) {
+      setCoachError(caught instanceof Error ? caught.message : 'Side Quest could not apply this change.');
+    } finally {
+      setApplyingProposal(false);
+    }
+  }
+
+  const selectedOption = proposal?.adaptation.adjustment.options.find((option) => option.id === selectedOptionId) ?? null;
+
   return (
     <V23Screen contentStyle={styles.page}>
       {activeWorkout ? <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink} onResume={() => router.push('/active-workout' as Href)} compact /> : null}
@@ -96,6 +157,103 @@ export default function CoachTab() {
             : 'Side Quest can make a specific recommendation after you set a goal, availability, and race priority.'}
         </Text>
       </View>
+
+      <V23Card elevated style={styles.messageCard}>
+        <View style={styles.messageHeader}>
+          <View style={styles.messageHeaderCopy}>
+            <Text style={styles.callLabel}>TELL SIDE QUEST WHAT CHANGED</Text>
+            <Text style={styles.messageTitle}>Don’t rewrite the plan yourself.</Text>
+          </View>
+          <View style={styles.messageIcon}><V23Icon name="adjust" color={tokens.accent} size={21} /></View>
+        </View>
+        <Text style={styles.callBody}>Say what is different today. Side Quest will turn it into planner inputs, propose a change, and re-check the week after you approve it.</Text>
+        <TextInput
+          value={message}
+          onChangeText={(value) => { setMessage(value); setCoachError(null); }}
+          placeholder="My legs are sore and I’m not feeling this workout…"
+          placeholderTextColor={tokens.textMuted}
+          multiline
+          maxLength={500}
+          style={styles.messageInput}
+          accessibilityLabel="Tell Side Quest what changed"
+        />
+        <View style={styles.quickSignals}>
+          {COACH_QUICK_SIGNALS.map((signal) => {
+            const selected = quickSignal === signal.id;
+            return (
+              <Pressable
+                key={signal.id}
+                onPress={() => { setQuickSignal(selected ? undefined : signal.id); setCoachError(null); }}
+                style={({ pressed }) => [styles.quickSignal, selected && styles.quickSignalSelected, pressed && styles.pressed]}
+              >
+                <Text style={[styles.quickSignalText, selected && styles.quickSignalTextSelected]}>{signal.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void reviewMessage()}
+          disabled={buildingProposal || applyingProposal || (!message.trim() && !quickSignal)}
+          style={({ pressed }) => [
+            styles.reviewButton,
+            (!message.trim() && !quickSignal) && styles.reviewButtonDisabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          {buildingProposal ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.reviewButtonText}>Review adaptation</Text><V23Icon name="chevron" color="#FFFFFF" size={18} /></>}
+        </Pressable>
+        <Text style={styles.messageFootnote}>Messages are interpreted as training signals. The planner—not the message itself—decides what changes are appropriate.</Text>
+      </V23Card>
+
+      {coachError ? <V23Card tone="muted" style={styles.feedbackCard}><Text style={styles.errorText}>{coachError}</Text></V23Card> : null}
+      {coachResult ? <V23Card tone="accent" style={styles.feedbackCard}><Text style={styles.resultText}>{coachResult}</Text></V23Card> : null}
+
+      {proposal ? (
+        <V23Card elevated style={styles.proposalCard}>
+          <Text style={styles.callLabel}>SIDE QUEST READ THAT AS</Text>
+          <Text style={styles.proposalSummary}>{proposal.adaptation.interpretation.summary}</Text>
+          <View style={styles.chips}>
+            {proposal.adaptation.interpretation.signals.map((signal) => <V23Chip key={signal} tone="neutral">{signal}</V23Chip>)}
+            <V23Chip tone="info">{proposal.adaptation.interpretation.confidence} confidence</V23Chip>
+          </View>
+          <View style={styles.proposalDivider} />
+          <Text style={styles.proposalFor}>For {proposal.sessionTitle} · {formatSessionDate(proposal.sessionDate)}</Text>
+          <Text style={styles.proposalHeadline}>{proposal.adaptation.adjustment.headline}</Text>
+          {proposal.adaptation.adjustment.safetyMessage ? <Text style={styles.safetyText}>{proposal.adaptation.adjustment.safetyMessage}</Text> : null}
+
+          <View style={styles.optionList}>
+            {proposal.adaptation.adjustment.options.map((option) => {
+              const selected = option.id === selectedOptionId;
+              const recommended = option.id === proposal.adaptation.adjustment.recommendedOptionId;
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => setSelectedOptionId(option.id)}
+                  style={({ pressed }) => [styles.optionCard, selected && styles.optionCardSelected, pressed && styles.pressed]}
+                >
+                  <View style={styles.optionTop}>
+                    <Text style={styles.optionLabel}>{recommended ? 'RECOMMENDED' : option.recommendationLevel.toUpperCase()}</Text>
+                    <View style={[styles.radio, selected && styles.radioSelected]}>{selected ? <View style={styles.radioDot} /> : null}</View>
+                  </View>
+                  <Text style={styles.optionTitle}>{option.title}</Text>
+                  <Text style={styles.optionBody}>{option.description}</Text>
+                  {selected ? (
+                    <View style={styles.consequenceBox}>
+                      <Text style={styles.consequenceLabel}>EFFECT ON THE WEEK</Text>
+                      {option.weeklyConsequences.map((line) => <Text key={line} style={styles.consequenceText}>• {line}</Text>)}
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {selectedOption ? <Text style={styles.approvalNote}>{selectedOption.requiresApproval ? 'This changes a meaningful part of the plan, so Side Quest will not apply it until you approve.' : 'You are still in control: nothing changes until you approve.'}</Text> : null}
+          <V23PrimaryButton onPress={() => void acceptProposal()} icon="check">{applyingProposal ? 'Applying…' : 'Accept this change'}</V23PrimaryButton>
+          <V23OutlineButton onPress={() => { setProposal(null); setSelectedOptionId(null); }}>Keep original plan</V23OutlineButton>
+        </V23Card>
+      ) : null}
 
       {nextSession && explanation ? (
         <>
@@ -161,11 +319,11 @@ function selectNextSession(sessions: PlannedStrengthSession[]): PlannedStrengthS
   if (!sessions.length) return null;
   const today = localDate();
   const upcoming = sessions
-    .filter((session) => session.completionStatus === 'planned' && session.date >= today)
+    .filter((session) => (session.completionStatus === 'planned' || session.completionStatus === 'modified') && session.date >= today)
     .sort((left, right) => left.date.localeCompare(right.date));
   if (upcoming[0]) return upcoming[0];
   return sessions
-    .filter((session) => session.completionStatus === 'planned')
+    .filter((session) => session.completionStatus === 'planned' || session.completionStatus === 'modified')
     .sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
 }
 
@@ -197,6 +355,44 @@ function makeStyles(tokens: DesignTokens) {
     eyebrow: { color: tokens.accent, fontSize: 11, lineHeight: 14, fontWeight: '900', letterSpacing: 1.25 },
     title: { color: tokens.text, fontSize: 31, lineHeight: 36, fontWeight: '900', letterSpacing: -0.7 },
     body: { color: tokens.textMuted, fontSize: 15.5, lineHeight: 22 },
+    messageCard: { gap: 13, padding: 18 },
+    messageHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    messageHeaderCopy: { flex: 1, minWidth: 0 },
+    messageTitle: { color: tokens.text, fontSize: 21, lineHeight: 26, fontWeight: '900', marginTop: 3 },
+    messageIcon: { width: 44, height: 44, borderRadius: 15, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
+    messageInput: { minHeight: 92, borderRadius: 16, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surfaceMuted, color: tokens.text, fontSize: 16, lineHeight: 22, paddingHorizontal: 14, paddingVertical: 12, textAlignVertical: 'top' },
+    quickSignals: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    quickSignal: { minHeight: 36, borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+    quickSignalSelected: { backgroundColor: tokens.accentSoft, borderColor: tokens.accent },
+    quickSignalText: { color: tokens.textMuted, fontSize: 13, lineHeight: 17, fontWeight: '700' },
+    quickSignalTextSelected: { color: tokens.accent },
+    reviewButton: { minHeight: 48, borderRadius: 15, backgroundColor: tokens.accent, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    reviewButtonDisabled: { opacity: 0.42 },
+    reviewButtonText: { color: '#FFFFFF', fontSize: 15.5, lineHeight: 20, fontWeight: '800' },
+    messageFootnote: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
+    feedbackCard: { padding: 14 },
+    errorText: { color: tokens.danger, fontSize: 13.5, lineHeight: 19, fontWeight: '700' },
+    resultText: { color: tokens.text, fontSize: 13.5, lineHeight: 19, fontWeight: '700' },
+    proposalCard: { gap: 12, padding: 18 },
+    proposalSummary: { color: tokens.text, fontSize: 20, lineHeight: 26, fontWeight: '850' },
+    proposalDivider: { height: StyleSheet.hairlineWidth, backgroundColor: tokens.border },
+    proposalFor: { color: tokens.textMuted, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+    proposalHeadline: { color: tokens.text, fontSize: 23, lineHeight: 28, fontWeight: '900' },
+    safetyText: { color: tokens.danger, fontSize: 13.5, lineHeight: 20, fontWeight: '700' },
+    optionList: { gap: 9 },
+    optionCard: { borderRadius: 16, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 14, gap: 5 },
+    optionCardSelected: { borderColor: tokens.accent, borderWidth: 2, backgroundColor: tokens.accentSoft },
+    optionTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    optionLabel: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
+    optionTitle: { color: tokens.text, fontSize: 17, lineHeight: 22, fontWeight: '850' },
+    optionBody: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
+    radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' },
+    radioSelected: { borderColor: tokens.accent },
+    radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: tokens.accent },
+    consequenceBox: { marginTop: 4, gap: 3 },
+    consequenceLabel: { color: tokens.text, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 0.9 },
+    consequenceText: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
+    approvalNote: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
     nextCard: { gap: 16, padding: 20 },
     nextHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     nextCopy: { flex: 1, minWidth: 0 },
