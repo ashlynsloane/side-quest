@@ -30,6 +30,7 @@ export interface CoachInterventionEffectPattern {
   key: string;
   fingerprint: CoachInterventionFingerprint;
   observations: number;
+  evaluableOutcomes: number;
   helped: number;
   neutral: number;
   hurt: number;
@@ -168,14 +169,15 @@ export function learnCoachInterventionEffects(
     const neutral = items.filter((item) => item.rating === 'neutral').length;
     const hurt = items.filter((item) => item.rating === 'hurt').length;
     const notCompleted = items.filter((item) => item.rating === 'not_completed').length;
-    const evaluable = Math.max(1, helped + neutral + hurt);
-    const helpedRate = helped / evaluable;
-    const hurtRate = hurt / evaluable;
+    const evaluableOutcomes = helped + neutral + hurt;
+    const denominator = Math.max(1, evaluableOutcomes);
+    const helpedRate = helped / denominator;
+    const hurtRate = hurt / denominator;
     const completionKnown = items.filter((item) => item.completedAsPlanned !== undefined);
     const completionRate = completionKnown.length
       ? completionKnown.filter((item) => item.completedAsPlanned).length / completionKnown.length
       : undefined;
-    const confidence: CoachInterventionConfidence = items.length >= 7 ? 'high' : items.length >= 3 ? 'moderate' : 'low';
+    const confidence: CoachInterventionConfidence = evaluableOutcomes >= 7 ? 'high' : evaluableOutcomes >= 3 ? 'moderate' : 'low';
     const direction = confidence !== 'low' && hurtRate >= 0.5
       ? 'caution' as const
       : confidence !== 'low' && helpedRate >= 0.67 && hurtRate <= 0.2
@@ -184,12 +186,27 @@ export function learnCoachInterventionEffects(
     const fingerprint = items[0]!.fingerprint;
     const context = `${fingerprint.action} ${fingerprint.discipline} for ${fingerprint.reason}`;
     const summary = direction === 'helpful'
-      ? `${context} has helped in ${helped} of ${evaluable} evaluable outcomes for this athlete.`
+      ? `${context} has helped in ${helped} of ${evaluableOutcomes} evaluable outcomes for this athlete.`
       : direction === 'caution'
-        ? `${context} has produced negative outcomes in ${hurt} of ${evaluable} evaluable outcomes; treat it as a lower-confidence option.`
+        ? `${context} has produced negative outcomes in ${hurt} of ${evaluableOutcomes} evaluable outcomes; treat it as a lower-confidence option.`
         : `${context} does not yet show a consistent personal outcome pattern.`;
-    return { key, fingerprint, observations: items.length, helped, neutral, hurt, notCompleted, helpedRate, hurtRate, completionRate, confidence, direction, summary };
-  }).sort((left, right) => right.observations - left.observations || left.key.localeCompare(right.key));
+    return {
+      key,
+      fingerprint,
+      observations: items.length,
+      evaluableOutcomes,
+      helped,
+      neutral,
+      hurt,
+      notCompleted,
+      helpedRate,
+      hurtRate,
+      completionRate,
+      confidence,
+      direction,
+      summary,
+    };
+  }).sort((left, right) => right.evaluableOutcomes - left.evaluableOutcomes || right.observations - left.observations || left.key.localeCompare(right.key));
 }
 
 export function findCoachInterventionEffectPattern(
@@ -206,7 +223,7 @@ export function buildProactiveCoachCue(pattern: CoachInterventionEffectPattern):
       level: 'info',
       headline: 'A personal response pattern is emerging.',
       body: `${pattern.summary} Side Quest can surface this option earlier when a similar situation happens again, but it will still re-check the current week first.`,
-      evidence: `${pattern.observations} athlete-specific outcomes · ${pattern.confidence} confidence`,
+      evidence: `${pattern.evaluableOutcomes} evaluable athlete-specific outcomes · ${pattern.confidence} confidence`,
       automaticChangeAllowed: false,
     };
   }
@@ -214,7 +231,7 @@ export function buildProactiveCoachCue(pattern: CoachInterventionEffectPattern):
     level: 'attention',
     headline: 'A prior adjustment deserves more caution.',
     body: `${pattern.summary} Side Quest should offer alternatives rather than treating this adjustment as the default.`,
-    evidence: `${pattern.observations} athlete-specific outcomes · ${pattern.confidence} confidence`,
+    evidence: `${pattern.evaluableOutcomes} evaluable athlete-specific outcomes · ${pattern.confidence} confidence`,
     automaticChangeAllowed: false,
   };
 }
