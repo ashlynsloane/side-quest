@@ -1,9 +1,9 @@
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 import { normalizeCalendarEvent, normalizeStrengthSession, type UnifiedTrainingSession } from '@circuit/planner';
+import { resolveCoachConversationMessage } from '@circuit/planner/coach-conversation';
 import {
   applyCoachStrengthAdjustment,
   buildCoachMessageAdaptation,
-  interpretCoachMessage,
   type CoachMessageAdaptation,
   type CoachQuickSignal,
   type CoachTargetDiscipline,
@@ -15,25 +15,27 @@ import {
   savePlanSnapshot,
   saveTrainingBlock,
 } from './database';
+import {
+  appendCoachConversationTurn,
+  cancelPendingCoachProposal,
+  loadCoachConversationState,
+  recordCoachApplied,
+  recordCoachProposal,
+  saveCoachConversationState,
+  updateCoachSelectedOption,
+  type CoachConversationState,
+  type PersistedCoachProposal,
+} from './coach-conversation-state';
 import { saveSideQuestPlanSessionOverride } from './side-quest-plan-overrides';
 import { isSideQuestGeneratedPlanEvent } from './whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
 export type CoachMessageTargetKind = 'strength' | 'endurance';
-
-export interface CoachMessageProposal {
-  sessionId: string;
-  sessionTitle: string;
-  sessionDate: string;
-  sessionDiscipline: 'swim' | 'bike' | 'run' | 'strength';
-  targetKind: CoachMessageTargetKind;
-  calendarEventId?: string;
-  adaptation: CoachMessageAdaptation;
-}
+export type CoachMessageProposal = PersistedCoachProposal;
 
 export type CoachMessageProposalResult =
-  | { ok: true; proposal: CoachMessageProposal }
-  | { ok: false; reason: 'empty_input' | 'no_plan' | 'no_adjustable_session'; message: string };
+  | { ok: true; proposal: CoachMessageProposal; autoApply?: boolean; conversation: CoachConversationState }
+  | { ok: false; reason: 'empty_input' | 'no_plan' | 'no_adjustable_session' | 'cancelled'; message: string; conversation?: CoachConversationState };
 
 export interface AppliedCoachMessageAdaptation {
   targetKind: CoachMessageTargetKind;
@@ -41,6 +43,7 @@ export interface AppliedCoachMessageAdaptation {
   optionTitle: string;
   replanWarning?: string;
   session?: PlannedStrengthSession;
+  conversation: CoachConversationState;
 }
 
 type AdjustableTarget =
@@ -54,6 +57,11 @@ type AdjustableTarget =
       calendarEvent: TrainingCalendarEvent;
       unified: UnifiedTrainingSession;
     };
+
+export async function loadCurrentCoachConversation(): Promise<CoachConversationState | null> {
+  const saved = await getLatestTrainingBlock();
+  return saved?.block ? loadCoachConversationState(saved.block.id) : null;
+}
 
 export async function buildCoachMessageProposal(
   message: string,
@@ -73,6 +81,35 @@ export async function buildCoachMessageProposal(
     return { ok: false, reason: 'no_adjustable_session', message: 'The active plan does not contain an adjustable training week.' };
   }
 
+  let conversation = loadCoachConversationState(block.id);
+  conversation = appendCoachConversationTurn(
+    conversation,
+    'athlete',
+    'message',
+    message.trim() || quickSignalLabel(quickSignal),
+  );
+
+  const resolution = resolveCoachConversationMessage(message, quickSignal, {
+    previousInterpretation: conversation.lastInterpretation,
+    previousTargetDiscipline: conversation.activeTarget?.sessionDiscipline,
+    previousSessionDate: conversation.activeTarget?.sessionDate,
+    referenceDate: localDate(),
+  });
+
+  if (resolution.cancelProposal) {
+    conversation = cancelPendingCoachProposal(conversation);
+    return { ok: false, reason: 'cancelled', message: 'Keeping the original plan.', conversation };
+  }
+
+  if (resolution.confirmProposal && conversation.pendingProposal) {
+    return {
+      ok: true,
+      proposal: conversation.pendingProposal,
+      autoApply: true,
+      conversation,
+    };
+  }
+
   try {
     await refreshLatestWholeAthletePlan();
   } catch {
@@ -83,31 +120,37 @@ export async function buildCoachMessageProposal(
     from: `${firstWeek.weekStartDate}T00:00:00.000Z`,
     to: `${addDays(lastWeek.weekStartDate, 6)}T23:59:59.999Z`,
   });
-  const interpretation = interpretCoachMessage(message, quickSignal);
-  const target = selectAdjustableTarget(block, calendar, interpretation.targetDiscipline);
+  const preferredSessionId = resolution.keepPriorTarget ? conversation.activeTarget?.sessionId : undefined;
+  const target = selectAdjustableTarget(block, calendar, resolution.targetDiscipline, preferredSessionId);
   if (!target) {
-    const discipline = interpretation.targetDiscipline ? `${interpretation.targetDiscipline} ` : '';
+    const discipline = resolution.targetDiscipline ? `${resolution.targetDiscipline} ` : '';
+    const messageText = `There is no upcoming Side Quest ${discipline}session available to adjust. Imported calendar workouts stay fixed until you explicitly change their source plan.`;
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', messageText);
     return {
       ok: false,
       reason: 'no_adjustable_session',
-      message: `There is no upcoming Side Quest ${discipline}session available to adjust. Imported calendar workouts stay fixed until you explicitly change their source plan.`,
+      message: messageText,
+      conversation,
     };
   }
 
   const sessionDate = target.unified.date;
   const owningWeek = block.weeks.find((week) => sessionDate >= week.weekStartDate && sessionDate <= addDays(week.weekStartDate, 6));
   if (!owningWeek) {
-    return { ok: false, reason: 'no_adjustable_session', message: 'Side Quest could not locate this session inside the current block.' };
+    const messageText = 'Side Quest could not locate this session inside the current block.';
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', messageText);
+    return { ok: false, reason: 'no_adjustable_session', message: messageText, conversation };
   }
 
   const weekEnd = addDays(owningWeek.weekStartDate, 6);
   const weekCalendar = calendar.filter((event) => event.startAt.slice(0, 10) >= owningWeek.weekStartDate && event.startAt.slice(0, 10) <= weekEnd);
   const weekSessions = buildUnifiedWeek(owningWeek.sessions, weekCalendar);
-  const availableDates = datesAfter(sessionDate, weekEnd);
+  const availableDates = datesInWeekExcept(owningWeek.weekStartDate, weekEnd, sessionDate, localDate());
   const capacity = block.goal.capacityProfile;
   const recentBoneStress = capacity?.boneStressInjuryHistory === 'recent_or_current';
   const returnToRun = capacity?.runStatus === 'return_to_run';
-  const fatigueTrend = /\b(worse|worsening|several\s+days|all\s+week|for\s+days)\b/i.test(message) ? 'worsening' as const : 'stable' as const;
+  const messageFatigueTrend = /\b(worse|worsening|several\s+days|all\s+week|for\s+days)\b/i.test(message) ? 'worsening' as const : undefined;
+  const fatigueTrend = resolution.recentFatigueTrend ?? messageFatigueTrend ?? (resolution.interpretation.reason === 'fatigue' ? 'stable' as const : undefined);
   const availableDisciplines = target.kind === 'endurance'
     ? block.goal.disciplines.filter((discipline) => discipline !== target.unified.discipline)
     : [];
@@ -119,23 +162,45 @@ export async function buildCoachMessageProposal(
     weekSessions,
     availableDates,
     availableDisciplines,
+    interpretation: resolution.interpretation,
+    preferredTargetDate: resolution.preferredTargetDate,
+    preferredReplacementDiscipline: resolution.preferredReplacementDiscipline,
     recentFatigueTrend: fatigueTrend,
     recentBoneStress,
     returnToRun,
   });
 
+  const proposal: CoachMessageProposal = {
+    sessionId: target.unified.id,
+    sessionTitle: target.unified.title,
+    sessionDate,
+    sessionDiscipline: target.unified.discipline as 'swim' | 'bike' | 'run' | 'strength',
+    targetKind: target.kind,
+    calendarEventId: target.kind === 'endurance' ? target.calendarEvent.id : undefined,
+    adaptation,
+  };
+  const selectedOptionId = adaptation.adjustment.recommendedOptionId;
+  conversation = recordCoachProposal(conversation, proposal, selectedOptionId);
+
   return {
     ok: true,
-    proposal: {
-      sessionId: target.unified.id,
-      sessionTitle: target.unified.title,
-      sessionDate,
-      sessionDiscipline: target.unified.discipline as 'swim' | 'bike' | 'run' | 'strength',
-      targetKind: target.kind,
-      calendarEventId: target.kind === 'endurance' ? target.calendarEvent.id : undefined,
-      adaptation,
-    },
+    proposal,
+    conversation,
   };
+}
+
+export async function saveCoachMessageProposalSelection(optionId: string): Promise<void> {
+  const saved = await getLatestTrainingBlock();
+  if (!saved?.block) return;
+  const state = loadCoachConversationState(saved.block.id);
+  if (!state.pendingProposal?.adaptation.adjustment.options.some((option) => option.id === optionId)) return;
+  updateCoachSelectedOption(state, optionId);
+}
+
+export async function cancelCoachMessageProposal(): Promise<CoachConversationState | null> {
+  const saved = await getLatestTrainingBlock();
+  if (!saved?.block) return null;
+  return cancelPendingCoachProposal(loadCoachConversationState(saved.block.id));
 }
 
 export async function applyCoachMessageProposal(
@@ -192,12 +257,22 @@ export async function applyCoachMessageProposal(
       : 'The session changed, but the rest of the week still needs a refresh.';
   }
 
+  const appliedMessage = replanWarning ?? `${option.title} applied. The rest of the week was replanned around it.`;
+  const conversation = recordCoachApplied(
+    loadCoachConversationState(block.id),
+    proposal,
+    option.title,
+    snapshot.id,
+    appliedMessage,
+  );
+
   return {
     targetKind: proposal.targetKind,
     session: updatedSession,
     snapshotId: snapshot.id,
     optionTitle: option.title,
     replanWarning,
+    conversation,
   };
 }
 
@@ -205,6 +280,7 @@ function selectAdjustableTarget(
   block: TrainingBlockPlan,
   calendar: TrainingCalendarEvent[],
   targetDiscipline?: CoachTargetDiscipline,
+  preferredSessionId?: string,
 ): AdjustableTarget | null {
   const today = localDate();
   const candidates: AdjustableTarget[] = [];
@@ -217,6 +293,11 @@ function selectAdjustableTarget(
   for (const event of calendar) {
     if (!isAdjustableEnduranceEvent(event)) continue;
     candidates.push({ kind: 'endurance', calendarEvent: event, unified: normalizeCalendarEvent(event) });
+  }
+
+  if (preferredSessionId) {
+    const exact = candidates.find((candidate) => candidate.unified.id === preferredSessionId && candidate.unified.date >= today);
+    if (exact) return exact;
   }
 
   const filtered = targetDiscipline
@@ -257,11 +338,12 @@ function buildUnifiedWeek(strength: PlannedStrengthSession[], calendar: Training
   return [...strengthSessions, ...calendarSessions];
 }
 
-function datesAfter(sessionDate: string, weekEnd: string): string[] {
+function datesInWeekExcept(weekStart: string, weekEnd: string, sessionDate: string, today: string): string[] {
   const dates: string[] = [];
-  for (let offset = 1; offset <= 6; offset += 1) {
-    const candidate = addDays(sessionDate, offset);
+  for (let offset = 0; offset <= 6; offset += 1) {
+    const candidate = addDays(weekStart, offset);
     if (candidate > weekEnd) break;
+    if (candidate === sessionDate || candidate < today) continue;
     dates.push(candidate);
   }
   return dates;
@@ -270,6 +352,11 @@ function datesAfter(sessionDate: string, weekEnd: string): string[] {
 function snapshotReason(proposal: CoachMessageProposal, optionTitle: string): string {
   const input = proposal.adaptation.message || proposal.adaptation.quickSignal || 'coach update';
   return `Coach message adaptation · ${proposal.sessionDiscipline} · ${input} · ${optionTitle}`;
+}
+
+function quickSignalLabel(signal?: CoachQuickSignal): string {
+  if (!signal) return '';
+  return signal.replaceAll('_', ' ');
 }
 
 function addDays(value: string, days: number): string {
