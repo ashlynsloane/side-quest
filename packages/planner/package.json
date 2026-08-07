@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./whole-athlete-week": "./src/whole-athlete-week.ts"
   },
   "dependencies": {
     "@circuit/domain": "workspace:*",
