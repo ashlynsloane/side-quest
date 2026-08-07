@@ -1,3 +1,4 @@
+import type { EnduranceActivity, PlannedCompletedMatch, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 import { classifyCoachObservedExecution, type CoachObservedExecution } from '@circuit/planner/coach-observed-outcome';
 import Storage from 'expo-sqlite/kv-store';
 
@@ -7,6 +8,7 @@ import {
   listEnduranceActivities,
   listPlannedCompletedMatches,
   listWorkoutLedgerEntries,
+  type WorkoutLedgerEntry,
 } from './database';
 import { exportCoachClosedLoopState, type CoachAppliedInterventionRecord } from './coach-closed-loop-state';
 
@@ -76,8 +78,8 @@ export async function refreshCoachObservedOutcomes(): Promise<CoachObservedOutco
 
 function observedStrength(
   intervention: CoachAppliedInterventionRecord,
-  block: Awaited<ReturnType<typeof getLatestTrainingBlock>>['block'] | undefined,
-  ledger: Awaited<ReturnType<typeof listWorkoutLedgerEntries>>,
+  block: TrainingBlockPlan | undefined,
+  ledger: WorkoutLedgerEntry[],
 ): CoachObservedOutcomeRecord | null {
   const entry = ledger
     .filter((item) => item.plannedSessionId === intervention.target.sessionId && item.completedAt >= intervention.appliedAt)
@@ -98,9 +100,9 @@ function observedStrength(
 
 function observedEndurance(
   intervention: CoachAppliedInterventionRecord,
-  matches: Awaited<ReturnType<typeof listPlannedCompletedMatches>>,
-  activityById: Map<string, Awaited<ReturnType<typeof listEnduranceActivities>>[number]>,
-  calendar: Awaited<ReturnType<typeof getTrainingCalendarEvents>>,
+  matches: PlannedCompletedMatch[],
+  activityById: Map<string, EnduranceActivity>,
+  calendar: TrainingCalendarEvent[],
 ): CoachObservedOutcomeRecord | null {
   const eventId = intervention.target.calendarEventId ?? intervention.target.sessionId;
   const match = matches
@@ -121,7 +123,7 @@ function observedEndurance(
   return { interventionId: intervention.id, observedAt: activity.startAt, execution, source: 'endurance_match', actualDurationMinutes, prescribedDurationMinutes };
 }
 
-function eventDurationMinutes(event: Awaited<ReturnType<typeof getTrainingCalendarEvents>>[number] | undefined): number | undefined {
+function eventDurationMinutes(event: TrainingCalendarEvent | undefined): number | undefined {
   if (!event) return undefined;
   if (event.endAt) {
     const minutes = Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000);
