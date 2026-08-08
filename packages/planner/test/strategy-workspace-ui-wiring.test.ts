@@ -31,30 +31,36 @@ describe('Strategy Coach workspace wiring', () => {
     expect(strategyState).toContain("circuit.strategy-conversation.v1");
   });
 
-  it('renders phase roadmap, per-week strategy source, and strategy-window handoff', () => {
+  it('renders phase roadmap, per-week strategy source, and season handoffs', () => {
     const workspace = source('apps/mobile/src/components/coach-strategy-workspace.tsx');
+    const season = source('apps/mobile/src/components/season-strategy-plan.tsx');
     const service = source('apps/mobile/src/services/strategy-workspace.ts');
     expect(workspace).toContain('PHASE ROADMAP');
     expect(workspace).toContain('BLOCK TIMELINE');
     expect(workspace).toContain("week.source === 'strategy_coach'");
-    expect(workspace).toContain('Race Intent is back in control');
+    expect(season).toContain('SEASON STRATEGY');
+    expect(season).toContain('PLANNED HANDOFFS');
     expect(service).toContain('buildStrategyMacrocycle');
-    expect(service).toContain('returnToRaceIntentWeek');
+    expect(service).toContain('seasonWindows');
   });
 
-  it('uses weekly strategy layers instead of pre-merging a dated override over Race Intent', () => {
+  it('uses a season schedule as weekly overlays instead of pre-merging one dated strategy', () => {
     const planner = source('packages/planner/src/whole-athlete-week-strategy.ts');
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     expect(planner).toContain('configureWholeAthleteStrategyLayers');
     expect(planner).toContain('resolveConfiguredStrategy(input.weekStartDate)');
-    expect(planner).toContain('coachStrategyAppliesToWeek');
-    expect(runtime).toContain('configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy)');
+    expect(planner).toContain('activeSeasonStrategyForWeek');
+    expect(runtime).toContain('loadApprovedCoachStrategySchedule');
+    expect(runtime).toContain('approvedSchedule.windows.map');
     expect(runtime).not.toContain('configureWholeAthleteCoachStrategy(mergeRaceIntentWithCoachStrategy');
   });
 
-  it('includes the separate Strategy thread in local export and erase controls', () => {
+  it('includes Strategy chat, season schedule, and season history in local export and erase controls', () => {
     const privacy = source('apps/mobile/src/services/local-training-data-privacy.ts');
     expect(privacy).toContain('strategyConversation: exportStrategyConversationState()');
+    expect(privacy).toContain('approvedCoachStrategySchedule: exportApprovedCoachStrategyScheduleState()');
+    expect(privacy).toContain('coachStrategyHistory: exportCoachStrategyHistoryState()');
     expect(privacy).toContain('clearStrategyConversationState()');
+    expect(privacy).toContain('clearCoachStrategyHistoryState()');
   });
 });
