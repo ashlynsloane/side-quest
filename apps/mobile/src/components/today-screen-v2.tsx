@@ -231,7 +231,7 @@ function SecondarySessions({
       styles={styles}
     /> : null}
     {calendar ? <SessionRow
-      kind={calendar.discipline}
+      kind={calendar.discipline ?? 'other'}
       title={conciseSessionLabel({ discipline: calendar.discipline, title: calendar.title }) ?? calendar.title ?? 'Scheduled training'}
       body={calendarTime(calendar)}
       tokens={tokens}
