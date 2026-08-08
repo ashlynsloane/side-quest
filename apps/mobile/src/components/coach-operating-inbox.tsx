@@ -2,6 +2,7 @@ import type { CoachSemanticStrategyChange } from '@circuit/planner/coach-semanti
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CoachModeSwitch } from '@/components/coach-mode-switch';
 import { RaceStrategyContextCard } from '@/components/race-strategy-context-card';
 import type { CoachOperatingInboxItem } from '@/services/coach-operating-inbox';
 import {
@@ -33,7 +34,8 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
     ? strategyReview.draft
     : strategyReview?.approved?.strategy;
   const strategyIsDraft = Boolean(strategyReview?.hasUnapprovedChanges && strategyReview.draft);
-  if (!items.length && !strategy) return null;
+  const approvedWindowState = strategyReview?.approvedWindowState;
+  if (!items.length && !strategy) return <CoachModeSwitch active="today" />;
 
   async function refreshStrategyReview() {
     const next = await loadCoachStrategyReview();
@@ -77,7 +79,7 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
     try {
       await stopApprovedCoachStrategy();
       await refreshStrategyReview();
-      setStrategyFeedback('Strategy emphasis stopped. Side Quest returned to the goal- and phase-based planning defaults.');
+      setStrategyFeedback('Strategy Coach override removed. Race Intent is the long-horizon planning baseline.');
     } catch (caught) {
       setStrategyFeedback(caught instanceof Error ? caught.message : 'Side Quest could not stop that strategy safely.');
     } finally {
@@ -87,6 +89,8 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
 
   return (
     <View style={styles.stack}>
+      <CoachModeSwitch active="today" />
+
       <View style={styles.header}>
         <Text style={styles.eyebrow}>COACH ATTENTION</Text>
         <Text style={styles.title}>What matters next</Text>
@@ -97,15 +101,19 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
       {strategy ? (
         <View style={[styles.card, styles.strategyCard]}>
           <View style={styles.topRow}>
-            <Text style={styles.strategyLevel}>{strategyIsDraft ? 'STRATEGY DRAFT' : 'ACTIVE STRATEGY'}</Text>
-            <Text style={styles.action}>{strategyIsDraft ? 'APPROVAL REQUIRED' : 'ACTIVE'}</Text>
+            <Text style={styles.strategyLevel}>{strategyIsDraft ? 'STRATEGY DRAFT' : lifecycleLabel(approvedWindowState)}</Text>
+            <Text style={styles.action}>{strategyIsDraft ? 'APPROVAL REQUIRED' : lifecycleAction(approvedWindowState)}</Text>
           </View>
           <Text style={styles.itemTitle}>{strategyTitle(strategy)}</Text>
           <Text style={styles.body}>{strategyBody(strategy)}</Text>
           <Text style={styles.reason}>
             {strategyIsDraft
               ? 'Nothing in the training plan changes until you approve this allocation strategy.'
-              : 'Health constraints, fixed commitments, race phase, and the weekly time budget still outrank this preference.'}
+              : approvedWindowState === 'scheduled'
+                ? 'Race Intent remains in control until the approved Strategy Coach window begins.'
+                : approvedWindowState === 'expired'
+                  ? 'This saved strategy is no longer affecting the plan. Race Intent resumed automatically after the approved window ended.'
+                  : 'Health constraints, fixed commitments, race phase, and the weekly time budget still outrank this preference.'}
           </Text>
           <View style={styles.strategyActions}>
             {strategyIsDraft ? (
@@ -134,7 +142,7 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
                 disabled={strategyBusy}
                 style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed, strategyBusy && styles.disabled]}
               >
-                {strategyBusy ? <ActivityIndicator color={tokens.text} /> : <Text style={styles.secondaryActionText}>Stop strategy</Text>}
+                {strategyBusy ? <ActivityIndicator color={tokens.text} /> : <Text style={styles.secondaryActionText}>{approvedWindowState === 'expired' ? 'Clear saved strategy' : 'Stop strategy'}</Text>}
               </Pressable>
             )}
           </View>
@@ -155,6 +163,18 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
       ))}
     </View>
   );
+}
+
+function lifecycleLabel(value: CoachStrategyReview['approvedWindowState']): string {
+  if (value === 'scheduled') return 'SCHEDULED STRATEGY';
+  if (value === 'expired') return 'SAVED STRATEGY';
+  return 'ACTIVE STRATEGY';
+}
+
+function lifecycleAction(value: CoachStrategyReview['approvedWindowState']): string {
+  if (value === 'scheduled') return 'SCHEDULED';
+  if (value === 'expired') return 'EXPIRED';
+  return 'ACTIVE';
 }
 
 function strategyTitle(strategy: CoachSemanticStrategyChange): string {
