@@ -1,6 +1,11 @@
 import type { EnduranceDiscipline } from '@circuit/domain';
 import type { CoachStrategyObjective, CoachStrategyTradeoff } from '@circuit/planner/coach-semantic-frame';
-import type { RaceIntentV2, RaceOverallObjective, RaceTargetKind } from '@circuit/planner/race-intent';
+import {
+  setRaceIntentDisciplinePriority,
+  type RaceIntentV2,
+  type RaceOverallObjective,
+  type RaceTargetKind,
+} from '@circuit/planner/race-intent';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -86,25 +91,15 @@ export default function RaceIntentScreen() {
   };
 
   const updateDisciplinePriority = (discipline: EnduranceDiscipline, priority: CoachStrategyObjective) => {
-    setIntent((current) => {
-      if (!current) return current;
-      const shouldBecomePrimary = priority === 'primary_focus' || priority === 'maximize';
-      return {
-        ...current,
-        primaryDiscipline: shouldBecomePrimary ? discipline : current.primaryDiscipline,
-        disciplinePriorities: { ...current.disciplinePriorities, [discipline]: priority },
-      };
-    });
+    setIntent((current) => current ? setRaceIntentDisciplinePriority(current, discipline, priority) : current);
     setError(null);
     setSavedMessage(null);
   };
 
   const choosePrimary = (discipline: EnduranceDiscipline) => {
-    setIntent((current) => current ? {
-      ...current,
-      primaryDiscipline: discipline,
-      disciplinePriorities: { ...current.disciplinePriorities, [discipline]: 'primary_focus' },
-    } : current);
+    setIntent((current) => current ? setRaceIntentDisciplinePriority(current, discipline, 'primary_focus') : current);
+    setError(null);
+    setSavedMessage(null);
   };
 
   const setTargetKind = (kind: RaceTargetKind) => {
@@ -200,7 +195,7 @@ export default function RaceIntentScreen() {
 
     {editor.disciplines.length > 1 || intent.overallObjective === 'discipline_performance' ? <V23Card elevated style={styles.card}>
       <Text style={styles.sectionTitle}>Primary discipline</Text>
-      <Text style={styles.body}>Choose one if a specific split matters more than your overall balanced result.</Text>
+      <Text style={styles.body}>Choose one if a specific split matters more than your overall balanced result. Only one discipline can hold the top focus at a time.</Text>
       <View style={styles.chipRow}>
         {editor.disciplines.map((discipline) => <Pressable key={discipline} onPress={() => choosePrimary(discipline)} style={[styles.disciplineChip, intent.primaryDiscipline === discipline && styles.disciplineChipSelected]}>
           <Text style={[styles.disciplineChipText, intent.primaryDiscipline === discipline && styles.selectedText]}>{disciplineLabel(discipline)}</Text>
@@ -210,7 +205,7 @@ export default function RaceIntentScreen() {
 
     <V23Card elevated style={styles.card}>
       <Text style={styles.sectionTitle}>Discipline priorities</Text>
-      <Text style={styles.body}>These are relative development priorities—not permission to erase a race discipline.</Text>
+      <Text style={styles.body}>These are relative development priorities—not permission to erase a race discipline. Primary focus and Maximize are exclusive: choosing one automatically releases the previous top focus.</Text>
       {editor.disciplines.map((discipline) => <View key={discipline} style={styles.disciplineBlock}>
         <View style={styles.disciplineHeading}>
           <Text style={styles.disciplineTitle}>{disciplineLabel(discipline)}</Text>
