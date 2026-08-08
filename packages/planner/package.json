@@ -15,6 +15,7 @@
     "./coach-semantic-frame": "./src/coach-semantic-frame.ts",
     "./coach-dialogue-engine": "./src/coach-dialogue-engine.ts",
     "./coach-language-interpreter": "./src/coach-language-interpreter.ts",
+    "./coach-language-evals": "./src/coach-language-evals.ts",
     "./coach-semantic-fallback": "./src/coach-semantic-fallback.ts",
     "./coach-observed-outcome": "./src/coach-observed-outcome.ts",
     "./athlete-context-intelligence": "./src/athlete-context-intelligence.ts",
