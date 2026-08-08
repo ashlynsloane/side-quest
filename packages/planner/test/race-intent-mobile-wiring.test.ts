@@ -14,12 +14,15 @@ describe('Race Intent V2 mobile wiring', () => {
     expect(source('packages/planner/package.json')).toContain('"./race-intent": "./src/race-intent.ts"');
   });
 
-  it('exposes race priorities from the goal-plan surface without rewriting the legacy setup screen', () => {
+  it('builds race priorities directly inside the unified Goal Setup flow', () => {
     const route = source('apps/mobile/src/app/goal-plan.tsx');
-    expect(route).toContain('LegacyGoalPlanScreen');
-    expect(route).toContain('raceIntentDock');
-    expect(route).toContain('Set race priorities');
-    expect(route).toContain("router.push('/race-intent'");
+    const setupRuntime = source('apps/mobile/src/services/goal-setup-runtime.ts');
+    expect(route).toContain('2 · RACE OUTCOME');
+    expect(route).toContain('Where should extra development go?');
+    expect(route).toContain('buildAndSaveGoalSetup');
+    expect(setupRuntime).toContain('buildRaceIntentForDraft');
+    expect(setupRuntime).toContain('applyRaceIntent');
+    expect(route).not.toContain('LegacyGoalPlanScreen');
   });
 
   it('offers multidimensional overall, discipline, tradeoff, and target controls', () => {
