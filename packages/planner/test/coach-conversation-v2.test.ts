@@ -33,15 +33,25 @@ describe('Coach Conversation Engine V2', () => {
     expect(result.errors).toContain('A completed event cannot be an editable training target.');
   });
 
+  it('rejects requested event references that are missing from the frame', () => {
+    const result = validateCoachTurnFrame(frame({
+      intent: 'modify_planned_session',
+      requestedChange: { action: 'move', targetEventSemanticId: 'missing-event', date: '2026-08-09' },
+    }));
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('requestedChange.targetEventSemanticId must reference an event in the frame.');
+  });
+
   it('allows a completed workout to be symptom context without making it the target', () => {
     const result = reduceCoachDialogue(emptyCoachDialogueState(), frame({
       intent: 'report_symptom',
       horizon: 'past',
       events: [{ semanticId: 'ride-source', eventId: 'ride-1', discipline: 'bike', temporalRole: 'completed', relationToTurn: 'symptom_source' }],
-      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', category: 'musculoskeletal', changedMovement: true, sourceEventSemanticId: 'ride-source' }],
+      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', category: 'musculoskeletal', functionChanged: true, changedMovement: true, sourceEventSemanticId: 'ride-source' }],
     }));
     expect(result.directive.targetEventId).toBeUndefined();
     expect(result.directive.action).toBe('none');
+    expect(result.directive.safetyFacts.functionChanged).toBe(true);
     expect(result.directive.safetyFacts.changedMovement).toBe(true);
   });
 
@@ -52,7 +62,7 @@ describe('Coach Conversation Engine V2', () => {
         { semanticId: 'ride-source', eventId: 'ride-done', discipline: 'bike', temporalRole: 'completed', relationToTurn: 'symptom_source' },
         { semanticId: 'run-target', eventId: 'run-tomorrow', discipline: 'run', temporalRole: 'planned', date: '2026-08-08', relationToTurn: 'change_target' },
       ],
-      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', changedMovement: true, sourceEventSemanticId: 'ride-source' }],
+      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', functionChanged: true, changedMovement: true, sourceEventSemanticId: 'ride-source' }],
       requestedChange: { action: 'evaluate', targetEventSemanticId: 'run-target', date: '2026-08-08' },
     }));
     expect(result.directive.targetEventId).toBe('run-tomorrow');
@@ -83,7 +93,7 @@ describe('Coach Conversation Engine V2', () => {
       intent: 'report_symptom',
       horizon: 'past',
       events: [{ semanticId: 'completed-run', eventId: 'run-done', discipline: 'run', temporalRole: 'completed', relationToTurn: 'symptom_source' }],
-      symptoms: [{ semanticId: 'knee-1', bodyArea: 'knee', category: 'musculoskeletal', changedMovement: true, sourceEventSemanticId: 'completed-run' }],
+      symptoms: [{ semanticId: 'knee-1', bodyArea: 'knee', category: 'musculoskeletal', functionChanged: true, changedMovement: true, sourceEventSemanticId: 'completed-run' }],
     }));
     expect(symptom.directive.action).toBe('none');
     expect(symptom.directive.targetEventId).toBeUndefined();
@@ -112,17 +122,81 @@ describe('Coach Conversation Engine V2', () => {
     const first = reduceCoachDialogue(emptyCoachDialogueState(), frame({
       turnId: 'turn-1',
       intent: 'report_symptom',
-      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', changedMovement: false, changedTraining: false }],
+      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', functionChanged: false, changedMovement: false, changedTraining: false }],
     }));
     const corrected = reduceCoachDialogue(first.state, frame({
       turnId: 'turn-2',
       intent: 'correct_previous_statement',
-      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', changedMovement: true, changedTraining: true }],
+      symptoms: [{ semanticId: 'hip-1', bodyArea: 'hip', functionChanged: true, changedMovement: true, changedTraining: true }],
       correction: { target: 'symptom_function' },
     }));
     expect(corrected.state.activeConcern?.semanticId).toBe('hip-1');
+    expect(corrected.directive.safetyFacts.functionChanged).toBe(true);
     expect(corrected.directive.safetyFacts.changedMovement).toBe(true);
     expect(corrected.directive.safetyFacts.changedTraining).toBe(true);
+  });
+
+  it('represents a vague body concern before deciding what it means', () => {
+    const vague = buildDeterministicCoachTurnFrame('My hip feels weird today.', undefined, {
+      turnId: 'vague-hip',
+      referenceDate: '2026-08-07',
+    });
+    const transition = reduceCoachDialogue(emptyCoachDialogueState(), vague);
+    expect(vague.intent).toBe('report_symptom');
+    expect(vague.symptoms[0]?.category).toBe('unknown');
+    expect(vague.symptoms[0]?.functionChanged).toBeUndefined();
+    expect(transition.directive.clarification?.kind).toBe('clarify_function');
+  });
+
+  it('records a negative function answer on the same semantic concern', () => {
+    const vague = buildDeterministicCoachTurnFrame('My hip feels weird today.', undefined, {
+      turnId: 'vague-hip',
+      referenceDate: '2026-08-07',
+    });
+    const first = reduceCoachDialogue(emptyCoachDialogueState(), vague);
+    const answer = buildDeterministicCoachTurnFrame('No, I trained normally.', undefined, {
+      turnId: 'hip-answer-no',
+      referenceDate: '2026-08-07',
+      pendingQuestionKind: first.state.pendingQuestion?.kind,
+      activeConcern: first.state.activeConcern,
+    });
+    const second = reduceCoachDialogue(first.state, answer);
+    expect(answer.intent).toBe('correct_previous_statement');
+    expect(second.state.activeConcern?.semanticId).toBe(first.state.activeConcern?.semanticId);
+    expect(second.state.activeConcern?.functionChanged).toBe(false);
+    expect(second.directive.safetyFacts.functionChanged).toBe(false);
+    expect(second.state.pendingQuestion).toBeUndefined();
+  });
+
+  it('can correct that function answer later without starting a new concern', () => {
+    const vague = buildDeterministicCoachTurnFrame('My hip feels weird today.', undefined, {
+      turnId: 'vague-hip',
+      referenceDate: '2026-08-07',
+    });
+    const first = reduceCoachDialogue(emptyCoachDialogueState(), vague);
+    const noAnswer = buildDeterministicCoachTurnFrame('No, I trained normally.', undefined, {
+      turnId: 'hip-answer-no',
+      referenceDate: '2026-08-07',
+      pendingQuestionKind: first.state.pendingQuestion?.kind,
+      activeConcern: first.state.activeConcern,
+    });
+    const second = reduceCoachDialogue(first.state, noAnswer);
+    const correction = frame({
+      turnId: 'hip-correction',
+      intent: 'correct_previous_statement',
+      symptoms: [{
+        semanticId: second.state.activeConcern!.semanticId,
+        bodyArea: second.state.activeConcern?.bodyArea,
+        category: second.state.activeConcern?.category,
+        functionChanged: true,
+        changedMovement: true,
+      }],
+      correction: { target: 'symptom_function' },
+    });
+    const third = reduceCoachDialogue(second.state, correction);
+    expect(third.state.activeConcern?.semanticId).toBe(first.state.activeConcern?.semanticId);
+    expect(third.directive.safetyFacts.functionChanged).toBe(true);
+    expect(third.directive.safetyFacts.changedMovement).toBe(true);
   });
 
   it('asks for a target rather than guessing when a modification has no planned target', () => {
