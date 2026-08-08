@@ -71,6 +71,43 @@ describe('Coach Conversation Engine V2', () => {
     expect(result.directive.requestedDate).toBe('2026-08-08');
   });
 
+  it('does not leak an old editable target into a new retrospective symptom report', () => {
+    const first = reduceCoachDialogue(emptyCoachDialogueState(), frame({
+      turnId: 'turn-old-target',
+      intent: 'modify_planned_session',
+      events: [{ semanticId: 'old-bike', eventId: 'bike-old', discipline: 'bike', temporalRole: 'planned', date: '2026-08-07', relationToTurn: 'change_target' }],
+      requestedChange: { action: 'shorten', targetEventSemanticId: 'old-bike', durationMinutes: 45 },
+    }));
+    const symptom = reduceCoachDialogue(first.state, frame({
+      turnId: 'turn-new-symptom',
+      intent: 'report_symptom',
+      horizon: 'past',
+      events: [{ semanticId: 'completed-run', eventId: 'run-done', discipline: 'run', temporalRole: 'completed', relationToTurn: 'symptom_source' }],
+      symptoms: [{ semanticId: 'knee-1', bodyArea: 'knee', category: 'musculoskeletal', changedMovement: true, sourceEventSemanticId: 'completed-run' }],
+    }));
+    expect(symptom.directive.action).toBe('none');
+    expect(symptom.directive.targetEventId).toBeUndefined();
+  });
+
+  it('uses the future focus date instead of a previous active target', () => {
+    const first = reduceCoachDialogue(emptyCoachDialogueState(), frame({
+      turnId: 'turn-bike',
+      intent: 'modify_planned_session',
+      events: [{ semanticId: 'today-bike', eventId: 'bike-today', discipline: 'bike', temporalRole: 'planned', date: '2026-08-07', relationToTurn: 'change_target' }],
+      requestedChange: { action: 'shorten', targetEventSemanticId: 'today-bike', durationMinutes: 45 },
+    }));
+    const tomorrow = reduceCoachDialogue(first.state, frame({
+      turnId: 'turn-tomorrow',
+      intent: 'ask_about_future_training',
+      horizon: 'tomorrow',
+      events: [{ semanticId: 'tomorrow-run', eventId: 'run-tomorrow', discipline: 'run', temporalRole: 'planned', date: '2026-08-08', relationToTurn: 'context' }],
+      requestedChange: { action: 'evaluate', date: '2026-08-08' },
+    }));
+    expect(tomorrow.directive.action).toBe('evaluate');
+    expect(tomorrow.directive.targetEventId).toBe('run-tomorrow');
+    expect(tomorrow.directive.targetDiscipline).toBe('run');
+  });
+
   it('applies a correction to the active symptom fact instead of creating an unrelated topic', () => {
     const first = reduceCoachDialogue(emptyCoachDialogueState(), frame({
       turnId: 'turn-1',
