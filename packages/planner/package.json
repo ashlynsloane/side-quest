@@ -5,7 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./whole-athlete-week": "./src/whole-athlete-week.ts",
+    "./whole-athlete-week": "./src/whole-athlete-week-strategy.ts",
     "./multisport": "./src/multisport.ts",
     "./multisport-governance": "./src/multisport-governance.ts",
     "./endurance-prescription": "./src/endurance-prescription.ts",
