@@ -31,7 +31,7 @@ export async function loadCurrentWeeklyStrategyContext(
   const race = raceContext ?? await loadRaceStrategyContext();
   if (!race) return null;
 
-  let generated = getLatestWholeAthletePlanSnapshot();
+  let generated = getLatestWholeAthletePlanSnapshot(race.blockId);
   if (!generated?.weeks.length) generated = await refreshLatestWholeAthletePlan();
   if (!generated?.weeks.length) return null;
 
