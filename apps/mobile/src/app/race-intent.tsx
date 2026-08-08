@@ -10,7 +10,14 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { V23Card, V23Chip, V23Screen } from '@/components/v23-ui';
+import {
+  ProductAction,
+  ProductChoiceRow,
+  ProductDisclosure,
+  ProductHero,
+  ProductSection,
+} from '@/components/product-ui';
+import { V23Chip, V23Screen } from '@/components/v23-ui';
 import {
   applyRaceIntent,
   loadRaceIntentEditorState,
@@ -34,7 +41,7 @@ const PRIORITY_OPTIONS: Array<{ id: CoachStrategyObjective; label: string; body:
   { id: 'maintain', label: 'Maintain', body: 'Hold current capacity without spending much progression budget here.' },
   { id: 'develop', label: 'Develop', body: 'Continue meaningful improvement as part of the overall plan.' },
   { id: 'primary_focus', label: 'Primary focus', body: 'Give this discipline first claim on discretionary progression.' },
-  { id: 'maximize', label: 'Maximize', body: 'Push development as far as the time, recovery, race, and safety ceilings allow.' },
+  { id: 'maximize', label: 'Maximize', body: 'Push development as far as time, recovery, race, and safety ceilings allow.' },
 ];
 
 const TRADEOFF_OPTIONS: Array<{ id: CoachStrategyTradeoff; title: string; body: string }> = [
@@ -52,12 +59,15 @@ const TARGET_OPTIONS: Array<{ id: RaceTargetKind; label: string }> = [
   { id: 'placement', label: 'Placement' },
 ];
 
+type IntentSection = 'outcome' | 'focus' | 'tradeoff' | 'target';
+
 export default function RaceIntentScreen() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [editor, setEditor] = useState<RaceIntentEditorState | null>(null);
   const [intent, setIntent] = useState<RaceIntentV2 | null>(null);
+  const [openSection, setOpenSection] = useState<IntentSection>('outcome');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
@@ -75,12 +85,14 @@ export default function RaceIntentScreen() {
   }, []));
 
   if (!editor || !intent) {
-    return <V23Screen>
+    return <V23Screen contentStyle={styles.page}>
       <View style={styles.headerRow}><Pressable onPress={() => router.back()}><Text style={styles.back}>‹ Back</Text></Pressable></View>
-      <V23Card elevated style={styles.card}>
-        <Text style={styles.title}>Race priorities need an active event plan.</Text>
-        <Text style={styles.body}>Create or open a race-based plan first, then come back here to decide where you want to spend your performance budget.</Text>
-      </V23Card>
+      <ProductHero
+        tone="surface"
+        eyebrow="RACE PRIORITIES"
+        title="Create a race plan first."
+        body="Race priorities attach to an active event plan so Side Quest can translate them into the actual weekly planner."
+      />
     </V23Screen>;
   }
 
@@ -129,7 +141,7 @@ export default function RaceIntentScreen() {
     setError(null);
     try {
       await applyRaceIntent(intent);
-      setSavedMessage('Race priorities applied. Side Quest reconciled the whole-athlete plan around this emphasis.');
+      setSavedMessage('Race priorities applied. The whole-athlete plan was reconciled around this strategy.');
       setEditor((current) => current ? { ...current, customized: true, intent } : current);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Race priorities could not be applied.');
@@ -146,7 +158,7 @@ export default function RaceIntentScreen() {
       const next = await loadRaceIntentEditorState();
       setEditor(next);
       setIntent(next?.intent ?? null);
-      setSavedMessage('Custom race priorities removed. The plan is back to the normal race defaults.');
+      setSavedMessage('Custom race priorities removed. The plan is back to normal race defaults.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Race priorities could not be reset.');
     } finally {
@@ -155,112 +167,171 @@ export default function RaceIntentScreen() {
   };
 
   const primaryTarget = intent.primaryDiscipline ? intent.disciplineTargets?.[intent.primaryDiscipline] : undefined;
+  const overall = OVERALL_OPTIONS.find((option) => option.id === intent.overallObjective);
+  const tradeoff = TRADEOFF_OPTIONS.find((option) => option.id === intent.tradeoffTolerance);
+  const topFocus = intent.primaryDiscipline ? disciplineLabel(intent.primaryDiscipline) : undefined;
 
-  return <V23Screen>
+  return <V23Screen contentStyle={styles.page}>
     <View style={styles.headerRow}>
-      <Pressable onPress={() => router.back()}><Text style={styles.back}>‹ Back</Text></Pressable>
-      <Text style={styles.headerLabel}>RACE INTENT V2</Text>
+      <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.backHit}><Text style={styles.back}>‹ Back</Text></Pressable>
+      <Text style={styles.headerLabel}>RACE PRIORITIES</Text>
     </View>
 
-    <View style={styles.intro}>
-      <Text style={styles.eyebrow}>PERFORMANCE BUDGET</Text>
-      <Text style={styles.title}>What do you actually want from this race?</Text>
-      <Text style={styles.body}>{editor.goalName}</Text>
-      <Text style={styles.body}>Your answer can favor one discipline. Safety constraints, race-specific minimums, taper rules, and the total weekly time budget still win.</Text>
+    <ProductHero
+      eyebrow="YOUR RACE STRATEGY"
+      title={editor.goalName}
+      body="Set the outcome that matters, then decide where Side Quest should spend scarce progression capacity."
+      meta={<>
+        <V23Chip tone="info">{overall?.title ?? 'Race goal'}</V23Chip>
+        {topFocus ? <V23Chip tone="warm">Top focus · {topFocus}</V23Chip> : <V23Chip tone="neutral">Balanced focus</V23Chip>}
+        {editor.customized ? <V23Chip tone="neutral">Customized</V23Chip> : null}
+      </>}
+    />
+
+    <ProductSection
+      eyebrow="DECISION FLOW"
+      title="Make the big choices. Keep the details tucked away."
+      body="Only one discipline can own the top-focus slot. Race floors, recovery, taper, and the weekly time budget remain protected."
+    >
+      <View style={styles.sheet}>
+        <ProductDisclosure
+          title="1 · Outcome"
+          summary={overall?.title}
+          expanded={openSection === 'outcome'}
+          onPress={() => setOpenSection(openSection === 'outcome' ? 'focus' : 'outcome')}
+        >
+          <View style={styles.choiceStack}>
+            {OVERALL_OPTIONS.map((option) => <ProductChoiceRow
+              key={option.id}
+              title={option.title}
+              body={option.body}
+              selected={intent.overallObjective === option.id}
+              onPress={() => {
+                const patch: Partial<RaceIntentV2> = { overallObjective: option.id };
+                if (option.id === 'discipline_performance' && !intent.primaryDiscipline) patch.primaryDiscipline = editor.disciplines[0];
+                updateIntent(patch);
+              }}
+            />)}
+          </View>
+          {intent.overallObjective === 'specific_overall_time' ? <TextInput
+            value={intent.overallTarget ?? ''}
+            onChangeText={(overallTarget) => updateIntent({ overallTarget })}
+            placeholder="Overall goal · e.g. 5:15:00"
+            placeholderTextColor={tokens.textMuted}
+            style={styles.input}
+          /> : null}
+        </ProductDisclosure>
+
+        <ProductDisclosure
+          title="2 · Focus"
+          summary={focusSummary(intent, editor.disciplines)}
+          expanded={openSection === 'focus'}
+          onPress={() => setOpenSection(openSection === 'focus' ? 'tradeoff' : 'focus')}
+          badge={topFocus ? <V23Chip tone="info">{topFocus}</V23Chip> : undefined}
+        >
+          {editor.disciplines.length > 1 ? <>
+            <Text style={styles.microLabel}>TOP DISCIPLINE</Text>
+            <View style={styles.chipRow}>
+              {editor.disciplines.map((discipline) => <Pressable
+                key={discipline}
+                onPress={() => choosePrimary(discipline)}
+                style={[styles.disciplineChip, intent.primaryDiscipline === discipline && styles.disciplineChipSelected]}
+              >
+                <Text style={[styles.disciplineChipText, intent.primaryDiscipline === discipline && styles.selectedText]}>{disciplineLabel(discipline)}</Text>
+              </Pressable>)}
+            </View>
+            <Text style={styles.helper}>Choosing a new top discipline releases the previous Primary focus / Maximize slot automatically.</Text>
+          </> : null}
+
+          <View style={styles.disciplineList}>
+            {editor.disciplines.map((discipline) => {
+              const selectedPriority = intent.disciplinePriorities[discipline];
+              const selectedOption = PRIORITY_OPTIONS.find((option) => option.id === selectedPriority);
+              return <View key={discipline} style={styles.disciplineBlock}>
+                <View style={styles.disciplineHeading}>
+                  <Text style={styles.disciplineTitle}>{disciplineLabel(discipline)}</Text>
+                  <Text style={styles.currentPriority}>{selectedOption?.label ?? 'Default'}</Text>
+                </View>
+                <View style={styles.priorityGrid}>
+                  {PRIORITY_OPTIONS.map((option) => {
+                    const selected = selectedPriority === option.id;
+                    return <Pressable
+                      key={option.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => updateDisciplinePriority(discipline, option.id)}
+                      style={[styles.priorityPill, selected && styles.priorityPillSelected]}
+                    >
+                      <Text style={[styles.priorityPillText, selected && styles.selectedText]}>{option.label}</Text>
+                    </Pressable>;
+                  })}
+                </View>
+                {selectedOption ? <Text style={styles.helper}>{selectedOption.body}</Text> : null}
+              </View>;
+            })}
+          </View>
+        </ProductDisclosure>
+
+        <ProductDisclosure
+          title="3 · Tradeoffs"
+          summary={tradeoff?.title ?? 'Use race defaults'}
+          expanded={openSection === 'tradeoff'}
+          onPress={() => setOpenSection(openSection === 'tradeoff' ? 'target' : 'tradeoff')}
+        >
+          <View style={styles.choiceStack}>
+            {TRADEOFF_OPTIONS.map((option) => <ProductChoiceRow
+              key={option.id}
+              title={option.title}
+              body={option.body}
+              selected={intent.tradeoffTolerance === option.id}
+              onPress={() => updateIntent({ tradeoffTolerance: option.id })}
+            />)}
+          </View>
+        </ProductDisclosure>
+
+        <ProductDisclosure
+          title="4 · Target"
+          summary={targetSummary(intent.primaryDiscipline, primaryTarget)}
+          expanded={openSection === 'target'}
+          onPress={() => setOpenSection(openSection === 'target' ? 'outcome' : 'target')}
+        >
+          {intent.primaryDiscipline ? <>
+            <Text style={styles.helper}>Optional {disciplineLabel(intent.primaryDiscipline)} benchmark. This defines success; it does not directly prescribe volume or intensity.</Text>
+            <View style={styles.chipRow}>
+              {TARGET_OPTIONS.map((option) => <Pressable
+                key={option.id}
+                onPress={() => setTargetKind(option.id)}
+                style={[styles.disciplineChip, primaryTarget?.kind === option.id && styles.disciplineChipSelected]}
+              >
+                <Text style={[styles.disciplineChipText, primaryTarget?.kind === option.id && styles.selectedText]}>{option.label}</Text>
+              </Pressable>)}
+            </View>
+            {primaryTarget && primaryTarget.kind !== 'pr' ? <TextInput
+              value={primaryTarget.value ?? ''}
+              onChangeText={setTargetValue}
+              placeholder={targetPlaceholder(primaryTarget.kind)}
+              placeholderTextColor={tokens.textMuted}
+              style={styles.input}
+            /> : null}
+          </> : <Text style={styles.helper}>Choose a top discipline first if you want a split-, pace-, power-, speed-, PR-, or placement-specific target.</Text>}
+        </ProductDisclosure>
+      </View>
+    </ProductSection>
+
+    <View style={styles.summaryStrip}>
+      <Text style={styles.summaryLabel}>WHAT SIDE QUEST WILL PROTECT</Text>
+      <Text style={styles.summaryText}>One top focus at a time · race-specific discipline floors · recovery and safety ceilings · taper and race-week rules.</Text>
     </View>
-
-    <V23Card elevated style={styles.card}>
-      <Text style={styles.sectionTitle}>Overall race objective</Text>
-      <View style={styles.optionStack}>
-        {OVERALL_OPTIONS.map((option) => {
-          const selected = intent.overallObjective === option.id;
-          return <Pressable key={option.id} onPress={() => {
-            const patch: Partial<RaceIntentV2> = { overallObjective: option.id };
-            if (option.id === 'discipline_performance' && !intent.primaryDiscipline) patch.primaryDiscipline = editor.disciplines[0];
-            updateIntent(patch);
-          }} style={[styles.option, selected && styles.optionSelected]}>
-            <View style={styles.optionTop}><Text style={[styles.optionTitle, selected && styles.selectedText]}>{option.title}</Text><View style={[styles.radio, selected && styles.radioSelected]}>{selected ? <View style={styles.radioDot} /> : null}</View></View>
-            <Text style={styles.optionBody}>{option.body}</Text>
-          </Pressable>;
-        })}
-      </View>
-      {intent.overallObjective === 'specific_overall_time' ? <TextInput
-        value={intent.overallTarget ?? ''}
-        onChangeText={(overallTarget) => updateIntent({ overallTarget })}
-        placeholder="Example: 5:15:00"
-        placeholderTextColor={tokens.textMuted}
-        style={styles.input}
-      /> : null}
-    </V23Card>
-
-    {editor.disciplines.length > 1 || intent.overallObjective === 'discipline_performance' ? <V23Card elevated style={styles.card}>
-      <Text style={styles.sectionTitle}>Primary discipline</Text>
-      <Text style={styles.body}>Choose one if a specific split matters more than your overall balanced result. Only one discipline can hold the top focus at a time.</Text>
-      <View style={styles.chipRow}>
-        {editor.disciplines.map((discipline) => <Pressable key={discipline} onPress={() => choosePrimary(discipline)} style={[styles.disciplineChip, intent.primaryDiscipline === discipline && styles.disciplineChipSelected]}>
-          <Text style={[styles.disciplineChipText, intent.primaryDiscipline === discipline && styles.selectedText]}>{disciplineLabel(discipline)}</Text>
-        </Pressable>)}
-      </View>
-    </V23Card> : null}
-
-    <V23Card elevated style={styles.card}>
-      <Text style={styles.sectionTitle}>Discipline priorities</Text>
-      <Text style={styles.body}>These are relative development priorities—not permission to erase a race discipline. Primary focus and Maximize are exclusive: choosing one automatically releases the previous top focus.</Text>
-      {editor.disciplines.map((discipline) => <View key={discipline} style={styles.disciplineBlock}>
-        <View style={styles.disciplineHeading}>
-          <Text style={styles.disciplineTitle}>{disciplineLabel(discipline)}</Text>
-          {intent.primaryDiscipline === discipline ? <V23Chip tone="info">PRIMARY</V23Chip> : null}
-        </View>
-        <View style={styles.priorityGrid}>
-          {PRIORITY_OPTIONS.map((option) => {
-            const selected = intent.disciplinePriorities[discipline] === option.id;
-            return <Pressable key={option.id} onPress={() => updateDisciplinePriority(discipline, option.id)} style={[styles.priorityOption, selected && styles.prioritySelected]}>
-              <Text style={[styles.priorityLabel, selected && styles.selectedText]}>{option.label}</Text>
-              <Text style={styles.priorityBody}>{option.body}</Text>
-            </Pressable>;
-          })}
-        </View>
-      </View>)}
-    </V23Card>
-
-    {editor.disciplines.length > 1 ? <V23Card elevated style={styles.card}>
-      <Text style={styles.sectionTitle}>How much tradeoff are you willing to accept?</Text>
-      <View style={styles.optionStack}>
-        {TRADEOFF_OPTIONS.map((option) => {
-          const selected = intent.tradeoffTolerance === option.id;
-          return <Pressable key={option.id} onPress={() => updateIntent({ tradeoffTolerance: option.id })} style={[styles.option, selected && styles.optionSelected]}>
-            <Text style={[styles.optionTitle, selected && styles.selectedText]}>{option.title}</Text>
-            <Text style={styles.optionBody}>{option.body}</Text>
-          </Pressable>;
-        })}
-      </View>
-    </V23Card> : null}
-
-    {intent.primaryDiscipline ? <V23Card elevated style={styles.card}>
-      <Text style={styles.sectionTitle}>Optional {disciplineLabel(intent.primaryDiscipline)} target</Text>
-      <Text style={styles.body}>This tells Side Quest what success means. It does not directly prescribe workout volume or intensity.</Text>
-      <View style={styles.chipRow}>
-        {TARGET_OPTIONS.map((option) => <Pressable key={option.id} onPress={() => setTargetKind(option.id)} style={[styles.disciplineChip, primaryTarget?.kind === option.id && styles.disciplineChipSelected]}>
-          <Text style={[styles.disciplineChipText, primaryTarget?.kind === option.id && styles.selectedText]}>{option.label}</Text>
-        </Pressable>)}
-      </View>
-      {primaryTarget && primaryTarget.kind !== 'pr' ? <TextInput
-        value={primaryTarget.value ?? ''}
-        onChangeText={setTargetValue}
-        placeholder={targetPlaceholder(primaryTarget.kind)}
-        placeholderTextColor={tokens.textMuted}
-        style={styles.input}
-      /> : null}
-    </V23Card> : null}
 
     {error ? <Text style={styles.error}>{error}</Text> : null}
     {savedMessage ? <Text style={styles.success}>{savedMessage}</Text> : null}
+    {busy ? <View style={styles.busy}><ActivityIndicator color={tokens.accent} /><Text style={styles.helper}>Reconciling the whole-athlete plan…</Text></View> : null}
 
-    <Pressable disabled={busy} onPress={() => void save()} style={[styles.primaryButton, busy && styles.disabled]}>
-      {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Apply race priorities</Text>}
-    </Pressable>
-    {editor.customized ? <Pressable disabled={busy} onPress={() => void reset()} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Use normal race defaults</Text></Pressable> : null}
-    <Text style={styles.footnote}>An explicitly approved Strategy Coach directive can later refine these priorities. It will not erase the underlying race goal or safety guardrails.</Text>
+    <View style={styles.actions}>
+      <ProductAction label="Apply race priorities" onPress={() => void save()} disabled={busy} icon="check" />
+      {editor.customized ? <ProductAction label="Use normal race defaults" onPress={() => void reset()} disabled={busy} variant="secondary" icon="" /> : null}
+    </View>
+    <Text style={styles.footnote}>Strategy Coach can later add date-scoped focus blocks on top of these race priorities. Race Intent remains the baseline underneath them.</Text>
   </V23Screen>;
 }
 
@@ -268,6 +339,25 @@ function disciplineLabel(discipline: EnduranceDiscipline): string {
   if (discipline === 'swim') return 'Swim';
   if (discipline === 'bike') return 'Bike';
   return 'Run';
+}
+
+function focusSummary(intent: RaceIntentV2, disciplines: EnduranceDiscipline[]): string {
+  return disciplines.map((discipline) => `${disciplineLabel(discipline)} · ${priorityLabel(intent.disciplinePriorities[discipline])}`).join('  •  ');
+}
+
+function priorityLabel(priority: CoachStrategyObjective | undefined): string {
+  return PRIORITY_OPTIONS.find((option) => option.id === priority)?.label ?? 'Default';
+}
+
+function targetSummary(
+  discipline: EnduranceDiscipline | undefined,
+  target: RaceIntentV2['disciplineTargets'] extends infer Targets
+    ? Targets extends Partial<Record<EnduranceDiscipline, infer Target>> ? Target | undefined : never
+    : never,
+): string {
+  if (!discipline || !target) return 'Optional';
+  const kind = TARGET_OPTIONS.find((option) => option.id === target.kind)?.label ?? target.kind;
+  return `${disciplineLabel(discipline)} · ${kind}${target.value ? ` · ${target.value}` : ''}`;
 }
 
 function targetPlaceholder(kind: RaceTargetKind): string {
@@ -281,45 +371,37 @@ function targetPlaceholder(kind: RaceTargetKind): string {
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
-    headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    back: { color: tokens.accent, fontSize: 16, fontWeight: '800' },
-    headerLabel: { color: tokens.textMuted, fontSize: 10.5, fontWeight: '900', letterSpacing: 1.1 },
-    intro: { gap: 7 },
-    eyebrow: { color: tokens.accent, fontSize: 11, lineHeight: 14, fontWeight: '900', letterSpacing: 1.2 },
-    title: { color: tokens.text, fontSize: 29, lineHeight: 35, fontWeight: '900', letterSpacing: -0.5 },
-    body: { color: tokens.textMuted, fontSize: 14, lineHeight: 20 },
-    card: { padding: 17, gap: 12 },
-    sectionTitle: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900' },
-    optionStack: { gap: 8 },
-    option: { borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, borderRadius: 15, padding: 13, gap: 5 },
-    optionSelected: { borderColor: tokens.accent, backgroundColor: tokens.accentSoft },
-    optionTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-    optionTitle: { flex: 1, color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
-    optionBody: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
-    selectedText: { color: tokens.accent },
-    radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' },
-    radioSelected: { borderColor: tokens.accent },
-    radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: tokens.accent },
-    input: { minHeight: 46, borderRadius: 14, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surfaceMuted, color: tokens.text, paddingHorizontal: 13, fontSize: 15 },
-    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    disciplineChip: { minHeight: 38, borderRadius: 19, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+    page: { paddingTop: 14, paddingBottom: 32, gap: 18 },
+    headerRow: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    backHit: { minHeight: 34, justifyContent: 'center', paddingRight: 12 },
+    back: { color: tokens.accent, fontSize: 15, fontWeight: '800' },
+    headerLabel: { color: tokens.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 1.05 },
+    sheet: { borderRadius: 20, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, paddingHorizontal: 15, overflow: 'hidden' },
+    choiceStack: { gap: 7 },
+    helper: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
+    microLabel: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    disciplineChip: { minHeight: 36, borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
     disciplineChipSelected: { borderColor: tokens.accent, backgroundColor: tokens.accentSoft },
-    disciplineChipText: { color: tokens.text, fontSize: 13, fontWeight: '800' },
-    disciplineBlock: { gap: 9, paddingTop: 5 },
-    disciplineHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    disciplineTitle: { color: tokens.text, fontSize: 17, fontWeight: '900' },
-    priorityGrid: { gap: 7 },
-    priorityOption: { borderWidth: 1, borderColor: tokens.border, borderRadius: 14, padding: 11, gap: 3, backgroundColor: tokens.surface },
-    prioritySelected: { borderColor: tokens.accent, backgroundColor: tokens.accentSoft },
-    priorityLabel: { color: tokens.text, fontSize: 14, fontWeight: '800' },
-    priorityBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
-    error: { color: tokens.danger, fontSize: 13, lineHeight: 19, fontWeight: '700' },
-    success: { color: tokens.success, fontSize: 13, lineHeight: 19, fontWeight: '700' },
-    primaryButton: { minHeight: 50, borderRadius: 15, backgroundColor: tokens.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-    primaryButtonText: { color: '#FFFFFF', fontSize: 15.5, fontWeight: '900' },
-    secondaryButton: { minHeight: 46, borderRadius: 15, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-    secondaryButtonText: { color: tokens.text, fontSize: 14, fontWeight: '800' },
-    disabled: { opacity: 0.5 },
-    footnote: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 17, paddingBottom: 12 },
+    disciplineChipText: { color: tokens.text, fontSize: 12.5, fontWeight: '800' },
+    selectedText: { color: tokens.accent },
+    disciplineList: { gap: 14, marginTop: 4 },
+    disciplineBlock: { gap: 8, paddingTop: 2 },
+    disciplineHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+    disciplineTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '900' },
+    currentPriority: { color: tokens.accent, fontSize: 11.5, lineHeight: 16, fontWeight: '800' },
+    priorityGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    priorityPill: { minHeight: 36, minWidth: '46%', flexGrow: 1, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
+    priorityPillSelected: { borderColor: tokens.accent, backgroundColor: tokens.accentSoft },
+    priorityPillText: { color: tokens.text, fontSize: 11.5, lineHeight: 15, fontWeight: '800' },
+    input: { minHeight: 46, borderRadius: 13, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surfaceMuted, color: tokens.text, paddingHorizontal: 13, fontSize: 14.5 },
+    summaryStrip: { borderLeftWidth: 3, borderLeftColor: tokens.accent, paddingLeft: 12, gap: 3 },
+    summaryLabel: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.85 },
+    summaryText: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
+    actions: { gap: 8 },
+    busy: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    error: { color: tokens.danger, fontSize: 12.5, lineHeight: 18, fontWeight: '700' },
+    success: { color: tokens.success, fontSize: 12.5, lineHeight: 18, fontWeight: '700' },
+    footnote: { color: tokens.textMuted, fontSize: 11, lineHeight: 16, paddingBottom: 8 },
   });
 }
