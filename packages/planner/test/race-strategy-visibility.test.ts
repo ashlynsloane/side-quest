@@ -19,20 +19,21 @@ describe('race strategy visibility', () => {
     expect(coachInbox).toContain('surface="coach"');
   });
 
-  it('keeps Race Intent as baseline and layers approved Strategy Coach changes on top', () => {
+  it('keeps Race Intent as baseline and layers only an active Strategy Coach window on top', () => {
     const context = source('apps/mobile/src/services/race-strategy-context.ts');
     expect(context).toContain('mergeRaceIntentWithCoachStrategy');
     expect(context).toContain('loadApprovedCoachStrategy');
+    expect(context).toContain("approvedStrategyWindowState === 'active'");
     expect(context).toContain('RACE INTENT + STRATEGY COACH');
     expect(context).toContain('first claim on discretionary progression');
   });
 
-  it('gives Plan a direct handoff between race priorities and Strategy Coach', () => {
+  it('gives Plan a direct handoff between race priorities and the Strategy workspace', () => {
     const card = source('apps/mobile/src/components/race-strategy-context-card.tsx');
     expect(card).toContain('Edit race priorities');
     expect(card).toContain('Talk strategy');
     expect(card).toContain("router.push('/race-intent'");
-    expect(card).toContain("router.push('/(tabs)/coach'");
+    expect(card).toContain("router.push('/coach-strategy'");
   });
 
   it('explains how the effective strategy is expressed in the generated week', () => {
@@ -60,7 +61,7 @@ describe('race strategy visibility', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
     expect(runtime).toContain('getLatestWholeAthletePlanSnapshot(blockId?: string)');
-    expect(runtime).toContain('latestReconciledPlan = { blockId: saved.block.id, plan: generated }');
+    expect(runtime).toContain('latestReconciledPlan = { blockId: saved.block.id, generated }');
     expect(runtime).toContain('latestReconciledPlan.blockId !== blockId');
     expect(weekly).toContain('getLatestWholeAthletePlanSnapshot(race.blockId)');
   });
