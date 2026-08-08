@@ -2,6 +2,7 @@ import type { EnduranceDiscipline, PerformanceGoalType } from '@circuit/domain';
 
 import {
   topStrategyDisciplines,
+  type CoachSemanticDiscipline,
   type CoachSemanticStrategyChange,
   type CoachStrategyObjective,
   type CoachStrategyTradeoff,
@@ -89,7 +90,7 @@ export function setRaceIntentDisciplinePriority(
     .find(([, objective]) => objective === 'primary_focus' || objective === 'maximize')?.[0] as EnduranceDiscipline | undefined;
   return {
     ...intent,
-    primaryDiscipline: intent.primaryDiscipline === discipline ? remainingTop : intent.primaryDiscipline,
+    primaryDiscipline: intent.primaryDiscipline === discipline && remainingTop ? remainingTop : intent.primaryDiscipline,
     disciplinePriorities,
   };
 }
@@ -213,7 +214,7 @@ function normalizeMergedStrategy(
   for (const [discipline, objective] of Object.entries(disciplineObjectives)) {
     if (discipline === preferredTop) continue;
     if (objective === 'primary_focus' || objective === 'maximize') {
-      disciplineObjectives[discipline as EnduranceDiscipline] = 'develop';
+      disciplineObjectives[discipline as CoachSemanticDiscipline] = 'develop';
     }
   }
   const newestPreferredObjective = newest.disciplineObjectives[preferredTop];
