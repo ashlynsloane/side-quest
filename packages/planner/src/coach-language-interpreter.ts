@@ -1,8 +1,10 @@
+import type { CoachSemanticStrategyChange } from './coach-semantic-frame';
 import { validateCoachTurnFrame, type CoachTurnFrameV2 } from './coach-semantic-frame';
 
 export interface CoachLanguageInterpreterInput {
   message: string;
   referenceDate: string;
+  turnId?: string;
   knownPlannedEvents?: Array<{
     eventId: string;
     title: string;
@@ -14,6 +16,7 @@ export interface CoachLanguageInterpreterInput {
     activeTargetEventId?: string;
     focusDate?: string;
     pendingQuestion?: string;
+    strategyDraft?: CoachSemanticStrategyChange;
   };
 }
 
@@ -43,7 +46,8 @@ export async function runCoachLanguageInterpreter(
       interpreterId: interpreter.id,
     };
   }
-  const validation = validateCoachTurnFrame(raw);
+  const candidate = attachRuntimeMetadata(raw, input.turnId);
+  const validation = validateCoachTurnFrame(candidate);
   return {
     ok: validation.valid,
     frame: validation.frame,
@@ -59,7 +63,7 @@ export async function runCoachLanguageInterpreter(
  */
 export function coachInterpreterSystemContract(): string {
   return [
-    'Return only a CoachTurnFrameV2-compatible object.',
+    'Return only CoachTurnFrameV2 semantic fields; runtime metadata such as turnId/source may be supplied by the adapter.',
     'Describe what the athlete said; do not prescribe training.',
     'Mark past/completed workouts as temporalRole=completed.',
     'Do not make a completed workout the target of a requested change.',
@@ -72,4 +76,16 @@ export function coachInterpreterSystemContract(): string {
     'A strategyChange may describe discipline objectives and tradeoff tolerance, but it may not prescribe the resulting training allocation.',
     'Do not diagnose injuries, illnesses, or menstrual disorders.',
   ].join('\n');
+}
+
+function attachRuntimeMetadata(raw: unknown, turnId?: string): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const value = raw as Record<string, unknown>;
+  return {
+    ...value,
+    turnId: typeof value.turnId === 'string' && value.turnId.trim() ? value.turnId : turnId,
+    source: value.source === 'test_fixture' || value.source === 'deterministic_fallback' || value.source === 'language_model'
+      ? value.source
+      : 'language_model',
+  };
 }
