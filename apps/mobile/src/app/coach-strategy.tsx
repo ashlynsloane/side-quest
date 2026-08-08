@@ -7,7 +7,7 @@ import { useTheme } from '@/state/theme-context';
 
 export default function CoachStrategyScreen() {
   const { tokens } = useTheme();
-  const contentStyle = useMemo(() => ({ gap: 18, paddingTop: 22, paddingBottom: 36, backgroundColor: tokens.background }), [tokens.background]);
+  const contentStyle = useMemo(() => ({ gap: 18, paddingTop: 22, paddingBottom: 36, backgroundColor: tokens.canvas }), [tokens.canvas]);
   return <V23Screen contentStyle={contentStyle}>
     <CoachModeSwitch active="strategy" />
     <CoachStrategyWorkspace />
