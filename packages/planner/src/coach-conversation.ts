@@ -28,6 +28,7 @@ export interface CoachConversationResolution {
   interpretation: CoachMessageInterpretation;
   targetDiscipline?: CoachTargetDiscipline;
   preferredTargetDate?: string;
+  focusDate?: string;
   preferredReplacementDiscipline?: CoachTargetDiscipline;
   recentFatigueTrend?: 'stable' | 'worsening' | 'improving';
   keepPriorTarget: boolean;
@@ -49,21 +50,29 @@ export function resolveCoachConversationMessage(
   const symptomResolved = explicitlyResolvesSafetyConcern(text);
   const worsening = isWorsening(text);
   const improving = isImproving(text);
-  const preferredTargetDate = parseRequestedDate(text, context.referenceDate);
+  const mentionedDate = parseMentionedDate(text, context.referenceDate);
+  const explicitMove = isExplicitMoveRequest(text, Boolean(mentionedDate));
+  const preferredTargetDate = explicitMove ? mentionedDate : undefined;
+  const focusDate = !explicitMove && mentionedDate && isDateFocusQuestion(text) ? mentionedDate : undefined;
   const preferredReplacementDiscipline = parseReplacementPreference(text);
-  const explicitMove = Boolean(preferredTargetDate) || /\b(move|reschedule|shift|push|tomorrow|tonight|later)\b/.test(text);
   const explicitDuration = fresh.availableMinutes !== undefined;
   const replacementLanguage = /\b(rather|replace|swap\s+(?:it|this))\b/.test(text)
     || (/\binstead\b/.test(text) && !explicitMove);
   const explicitReplacement = Boolean(preferredReplacementDiscipline) || replacementLanguage;
   const explicitNewSafety = fresh.reason === 'pain' || fresh.reason === 'illness';
   const lowInformationFollowUp = fresh.confidence === 'low' || isEllipticalFollowUp(text);
+  const freshTargetIsRetrospective = Boolean(
+    fresh.targetDiscipline
+    && isRetrospectiveDisciplineMention(text, fresh.targetDiscipline)
+    && !isForwardDisciplineRequest(text, fresh.targetDiscipline),
+  );
+  const freshTargetDiscipline = freshTargetIsRetrospective ? undefined : fresh.targetDiscipline;
   const distinctCompensatoryRequest = Boolean(
     previous
     && (previous.reason === 'pain' || previous.reason === 'illness')
     && (fresh.compensatoryTrainingIntent || fresh.requestedLargeTrainingLoad)
-    && fresh.targetDiscipline
-    && fresh.targetDiscipline !== previous.targetDiscipline,
+    && freshTargetDiscipline
+    && freshTargetDiscipline !== previous.targetDiscipline,
   );
 
   let interpretation = fresh;
@@ -92,17 +101,17 @@ export function resolveCoachConversationMessage(
         confidence: 'high',
         summary: 'This is a new training request, but the recent pain-related interruption still constrains how much load should be added next.',
       };
-    } else if (previousWasSafety && (lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening)) {
+    } else if (previousWasSafety && (lowInformationFollowUp || explicitMove || focusDate || explicitDuration || explicitReplacement || worsening)) {
       interpretation = {
         ...previous,
         targetDiscipline: explicitReplacement
           ? previous.targetDiscipline
-          : fresh.targetDiscipline ?? previous.targetDiscipline,
+          : freshTargetDiscipline ?? previous.targetDiscipline,
         signals: unique([...previous.signals, ...fresh.signals.filter((signal) => signal !== 'General workout preference')]),
         confidence: previous.confidence === 'high' ? 'high' : 'moderate',
         summary: previous.summary,
       };
-    } else if (previous.reason === 'fatigue' && (worsening || improving || lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement)) {
+    } else if (previous.reason === 'fatigue' && (worsening || improving || lowInformationFollowUp || explicitMove || focusDate || explicitDuration || explicitReplacement)) {
       interpretation = mergeFatigueFollowUp(previous, fresh, {
         worsening,
         improving,
@@ -176,19 +185,22 @@ export function resolveCoachConversationMessage(
     }
   }
 
-  const targetDiscipline = distinctCompensatoryRequest
-    ? fresh.targetDiscipline
-    : explicitReplacement && context.previousTargetDiscipline
-      ? context.previousTargetDiscipline
-      : fresh.targetDiscipline
-        ?? interpretation.targetDiscipline
-        ?? context.previousTargetDiscipline;
+  const targetDiscipline = focusDate
+    ? freshTargetDiscipline
+    : distinctCompensatoryRequest
+      ? freshTargetDiscipline
+      : explicitReplacement && context.previousTargetDiscipline
+        ? context.previousTargetDiscipline
+        : freshTargetDiscipline
+          ?? interpretation.targetDiscipline
+          ?? context.previousTargetDiscipline;
   interpretation = { ...interpretation, targetDiscipline };
 
   const keepPriorTarget = Boolean(
-    !distinctCompensatoryRequest
+    !focusDate
+    && !distinctCompensatoryRequest
     && context.previousTargetDiscipline
-    && (explicitReplacement || !fresh.targetDiscipline)
+    && (explicitReplacement || !freshTargetDiscipline)
     && (previous || lowInformationFollowUp || explicitMove || explicitDuration || explicitReplacement || worsening || improving),
   );
 
@@ -196,6 +208,8 @@ export function resolveCoachConversationMessage(
     ...(keepPriorTarget ? ['Continues prior session'] : []),
     ...(distinctCompensatoryRequest ? ['New request constrained by recent interruption'] : []),
     ...(preferredTargetDate ? [`Requested date: ${preferredTargetDate}`] : []),
+    ...(focusDate ? [`Evaluate date: ${focusDate}`] : []),
+    ...(freshTargetIsRetrospective ? ['Sport mention describes completed or prior training'] : []),
     ...(preferredReplacementDiscipline ? [`Preferred replacement: ${preferredReplacementDiscipline}`] : []),
     ...(worsening ? ['Condition worsening'] : []),
     ...(improving ? ['Condition improving'] : []),
@@ -206,6 +220,7 @@ export function resolveCoachConversationMessage(
     interpretation,
     targetDiscipline,
     preferredTargetDate,
+    focusDate,
     preferredReplacementDiscipline,
     recentFatigueTrend,
     keepPriorTarget,
@@ -279,12 +294,12 @@ function parseReplacementPreference(text: string): CoachTargetDiscipline | undef
   return patterns.find(([, pattern]) => pattern.test(text))?.[0];
 }
 
-function parseRequestedDate(text: string, referenceDate: string): string | undefined {
+function parseMentionedDate(text: string, referenceDate: string): string | undefined {
   const iso = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
   if (iso) return iso;
   if (/\bday\s+after\s+tomorrow\b/.test(text)) return addDays(referenceDate, 2);
   if (/\btomorrow\b/.test(text)) return addDays(referenceDate, 1);
-  if (/\btoday\b/.test(text) && /\b(move|reschedule|shift|later|tonight)\b/.test(text)) return referenceDate;
+  if (/\btoday\b/.test(text)) return referenceDate;
 
   const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
   const match = weekdays.find((weekday) => new RegExp(`\\b${weekday}\\b`).test(text));
@@ -294,6 +309,40 @@ function parseRequestedDate(text: string, referenceDate: string): string | undef
   let delta = (targetIndex - reference.getUTCDay() + 7) % 7;
   if (delta === 0 && /\bnext\s+/.test(text)) delta = 7;
   return addDays(referenceDate, delta);
+}
+
+function isExplicitMoveRequest(text: string, hasMentionedDate: boolean): boolean {
+  if (/\b(move|reschedule|shift|push)\b/.test(text)) return true;
+  if (!hasMentionedDate) return false;
+  if (/\b(?:instead|rather)\b/.test(text)) return true;
+  if (/\b(?:can|could|should|would)\s+(?:we|i)\s+(?:do|make|put|schedule)\b/.test(text)) return true;
+  if (/\b(?:do|make|put|schedule)\s+(?:it|this|the\s+(?:workout|session))\b/.test(text)) return true;
+  return false;
+}
+
+function isDateFocusQuestion(text: string): boolean {
+  return /\b(?:what|how)\s+about\s+(?:today|tomorrow|the\s+day\s+after\s+tomorrow|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(text)
+    || /\b(?:for|on)\s+(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b[^.!?]{0,24}\b(?:training|workout|session|plan)\b/.test(text);
+}
+
+function isRetrospectiveDisciplineMention(text: string, discipline: CoachTargetDiscipline): boolean {
+  const sport = disciplinePattern(discipline);
+  return new RegExp(`\\b(?:after|during|finished|completed|already\\s+did|just\\s+did|did)\\b[^.!?]{0,28}\\b(?:${sport})\\b`).test(text)
+    || new RegExp(`\\b(?:${sport})\\b[^.!?]{0,28}\\b(?:already\\s+done|done|finished|completed)\\b`).test(text);
+}
+
+function isForwardDisciplineRequest(text: string, discipline: CoachTargetDiscipline): boolean {
+  const sport = disciplinePattern(discipline);
+  return new RegExp(`\\b(?:want|plan|planning|going|need|would\\s+like|can\\s+i|could\\s+i)\\b[^.!?]{0,28}\\b(?:${sport})\\b`).test(text)
+    || new RegExp(`\\b(?:${sport})\\b[^.!?]{0,24}\\b(?:tomorrow|later|next|tonight)\\b`).test(text)
+    || /\b(move|reschedule|shift|push)\b/.test(text);
+}
+
+function disciplinePattern(discipline: CoachTargetDiscipline): string {
+  if (discipline === 'swim') return 'swim|swimming|pool';
+  if (discipline === 'bike') return 'bike|biking|ride|riding|cycle|cycling|trainer';
+  if (discipline === 'run') return 'run|running|jog|jogging|treadmill|track';
+  return 'strength|lift|lifting|weights|gym';
 }
 
 function isCancellation(text: string): boolean {
