@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve } from 'node:url';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -40,10 +40,12 @@ describe('Race Intent V2 mobile wiring', () => {
     expect(runtime).toContain('resetRaceIntent');
   });
 
-  it('keeps Race Intent as the durable baseline around a date-scoped Strategy Coach override', () => {
+  it('keeps Race Intent as the durable baseline around date-scoped season strategy blocks', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const overlay = source('packages/planner/src/whole-athlete-week-strategy.ts');
-    expect(runtime).toContain('configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy)');
+    expect(runtime).toContain('loadApprovedCoachStrategySchedule');
+    expect(runtime).toContain('configureWholeAthleteStrategyLayers');
+    expect(runtime).toContain('approvedSchedule.windows.map');
     expect(overlay).toContain('mergeRaceIntentWithCoachStrategy(configuredRaceIntent, approved)');
     expect(overlay).toContain('resolveConfiguredStrategy(input.weekStartDate)');
   });
