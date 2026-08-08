@@ -42,6 +42,19 @@ describe('Strategy Coach deterministic fallback', () => {
     expect(frame.requestedChange).toBeUndefined();
   });
 
+  it('asks which discipline wins when one turn tries to maximize two disciplines', () => {
+    const frame = buildDeterministicCoachTurnFrame(
+      'For this build I want to maximize the bike and run.',
+      undefined,
+      { turnId: 'strategy-conflict', referenceDate: '2026-08-07' },
+    );
+
+    expect(frame.intent).toBe('strategy_change');
+    expect(frame.strategyChange).toBeUndefined();
+    expect(frame.unresolved).toContain('single_top_focus');
+    expect(frame.requestedChange).toBeUndefined();
+  });
+
   it('can update only the strategy window when a draft already exists', () => {
     const frame = buildDeterministicCoachTurnFrame(
       'Do that until November.',
