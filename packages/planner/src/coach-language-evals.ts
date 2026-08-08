@@ -4,7 +4,10 @@ import type {
   CoachConversationHorizon,
   CoachEventTemporalRole,
   CoachSemanticAction,
+  CoachSemanticDiscipline,
   CoachSemanticIntent,
+  CoachStrategyObjective,
+  CoachStrategyTradeoff,
   CoachTurnFrameV2,
 } from './coach-semantic-frame';
 
@@ -15,6 +18,9 @@ export interface CoachInterpreterEvalExpectation {
   mustIncludeEventRole?: CoachEventTemporalRole;
   mustNotTargetCompleted?: boolean;
   minimumUnresolved?: number;
+  strategyPrimaryFocus?: CoachSemanticDiscipline;
+  strategyObjectives?: Partial<Record<CoachSemanticDiscipline, CoachStrategyObjective>>;
+  strategyTradeoff?: CoachStrategyTradeoff;
 }
 
 export interface CoachInterpreterEvalCase {
@@ -76,6 +82,17 @@ export function evaluateFrame(
   if (expected.mustNotTargetCompleted && targetsCompletedEvent(frame)) failures.push('A completed event was used as an editable target.');
   if (expected.minimumUnresolved !== undefined && frame.unresolved.length < expected.minimumUnresolved) {
     failures.push(`Expected at least ${expected.minimumUnresolved} unresolved slot(s).`);
+  }
+  if (expected.strategyPrimaryFocus && frame.strategyChange?.primaryFocus !== expected.strategyPrimaryFocus) {
+    failures.push(`Expected strategy primary focus ${expected.strategyPrimaryFocus}, received ${frame.strategyChange?.primaryFocus ?? 'none'}.`);
+  }
+  if (expected.strategyTradeoff && frame.strategyChange?.tradeoffTolerance !== expected.strategyTradeoff) {
+    failures.push(`Expected strategy tradeoff ${expected.strategyTradeoff}, received ${frame.strategyChange?.tradeoffTolerance ?? 'none'}.`);
+  }
+  for (const [discipline, objective] of Object.entries(expected.strategyObjectives ?? {}) as Array<[CoachSemanticDiscipline, CoachStrategyObjective]>) {
+    if (frame.strategyChange?.disciplineObjectives[discipline] !== objective) {
+      failures.push(`Expected ${discipline} strategy objective ${objective}, received ${frame.strategyChange?.disciplineObjectives[discipline] ?? 'none'}.`);
+    }
   }
   return failures;
 }
@@ -144,12 +161,22 @@ export const COACH_LANGUAGE_EVAL_CASES: CoachInterpreterEvalCase[] = [
   {
     id: 'long-term-bike-focus',
     input: { message: 'For the next four months I want cycling to be my main focus while I maintain my swim and run.', referenceDate: '2026-08-07' },
-    expected: { intent: 'strategy_change', horizon: 'long_term' },
+    expected: {
+      intent: 'strategy_change',
+      horizon: 'long_term',
+      strategyPrimaryFocus: 'bike',
+      strategyObjectives: { bike: 'primary_focus', swim: 'maintain', run: 'maintain' },
+    },
   },
   {
     id: 'race-split-priority',
     input: { message: 'For this 70.3 I care most about getting the fastest bike split I can, even if the swim only stays at maintenance.', referenceDate: '2026-08-07' },
-    expected: { intent: 'strategy_change', horizon: 'long_term' },
+    expected: {
+      intent: 'strategy_change',
+      horizon: 'long_term',
+      strategyPrimaryFocus: 'bike',
+      strategyObjectives: { bike: 'maximize', swim: 'maintain' },
+    },
   },
   {
     id: 'explanation-only',
