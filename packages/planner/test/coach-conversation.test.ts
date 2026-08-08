@@ -40,8 +40,35 @@ describe('coach conversation resolver', () => {
     expect(result.intent).toBe('refine_move');
     expect(result.targetDiscipline).toBe('bike');
     expect(result.preferredTargetDate).toBe('2026-08-14');
+    expect(result.focusDate).toBeUndefined();
     expect(result.interpretation.requestedAction).toBe('move');
     expect(result.keepPriorTarget).toBe(true);
+  });
+
+  it('treats a date question as a planning horizon instead of a move command', () => {
+    const previous = interpretCoachMessage('My hip has sharp pain.');
+    const result = resolveCoachConversationMessage('I already did the bike today. What about tomorrow?', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: '2026-08-07',
+      referenceDate: '2026-08-07',
+    });
+
+    expect(result.intent).toBe('follow_up');
+    expect(result.preferredTargetDate).toBeUndefined();
+    expect(result.focusDate).toBe('2026-08-08');
+    expect(result.targetDiscipline).toBeUndefined();
+    expect(result.keepPriorTarget).toBe(false);
+    expect(result.interpretation.requestedAction).not.toBe('move');
+  });
+
+  it('does not treat a retrospective sport mention as the workout to rewrite', () => {
+    const result = resolveCoachConversationMessage('I was limping for a few minutes after my ride.', undefined, {
+      referenceDate: '2026-08-07',
+    });
+
+    expect(result.targetDiscipline).toBeUndefined();
+    expect(result.conversationSignals).toContain('Sport mention describes completed or prior training');
   });
 
   it('treats "I would rather swim" as a replacement preference, not a new swim target', () => {
