@@ -336,8 +336,10 @@ function isValidPendingClarification(value: unknown): value is PendingCoachClari
 function isValidResolvedClarification(value: unknown): value is ResolvedCoachClarification {
   const item = value as Partial<ResolvedCoachClarification> | null | undefined;
   return Boolean(
-    item
-    && isValidPendingClarification(item)
+    item?.originalMessage
+    && item.question
+    && item.askedAt
+    && (item.kind === 'function' || item.kind === 'pain_type' || item.kind === 'target_session' || item.kind === 'constraint')
     && item.resolvedAt
     && item.outcome === 'no_training_change',
   );
