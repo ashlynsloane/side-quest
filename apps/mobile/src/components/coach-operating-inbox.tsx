@@ -2,6 +2,7 @@ import type { CoachSemanticStrategyChange } from '@circuit/planner/coach-semanti
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { RaceStrategyContextCard } from '@/components/race-strategy-context-card';
 import type { CoachOperatingInboxItem } from '@/services/coach-operating-inbox';
 import {
   approveCurrentCoachStrategyDraft,
@@ -90,6 +91,8 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
         <Text style={styles.eyebrow}>COACH ATTENTION</Text>
         <Text style={styles.title}>What matters next</Text>
       </View>
+
+      <RaceStrategyContextCard surface="coach" />
 
       {strategy ? (
         <View style={[styles.card, styles.strategyCard]}>
