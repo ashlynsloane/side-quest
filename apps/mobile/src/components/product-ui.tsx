@@ -188,7 +188,7 @@ function makeStyles(tokens: DesignTokens) {
     disclosure: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border },
     disclosureHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
     disclosureCopy: { flex: 1, minWidth: 0, gap: 2 },
-    disclosureTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '850' as never },
+    disclosureTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },
     disclosureSummary: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17 },
     disclosureMark: { width: 30, height: 30, borderRadius: 15, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
     disclosureMarkText: { color: tokens.accent, fontSize: 19, lineHeight: 22, fontWeight: '700' },
@@ -209,7 +209,7 @@ function makeStyles(tokens: DesignTokens) {
     action: { minHeight: 42, borderRadius: 13, backgroundColor: tokens.accent, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
     actionSecondary: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border },
     actionQuiet: { backgroundColor: 'transparent', paddingHorizontal: 4 },
-    actionText: { color: '#FFFFFF', fontSize: 13, lineHeight: 17, fontWeight: '850' as never },
+    actionText: { color: '#FFFFFF', fontSize: 13, lineHeight: 17, fontWeight: '800' },
     actionTextSecondary: { color: tokens.accent },
     disabled: { opacity: 0.48 },
 
