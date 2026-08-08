@@ -5,6 +5,7 @@ import {
   legacyPriorityForRaceIntent,
   mergeRaceIntentWithCoachStrategy,
   raceIntentToCoachStrategy,
+  setRaceIntentDisciplinePriority,
   validateRaceIntent,
   type RaceIntentV2,
 } from '../src/race-intent';
@@ -59,6 +60,43 @@ describe('Race Intent V2', () => {
     expect(run.disciplineObjectives.swim).toBe('minimum_viable');
   });
 
+  it('rejects two maximized disciplines and two top-focus disciplines', () => {
+    const doubleMax = validateRaceIntent({
+      version: 2,
+      overallObjective: 'best_overall',
+      primaryDiscipline: 'bike',
+      disciplinePriorities: { swim: 'maintain', bike: 'maximize', run: 'maximize' },
+      tradeoffTolerance: 'aggressive_specialization',
+    }, ['swim', 'bike', 'run']);
+    expect(doubleMax.valid).toBe(false);
+    expect(doubleMax.errors).toContain('Only one discipline can be maximized at a time.');
+
+    const twoTop = validateRaceIntent({
+      version: 2,
+      overallObjective: 'best_overall',
+      primaryDiscipline: 'bike',
+      disciplinePriorities: { swim: 'maintain', bike: 'maximize', run: 'primary_focus' },
+      tradeoffTolerance: 'moderate_tradeoff',
+    }, ['swim', 'bike', 'run']);
+    expect(twoTop.valid).toBe(false);
+    expect(twoTop.errors).toContain('Only one discipline can hold the top race-development priority at a time.');
+  });
+
+  it('moves the sole top focus when the athlete maximizes a different discipline', () => {
+    const current: RaceIntentV2 = {
+      version: 2,
+      overallObjective: 'discipline_performance',
+      primaryDiscipline: 'bike',
+      disciplinePriorities: { swim: 'maintain', bike: 'maximize', run: 'maintain' },
+      tradeoffTolerance: 'moderate_tradeoff',
+    };
+    const next = setRaceIntentDisciplinePriority(current, 'run', 'maximize');
+    expect(next.primaryDiscipline).toBe('run');
+    expect(next.disciplinePriorities.run).toBe('maximize');
+    expect(next.disciplinePriorities.bike).toBe('develop');
+    expect(validateRaceIntent(next, ['swim', 'bike', 'run']).valid).toBe(true);
+  });
+
   it('lets an approved Strategy Coach directive override only the race-intent fields it changes', () => {
     const raceIntent: RaceIntentV2 = {
       version: 2,
@@ -75,6 +113,23 @@ describe('Race Intent V2', () => {
     expect(merged?.disciplineObjectives).toEqual({ swim: 'maintain', bike: 'primary_focus', run: 'develop' });
     expect(merged?.tradeoffTolerance).toBe('moderate_tradeoff');
     expect(merged?.endsAt).toBe('2026-11-30');
+  });
+
+  it('moves an existing race maximum when Strategy Coach explicitly maximizes another discipline', () => {
+    const raceIntent: RaceIntentV2 = {
+      version: 2,
+      overallObjective: 'discipline_performance',
+      primaryDiscipline: 'bike',
+      disciplinePriorities: { swim: 'maintain', bike: 'maximize', run: 'maintain' },
+      tradeoffTolerance: 'aggressive_specialization',
+    };
+    const merged = mergeRaceIntentWithCoachStrategy(raceIntent, {
+      primaryFocus: 'run',
+      disciplineObjectives: { run: 'maximize' },
+    });
+    expect(merged?.primaryFocus).toBe('run');
+    expect(merged?.disciplineObjectives.run).toBe('maximize');
+    expect(merged?.disciplineObjectives.bike).toBe('develop');
   });
 
   it('rejects a focus discipline that is not in the active race', () => {
