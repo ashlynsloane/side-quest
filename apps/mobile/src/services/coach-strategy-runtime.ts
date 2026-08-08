@@ -9,16 +9,27 @@ import { loadCoachDialogueV2, saveCoachDialogueV2 } from './coach-dialogue-v2';
 import {
   clearApprovedCoachStrategy,
   loadApprovedCoachStrategy,
-  saveApprovedCoachStrategy,
+  loadApprovedCoachStrategySchedule,
+  removeApprovedCoachStrategyWindow,
+  replaceApprovedCoachStrategySchedule,
+  saveApprovedCoachStrategyWindow,
+  type ApprovedCoachStrategyScheduleState,
   type ApprovedCoachStrategyState,
+  type ApprovedCoachStrategyWindowState,
 } from './coach-strategy-state';
+import {
+  loadStrategyConversationState,
+  setStrategyConversationEditingWindow,
+} from './strategy-conversation-state';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
 export interface CoachStrategyReview {
   blockId: string;
   draft?: CoachSemanticStrategyChange;
   approved?: ApprovedCoachStrategyState;
+  schedule: ApprovedCoachStrategyScheduleState;
   approvedWindowState?: CoachStrategyWindowState;
+  editingWindowId?: string;
   draftTurnId?: string;
   hasUnapprovedChanges: boolean;
 }
@@ -28,35 +39,61 @@ export async function loadCoachStrategyReview(): Promise<CoachStrategyReview | n
   const block = saved?.block;
   if (!block) return null;
   const dialogue = loadCoachDialogueV2(block.id);
+  const conversation = loadStrategyConversationState(block.id);
+  const schedule = loadApprovedCoachStrategySchedule(block.id);
   const approved = loadApprovedCoachStrategy(block.id) ?? undefined;
   const draft = dialogue.strategyDraft;
+  const editingWindow = conversation.editingWindowId
+    ? schedule.windows.find((window) => window.id === conversation.editingWindowId)
+    : undefined;
+  const draftMatches = draft
+    ? editingWindow
+      ? sameStrategy(draft, editingWindow.strategy)
+      : schedule.windows.some((window) => sameStrategy(draft, window.strategy))
+    : true;
   return {
     blockId: block.id,
     draft,
     approved,
+    schedule,
     approvedWindowState: approved ? coachStrategyWindowStateForWeek(approved.strategy, currentWeekStart()) : undefined,
+    editingWindowId: conversation.editingWindowId,
     draftTurnId: dialogue.updatedAtTurnId,
-    hasUnapprovedChanges: Boolean(draft && !sameStrategy(draft, approved?.strategy)),
+    hasUnapprovedChanges: Boolean(draft && !draftMatches),
   };
 }
 
-export async function approveCurrentCoachStrategyDraft(): Promise<ApprovedCoachStrategyState> {
+export async function approveCurrentCoachStrategyDraft(): Promise<ApprovedCoachStrategyWindowState> {
   const saved = await getLatestTrainingBlock();
   const block = saved?.block;
   if (!block) throw new Error('The active training plan is no longer available.');
   const dialogue = loadCoachDialogueV2(block.id);
   if (!dialogue.strategyDraft) throw new Error('There is no strategy draft to approve yet.');
-  const previous = loadApprovedCoachStrategy(block.id);
-  const approved = saveApprovedCoachStrategy(block.id, dialogue.strategyDraft, dialogue.updatedAtTurnId);
+  const conversation = loadStrategyConversationState(block.id);
+  const previousSchedule = loadApprovedCoachStrategySchedule(block.id);
+  let approved: ApprovedCoachStrategyWindowState;
+  try {
+    approved = saveApprovedCoachStrategyWindow(
+      block.id,
+      dialogue.strategyDraft,
+      dialogue.updatedAtTurnId,
+      conversation.editingWindowId,
+    );
+  } catch (caught) {
+    throw new Error(caught instanceof Error
+      ? `That strategy window cannot be added to the season plan: ${caught.message}`
+      : 'That strategy window cannot be added to the season plan.');
+  }
+
   try {
     await refreshLatestWholeAthletePlan();
+    setStrategyConversationEditingWindow(conversation, undefined);
   } catch (caught) {
-    if (previous) saveApprovedCoachStrategy(previous.blockId, previous.strategy, previous.sourceTurnId);
-    else clearApprovedCoachStrategy();
+    replaceApprovedCoachStrategySchedule(block.id, previousSchedule.windows);
     try { await refreshLatestWholeAthletePlan(); } catch { /* best-effort rollback reconciliation */ }
     throw new Error(caught instanceof Error
-      ? `The strategy was not applied because the week could not be reconciled safely: ${caught.message}`
-      : 'The strategy was not applied because the week could not be reconciled safely.');
+      ? `The strategy was not applied because the block could not be reconciled safely: ${caught.message}`
+      : 'The strategy was not applied because the block could not be reconciled safely.');
   }
   return approved;
 }
@@ -66,33 +103,75 @@ export async function discardCurrentCoachStrategyDraft(): Promise<void> {
   const block = saved?.block;
   if (!block) return;
   const dialogue = loadCoachDialogueV2(block.id);
-  const approved = loadApprovedCoachStrategy(block.id);
+  const conversation = loadStrategyConversationState(block.id);
+  const schedule = loadApprovedCoachStrategySchedule(block.id);
+  const editing = conversation.editingWindowId
+    ? schedule.windows.find((window) => window.id === conversation.editingWindowId)
+    : undefined;
   saveCoachDialogueV2(block.id, {
     ...dialogue,
-    strategyDraft: approved?.strategy ? cloneStrategy(approved.strategy) : undefined,
+    strategyDraft: editing?.strategy ? cloneStrategy(editing.strategy) : undefined,
   });
+  setStrategyConversationEditingWindow(conversation, editing?.id);
 }
 
-export async function stopApprovedCoachStrategy(): Promise<void> {
+export async function beginEditingApprovedCoachStrategyWindow(windowId: string): Promise<CoachStrategyReview> {
+  const saved = await getLatestTrainingBlock();
+  const block = saved?.block;
+  if (!block) throw new Error('The active training plan is no longer available.');
+  const schedule = loadApprovedCoachStrategySchedule(block.id);
+  const window = schedule.windows.find((candidate) => candidate.id === windowId);
+  if (!window) throw new Error('That season strategy window is no longer available.');
+  const dialogue = loadCoachDialogueV2(block.id);
+  saveCoachDialogueV2(block.id, { ...dialogue, strategyDraft: cloneStrategy(window.strategy) });
+  const conversation = loadStrategyConversationState(block.id);
+  setStrategyConversationEditingWindow(conversation, window.id);
+  const review = await loadCoachStrategyReview();
+  if (!review) throw new Error('Side Quest could not reopen that season strategy window.');
+  return review;
+}
+
+export async function beginNewCoachStrategyWindow(): Promise<CoachStrategyReview> {
+  const saved = await getLatestTrainingBlock();
+  const block = saved?.block;
+  if (!block) throw new Error('The active training plan is no longer available.');
+  const dialogue = loadCoachDialogueV2(block.id);
+  saveCoachDialogueV2(block.id, { ...dialogue, strategyDraft: undefined });
+  const conversation = loadStrategyConversationState(block.id);
+  setStrategyConversationEditingWindow(conversation, undefined);
+  const review = await loadCoachStrategyReview();
+  if (!review) throw new Error('Side Quest could not start a new strategy window.');
+  return review;
+}
+
+export async function stopApprovedCoachStrategy(windowId?: string): Promise<void> {
   const saved = await getLatestTrainingBlock();
   if (!saved?.block) {
     clearApprovedCoachStrategy();
     return;
   }
   const block = saved.block;
-  const previous = loadApprovedCoachStrategy(block.id);
+  const previousSchedule = loadApprovedCoachStrategySchedule(block.id);
+  const relevant = loadApprovedCoachStrategy(block.id);
+  const targetId = windowId ?? relevant?.id;
+  if (!targetId) return;
   const previousDialogue = loadCoachDialogueV2(block.id);
-  clearApprovedCoachStrategy();
-  saveCoachDialogueV2(block.id, { ...previousDialogue, strategyDraft: undefined });
+  const previousConversation = loadStrategyConversationState(block.id);
+  removeApprovedCoachStrategyWindow(block.id, targetId);
+  if (previousConversation.editingWindowId === targetId) {
+    setStrategyConversationEditingWindow(previousConversation, undefined);
+    saveCoachDialogueV2(block.id, { ...previousDialogue, strategyDraft: undefined });
+  }
   try {
     await refreshLatestWholeAthletePlan();
   } catch (caught) {
-    if (previous) saveApprovedCoachStrategy(previous.blockId, previous.strategy, previous.sourceTurnId);
+    replaceApprovedCoachStrategySchedule(block.id, previousSchedule.windows);
     saveCoachDialogueV2(block.id, previousDialogue);
+    setStrategyConversationEditingWindow(previousConversation, previousConversation.editingWindowId);
     try { await refreshLatestWholeAthletePlan(); } catch { /* best-effort rollback reconciliation */ }
     throw new Error(caught instanceof Error
-      ? `The prior strategy was restored because replanning failed: ${caught.message}`
-      : 'The prior strategy was restored because replanning failed.');
+      ? `The prior season strategy was restored because replanning failed: ${caught.message}`
+      : 'The prior season strategy was restored because replanning failed.');
   }
 }
 
