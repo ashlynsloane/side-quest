@@ -104,6 +104,7 @@ export async function interpretCoachTurnV2(
     const interpreted = await runCoachLanguageInterpreter(registeredInterpreter, {
       message,
       referenceDate: localDate(),
+      turnId,
       knownPlannedEvents,
       dialogueSummary: {
         activeConcern: previousDialogue.activeConcern
@@ -112,6 +113,7 @@ export async function interpretCoachTurnV2(
         activeTargetEventId: previousDialogue.activePlannedTarget?.eventId,
         focusDate: previousDialogue.focusDate,
         pendingQuestion: previousDialogue.pendingQuestion?.prompt,
+        strategyDraft: previousDialogue.strategyDraft,
       },
     });
     if (interpreted.ok && interpreted.frame && frameBindsToLivePlan(interpreted.frame, knownPlannedEvents)) {
