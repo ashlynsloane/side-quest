@@ -159,6 +159,12 @@ export function resolveRequestedTarget(frame: CoachTurnFrameV2): CoachSemanticTr
   return undefined;
 }
 
+export function topStrategyDisciplines(strategy: CoachSemanticStrategyChange): CoachSemanticDiscipline[] {
+  return Object.entries(strategy.disciplineObjectives)
+    .filter(([, objective]) => objective === 'primary_focus' || objective === 'maximize')
+    .map(([discipline]) => discipline as CoachSemanticDiscipline);
+}
+
 function isIntent(value: unknown): value is CoachSemanticIntent {
   return value === 'report_symptom' || value === 'report_completed_training' || value === 'modify_planned_session'
     || value === 'ask_about_future_training' || value === 'report_schedule_constraint' || value === 'request_extra_training'
@@ -208,6 +214,12 @@ function isStrategyChange(value: unknown): value is CoachSemanticStrategyChange 
   for (const [discipline, objective] of Object.entries(strategy.disciplineObjectives)) {
     if (!isDiscipline(discipline) || !isStrategyObjective(objective)) return false;
   }
+  const top = topStrategyDisciplines(strategy as CoachSemanticStrategyChange);
+  const maximized = Object.entries(strategy.disciplineObjectives)
+    .filter(([, objective]) => objective === 'maximize')
+    .map(([discipline]) => discipline);
+  if (maximized.length > 1 || top.length > 1) return false;
+  if (strategy.primaryFocus && top.length === 1 && top[0] !== strategy.primaryFocus) return false;
   if (strategy.racePriority) {
     const race = strategy.racePriority;
     if (race.discipline !== undefined && race.discipline !== 'swim' && race.discipline !== 'bike' && race.discipline !== 'run') return false;
