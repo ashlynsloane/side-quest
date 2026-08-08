@@ -44,6 +44,11 @@ export interface PendingCoachClarification {
   askedAt: string;
 }
 
+export interface ResolvedCoachClarification extends PendingCoachClarification {
+  resolvedAt: string;
+  outcome: 'no_training_change';
+}
+
 export interface CoachConversationState {
   version: 1;
   blockId: string;
@@ -51,6 +56,7 @@ export interface CoachConversationState {
   activeTarget?: PersistedCoachTarget;
   lastInterpretation?: CoachMessageInterpretation;
   pendingClarification?: PendingCoachClarification;
+  recentClarification?: ResolvedCoachClarification;
   pendingProposal?: PersistedCoachProposal;
   selectedOptionId?: string;
   lastApplied?: {
@@ -80,6 +86,7 @@ export function loadCoachConversationState(blockId: string): CoachConversationSt
       activeTarget: isValidTarget(parsed.activeTarget) ? parsed.activeTarget : undefined,
       lastInterpretation: isValidInterpretation(parsed.lastInterpretation) ? parsed.lastInterpretation : undefined,
       pendingClarification: isValidPendingClarification(parsed.pendingClarification) ? parsed.pendingClarification : undefined,
+      recentClarification: isValidResolvedClarification(parsed.recentClarification) ? parsed.recentClarification : undefined,
       pendingProposal: isValidProposal(parsed.pendingProposal) ? parsed.pendingProposal : undefined,
       selectedOptionId: typeof parsed.selectedOptionId === 'string' ? parsed.selectedOptionId : undefined,
       lastApplied: isValidLastApplied(parsed.lastApplied) ? parsed.lastApplied : undefined,
@@ -132,13 +139,33 @@ export function recordCoachClarification(
   return saveCoachConversationState({
     ...state,
     pendingClarification: { ...input, askedAt },
+    recentClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
   });
 }
 
+export function recordCoachClarificationResolution(
+  state: CoachConversationState,
+  clarification: PendingCoachClarification,
+): CoachConversationState {
+  return saveCoachConversationState({
+    ...state,
+    pendingClarification: undefined,
+    recentClarification: {
+      ...clarification,
+      resolvedAt: new Date().toISOString(),
+      outcome: 'no_training_change',
+    },
+  });
+}
+
 export function clearCoachClarification(state: CoachConversationState): CoachConversationState {
   return saveCoachConversationState({ ...state, pendingClarification: undefined });
+}
+
+export function clearRecentCoachClarification(state: CoachConversationState): CoachConversationState {
+  return saveCoachConversationState({ ...state, recentClarification: undefined });
 }
 
 export function recordCoachProposal(
@@ -148,14 +175,13 @@ export function recordCoachProposal(
 ): CoachConversationState {
   const target = targetFromProposal(proposal);
   const recommended = proposal.adaptation.adjustment.options.find((option) => option.id === selectedOptionId);
-  const coachText = recommended
-    ? `${proposal.adaptation.interpretation.summary} I recommend: ${recommended.title}.`
-    : proposal.adaptation.interpretation.summary;
+  const coachText = proposalText(proposal, recommended?.title);
   return appendCoachConversationTurn({
     ...state,
     activeTarget: target,
     lastInterpretation: proposal.adaptation.interpretation,
     pendingClarification: undefined,
+    recentClarification: undefined,
     pendingProposal: proposal,
     selectedOptionId,
   }, 'coach', 'proposal', coachText);
@@ -178,6 +204,7 @@ export function recordCoachApplied(
     activeTarget: target,
     lastInterpretation: proposal.adaptation.interpretation,
     pendingClarification: undefined,
+    recentClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
     lastApplied: {
@@ -197,6 +224,7 @@ export function recordCoachReverted(
   return appendCoachConversationTurn({
     ...state,
     pendingClarification: undefined,
+    recentClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
     lastApplied: state.lastApplied?.snapshotId === snapshotId ? undefined : state.lastApplied,
@@ -207,6 +235,7 @@ export function cancelPendingCoachProposal(state: CoachConversationState, messag
   return appendCoachConversationTurn({
     ...state,
     pendingClarification: undefined,
+    recentClarification: undefined,
     pendingProposal: undefined,
     selectedOptionId: undefined,
   }, 'coach', 'cancelled', message);
@@ -234,6 +263,21 @@ function targetFromProposal(proposal: PersistedCoachProposal): PersistedCoachTar
     targetKind: proposal.targetKind,
     calendarEventId: proposal.calendarEventId,
   };
+}
+
+function proposalText(proposal: PersistedCoachProposal, recommendedTitle?: string): string {
+  if (!recommendedTitle) return `I found an adjustment for ${proposal.sessionTitle}. Review it before anything changes.`;
+  const recommendation = lowerFirst(recommendedTitle.replace(/\.$/, ''));
+  const protective = proposal.adaptation.painAssessment?.level === 'protect'
+    || Boolean(proposal.adaptation.adjustment.safetyMessage);
+  if (protective) {
+    return `Because this changed your movement or training, I’m treating the next decision conservatively. For ${proposal.sessionTitle}, I recommend ${recommendation}. Nothing changes until you approve it.`;
+  }
+  return `For ${proposal.sessionTitle}, I recommend ${recommendation}. Review the reasoning before anything changes.`;
+}
+
+function lowerFirst(value: string): string {
+  return value ? `${value[0]!.toLowerCase()}${value.slice(1)}` : value;
 }
 
 function isExpiredState(updatedAt: unknown): boolean {
@@ -286,6 +330,16 @@ function isValidPendingClarification(value: unknown): value is PendingCoachClari
     && item.question
     && item.askedAt
     && (item.kind === 'function' || item.kind === 'pain_type' || item.kind === 'target_session' || item.kind === 'constraint'),
+  );
+}
+
+function isValidResolvedClarification(value: unknown): value is ResolvedCoachClarification {
+  const item = value as Partial<ResolvedCoachClarification> | null | undefined;
+  return Boolean(
+    item
+    && isValidPendingClarification(item)
+    && item.resolvedAt
+    && item.outcome === 'no_training_change',
   );
 }
 
