@@ -33,7 +33,7 @@ describe('race strategy visibility', () => {
     expect(card).toContain('Edit race priorities');
     expect(card).toContain('Talk strategy');
     expect(card).toContain("router.push('/race-intent'");
-    expect(card).toContain("router.push('/coach-strategy'");
+    expect(card).toContain("router.push('/(tabs)/coach-strategy'");
   });
 
   it('explains how the effective strategy is expressed in the generated week', () => {
