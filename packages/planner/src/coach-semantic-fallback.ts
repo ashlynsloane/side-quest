@@ -1,10 +1,16 @@
 import { resolveCoachConversationMessage, type CoachConversationContext } from './coach-conversation';
 import { interpretCoachMessage, type CoachQuickSignal, type CoachTargetDiscipline } from './coach-message-adaptation';
-import type { CoachSemanticTrainingEvent, CoachTurnFrameV2 } from './coach-semantic-frame';
+import type { CoachSemanticSymptom, CoachSemanticTrainingEvent, CoachTurnFrameV2 } from './coach-semantic-frame';
 
 export interface CoachSemanticFallbackContext extends CoachConversationContext {
   turnId: string;
   previousTargetEventId?: string;
+  pendingQuestionKind?: 'clarify_target' | 'clarify_function' | 'clarify_time' | 'clarify_request';
+  activeConcern?: {
+    semanticId: string;
+    bodyArea?: string;
+    category?: CoachSemanticSymptom['category'];
+  };
   knownPlannedEvents?: Array<{
     eventId: string;
     title: string;
@@ -23,6 +29,12 @@ export function buildDeterministicCoachTurnFrame(
   const retrospective = resolution.conversationSignals.includes('Sport mention describes completed or prior training');
   const movementChanged = /\b(limp|limping|changed\s+(?:my\s+)?movement|changed\s+(?:my\s+)?stride|altered\s+(?:my\s+)?stride|changed\s+(?:my\s+)?form)\b/i.test(message);
   const trainingChanged = /\b(modified|cut\s+(?:it|the\s+workout)\s+short|stopped|quit|couldn['’]?t\s+finish|could\s+not\s+finish|changed\s+(?:my\s+)?training)\b/i.test(message);
+  const vagueBodyConcern = /\b(feels?\s+(?:weird|off|wrong|funny)|doesn['’]?t\s+feel\s+right|something\s+with\s+my)\b/i.test(message)
+    && fresh.affectedArea !== 'unknown';
+  const answeringFunction = context.pendingQuestionKind === 'clarify_function';
+  const functionDenied = answeringFunction && /\b(no|nope|not\s+really|didn['’]?t|did\s+not|unchanged|movement\s+was\s+normal|trained\s+normally|training\s+was\s+normal)\b/i.test(message);
+  const functionAffirmed = answeringFunction && !functionDenied && /\b(yes|yeah|yep|it\s+did|limp|limping|changed|modified|stopped|quit|backed\s+off)\b/i.test(message);
+  const resolvedFunctionAnswer = functionDenied || functionAffirmed;
   const events: CoachSemanticTrainingEvent[] = [];
 
   if (retrospective && fresh.targetDiscipline) {
@@ -66,31 +78,29 @@ export function buildDeterministicCoachTurnFrame(
   }
 
   const sourceEventSemanticId = retrospective && fresh.targetDiscipline ? `turn:${context.turnId}:source` : undefined;
-  const symptom = fresh.painContext ? {
-    semanticId: `turn:${context.turnId}:symptom`,
-    bodyArea: fresh.affectedArea === 'unknown' ? undefined : fresh.affectedArea,
-    category: painCategory(fresh.painContext.kind),
-    severity0to10: fresh.painContext.score0to10,
-    changedMovement: movementChanged || fresh.painContext.functionalInterference === 'modified_session'
-      || fresh.painContext.functionalInterference === 'daily_activity'
-      || fresh.painContext.functionalInterference === 'rest_or_night',
-    changedTraining: trainingChanged || fresh.painContext.functionalInterference === 'modified_session'
-      || fresh.painContext.functionalInterference === 'stopped_session',
-    stoppedTraining: fresh.painContext.stoppedSession,
-    trajectory: fresh.painContext.worsening ? 'worse' as const : 'unknown' as const,
+  const symptom = buildSymptom({
+    message,
+    fresh,
+    movementChanged,
+    trainingChanged,
+    vagueBodyConcern,
+    resolvedFunctionAnswer,
+    functionDenied,
+    functionAffirmed,
+    activeConcern: context.activeConcern,
     sourceEventSemanticId,
-  } : movementChanged ? {
-    semanticId: `turn:${context.turnId}:symptom`,
-    bodyArea: fresh.affectedArea === 'unknown' ? undefined : fresh.affectedArea,
-    category: 'unknown' as const,
-    changedMovement: true,
-    changedTraining: trainingChanged,
-    stoppedTraining: false,
-    trajectory: 'unknown' as const,
-    sourceEventSemanticId,
-  } : undefined;
+    turnId: context.turnId,
+  });
 
-  const intent = inferIntent(message, fresh, resolution.intent, retrospective, Boolean(resolution.focusDate), Boolean(symptom));
+  const intent = inferIntent(
+    message,
+    fresh,
+    resolution.intent,
+    retrospective,
+    Boolean(resolution.focusDate),
+    Boolean(symptom),
+    resolvedFunctionAnswer,
+  );
   const action = intent === 'ask_about_future_training'
     ? 'evaluate' as const
     : intent === 'request_extra_training'
@@ -118,14 +128,90 @@ export function buildDeterministicCoachTurnFrame(
       date: resolution.focusDate ?? resolution.preferredTargetDate,
       durationMinutes: fresh.availableMinutes,
     },
-    correction: /^\s*(actually|well\s+actually)\b/i.test(message)
-      ? { target: symptom ? 'symptom_function' : 'general', note: 'Athlete is revising recent conversation context.' }
-      : undefined,
+    correction: resolvedFunctionAnswer
+      ? { target: 'symptom_function', note: 'This answer resolves the active functional-impact question.' }
+      : /^\s*(actually|well\s+actually)\b/i.test(message)
+        ? { target: symptom ? 'symptom_function' : 'general', note: 'Athlete is revising recent conversation context.' }
+        : undefined,
     constraints: resolution.interpretation.signals,
     unresolved: [],
     confidence: resolution.interpretation.confidence === 'high' ? 0.9 : resolution.interpretation.confidence === 'moderate' ? 0.65 : 0.35,
     source: 'deterministic_fallback',
   };
+}
+
+function buildSymptom(input: {
+  message: string;
+  fresh: ReturnType<typeof interpretCoachMessage>;
+  movementChanged: boolean;
+  trainingChanged: boolean;
+  vagueBodyConcern: boolean;
+  resolvedFunctionAnswer: boolean;
+  functionDenied: boolean;
+  functionAffirmed: boolean;
+  activeConcern?: CoachSemanticFallbackContext['activeConcern'];
+  sourceEventSemanticId?: string;
+  turnId: string;
+}): CoachSemanticSymptom | undefined {
+  const { fresh } = input;
+  if (input.resolvedFunctionAnswer) {
+    return {
+      semanticId: input.activeConcern?.semanticId ?? `turn:${input.turnId}:symptom`,
+      bodyArea: input.activeConcern?.bodyArea ?? (fresh.affectedArea === 'unknown' ? undefined : fresh.affectedArea),
+      category: input.activeConcern?.category ?? 'unknown',
+      functionChanged: input.functionAffirmed,
+      changedMovement: input.functionDenied ? false : input.movementChanged ? true : undefined,
+      changedTraining: input.functionDenied ? false : input.trainingChanged ? true : undefined,
+      stoppedTraining: input.functionDenied ? false : /\b(stopped|quit|couldn['’]?t\s+finish|could\s+not\s+finish)\b/i.test(input.message) || undefined,
+      trajectory: 'unknown',
+      sourceEventSemanticId: input.sourceEventSemanticId,
+    };
+  }
+
+  if (fresh.painContext) {
+    const functionalInterference = fresh.painContext.functionalInterference;
+    const functionChanged = input.movementChanged || input.trainingChanged
+      || functionalInterference === 'modified_session'
+      || functionalInterference === 'stopped_session'
+      || functionalInterference === 'daily_activity'
+      || functionalInterference === 'rest_or_night';
+    return {
+      semanticId: `turn:${input.turnId}:symptom`,
+      bodyArea: fresh.affectedArea === 'unknown' ? undefined : fresh.affectedArea,
+      category: painCategory(fresh.painContext.kind),
+      severity0to10: fresh.painContext.score0to10,
+      functionChanged: functionChanged || undefined,
+      changedMovement: input.movementChanged || functionalInterference === 'daily_activity' || functionalInterference === 'rest_or_night' || undefined,
+      changedTraining: input.trainingChanged || functionalInterference === 'modified_session' || functionalInterference === 'stopped_session' || undefined,
+      stoppedTraining: fresh.painContext.stoppedSession || undefined,
+      trajectory: fresh.painContext.worsening ? 'worse' : 'unknown',
+      sourceEventSemanticId: input.sourceEventSemanticId,
+    };
+  }
+
+  if (input.movementChanged) {
+    return {
+      semanticId: `turn:${input.turnId}:symptom`,
+      bodyArea: fresh.affectedArea === 'unknown' ? undefined : fresh.affectedArea,
+      category: 'unknown',
+      functionChanged: true,
+      changedMovement: true,
+      changedTraining: input.trainingChanged || undefined,
+      trajectory: 'unknown',
+      sourceEventSemanticId: input.sourceEventSemanticId,
+    };
+  }
+
+  if (input.vagueBodyConcern) {
+    return {
+      semanticId: `turn:${input.turnId}:symptom`,
+      bodyArea: fresh.affectedArea === 'unknown' ? undefined : fresh.affectedArea,
+      category: 'unknown',
+      trajectory: 'unknown',
+    };
+  }
+
+  return undefined;
 }
 
 function findKnownTarget(
@@ -148,7 +234,9 @@ function inferIntent(
   retrospective: boolean,
   dateFocus: boolean,
   hasSymptom: boolean,
+  resolvedFunctionAnswer: boolean,
 ): CoachTurnFrameV2['intent'] {
+  if (resolvedFunctionAnswer) return 'correct_previous_statement';
   if (dateFocus) return 'ask_about_future_training';
   if (/^\s*(actually|well\s+actually)\b/i.test(message)) return 'correct_previous_statement';
   if (retrospective && hasSymptom) return 'report_symptom';
