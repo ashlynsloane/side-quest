@@ -43,7 +43,10 @@ export function buildDeterministicCoachTurnFrame(
   const functionDenied = answeringFunction && /\b(no|nope|not\s+really|didn['’]?t|did\s+not|unchanged|movement\s+was\s+normal|trained\s+normally|training\s+was\s+normal)\b/i.test(message);
   const functionAffirmed = answeringFunction && !functionDenied && /\b(yes|yeah|yep|it\s+did|limp|limping|changed|modified|stopped|quit|backed\s+off)\b/i.test(message);
   const resolvedFunctionAnswer = functionDenied || functionAffirmed;
-  const strategyChange = buildStrategyChange(message, context.referenceDate, context.strategyDraft);
+  const rawStrategyChange = buildStrategyChange(message, context.referenceDate, context.strategyDraft);
+  const strategyConflict = hasConflictingTopFocus(rawStrategyChange);
+  const strategyChange = strategyConflict ? undefined : rawStrategyChange;
+  const strategyTopic = Boolean(rawStrategyChange);
   const events: CoachSemanticTrainingEvent[] = [];
 
   if (retrospective && fresh.targetDiscipline) {
@@ -55,7 +58,7 @@ export function buildDeterministicCoachTurnFrame(
     });
   }
 
-  if (resolution.focusDate && !strategyChange) {
+  if (resolution.focusDate && !strategyTopic) {
     const planned = (context.knownPlannedEvents ?? []).filter((event) => event.date === resolution.focusDate);
     for (const event of planned) {
       events.push({
@@ -72,7 +75,7 @@ export function buildDeterministicCoachTurnFrame(
   const modificationIntent = resolution.intent === 'refine_move'
     || resolution.intent === 'refine_duration'
     || resolution.intent === 'refine_replacement';
-  const explicitTarget = modificationIntent && !strategyChange
+  const explicitTarget = modificationIntent && !strategyTopic
     ? findKnownTarget(context, resolution.targetDiscipline, resolution.preferredTargetDate)
     : undefined;
   if (explicitTarget && !events.some((event) => event.eventId === explicitTarget.eventId)) {
@@ -87,7 +90,7 @@ export function buildDeterministicCoachTurnFrame(
   }
 
   const sourceEventSemanticId = retrospective && fresh.targetDiscipline ? `turn:${context.turnId}:source` : undefined;
-  const symptom = strategyChange ? undefined : buildSymptom({
+  const symptom = strategyTopic ? undefined : buildSymptom({
     message,
     fresh,
     movementChanged,
@@ -109,7 +112,7 @@ export function buildDeterministicCoachTurnFrame(
     Boolean(resolution.focusDate),
     Boolean(symptom),
     resolvedFunctionAnswer,
-    Boolean(strategyChange),
+    strategyTopic,
   );
   const action = intent === 'ask_about_future_training'
     ? 'evaluate' as const
@@ -122,8 +125,8 @@ export function buildDeterministicCoachTurnFrame(
   const requestedDiscipline = retrospective && !hasForwardTrainingRequest(message, fresh.targetDiscipline)
     ? undefined
     : resolution.targetDiscipline;
-  const horizon = strategyChange
-    ? strategyHorizon(strategyChange, context.referenceDate)
+  const horizon = rawStrategyChange
+    ? strategyHorizon(rawStrategyChange, context.referenceDate)
     : resolution.focusDate
       ? horizonForDate(resolution.focusDate, context.referenceDate)
       : inferHorizon(message);
@@ -149,9 +152,9 @@ export function buildDeterministicCoachTurnFrame(
       : /^\s*(actually|well\s+actually)\b/i.test(message)
         ? { target: symptom ? 'symptom_function' : 'general', note: 'Athlete is revising recent conversation context.' }
         : undefined,
-    constraints: strategyChange ? [] : resolution.interpretation.signals,
-    unresolved: [],
-    confidence: strategyChange ? 0.72 : resolution.interpretation.confidence === 'high' ? 0.9 : resolution.interpretation.confidence === 'moderate' ? 0.65 : 0.35,
+    constraints: strategyTopic ? [] : resolution.interpretation.signals,
+    unresolved: strategyConflict ? ['single_top_focus'] : [],
+    confidence: strategyTopic ? 0.72 : resolution.interpretation.confidence === 'high' ? 0.9 : resolution.interpretation.confidence === 'moderate' ? 0.65 : 0.35,
     source: 'deterministic_fallback',
   };
 }
@@ -198,6 +201,13 @@ function buildStrategyChange(
     tradeoffTolerance,
     racePriority,
   };
+}
+
+function hasConflictingTopFocus(strategy: CoachSemanticStrategyChange | undefined): boolean {
+  if (!strategy) return false;
+  const top = Object.values(strategy.disciplineObjectives)
+    .filter((objective) => objective === 'primary_focus' || objective === 'maximize');
+  return top.length > 1;
 }
 
 function objectiveForDiscipline(text: string, discipline: CoachSemanticDiscipline): CoachStrategyObjective | undefined {
