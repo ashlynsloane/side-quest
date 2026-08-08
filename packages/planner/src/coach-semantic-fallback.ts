@@ -202,19 +202,23 @@ function buildStrategyChange(
 
 function objectiveForDiscipline(text: string, discipline: CoachSemanticDiscipline): CoachStrategyObjective | undefined {
   const sport = sportPattern(discipline);
-  if (nearEither(text, sport, 'maximize|maximise|as much as possible|biggest possible')) return 'maximize';
-  if (nearEither(text, sport, '(?:main|primary|biggest) focus|prioriti[sz]e|priority')) return 'primary_focus';
-  if (nearEither(text, sport, 'develop|improve|build')) return 'develop';
-  if (nearEither(text, sport, 'maintain|maintenance|hold steady|keep steady')) return 'maintain';
-  if (nearEither(text, sport, 'minimum viable|bare minimum')) return 'minimum_viable';
+  for (const clause of strategyClauses(text).filter((candidate) => new RegExp(`\\b(?:${sport})\\b`).test(candidate))) {
+    if (/\b(maximize|maximise|as\s+much\s+as\s+possible|biggest\s+possible)\b/.test(clause)) return 'maximize';
+    if (/\b(?:main|primary|biggest)\s+focus\b|\bprioriti[sz]e\b|\bpriority\b/.test(clause)) return 'primary_focus';
+    if (/\b(develop|improve|build)\b/.test(clause)) return 'develop';
+    if (/\b(maintain|maintenance|hold\s+steady|keep\s+steady)\b/.test(clause)) return 'maintain';
+    if (/\b(minimum\s+viable|bare\s+minimum)\b/.test(clause)) return 'minimum_viable';
+  }
   return undefined;
 }
 
 function inferPrimaryStrategyFocus(text: string, disciplines: CoachSemanticDiscipline[]): CoachSemanticDiscipline | undefined {
+  const clauses = strategyClauses(text);
   for (const discipline of disciplines) {
     const sport = sportPattern(discipline);
-    if (nearEither(text, sport, '(?:main|primary|biggest) focus|prioriti[sz]e|priority')) return discipline;
-    if (new RegExp(`\\bfastest\\s+(?:${sport})\\s+split\\b`).test(text)) return discipline;
+    const disciplineClauses = clauses.filter((clause) => new RegExp(`\\b(?:${sport})\\b`).test(clause));
+    if (disciplineClauses.some((clause) => /\b(?:main|primary|biggest)\s+focus\b|\bprioriti[sz]e\b|\bpriority\b/.test(clause))) return discipline;
+    if (disciplineClauses.some((clause) => /\bfastest\s+(?:swim|bike|run)\s+split\b/.test(clause))) return discipline;
   }
   return undefined;
 }
@@ -275,9 +279,11 @@ function sportPattern(discipline: CoachSemanticDiscipline): string {
   return 'strength|lift|lifting|weights|gym';
 }
 
-function nearEither(text: string, left: string, right: string): boolean {
-  return new RegExp(`\\b(?:${left})\\b[^.!?]{0,45}\\b(?:${right})\\b`).test(text)
-    || new RegExp(`\\b(?:${right})\\b[^.!?]{0,45}\\b(?:${left})\\b`).test(text);
+function strategyClauses(text: string): string[] {
+  return text
+    .split(/\s+(?:while|but|whereas)\s+|[;,.]+|\s+and\s+(?=(?:i\s+|we\s+)?(?:maintain|develop|improve|build|maximize|maximise|prioriti[sz]e|keep|hold)\b)/)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
 }
 
 function buildSymptom(input: {
