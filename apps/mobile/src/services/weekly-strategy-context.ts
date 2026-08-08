@@ -20,8 +20,10 @@ export interface CurrentWeeklyStrategyContext {
   isCurrentWeek: boolean;
 }
 
-export async function loadCurrentWeeklyStrategyContext(): Promise<CurrentWeeklyStrategyContext | null> {
-  const race = await loadRaceStrategyContext();
+export async function loadCurrentWeeklyStrategyContext(
+  raceContext?: RaceStrategyContext,
+): Promise<CurrentWeeklyStrategyContext | null> {
+  const race = raceContext ?? await loadRaceStrategyContext();
   if (!race) return null;
 
   let generated = getLatestWholeAthletePlanSnapshot();
