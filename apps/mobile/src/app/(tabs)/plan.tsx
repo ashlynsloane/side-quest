@@ -5,9 +5,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
+import { ProductHero, ProductMetric, ProductSection } from '@/components/product-ui';
 import { RaceStrategyContextCard } from '@/components/race-strategy-context-card';
 import { SportIcon, normalizeSportKind } from '@/components/sport-icon';
-import { V23Card, V23Chip, V23GroupedList, V23Icon, V23Row, V23Screen, V23SportPill, V23StatusCard } from '@/components/v23-ui';
+import { V23Icon, V23Screen, V23SportPill } from '@/components/v23-ui';
 import {
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
@@ -81,6 +82,9 @@ export default function PlanTab() {
   const today = localDate();
   const selectedIndex = days.findIndex((day) => day.date === today);
   const counts = weeklyCounts(days);
+  const currentWeek = block?.weeks.find((week) => anchorDate >= week.weekStartDate && anchorDate <= addDays(week.weekStartDate, 6)) ?? block?.weeks[0];
+  const phase = currentWeek?.phase;
+  const totalSessions = counts.swim + counts.bike + counts.run + counts.strength;
 
   const openStrength = (session: PlannedStrengthSession) => {
     openPlannedWorkoutPreview(session, {
@@ -94,66 +98,103 @@ export default function PlanTab() {
     router.push('/workout-preview' as Href);
   };
 
-  return <V23Screen>
-    {activeWorkout ? <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink} onResume={() => router.push('/active-workout' as Href)} compact /> : null}
-    <V23Card elevated style={styles.weekCard}>
-      <View style={styles.weekHeading}>
-        <Pressable accessibilityLabel="Open full schedule" onPress={() => router.push('/schedule' as Href)} style={styles.arrowButton}><V23Icon name="plan" color={tokens.accent} size={20} /></Pressable>
-        <View style={styles.weekTitleCopy}><Text style={styles.weekTitle}>This week</Text><Text style={styles.weekRange}>{formatWeekRange(days)}</Text></View>
-        <Pressable onPress={() => router.push('/session-adjustment' as Href)} style={styles.controlButton}><V23Icon name="adjust" color={tokens.accent} size={19} /></Pressable>
-      </View>
-      <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
-        <Text style={styles.dayInitial}>{day.weekday}</Text>
-        <View style={[styles.dayNumberWrap, index === selectedIndex && styles.dayNumberSelected]}><Text style={[styles.dayNumber, index === selectedIndex && styles.dayNumberSelectedText]}>{day.dayNumber}</Text></View>
-      </View>)}</View>
-      <View style={styles.schedule}>{days.map((day, dayIndex) => {
-        const isToday = day.date === today;
-        return <View key={day.date} style={[styles.dayRow, isToday && styles.dayRowToday, dayIndex === days.length - 1 && styles.dayRowLast]}>
-          <View style={[styles.todayMarker, isToday && styles.todayMarkerActive]} />
-          <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{day.label}</Text>
-          <View style={styles.sessions}>{day.items.length ? day.items.map((item) => item.kind === 'strength' ? (() => {
-            const closed = item.session.completionStatus === 'completed' || item.session.completionStatus === 'skipped';
-            return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session)} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
-              <V23SportPill kind="strength" />
-              <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
-              {item.session.completionStatus === 'completed' ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View> : <View style={[styles.statusDot, { backgroundColor: item.session.completionStatus === 'skipped' ? tokens.textMuted : tokens.accent }]} />}
-            </Pressable>;
-          })() : <Pressable key={item.id} onPress={() => router.push('/schedule' as Href)} style={styles.sessionRow}>
-            <V23SportPill kind={normalizeSportKind(item.discipline)} />
-            <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
-            <View style={[styles.statusDot, { backgroundColor: disciplineColor(item.discipline, tokens.accent) }]} />
-          </Pressable>) : <View style={styles.sessionRow}>
-            <SportIcon kind="recovery" color={tokens.textMuted} backgroundColor={tokens.surfaceMuted} size={18} />
-            <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>Open day</Text><Text style={styles.sessionMeta}>Recovery or flexible training</Text></View>
-            <View style={[styles.statusDot, { backgroundColor: tokens.success }]} />
-          </View>}</View>
-        </View>;
-      })}</View>
-    </V23Card>
+  if (!block) {
+    return <V23Screen contentStyle={styles.page}>
+      <ProductHero
+        eyebrow="WEEK"
+        title="Build your first coordinated week."
+        body="Choose a goal and Side Quest will organize swim, bike, run, and strength around your real capacity."
+        actions={<Pressable onPress={() => router.push('/goal-catalog' as Href)} style={styles.heroButton}><Text style={styles.heroButtonText}>Choose a goal</Text><V23Icon name="chevron" color="#FFFFFF" size={16} /></Pressable>}
+      />
+    </V23Screen>;
+  }
 
-    <V23StatusCard
-      title={planningState ? `Whole-athlete plan · ${planningState}` : 'Whole-athlete planning'}
-      body={planningWarning ?? planningStateBody(planningState, Boolean(block))}
-      icon={<V23Icon name="heart" color="#FFFFFF" size={18} />}
-      tone={planningState === 'recover' ? 'recovery' : planningState === 'protect' ? 'review' : planningState === 'hold' ? 'info' : 'accent'}
-      featured
-      onPress={() => router.push('/training-guardrails' as Href)}
+  return <V23Screen contentStyle={styles.page}>
+    {activeWorkout ? <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink} onResume={() => router.push('/active-workout' as Href)} compact /> : null}
+
+    <ProductHero
+      eyebrow={`WEEK · ${phaseLabel(phase)}`}
+      title={block.goal.name}
+      body={planningWarning ?? planningStateBody(planningState, true)}
+      meta={<>
+        <ProductMetric label="sessions" value={String(totalSessions)} emphasis />
+        {counts.swim ? <ProductMetric label="swim" value={String(counts.swim)} /> : null}
+        {counts.bike ? <ProductMetric label="bike" value={String(counts.bike)} /> : null}
+        {counts.run ? <ProductMetric label="run" value={String(counts.run)} /> : null}
+        <ProductMetric label="strength" value={String(counts.strength)} />
+        {block.goal.eventDate ? <ProductMetric label="to race" value={raceCountdown(block.goal.eventDate)} /> : null}
+      </>}
+      actions={<>
+        <Pressable onPress={() => router.push('/session-adjustment' as Href)} style={styles.heroButton}><V23Icon name="adjust" color="#FFFFFF" size={16} /><Text style={styles.heroButtonText}>Adjust week</Text></Pressable>
+        <Pressable onPress={() => router.push('/schedule' as Href)} style={styles.heroButtonSecondary}><V23Icon name="plan" color="#FFFFFF" size={16} /><Text style={styles.heroButtonText}>Full schedule</Text></Pressable>
+      </>}
     />
 
-    {block ? <RaceStrategyContextCard surface="plan" /> : null}
+    <ProductSection
+      eyebrow="THIS WEEK"
+      title={formatWeekRange(days)}
+      body="Tap a strength session to preview it. Endurance sessions open the full schedule."
+    >
+      <View style={styles.weekSurface}>
+        <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
+          <Text style={styles.dayInitial}>{day.weekday}</Text>
+          <View style={[styles.dayNumberWrap, index === selectedIndex && styles.dayNumberSelected]}><Text style={[styles.dayNumber, index === selectedIndex && styles.dayNumberSelectedText]}>{day.dayNumber}</Text></View>
+        </View>)}</View>
 
-    {block ? <V23Card style={styles.blockSummary}>
-      <Text style={styles.blockLabel}>Current block</Text>
-      <Text style={styles.blockTitle}>{block.goal.name}</Text>
-      <View style={styles.chips}>
-        <V23Chip>{block.weeks.find((week) => anchorDate >= week.weekStartDate && anchorDate <= addDays(week.weekStartDate, 6))?.phase.replaceAll('_', ' ') ?? block.weeks[0]?.phase.replaceAll('_', ' ') ?? 'training'}</V23Chip>
-        {counts.swim ? <V23Chip tone="info">{counts.swim} swim</V23Chip> : null}
-        {counts.bike ? <V23Chip tone="warm">{counts.bike} bike</V23Chip> : null}
-        {counts.run ? <V23Chip tone="neutral">{counts.run} run</V23Chip> : null}
-        <V23Chip tone="neutral">{counts.strength} strength</V23Chip>
+        <View style={styles.schedule}>{days.map((day, dayIndex) => {
+          const isToday = day.date === today;
+          return <View key={day.date} style={[styles.dayRow, isToday && styles.dayRowToday, dayIndex === days.length - 1 && styles.dayRowLast]}>
+            <View style={[styles.todayMarker, isToday && styles.todayMarkerActive]} />
+            <View style={styles.dayCopy}>
+              <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{day.label}</Text>
+              {isToday ? <Text style={styles.todayText}>TODAY</Text> : null}
+            </View>
+            <View style={styles.sessions}>{day.items.length ? day.items.map((item) => item.kind === 'strength' ? (() => {
+              const closed = item.session.completionStatus === 'completed' || item.session.completionStatus === 'skipped';
+              return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session)} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
+                <V23SportPill kind="strength" />
+                <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
+                {item.session.completionStatus === 'completed' ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View> : <V23Icon name="chevron" color={tokens.textMuted} size={15} />}
+              </Pressable>;
+            })() : <Pressable key={item.id} onPress={() => router.push('/schedule' as Href)} style={styles.sessionRow}>
+              <V23SportPill kind={normalizeSportKind(item.discipline)} />
+              <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
+              <View style={[styles.statusDot, { backgroundColor: disciplineColor(item.discipline, tokens.accent) }]} />
+            </Pressable>) : <View style={styles.openRow}>
+              <SportIcon kind="recovery" color={tokens.textMuted} backgroundColor={tokens.surfaceMuted} size={17} />
+              <Text style={styles.openText}>Open / recovery</Text>
+            </View>}</View>
+          </View>;
+        })}</View>
       </View>
-    </V23Card> : <V23GroupedList><V23Row title="Choose a goal" detail="Build swim, bike, run, and strength around your capacity and timeline." onPress={() => router.push('/goal-catalog' as Href)} icon={<V23Icon name="goal" color={tokens.accent} size={20} />} last /></V23GroupedList>}
+    </ProductSection>
+
+    <RaceStrategyContextCard surface="plan" />
+
+    <ProductSection eyebrow="PLAN TOOLS" title="Change the plan without losing the plan.">
+      <View style={styles.toolGrid}>
+        <ToolButton icon="adjust" title="Adjust week" body="Move, shorten, or replace a session." onPress={() => router.push('/session-adjustment' as Href)} styles={styles} tokens={tokens} />
+        <ToolButton icon="heart" title="Guardrails" body={`${planningStateLabel(planningState)} · review the current ceiling.`} onPress={() => router.push('/training-guardrails' as Href)} styles={styles} tokens={tokens} />
+        <ToolButton icon="insights" title="Season strategy" body="See focus blocks and upcoming handoffs." onPress={() => router.push('/(tabs)/coach-strategy' as Href)} styles={styles} tokens={tokens} />
+        <ToolButton icon="goal" title="Race priorities" body="Change what the race plan is optimizing for." onPress={() => router.push('/race-intent' as Href)} styles={styles} tokens={tokens} />
+      </View>
+    </ProductSection>
   </V23Screen>;
+}
+
+function ToolButton({ icon, title, body, onPress, styles, tokens }: {
+  icon: 'adjust' | 'heart' | 'insights' | 'goal';
+  title: string;
+  body: string;
+  onPress: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  tokens: DesignTokens;
+}) {
+  return <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.toolButton, pressed && styles.pressed]}>
+    <View style={styles.toolIcon}><V23Icon name={icon} color={tokens.accent} size={18} /></View>
+    <Text style={styles.toolTitle}>{title}</Text>
+    <Text style={styles.toolBody}>{body}</Text>
+  </Pressable>;
 }
 
 type DayItem = { id: string; kind: 'event'; title: string; meta: string; discipline?: string } | { id: string; kind: 'strength'; title: string; meta: string; session: PlannedStrengthSession };
@@ -194,10 +235,31 @@ function weeklyCounts(days: ReturnType<typeof weekDays>) {
 
 function planningStateBody(state: 'build' | 'hold' | 'protect' | 'recover' | null, hasBlock: boolean): string {
   if (!hasBlock) return 'Choose a goal and weekly capacity to build a coordinated training week.';
-  if (state === 'recover') return 'Recovery capacity is the priority. Side Quest is not adding discretionary training load.';
-  if (state === 'protect') return 'Progression is held while injury, impact, or recovery constraints are active; lower-risk work is preserved where appropriate.';
-  if (state === 'hold') return 'The week consolidates recent training instead of adding volume or intensity.';
-  return 'Swim, bike, run, and strength are being planned together with only a small number of progression targets.';
+  if (state === 'recover') return 'Recovery is the priority this week. Side Quest is preserving useful movement without adding discretionary load.';
+  if (state === 'protect') return 'Progression is held while an impact, injury, or recovery constraint is active; lower-risk work stays where appropriate.';
+  if (state === 'hold') return 'This is a consolidation week: keep the rhythm, absorb recent training, and avoid adding unnecessary load.';
+  return 'This is a build week. Side Quest is coordinating a small number of progression targets across the entire training load.';
+}
+
+function planningStateLabel(state: 'build' | 'hold' | 'protect' | 'recover' | null): string {
+  if (state === 'recover') return 'Recovery first';
+  if (state === 'protect') return 'Protection active';
+  if (state === 'hold') return 'Holding load';
+  return 'Build week';
+}
+
+function phaseLabel(value: string | undefined): string {
+  if (!value) return 'TRAINING';
+  return value.replaceAll('_', ' ').toUpperCase();
+}
+
+function raceCountdown(eventDate: string): string {
+  const event = new Date(`${eventDate}T12:00:00`);
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  const days = Math.max(0, Math.ceil((event.getTime() - now.getTime()) / 86_400_000));
+  if (days < 14) return `${days}d`;
+  return `${Math.ceil(days / 7)}w`;
 }
 
 function strengthStatusLabel(status: PlannedStrengthSession['completionStatus']): string { if (status === 'completed') return 'Completed'; if (status === 'skipped') return 'Skipped'; if (status === 'modified') return 'Adjusted'; return 'Planned'; }
@@ -209,9 +271,48 @@ function disciplineColor(discipline: string | undefined, accent: string) { if (d
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function addDays(value: string, days: number) { const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10); }
 
-function makeStyles(tokens: DesignTokens) { return StyleSheet.create({
-  weekCard: { paddingHorizontal: 14, paddingTop: 11, paddingBottom: 5 }, weekHeading: { flexDirection: 'row', alignItems: 'center', minHeight: 50 }, arrowButton: { width: 34, height: 38, alignItems: 'flex-start', justifyContent: 'center' }, weekTitleCopy: { flex: 1 }, weekTitle: { color: tokens.text, fontSize: 22, lineHeight: 27, fontWeight: '800' }, weekRange: { color: tokens.textMuted, fontSize: 14, lineHeight: 18, marginTop: 1 }, controlButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: tokens.surfaceMuted, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' },
-  calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 6, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: tokens.border }, calendarDay: { width: 38, alignItems: 'center', gap: 5 }, dayInitial: { color: tokens.textMuted, fontSize: 11, lineHeight: 14, fontWeight: '700' }, dayNumberWrap: { width: 31, height: 31, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, dayNumberSelected: { backgroundColor: tokens.header }, dayNumber: { color: tokens.text, fontSize: 14, fontWeight: '700' }, dayNumberSelectedText: { color: '#FFFFFF' },
-  schedule: { paddingTop: 7 }, dayRow: { position: 'relative', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 68, paddingHorizontal: 7, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, borderRadius: 15 }, dayRowToday: { backgroundColor: tokens.accentSoft }, dayRowLast: { borderBottomWidth: 0 }, todayMarker: { width: 4, alignSelf: 'stretch', borderRadius: 3, backgroundColor: 'transparent' }, todayMarkerActive: { backgroundColor: tokens.accent }, dayLabel: { width: 59, color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '800' }, dayLabelToday: { color: tokens.accent }, sessions: { flex: 1 }, sessionRow: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 9 }, sessionRowClosed: { opacity: 0.66 }, sessionCopy: { flex: 1, minWidth: 0 }, sessionTitle: { color: tokens.text, fontSize: 16, lineHeight: 20, fontWeight: '700' }, sessionTitleClosed: { textDecorationLine: 'line-through' }, sessionMeta: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, marginTop: 1 }, statusDot: { width: 7, height: 7, borderRadius: 4 }, completedIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
-  blockSummary: { gap: 5 }, blockLabel: { color: tokens.accent, fontSize: 11, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05, textTransform: 'uppercase' }, blockTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '700' }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 4 },
-}); }
+function makeStyles(tokens: DesignTokens) {
+  return StyleSheet.create({
+    page: { paddingTop: 16, paddingBottom: 30, gap: 20 },
+    heroButton: { minHeight: 40, borderRadius: 12, backgroundColor: tokens.accent, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    heroButtonSecondary: { minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.36)', paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    heroButtonText: { color: '#FFFFFF', fontSize: 12.5, lineHeight: 17, fontWeight: '800' },
+
+    weekSurface: { borderRadius: 20, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, overflow: 'hidden' },
+    calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 11, paddingTop: 12, paddingBottom: 11, backgroundColor: tokens.surfaceMuted, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
+    calendarDay: { width: 36, alignItems: 'center', gap: 5 },
+    dayInitial: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 13, fontWeight: '800' },
+    dayNumberWrap: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+    dayNumberSelected: { backgroundColor: tokens.header },
+    dayNumber: { color: tokens.text, fontSize: 13.5, fontWeight: '800' },
+    dayNumberSelectedText: { color: '#FFFFFF' },
+    schedule: { paddingHorizontal: 11 },
+    dayRow: { position: 'relative', flexDirection: 'row', alignItems: 'stretch', gap: 8, minHeight: 61, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
+    dayRowToday: { backgroundColor: tokens.surface },
+    dayRowLast: { borderBottomWidth: 0 },
+    todayMarker: { width: 3, borderRadius: 2, backgroundColor: 'transparent' },
+    todayMarkerActive: { backgroundColor: tokens.accent },
+    dayCopy: { width: 55, justifyContent: 'center', gap: 1 },
+    dayLabel: { color: tokens.textMuted, fontSize: 11, lineHeight: 14, fontWeight: '850' as never },
+    dayLabelToday: { color: tokens.text },
+    todayText: { color: tokens.accent, fontSize: 8, lineHeight: 10, fontWeight: '900', letterSpacing: 0.7 },
+    sessions: { flex: 1, justifyContent: 'center' },
+    sessionRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 9 },
+    sessionRowClosed: { opacity: 0.58 },
+    sessionCopy: { flex: 1, minWidth: 0 },
+    sessionTitle: { color: tokens.text, fontSize: 14.5, lineHeight: 19, fontWeight: '800' },
+    sessionTitleClosed: { textDecorationLine: 'line-through' },
+    sessionMeta: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 15, marginTop: 1 },
+    statusDot: { width: 7, height: 7, borderRadius: 4 },
+    completedIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    openRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    openText: { color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '700' },
+
+    toolGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+    toolButton: { width: '48%', flexGrow: 1, minHeight: 112, borderRadius: 17, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 13, gap: 5 },
+    toolIcon: { width: 34, height: 34, borderRadius: 11, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+    toolTitle: { color: tokens.text, fontSize: 14, lineHeight: 18, fontWeight: '900' },
+    toolBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
+    pressed: { opacity: 0.75 },
+  });
+}
