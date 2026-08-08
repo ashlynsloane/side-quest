@@ -29,7 +29,7 @@ const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
 };
 
 let reconciliationQueue: Promise<GeneratedWholeAthleteBlock | null> = Promise.resolve(null);
-let latestReconciledPlan: GeneratedWholeAthleteBlock | null = null;
+let latestReconciledPlan: { blockId: string; plan: GeneratedWholeAthleteBlock } | null = null;
 
 export function getDefaultWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
   return { ...DEFAULT_HEALTH_PREFERENCES };
@@ -59,8 +59,10 @@ export function clearWholeAthleteHealthPreferences(): void {
   Storage.removeItemSync(HEALTH_PREFERENCES_KEY);
 }
 
-export function getLatestWholeAthletePlanSnapshot(): GeneratedWholeAthleteBlock | null {
-  return latestReconciledPlan;
+export function getLatestWholeAthletePlanSnapshot(blockId?: string): GeneratedWholeAthleteBlock | null {
+  if (!latestReconciledPlan) return null;
+  if (blockId && latestReconciledPlan.blockId !== blockId) return null;
+  return latestReconciledPlan.plan;
 }
 
 export function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
@@ -100,7 +102,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     ptProfileActive: Boolean(ptProfile?.active),
     readiness,
   });
-  latestReconciledPlan = generated;
+  latestReconciledPlan = { blockId: saved.block.id, plan: generated };
   return generated;
 }
 
