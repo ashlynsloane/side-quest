@@ -200,7 +200,7 @@ export function CoachStrategyWorkspace() {
         </View>
         <View style={styles.icon}><V23Icon name="adjust" color={tokens.accent} size={20} /></View>
       </View>
-      <Text style={styles.body}>Examples: “Keep bike as the focus through October,” “I want to maintain swim but develop run more,” or “Once taper starts, go back to balanced race prep.”</Text>
+      <Text style={styles.body}>Examples: “For the next 8 weeks, bike is my main focus while I maintain swim and run,” “Actually I want to develop the run too,” or “Do that until November.”</Text>
       {turns.length ? <View style={styles.thread}>
         {turns.map((turn) => <View key={turn.id} style={[styles.turnRow, turn.role === 'athlete' && styles.turnRowAthlete]}>
           <View style={[styles.bubble, turn.role === 'athlete' ? styles.athleteBubble : styles.coachBubble]}>
