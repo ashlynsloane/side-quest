@@ -15,10 +15,12 @@ describe('Strategy Coach wiring', () => {
     expect(plannerPackage).toContain('"./whole-athlete-week": "./src/whole-athlete-week-strategy.ts"');
   });
 
-  it('loads only athlete-approved strategy into whole-athlete reconciliation', () => {
+  it('merges baseline race intent with only athlete-approved Strategy Coach state during reconciliation', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+    expect(runtime).toContain('loadRaceIntent');
     expect(runtime).toContain('loadApprovedCoachStrategy');
-    expect(runtime).toContain('configureWholeAthleteCoachStrategy(approvedStrategy?.strategy)');
+    expect(runtime).toContain('mergeRaceIntentWithCoachStrategy(raceIntent, approvedStrategy)');
+    expect(runtime).toContain('configureWholeAthleteCoachStrategy');
   });
 
   it('keeps strategy turns out of the Daily Coach workout-adaptation path', () => {
