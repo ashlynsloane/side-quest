@@ -116,8 +116,12 @@ export function validateCoachTurnFrame(input: unknown): CoachFrameValidationResu
   if (frame.requestedChange && !isRequestedChange(frame.requestedChange)) errors.push('requestedChange is invalid.');
   if (frame.strategyChange && !isStrategyChange(frame.strategyChange)) errors.push('strategyChange is invalid.');
   if (frame.correction && !isCorrection(frame.correction)) errors.push('correction is invalid.');
-  if (frame.intent === 'strategy_change' && !frame.strategyChange && !(frame.unresolved?.length)) {
-    errors.push('strategy_change requires strategyChange details or unresolved fields.');
+  if (
+    frame.intent === 'strategy_change'
+    && (!frame.strategyChange || !hasMeaningfulStrategyFacts(frame.strategyChange))
+    && !(frame.unresolved?.length)
+  ) {
+    errors.push('strategy_change requires meaningful strategy details or unresolved fields.');
   }
 
   if (errors.length) return { valid: false, errors };
@@ -210,6 +214,17 @@ function isStrategyChange(value: unknown): value is CoachSemanticStrategyChange 
     if (race.objective !== undefined && race.objective !== 'finish' && race.objective !== 'strong_split' && race.objective !== 'personal_best' && race.objective !== 'time_goal' && race.objective !== 'placement') return false;
   }
   return true;
+}
+
+function hasMeaningfulStrategyFacts(strategy: CoachSemanticStrategyChange): boolean {
+  return Boolean(
+    strategy.startsAt
+    || strategy.endsAt
+    || strategy.primaryFocus
+    || strategy.tradeoffTolerance
+    || strategy.racePriority
+    || Object.keys(strategy.disciplineObjectives).length,
+  );
 }
 
 function isDiscipline(value: unknown): value is CoachSemanticDiscipline {
