@@ -53,7 +53,7 @@ describe('weekly strategy expression', () => {
     const expression = buildWeeklyStrategyExpression(week, strategy);
 
     expect(expression.state).toBe(week.progressionBudget.primary === 'run_volume' ? 'expressed' : 'partially_expressed');
-    if (expression.state === 'partially_expressed') expect(expression.summary).toContain('another');
+    if (expression.state === 'partially_expressed') expect(expression.summary).toContain('remains prioritized');
   });
 
   it('reports strategy as held when protection prevents discretionary progression', () => {
