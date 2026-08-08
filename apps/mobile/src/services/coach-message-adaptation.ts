@@ -17,6 +17,7 @@ import { loadPainContextObservations, recordPainContextObservation } from './ath
 import {
   getLatestTrainingBlock,
   getTrainingCalendarEvents,
+  listPlannedCompletedMatches,
   savePlanSnapshot,
   saveTrainingBlock,
   saveTrainingCalendarSource,
@@ -59,6 +60,12 @@ type AdjustableTarget =
   | { kind: 'strength'; strengthSession: PlannedStrengthSession; unified: UnifiedTrainingSession }
   | { kind: 'endurance'; calendarEvent: TrainingCalendarEvent; unified: UnifiedTrainingSession }
   | { kind: 'ad_hoc'; unified: UnifiedTrainingSession };
+
+interface TargetSelectionOptions {
+  focusDate?: string;
+  completedCalendarEventIds?: Set<string>;
+  excludeTodayDiscipline?: CoachTargetDiscipline;
+}
 
 export async function loadCurrentCoachConversation(): Promise<CoachConversationState | null> {
   const saved = await getLatestTrainingBlock();
@@ -115,16 +122,41 @@ export async function buildCoachMessageProposal(message: string, quickSignal?: C
 
   try { await refreshLatestWholeAthletePlan(); } catch { /* use latest persisted plan */ }
 
-  const calendar = await getTrainingCalendarEvents({
+  const range = {
     from: `${firstWeek.weekStartDate}T00:00:00.000Z`,
     to: `${addDays(lastWeek.weekStartDate, 6)}T23:59:59.999Z`,
+  };
+  const [calendar, plannedCompletedMatches] = await Promise.all([
+    getTrainingCalendarEvents(range),
+    listPlannedCompletedMatches(),
+  ]);
+  const completedCalendarEventIds = new Set(
+    plannedCompletedMatches
+      .filter((match) => match.status === 'matched' && match.calendarEventId)
+      .map((match) => match.calendarEventId!),
+  );
+  const retrospectiveDiscipline = retrospectiveTrainingDiscipline(message);
+  const forwardRetrospectiveRequest = retrospectiveDiscipline
+    ? hasForwardTrainingRequest(message, retrospectiveDiscipline)
+    : false;
+  const targetDiscipline = retrospectiveDiscipline
+    && resolution.targetDiscipline === retrospectiveDiscipline
+    && !forwardRetrospectiveRequest
+      ? undefined
+      : resolution.targetDiscipline;
+  const preferredSessionId = resolution.keepPriorTarget && continuePriorContext && !resolution.focusDate
+    ? previousConversation.activeTarget?.sessionId
+    : undefined;
+  let target = selectAdjustableTarget(block, calendar, targetDiscipline, preferredSessionId, {
+    focusDate: resolution.focusDate,
+    completedCalendarEventIds,
+    excludeTodayDiscipline: retrospectiveDiscipline && !forwardRetrospectiveRequest ? retrospectiveDiscipline : undefined,
   });
-  const preferredSessionId = resolution.keepPriorTarget && continuePriorContext ? previousConversation.activeTarget?.sessionId : undefined;
-  let target = selectAdjustableTarget(block, calendar, resolution.targetDiscipline, preferredSessionId);
   if (!target) target = buildProtectedAdHocCandidate(block, resolution.interpretation, resolution.preferredTargetDate, message);
   if (!target) {
-    const discipline = resolution.targetDiscipline ? `${resolution.targetDiscipline} ` : '';
-    const messageText = `There is no upcoming Side Quest ${discipline}session available to adjust. Imported calendar workouts stay fixed until you explicitly change their source plan.`;
+    const messageText = resolution.focusDate
+      ? `I do not see an adjustable Side Quest session on ${friendlyDate(resolution.focusDate)}. I will not move another workout there unless you ask me to.`
+      : `I do not see an upcoming Side Quest ${targetDiscipline ? `${targetDiscipline} ` : ''}session that is still available to change. Completed workouts stay in the training record, and imported calendar workouts stay fixed until you explicitly change their source plan.`;
     conversation = appendCoachConversationTurn(conversation, 'coach', 'system', messageText);
     return { ok: false, reason: 'no_adjustable_session', message: messageText, conversation };
   }
@@ -263,7 +295,13 @@ export async function applyCoachMessageProposal(proposal: CoachMessageProposal, 
   return { targetKind: proposal.targetKind, session: updatedSession, snapshotId: snapshot.id, optionTitle: option.title, replanWarning, conversation };
 }
 
-function selectAdjustableTarget(block: TrainingBlockPlan, calendar: TrainingCalendarEvent[], targetDiscipline?: CoachTargetDiscipline, preferredSessionId?: string): AdjustableTarget | null {
+function selectAdjustableTarget(
+  block: TrainingBlockPlan,
+  calendar: TrainingCalendarEvent[],
+  targetDiscipline?: CoachTargetDiscipline,
+  preferredSessionId?: string,
+  options: TargetSelectionOptions = {},
+): AdjustableTarget | null {
   const today = localDate();
   const candidates: AdjustableTarget[] = [];
   for (const session of block.weeks.flatMap((week) => week.sessions)) {
@@ -272,13 +310,29 @@ function selectAdjustableTarget(block: TrainingBlockPlan, calendar: TrainingCale
   }
   for (const event of calendar) {
     if (!isAdjustableEnduranceEvent(event)) continue;
+    if (options.completedCalendarEventIds?.has(event.id)) continue;
     candidates.push({ kind: 'endurance', calendarEvent: event, unified: normalizeCalendarEvent(event) });
   }
+
+  const eligible = candidates.filter((candidate) => !(
+    options.excludeTodayDiscipline
+    && candidate.unified.date === today
+    && candidate.unified.discipline === options.excludeTodayDiscipline
+  ));
+
+  if (options.focusDate) {
+    const onDate = eligible.filter((candidate) => candidate.unified.date === options.focusDate);
+    const matchingDiscipline = targetDiscipline
+      ? onDate.filter((candidate) => candidate.unified.discipline === targetDiscipline)
+      : onDate;
+    return (matchingDiscipline.length ? matchingDiscipline : onDate).sort(compareTargets)[0] ?? null;
+  }
+
   if (preferredSessionId) {
-    const exact = candidates.find((candidate) => candidate.unified.id === preferredSessionId && candidate.unified.date >= today);
+    const exact = eligible.find((candidate) => candidate.unified.id === preferredSessionId && candidate.unified.date >= today);
     if (exact) return exact;
   }
-  const filtered = targetDiscipline ? candidates.filter((candidate) => candidate.unified.discipline === targetDiscipline) : candidates;
+  const filtered = targetDiscipline ? eligible.filter((candidate) => candidate.unified.discipline === targetDiscipline) : eligible;
   const upcoming = filtered.filter((candidate) => candidate.unified.date >= today).sort(compareTargets);
   if (upcoming[0]) return upcoming[0];
   return filtered.sort((left, right) => compareTargets(right, left))[0] ?? null;
@@ -333,10 +387,13 @@ function requestedTrainingDurationMinutes(message: string): number | undefined {
 function requestedTrainingIntensity(message: string): 'recovery' | 'easy' | 'moderate' | 'hard' | 'max' | undefined { const text = message.toLowerCase(); if (/\b(all\s*out|max(?:imal)?|race\s+effort)\b/.test(text)) return 'max'; if (/\b(hard|threshold|vo2|intervals?|hammer|race\s+pace)\b/.test(text)) return 'hard'; if (/\b(moderate|steady)\b/.test(text)) return 'moderate'; if (/\b(easy|recovery|gentle)\b/.test(text)) return 'easy'; return undefined; }
 function painOccurredAt(message: string): string { return /\byesterday\b/i.test(message) ? `${addDays(localDate(), -1)}T12:00:00.000Z` : new Date().toISOString(); }
 function painSourceDiscipline(message: string): 'swim' | 'bike' | 'run' | 'strength' | undefined { const text = message.toLowerCase(); const matches: Array<'swim' | 'bike' | 'run' | 'strength'> = []; if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:swim|swimming|pool)\b/.test(text)) matches.push('swim'); if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:bike|ride|cycling|trainer)\b/.test(text)) matches.push('bike'); if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:run|running|track\s+workout|track\s+session)\b/.test(text) || /\bquit\s+(?:my\s+|the\s+)?track\s+workout\b/.test(text)) matches.push('run'); if (/\b(?:during|after|on|in)\s+(?:my\s+|the\s+)?(?:strength|lifting|lift|gym\s+workout)\b/.test(text)) matches.push('strength'); const unique = [...new Set(matches)]; return unique.length === 1 ? unique[0] : undefined; }
+function retrospectiveTrainingDiscipline(message: string): CoachTargetDiscipline | undefined { const text = message.toLowerCase(); const matches: CoachTargetDiscipline[] = []; if (/\b(?:after|during|finished|completed|already\s+did|just\s+did|did)\b[^.!?]{0,28}\b(?:swim|swimming|pool)\b|\b(?:swim|swimming)\b[^.!?]{0,24}\b(?:done|finished|completed)\b/.test(text)) matches.push('swim'); if (/\b(?:after|during|finished|completed|already\s+did|just\s+did|did)\b[^.!?]{0,28}\b(?:bike|ride|cycling|trainer)\b|\b(?:bike|ride|cycling)\b[^.!?]{0,24}\b(?:done|finished|completed)\b/.test(text)) matches.push('bike'); if (/\b(?:after|during|finished|completed|already\s+did|just\s+did|did)\b[^.!?]{0,28}\b(?:run|running|track\s+workout|track\s+session)\b|\b(?:run|running)\b[^.!?]{0,24}\b(?:done|finished|completed)\b/.test(text)) matches.push('run'); if (/\b(?:after|during|finished|completed|already\s+did|just\s+did|did)\b[^.!?]{0,28}\b(?:strength|lifting|lift|gym\s+workout)\b|\b(?:strength|lift|lifting)\b[^.!?]{0,24}\b(?:done|finished|completed)\b/.test(text)) matches.push('strength'); const unique = [...new Set(matches)]; return unique.length === 1 ? unique[0] : undefined; }
+function hasForwardTrainingRequest(message: string, discipline: CoachTargetDiscipline): boolean { const text = message.toLowerCase(); const sport = discipline === 'swim' ? 'swim|swimming|pool' : discipline === 'bike' ? 'bike|biking|ride|riding|cycle|cycling|trainer' : discipline === 'run' ? 'run|running|jog|jogging|track' : 'strength|lift|lifting|weights|gym'; return new RegExp(`\\b(?:want|plan|planning|going|need|would\\s+like|can\\s+i|could\\s+i)\\b[^.!?]{0,28}\\b(?:${sport})\\b`).test(text) || new RegExp(`\\b(?:${sport})\\b[^.!?]{0,24}\\b(?:tomorrow|later|next|tonight)\\b`).test(text) || /\b(move|reschedule|shift|push)\b/.test(text); }
 function reportsPainResolved(message: string): boolean { return /\b(no\s+(?:more\s+)?pain|pain\s+(?:is\s+)?gone|doesn['’]?t\s+hurt\s+(?:now|anymore)|does\s+not\s+hurt\s+(?:now|anymore)|symptoms?\s+(?:are\s+)?gone)\b/i.test(message); }
 function snapshotReason(proposal: CoachMessageProposal, optionTitle: string): string { const input = proposal.adaptation.message || proposal.adaptation.quickSignal || 'coach update'; return `Coach message adaptation · ${proposal.sessionDiscipline} · ${input} · ${optionTitle}`; }
 function quickSignalLabel(signal?: CoachQuickSignal): string { return signal ? signal.replaceAll('_', ' ') : ''; }
 function disciplineLabel(discipline: 'swim' | 'bike' | 'run'): string { return discipline === 'bike' ? 'ride' : discipline; }
+function friendlyDate(value: string): string { return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date(`${value}T12:00:00`)); }
 function stableMessageId(message: string): string { let hash = 2166136261; for (let index = 0; index < message.length; index += 1) { hash ^= message.charCodeAt(index); hash = Math.imul(hash, 16777619); } return Math.abs(hash >>> 0).toString(36); }
 function addDays(value: string, days: number): string { const date = new Date(`${value}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
 function localDate(): string { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
