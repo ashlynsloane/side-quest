@@ -39,6 +39,7 @@ export interface CoachSemanticSymptom {
   bodyArea?: string;
   category?: 'soreness' | 'exertion' | 'menstrual' | 'musculoskeletal' | 'illness' | 'unknown';
   severity0to10?: number;
+  functionChanged?: boolean;
   changedMovement?: boolean;
   changedTraining?: boolean;
   stoppedTraining?: boolean;
