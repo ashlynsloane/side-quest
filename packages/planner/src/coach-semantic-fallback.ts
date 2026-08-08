@@ -1,6 +1,13 @@
 import { resolveCoachConversationMessage, type CoachConversationContext } from './coach-conversation';
 import { interpretCoachMessage, type CoachQuickSignal, type CoachTargetDiscipline } from './coach-message-adaptation';
-import type { CoachSemanticSymptom, CoachSemanticTrainingEvent, CoachTurnFrameV2 } from './coach-semantic-frame';
+import type {
+  CoachSemanticDiscipline,
+  CoachSemanticStrategyChange,
+  CoachSemanticSymptom,
+  CoachSemanticTrainingEvent,
+  CoachStrategyObjective,
+  CoachTurnFrameV2,
+} from './coach-semantic-frame';
 
 export interface CoachSemanticFallbackContext extends CoachConversationContext {
   turnId: string;
@@ -11,6 +18,7 @@ export interface CoachSemanticFallbackContext extends CoachConversationContext {
     bodyArea?: string;
     category?: CoachSemanticSymptom['category'];
   };
+  strategyDraft?: CoachSemanticStrategyChange;
   knownPlannedEvents?: Array<{
     eventId: string;
     title: string;
@@ -35,6 +43,7 @@ export function buildDeterministicCoachTurnFrame(
   const functionDenied = answeringFunction && /\b(no|nope|not\s+really|didn['’]?t|did\s+not|unchanged|movement\s+was\s+normal|trained\s+normally|training\s+was\s+normal)\b/i.test(message);
   const functionAffirmed = answeringFunction && !functionDenied && /\b(yes|yeah|yep|it\s+did|limp|limping|changed|modified|stopped|quit|backed\s+off)\b/i.test(message);
   const resolvedFunctionAnswer = functionDenied || functionAffirmed;
+  const strategyChange = buildStrategyChange(message, context.referenceDate, context.strategyDraft);
   const events: CoachSemanticTrainingEvent[] = [];
 
   if (retrospective && fresh.targetDiscipline) {
@@ -46,7 +55,7 @@ export function buildDeterministicCoachTurnFrame(
     });
   }
 
-  if (resolution.focusDate) {
+  if (resolution.focusDate && !strategyChange) {
     const planned = (context.knownPlannedEvents ?? []).filter((event) => event.date === resolution.focusDate);
     for (const event of planned) {
       events.push({
@@ -63,7 +72,7 @@ export function buildDeterministicCoachTurnFrame(
   const modificationIntent = resolution.intent === 'refine_move'
     || resolution.intent === 'refine_duration'
     || resolution.intent === 'refine_replacement';
-  const explicitTarget = modificationIntent
+  const explicitTarget = modificationIntent && !strategyChange
     ? findKnownTarget(context, resolution.targetDiscipline, resolution.preferredTargetDate)
     : undefined;
   if (explicitTarget && !events.some((event) => event.eventId === explicitTarget.eventId)) {
@@ -78,7 +87,7 @@ export function buildDeterministicCoachTurnFrame(
   }
 
   const sourceEventSemanticId = retrospective && fresh.targetDiscipline ? `turn:${context.turnId}:source` : undefined;
-  const symptom = buildSymptom({
+  const symptom = strategyChange ? undefined : buildSymptom({
     message,
     fresh,
     movementChanged,
@@ -100,6 +109,7 @@ export function buildDeterministicCoachTurnFrame(
     Boolean(resolution.focusDate),
     Boolean(symptom),
     resolvedFunctionAnswer,
+    Boolean(strategyChange),
   );
   const action = intent === 'ask_about_future_training'
     ? 'evaluate' as const
@@ -112,12 +122,17 @@ export function buildDeterministicCoachTurnFrame(
   const requestedDiscipline = retrospective && !hasForwardTrainingRequest(message, fresh.targetDiscipline)
     ? undefined
     : resolution.targetDiscipline;
+  const horizon = strategyChange
+    ? strategyHorizon(strategyChange, context.referenceDate)
+    : resolution.focusDate
+      ? horizonForDate(resolution.focusDate, context.referenceDate)
+      : inferHorizon(message);
 
   return {
     version: 2,
     turnId: context.turnId,
     intent,
-    horizon: resolution.focusDate ? horizonForDate(resolution.focusDate, context.referenceDate) : inferHorizon(message),
+    horizon,
     events,
     symptoms: symptom ? [symptom] : [],
     requestedChange: action === 'none' ? undefined : {
@@ -128,16 +143,141 @@ export function buildDeterministicCoachTurnFrame(
       date: resolution.focusDate ?? resolution.preferredTargetDate,
       durationMinutes: fresh.availableMinutes,
     },
+    strategyChange,
     correction: resolvedFunctionAnswer
       ? { target: 'symptom_function', note: 'This answer resolves the active functional-impact question.' }
       : /^\s*(actually|well\s+actually)\b/i.test(message)
         ? { target: symptom ? 'symptom_function' : 'general', note: 'Athlete is revising recent conversation context.' }
         : undefined,
-    constraints: resolution.interpretation.signals,
+    constraints: strategyChange ? [] : resolution.interpretation.signals,
     unresolved: [],
-    confidence: resolution.interpretation.confidence === 'high' ? 0.9 : resolution.interpretation.confidence === 'moderate' ? 0.65 : 0.35,
+    confidence: strategyChange ? 0.72 : resolution.interpretation.confidence === 'high' ? 0.9 : resolution.interpretation.confidence === 'moderate' ? 0.65 : 0.35,
     source: 'deterministic_fallback',
   };
+}
+
+function buildStrategyChange(
+  message: string,
+  referenceDate: string,
+  previous: CoachSemanticStrategyChange | undefined,
+): CoachSemanticStrategyChange | undefined {
+  const text = normalize(message);
+  const disciplines = mentionedDisciplines(text);
+  const explicitObjectiveLanguage = /\b(main|primary|biggest)\s+focus\b|\bprioriti[sz]e\b|\bmaintain(?:ance)?\b|\bdevelop\b|\bimprov(?:e|ing)\b|\bmaximize\b|\bmaximise\b|\bminimum\s+viable\b|\bfastest\s+(?:swim|bike|run)\s+split\b/.test(text);
+  const explicitLongHorizon = /\b(next|for\s+the\s+next)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:weeks?|months?)\b|\buntil\s+(?:20\d{2}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)\b|\bfor\s+(?:this|my|the)\s+(?:race|season|70\.3|ironman|marathon|block)\b/.test(text);
+  const strategyContinuation = Boolean(previous) && (explicitObjectiveLanguage || explicitLongHorizon);
+  if (!(disciplines.length && explicitObjectiveLanguage) && !explicitLongHorizon && !strategyContinuation) return undefined;
+
+  const disciplineObjectives: CoachSemanticStrategyChange['disciplineObjectives'] = {};
+  for (const discipline of disciplines) {
+    const objective = objectiveForDiscipline(text, discipline);
+    if (objective) disciplineObjectives[discipline] = objective;
+  }
+
+  const primaryFocus = inferPrimaryStrategyFocus(text, disciplines)
+    ?? (Object.entries(disciplineObjectives).find(([, objective]) => objective === 'primary_focus' || objective === 'maximize')?.[0] as CoachSemanticDiscipline | undefined);
+  if (primaryFocus && !disciplineObjectives[primaryFocus]) disciplineObjectives[primaryFocus] = 'primary_focus';
+
+  const duration = parseStrategyWindow(text, referenceDate);
+  const tradeoffTolerance = inferTradeoff(text);
+  const racePriority = inferRacePriority(text, primaryFocus);
+  const hasNewFact = Boolean(
+    primaryFocus
+    || Object.keys(disciplineObjectives).length
+    || duration.startsAt
+    || duration.endsAt
+    || tradeoffTolerance
+    || racePriority,
+  );
+  if (!hasNewFact) return undefined;
+
+  return {
+    ...duration,
+    primaryFocus,
+    disciplineObjectives,
+    tradeoffTolerance,
+    racePriority,
+  };
+}
+
+function objectiveForDiscipline(text: string, discipline: CoachSemanticDiscipline): CoachStrategyObjective | undefined {
+  const sport = sportPattern(discipline);
+  if (nearEither(text, sport, 'maximize|maximise|as much as possible|biggest possible')) return 'maximize';
+  if (nearEither(text, sport, '(?:main|primary|biggest) focus|prioriti[sz]e|priority')) return 'primary_focus';
+  if (nearEither(text, sport, 'develop|improve|build')) return 'develop';
+  if (nearEither(text, sport, 'maintain|maintenance|hold steady|keep steady')) return 'maintain';
+  if (nearEither(text, sport, 'minimum viable|bare minimum')) return 'minimum_viable';
+  return undefined;
+}
+
+function inferPrimaryStrategyFocus(text: string, disciplines: CoachSemanticDiscipline[]): CoachSemanticDiscipline | undefined {
+  for (const discipline of disciplines) {
+    const sport = sportPattern(discipline);
+    if (nearEither(text, sport, '(?:main|primary|biggest) focus|prioriti[sz]e|priority')) return discipline;
+    if (new RegExp(`\\bfastest\\s+(?:${sport})\\s+split\\b`).test(text)) return discipline;
+  }
+  return undefined;
+}
+
+function inferTradeoff(text: string): CoachSemanticStrategyChange['tradeoffTolerance'] | undefined {
+  if (/\b(sacrifice|at\s+the\s+expense\s+of|don['’]?t\s+care\s+about|okay\s+if\s+.+\s+drops?)\b/.test(text)) return 'aggressive_specialization';
+  if (/\bwhile\s+(?:i\s+)?maintain|even\s+if\s+.+\s+maintain|keep\s+.+\s+at\s+maintenance\b/.test(text)) return 'moderate_tradeoff';
+  if (/\b(balance|balanced|without\s+sacrificing|keep\s+everything\s+moving)\b/.test(text)) return 'preserve_balance';
+  return undefined;
+}
+
+function inferRacePriority(
+  text: string,
+  primaryFocus: CoachSemanticDiscipline | undefined,
+): CoachSemanticStrategyChange['racePriority'] | undefined {
+  const discipline = primaryFocus === 'strength' ? undefined : primaryFocus;
+  if (/\bfastest\s+(?:swim|bike|run)\s+split\b|\bstrong\s+(?:swim|bike|run)\s+split\b/.test(text)) {
+    return { discipline, objective: 'strong_split' };
+  }
+  if (/\b(personal\s+best|\bpr\b|\bpb\b)\b/.test(text)) return { discipline, objective: 'personal_best' };
+  if (/\b(place|placement|podium)\b/.test(text)) return { discipline, objective: 'placement' };
+  return undefined;
+}
+
+function parseStrategyWindow(text: string, referenceDate: string): Pick<CoachSemanticStrategyChange, 'startsAt' | 'endsAt'> {
+  const duration = text.match(/\b(?:next|for\s+the\s+next)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(weeks?|months?)\b/);
+  if (duration) {
+    const amount = parseCount(duration[1]!);
+    if (amount) {
+      return {
+        startsAt: referenceDate,
+        endsAt: duration[2]!.startsWith('month') ? addMonths(referenceDate, amount) : addDays(referenceDate, amount * 7),
+      };
+    }
+  }
+
+  const isoEnd = text.match(/\buntil\s+(20\d{2}-\d{2}-\d{2})\b/);
+  if (isoEnd) return { endsAt: isoEnd[1] };
+  const monthEnd = text.match(/\buntil\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b/);
+  if (monthEnd) return { endsAt: endOfNamedMonth(monthEnd[1]!, referenceDate) };
+  return {};
+}
+
+function strategyHorizon(strategy: CoachSemanticStrategyChange, referenceDate: string): CoachTurnFrameV2['horizon'] {
+  if (!strategy.endsAt) return 'long_term';
+  const days = differenceDays(referenceDate, strategy.endsAt);
+  return days >= 42 ? 'long_term' : 'future_block';
+}
+
+function mentionedDisciplines(text: string): CoachSemanticDiscipline[] {
+  return (['swim', 'bike', 'run', 'strength'] as const).filter((discipline) => new RegExp(`\\b(?:${sportPattern(discipline)})\\b`).test(text));
+}
+
+function sportPattern(discipline: CoachSemanticDiscipline): string {
+  if (discipline === 'swim') return 'swim|swimming|pool';
+  if (discipline === 'bike') return 'bike|biking|cycle|cycling|ride|riding|trainer';
+  if (discipline === 'run') return 'run|running|jog|jogging';
+  return 'strength|lift|lifting|weights|gym';
+}
+
+function nearEither(text: string, left: string, right: string): boolean {
+  return new RegExp(`\\b(?:${left})\\b[^.!?]{0,45}\\b(?:${right})\\b`).test(text)
+    || new RegExp(`\\b(?:${right})\\b[^.!?]{0,45}\\b(?:${left})\\b`).test(text);
 }
 
 function buildSymptom(input: {
@@ -235,7 +375,9 @@ function inferIntent(
   dateFocus: boolean,
   hasSymptom: boolean,
   resolvedFunctionAnswer: boolean,
+  hasStrategyChange: boolean,
 ): CoachTurnFrameV2['intent'] {
+  if (hasStrategyChange) return 'strategy_change';
   if (resolvedFunctionAnswer) return 'correct_previous_statement';
   if (dateFocus) return 'ask_about_future_training';
   if (/^\s*(actually|well\s+actually)\b/i.test(message)) return 'correct_previous_statement';
@@ -291,8 +433,41 @@ function hasForwardTrainingRequest(message: string, discipline: CoachTargetDisci
     || /\b(move|reschedule|shift|push)\b/.test(text);
 }
 
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+function parseCount(value: string): number | undefined {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.round(numeric);
+  const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+  return words[value];
+}
+
 function addDays(value: string, days: number): string {
   const date = new Date(`${value}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function addMonths(value: string, months: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
+function endOfNamedMonth(name: string, referenceDate: string): string {
+  const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const month = months.indexOf(name);
+  const reference = new Date(`${referenceDate}T12:00:00Z`);
+  let year = reference.getUTCFullYear();
+  const candidateEnd = new Date(Date.UTC(year, month + 1, 0, 12));
+  if (candidateEnd.getTime() < reference.getTime()) year += 1;
+  return new Date(Date.UTC(year, month + 1, 0, 12)).toISOString().slice(0, 10);
+}
+
+function differenceDays(left: string, right: string): number {
+  const leftTime = new Date(`${left}T12:00:00Z`).getTime();
+  const rightTime = new Date(`${right}T12:00:00Z`).getTime();
+  return Math.max(0, Math.round((rightTime - leftTime) / 86_400_000));
 }
