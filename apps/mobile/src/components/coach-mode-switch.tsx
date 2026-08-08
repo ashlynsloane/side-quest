@@ -12,7 +12,7 @@ export function CoachModeSwitch({ active }: { active: 'today' | 'strategy' }) {
 
   function open(mode: 'today' | 'strategy') {
     if (mode === active) return;
-    router.replace((mode === 'today' ? '/(tabs)/coach' : '/coach-strategy') as Href);
+    router.replace((mode === 'today' ? '/(tabs)/coach' : '/(tabs)/coach-strategy') as Href);
   }
 
   return <View style={styles.shell}>
