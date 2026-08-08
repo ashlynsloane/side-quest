@@ -14,6 +14,7 @@ import {
 } from '@circuit/planner/coach-closed-loop';
 import type { CoachPlannerDirectiveV2 } from '@circuit/planner/coach-dialogue-engine';
 import { interpretCoachMessage, type CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
+import type { CoachSemanticStrategyChange } from '@circuit/planner/coach-semantic-frame';
 
 import {
   getLatestTrainingBlock,
@@ -158,6 +159,19 @@ export async function buildCoachMessageProposalClosedLoop(
       question,
     });
     return { ok: false, reason: 'needs_clarification', message: question, conversation };
+  }
+
+  if (semanticTurn?.frame.intent === 'strategy_change' && semanticTurn.state.strategyDraft && saved?.block) {
+    let conversation = refreshedConversation ?? loadCoachConversationState(saved.block.id);
+    const response = strategyDraftMessage(semanticTurn.state.strategyDraft);
+    conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', response);
+    conversation = saveCoachConversationState({
+      ...conversation,
+      pendingClarification: undefined,
+      recentClarification: undefined,
+    });
+    return { ok: false, reason: 'needs_clarification', message: response, conversation };
   }
 
   const result = await buildCoachMessageProposal(effectiveMessage, quickSignal);
@@ -390,6 +404,21 @@ function semanticClarificationKind(kind: 'clarify_target' | 'clarify_function' |
   if (kind === 'clarify_target') return 'target_session';
   if (kind === 'clarify_function') return 'function';
   return 'constraint';
+}
+
+function strategyDraftMessage(strategy: CoachSemanticStrategyChange): string {
+  const objectives = Object.entries(strategy.disciplineObjectives)
+    .map(([discipline, objective]) => `${discipline}: ${String(objective).replaceAll('_', ' ')}`);
+  const focus = strategy.primaryFocus ? `${strategy.primaryFocus} is the primary focus` : objectives[0] ?? 'training priorities updated';
+  const maintenance = objectives.filter((line) => line.includes('maintain') || line.includes('minimum viable'));
+  const window = strategy.startsAt || strategy.endsAt
+    ? ` Window: ${strategy.startsAt ?? 'now'} to ${strategy.endsAt ?? 'open-ended'}.`
+    : '';
+  const tradeoff = strategy.tradeoffTolerance
+    ? ` Tradeoff: ${strategy.tradeoffTolerance.replaceAll('_', ' ')}.`
+    : '';
+  const supporting = maintenance.length ? ` ${maintenance.join('; ')}.` : '';
+  return `Strategy draft updated: ${focus}.${supporting}${window}${tradeoff} Nothing changed yet—review the Strategy Coach card and approve it before Side Quest reallocates training.`;
 }
 
 function semanticProposalConflict(directive: CoachPlannerDirectiveV2, proposal: CoachMessageProposal): string | undefined {
