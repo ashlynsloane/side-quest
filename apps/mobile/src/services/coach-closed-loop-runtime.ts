@@ -12,6 +12,7 @@ import {
   scheduleCoachFollowUp,
   type CoachDecisionExplanation,
 } from '@circuit/planner/coach-closed-loop';
+import type { CoachPlannerDirectiveV2 } from '@circuit/planner/coach-dialogue-engine';
 import { interpretCoachMessage, type CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
 
 import {
@@ -160,6 +161,20 @@ export async function buildCoachMessageProposalClosedLoop(
 
   const result = await buildCoachMessageProposal(effectiveMessage, quickSignal);
   if (!result.ok) return result;
+
+  const semanticConflict = semanticTurn ? semanticProposalConflict(semanticTurn.directive, result.proposal) : undefined;
+  if (semanticConflict && saved?.block) {
+    let conversation = loadCoachConversationState(saved.block.id);
+    const question = `${semanticConflict} Which planned workout do you want Side Quest to evaluate?`;
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', question);
+    conversation = recordCoachClarification(conversation, {
+      kind: 'target_session',
+      originalMessage: effectiveMessage,
+      question,
+    });
+    return { ok: false, reason: 'needs_clarification', message: question, conversation };
+  }
+
   if (rewriteAthleteTurn) {
     const turns = [...result.conversation.turns];
     const lastAthleteIndex = turns.map((turn) => turn.role).lastIndexOf('athlete');
@@ -374,4 +389,31 @@ function semanticClarificationKind(kind: 'clarify_target' | 'clarify_function' |
   if (kind === 'clarify_target') return 'target_session';
   if (kind === 'clarify_function') return 'function';
   return 'constraint';
+}
+
+function semanticProposalConflict(directive: CoachPlannerDirectiveV2, proposal: CoachMessageProposal): string | undefined {
+  if (directive.blockedReasons.length) return directive.blockedReasons[0];
+  if (directive.targetEventId && proposal.sessionId !== directive.targetEventId) {
+    return 'I understood one planned workout, but the legacy planner resolved a different one, so I will not apply that proposal.';
+  }
+  if (directive.focusDate && directive.action === 'evaluate' && proposal.sessionDate !== directive.focusDate) {
+    return `I understood the question as being about ${directive.focusDate}, but the legacy planner selected a different day, so I will not guess.`;
+  }
+  if (directive.action === 'add' && proposal.targetKind !== 'ad_hoc') {
+    return 'I understood this as a request for additional training, but the legacy planner tried to edit an existing workout.';
+  }
+
+  const expectedLegacyAction = semanticToLegacyAction(directive.action);
+  if (expectedLegacyAction && proposal.adaptation.interpretation.requestedAction !== expectedLegacyAction) {
+    return 'The semantic request and the legacy adjustment action disagree, so I will not change the plan until the target is clear.';
+  }
+  return undefined;
+}
+
+function semanticToLegacyAction(action: CoachPlannerDirectiveV2['action']): 'move' | 'shorter' | 'different' | 'skip' | undefined {
+  if (action === 'move') return 'move';
+  if (action === 'shorten') return 'shorter';
+  if (action === 'replace') return 'different';
+  if (action === 'skip') return 'skip';
+  return undefined;
 }
