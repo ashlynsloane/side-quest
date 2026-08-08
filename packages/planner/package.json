@@ -20,6 +20,7 @@
     "./coach-strategy-policy": "./src/coach-strategy-policy.ts",
     "./race-intent": "./src/race-intent.ts",
     "./weekly-strategy-expression": "./src/weekly-strategy-expression.ts",
+    "./race-target-evidence": "./src/race-target-evidence.ts",
     "./coach-observed-outcome": "./src/coach-observed-outcome.ts",
     "./athlete-context-intelligence": "./src/athlete-context-intelligence.ts",
     "./athlete-period-adapter": "./src/athlete-period-adapter.ts",
