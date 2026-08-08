@@ -6,6 +6,7 @@ import {
   beginEditingApprovedCoachStrategyWindow,
   beginNewCoachStrategyWindow,
   stopApprovedCoachStrategy,
+  undoLatestCoachStrategyScheduleChange,
 } from '@/services/coach-strategy-runtime';
 import {
   formatStrategyWeek,
@@ -87,6 +88,21 @@ export function SeasonStrategyPlan({
     }
   }
 
+  async function undoLatest() {
+    if (busyId || !workspace.review.latestRevision) return;
+    setBusyId('undo');
+    setFeedback(null);
+    try {
+      await undoLatestCoachStrategyScheduleChange();
+      setFeedback('The last season strategy change was undone and the block was reconciled.');
+      await onChanged();
+    } catch (caught) {
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not undo that season strategy change safely.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return <V23Card elevated style={styles.card}>
     <View style={styles.header}>
       <View style={styles.icon}><V23Icon name="plan" color={tokens.accent} size={20} /></View>
@@ -142,14 +158,25 @@ export function SeasonStrategyPlan({
       </Text>)}
     </View> : null}
 
-    <Pressable
-      accessibilityRole="button"
-      onPress={() => void addWindow()}
-      disabled={Boolean(busyId)}
-      style={({ pressed }) => [styles.addAction, pressed && styles.pressed, busyId && styles.disabled]}
-    >
-      <Text style={styles.addText}>+ Add focus block</Text>
-    </Pressable>
+    <View style={styles.footerActions}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => void addWindow()}
+        disabled={Boolean(busyId)}
+        style={({ pressed }) => [styles.addAction, pressed && styles.pressed, busyId && styles.disabled]}
+      >
+        <Text style={styles.addText}>+ Add focus block</Text>
+      </Pressable>
+      {workspace.review.latestRevision ? <Pressable
+        accessibilityRole="button"
+        onPress={() => void undoLatest()}
+        disabled={Boolean(busyId)}
+        style={({ pressed }) => [styles.undoAction, pressed && styles.pressed, busyId && styles.disabled]}
+      >
+        <Text style={styles.undoText}>Undo last season change</Text>
+      </Pressable> : null}
+    </View>
+    {workspace.review.latestRevision ? <Text style={styles.revisionNote}>{revisionDescription(workspace.review.latestRevision.action)}</Text> : null}
     {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
   </V23Card>;
 }
@@ -176,6 +203,13 @@ function handoffLabel(
   if (!window) return 'Strategy Coach';
   const focus = window.strategy.primaryFocus;
   return focus ? `${titleCase(focus)} block` : 'Strategy Coach';
+}
+
+function revisionDescription(action: 'add' | 'update' | 'remove' | 'undo'): string {
+  if (action === 'add') return 'Latest saved change: added a season block.';
+  if (action === 'update') return 'Latest saved change: revised a season block.';
+  if (action === 'remove') return 'Latest saved change: removed a season block.';
+  return 'Latest saved change: restored the previous season strategy.';
 }
 
 function titleCase(value: string): string {
@@ -211,8 +245,12 @@ function makeStyles(tokens: DesignTokens) {
     handoffBox: { borderRadius: 14, backgroundColor: tokens.surfaceMuted, padding: 12, gap: 4 },
     handoffLabel: { color: tokens.textMuted, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
     handoffText: { color: tokens.text, fontSize: 11.5, lineHeight: 17, fontWeight: '700' },
+    footerActions: { gap: 8 },
     addAction: { minHeight: 42, borderRadius: 12, backgroundColor: tokens.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
     addText: { color: '#FFFFFF', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+    undoAction: { minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
+    undoText: { color: tokens.text, fontSize: 12.5, lineHeight: 17, fontWeight: '800' },
+    revisionNote: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 15 },
     feedback: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 17, fontWeight: '700' },
     pressed: { opacity: 0.74 },
     disabled: { opacity: 0.5 },
