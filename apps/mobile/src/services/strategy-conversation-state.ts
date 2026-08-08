@@ -16,6 +16,8 @@ export interface StrategyConversationState {
   blockId: string;
   turns: StrategyConversationTurn[];
   editingWindowId?: string;
+  creatingNewWindow?: boolean;
+  suggestedWindowStart?: string;
   updatedAt: string;
 }
 
@@ -35,6 +37,8 @@ export function loadStrategyConversationState(blockId: string): StrategyConversa
       blockId,
       turns: parsed.turns.filter(isTurn).slice(-MAX_TURNS),
       editingWindowId: typeof parsed.editingWindowId === 'string' ? parsed.editingWindowId : undefined,
+      creatingNewWindow: parsed.creatingNewWindow === true,
+      suggestedWindowStart: typeof parsed.suggestedWindowStart === 'string' ? parsed.suggestedWindowStart : undefined,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
   } catch {
@@ -74,6 +78,35 @@ export function setStrategyConversationEditingWindow(
   const next: StrategyConversationState = {
     ...state,
     editingWindowId,
+    creatingNewWindow: false,
+    suggestedWindowStart: undefined,
+    updatedAt: new Date().toISOString(),
+  };
+  Storage.setItemSync(STRATEGY_CONVERSATION_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function setStrategyConversationNewWindow(
+  state: StrategyConversationState,
+  suggestedWindowStart: string,
+): StrategyConversationState {
+  const next: StrategyConversationState = {
+    ...state,
+    editingWindowId: undefined,
+    creatingNewWindow: true,
+    suggestedWindowStart,
+    updatedAt: new Date().toISOString(),
+  };
+  Storage.setItemSync(STRATEGY_CONVERSATION_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function clearStrategyConversationWindowContext(state: StrategyConversationState): StrategyConversationState {
+  const next: StrategyConversationState = {
+    ...state,
+    editingWindowId: undefined,
+    creatingNewWindow: false,
+    suggestedWindowStart: undefined,
     updatedAt: new Date().toISOString(),
   };
   Storage.setItemSync(STRATEGY_CONVERSATION_KEY, JSON.stringify(next));
