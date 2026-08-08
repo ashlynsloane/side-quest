@@ -39,6 +39,27 @@ describe('Strategy Coach semantic frame validation', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('rejects multiple maximized or top-focus disciplines', () => {
+    const doubleMax = validateCoachTurnFrame({
+      ...base(),
+      strategyChange: {
+        primaryFocus: 'bike',
+        disciplineObjectives: { bike: 'maximize', run: 'maximize' },
+      },
+    });
+    expect(doubleMax.valid).toBe(false);
+    expect(doubleMax.errors).toContain('strategyChange is invalid.');
+
+    const splitTop = validateCoachTurnFrame({
+      ...base(),
+      strategyChange: {
+        primaryFocus: 'run',
+        disciplineObjectives: { bike: 'maximize', run: 'primary_focus' },
+      },
+    });
+    expect(splitTop.valid).toBe(false);
+  });
+
   it('allows an unresolved strategy turn to request clarification without inventing facts', () => {
     const result = validateCoachTurnFrame({
       ...base(),
