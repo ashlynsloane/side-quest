@@ -1,0 +1,82 @@
+import type { CoachSemanticStrategyChange } from '@circuit/planner/coach-semantic-frame';
+
+import { getLatestTrainingBlock } from './database';
+import { interpretCoachTurnV2 } from './coach-dialogue-v2';
+import {
+  appendStrategyConversationTurn,
+  loadStrategyConversationState,
+  type StrategyConversationState,
+} from './strategy-conversation-state';
+
+export interface StrategyCoachMessageResult {
+  conversation: StrategyConversationState;
+  response: string;
+  draft?: CoachSemanticStrategyChange;
+  needsClarification: boolean;
+}
+
+export async function sendStrategyCoachMessage(message: string): Promise<StrategyCoachMessageResult> {
+  const text = message.trim();
+  if (!text) throw new Error('Tell Side Quest what you want to change about the longer-term training strategy.');
+  const saved = await getLatestTrainingBlock();
+  const block = saved?.block;
+  if (!block) throw new Error('Create a training plan before starting a Strategy Coach conversation.');
+
+  let conversation = loadStrategyConversationState(block.id);
+  conversation = appendStrategyConversationTurn(conversation, 'athlete', text);
+  const semantic = await interpretCoachTurnV2(text, undefined);
+
+  if (!semantic) {
+    const response = 'I could not map that into the current strategy safely. Try describing the discipline you want to emphasize, maintain, or protect and the time window you have in mind.';
+    conversation = appendStrategyConversationTurn(conversation, 'coach', response);
+    return { conversation, response, needsClarification: true };
+  }
+
+  if (semantic.frame.intent !== 'strategy_change') {
+    const response = 'This Strategy thread is for changes that span weeks or months. Tell me what you want to emphasize, maintain, or trade away over the longer horizon; use Today for an individual workout or immediate symptom/schedule change.';
+    conversation = appendStrategyConversationTurn(conversation, 'coach', response);
+    return { conversation, response, draft: semantic.state.strategyDraft, needsClarification: true };
+  }
+
+  if (semantic.directive.clarification) {
+    const response = semantic.directive.clarification.prompt;
+    conversation = appendStrategyConversationTurn(conversation, 'coach', response);
+    return { conversation, response, draft: semantic.state.strategyDraft, needsClarification: true };
+  }
+
+  const draft = semantic.state.strategyDraft;
+  if (!draft) {
+    const response = 'I need one more strategy detail before I can build a reviewable draft.';
+    conversation = appendStrategyConversationTurn(conversation, 'coach', response);
+    return { conversation, response, needsClarification: true };
+  }
+
+  const response = `${strategyDraftSummary(draft)}\n\nDraft updated. Nothing in the training plan changes until you approve it.`;
+  conversation = appendStrategyConversationTurn(conversation, 'coach', response);
+  return { conversation, response, draft, needsClarification: false };
+}
+
+export async function loadStrategyCoachConversation(): Promise<StrategyConversationState | null> {
+  const saved = await getLatestTrainingBlock();
+  return saved?.block ? loadStrategyConversationState(saved.block.id) : null;
+}
+
+function strategyDraftSummary(strategy: CoachSemanticStrategyChange): string {
+  const parts: string[] = [];
+  if (strategy.primaryFocus) parts.push(`${label(strategy.primaryFocus)} is the top focus.`);
+  const objectives = Object.entries(strategy.disciplineObjectives)
+    .filter(([, objective]) => Boolean(objective))
+    .map(([discipline, objective]) => `${label(discipline)} · ${String(objective).replaceAll('_', ' ')}`);
+  if (objectives.length) parts.push(objectives.join('  •  '));
+  if (strategy.tradeoffTolerance) parts.push(`Tradeoff · ${strategy.tradeoffTolerance.replaceAll('_', ' ')}`);
+  if (strategy.startsAt || strategy.endsAt) parts.push(`Window · ${strategy.startsAt ?? 'now'} → ${strategy.endsAt ?? 'open-ended'}`);
+  if (strategy.racePriority?.objective) {
+    const discipline = strategy.racePriority.discipline ? `${label(strategy.racePriority.discipline)} · ` : '';
+    parts.push(`Race priority · ${discipline}${strategy.racePriority.objective.replaceAll('_', ' ')}`);
+  }
+  return parts.join('\n') || 'Long-horizon strategy draft updated.';
+}
+
+function label(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1).replaceAll('_', ' ');
+}
