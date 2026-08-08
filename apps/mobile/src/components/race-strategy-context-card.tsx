@@ -111,7 +111,7 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
       <Pressable onPress={() => router.push('/race-intent' as Href)} style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed]}>
         <Text style={styles.primaryActionText}>Edit race priorities</Text>
       </Pressable>
-      {surface === 'plan' ? <Pressable onPress={() => router.push('/coach-strategy' as Href)} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
+      {surface === 'plan' ? <Pressable onPress={() => router.push('/(tabs)/coach-strategy' as Href)} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
         <Text style={styles.secondaryActionText}>Talk strategy</Text>
       </Pressable> : null}
     </View>
