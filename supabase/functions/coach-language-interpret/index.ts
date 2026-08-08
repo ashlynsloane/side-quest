@@ -174,6 +174,7 @@ Interpret the athlete's language into facts:
 - Use unresolved when target, time, requested action, symptom function, or strategy tradeoff is genuinely ambiguous.
 - Corrections should revise a prior fact rather than create an unrelated topic.
 - For long-horizon goals, use strategy_change and strategyChange. Describe objectives/tradeoffs only; do not prescribe the resulting allocation.
+- Only one discipline may hold primary_focus or maximize at a time. If the athlete asks to maximize or make multiple disciplines the top focus, return strategyChange as null and include single_top_focus in unresolved so Side Quest can ask which discipline wins.
 - Never diagnose an injury, illness, menstrual disorder, or other medical condition.
 - confidence describes interpretation confidence, not confidence in medical or training advice.
 
