@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CoachModeSwitch } from '@/components/coach-mode-switch';
+import { ProductDisclosure } from '@/components/product-ui';
 import { RaceStrategyContextCard } from '@/components/race-strategy-context-card';
 import type { CoachOperatingInboxItem } from '@/services/coach-operating-inbox';
 import {
@@ -20,6 +21,7 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
   const [strategyReview, setStrategyReview] = useState<CoachStrategyReview | null>(null);
   const [strategyBusy, setStrategyBusy] = useState(false);
   const [strategyFeedback, setStrategyFeedback] = useState<string | null>(null);
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -35,6 +37,9 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
     : strategyReview?.approved?.strategy;
   const strategyIsDraft = Boolean(strategyReview?.hasUnapprovedChanges && strategyReview.draft);
   const approvedWindowState = strategyReview?.approvedWindowState;
+  const protectionCount = items.filter((item) => item.level === 'protection').length;
+  const urgent = strategyIsDraft || protectionCount > 0;
+  const expanded = urgent || attentionExpanded;
   if (!items.length && !strategy) return <CoachModeSwitch active="today" />;
 
   async function refreshStrategyReview() {
@@ -87,19 +92,19 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
     }
   }
 
-  return (
-    <View style={styles.stack}>
-      <CoachModeSwitch active="today" />
+  return <View style={styles.stack}>
+    <CoachModeSwitch active="today" />
 
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>COACH ATTENTION</Text>
-        <Text style={styles.title}>What matters next</Text>
-      </View>
+    <View style={styles.attentionShell}>
+      <ProductDisclosure
+        title={attentionTitle(strategyIsDraft, protectionCount, items.length)}
+        summary={attentionSummary(strategyIsDraft, protectionCount, items)}
+        expanded={expanded}
+        onPress={() => { if (!urgent) setAttentionExpanded((value) => !value); }}
+      >
+        <RaceStrategyContextCard surface="coach" />
 
-      <RaceStrategyContextCard surface="coach" />
-
-      {strategy ? (
-        <View style={[styles.card, styles.strategyCard]}>
+        {strategy ? <View style={[styles.card, styles.strategyCard]}>
           <View style={styles.topRow}>
             <Text style={styles.strategyLevel}>{strategyIsDraft ? 'STRATEGY DRAFT' : lifecycleLabel(approvedWindowState)}</Text>
             <Text style={styles.action}>{strategyIsDraft ? 'APPROVAL REQUIRED' : lifecycleAction(approvedWindowState)}</Text>
@@ -116,42 +121,36 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
                   : 'Health constraints, fixed commitments, race phase, and the weekly time budget still outrank this preference.'}
           </Text>
           <View style={styles.strategyActions}>
-            {strategyIsDraft ? (
-              <>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => void applyStrategy()}
-                  disabled={strategyBusy}
-                  style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed, strategyBusy && styles.disabled]}
-                >
-                  {strategyBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryActionText}>Apply strategy</Text>}
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => void discardStrategyDraft()}
-                  disabled={strategyBusy}
-                  style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed, strategyBusy && styles.disabled]}
-                >
-                  <Text style={styles.secondaryActionText}>Discard draft</Text>
-                </Pressable>
-              </>
-            ) : (
+            {strategyIsDraft ? <>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => void stopStrategy()}
+                onPress={() => void applyStrategy()}
+                disabled={strategyBusy}
+                style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed, strategyBusy && styles.disabled]}
+              >
+                {strategyBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryActionText}>Apply strategy</Text>}
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void discardStrategyDraft()}
                 disabled={strategyBusy}
                 style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed, strategyBusy && styles.disabled]}
               >
-                {strategyBusy ? <ActivityIndicator color={tokens.text} /> : <Text style={styles.secondaryActionText}>{approvedWindowState === 'expired' ? 'Clear saved strategy' : 'Stop strategy'}</Text>}
+                <Text style={styles.secondaryActionText}>Discard draft</Text>
               </Pressable>
-            )}
+            </> : <Pressable
+              accessibilityRole="button"
+              onPress={() => void stopStrategy()}
+              disabled={strategyBusy}
+              style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed, strategyBusy && styles.disabled]}
+            >
+              {strategyBusy ? <ActivityIndicator color={tokens.text} /> : <Text style={styles.secondaryActionText}>{approvedWindowState === 'expired' ? 'Clear saved strategy' : 'Stop strategy'}</Text>}
+            </Pressable>}
           </View>
           {strategyFeedback ? <Text style={styles.feedback}>{strategyFeedback}</Text> : null}
-        </View>
-      ) : null}
+        </View> : null}
 
-      {items.map((item) => (
-        <View key={item.id} style={[styles.card, item.level === 'protection' && styles.protection]}>
+        {items.map((item) => <View key={item.id} style={[styles.card, item.level === 'protection' && styles.protection]}>
           <View style={styles.topRow}>
             <Text style={[styles.level, item.level === 'protection' && styles.protectionText]}>{label(item.level)}</Text>
             <Text style={styles.action}>{item.actionable ? 'REVIEW' : 'FYI'}</Text>
@@ -159,10 +158,23 @@ export function CoachOperatingInboxPanel({ items }: { items: CoachOperatingInbox
           <Text style={styles.itemTitle}>{item.title}</Text>
           <Text style={styles.body}>{item.body}</Text>
           <Text style={styles.reason}>{item.reason}</Text>
-        </View>
-      ))}
+        </View>)}
+      </ProductDisclosure>
     </View>
-  );
+  </View>;
+}
+
+function attentionTitle(strategyDraft: boolean, protectionCount: number, itemCount: number): string {
+  if (strategyDraft) return 'Strategy change needs approval';
+  if (protectionCount) return `${protectionCount} protection item${protectionCount === 1 ? '' : 's'} need attention`;
+  return itemCount ? 'Plan context' : 'Race strategy';
+}
+
+function attentionSummary(strategyDraft: boolean, protectionCount: number, items: CoachOperatingInboxItem[]): string {
+  if (strategyDraft) return 'Nothing changes until you review and approve the draft.';
+  if (protectionCount) return 'Open this before changing today’s training.';
+  const actionable = items.filter((item) => item.actionable).length;
+  return actionable ? `${actionable} review item${actionable === 1 ? '' : 's'} plus current race strategy.` : 'Current race strategy and non-urgent coaching context.';
 }
 
 function lifecycleLabel(value: CoachStrategyReview['approvedWindowState']): string {
@@ -223,11 +235,9 @@ function label(level: CoachOperatingInboxItem['level']): string {
 
 function makeStyles(tokens: ReturnType<typeof useTheme>['tokens']) {
   return StyleSheet.create({
-    stack: { gap: 10 },
-    header: { gap: 2 },
-    eyebrow: { color: tokens.accent, fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 1.05 },
-    title: { color: tokens.text, fontSize: 20, lineHeight: 25, fontWeight: '900' },
-    card: { borderWidth: 1, borderColor: tokens.border, borderRadius: 17, backgroundColor: tokens.surface, padding: 15, gap: 6 },
+    stack: { gap: 9 },
+    attentionShell: { borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 14 },
+    card: { borderWidth: 1, borderColor: tokens.border, borderRadius: 15, backgroundColor: tokens.surface, padding: 13, gap: 6 },
     strategyCard: { borderColor: tokens.accent },
     protection: { borderColor: tokens.danger },
     topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
@@ -235,15 +245,15 @@ function makeStyles(tokens: ReturnType<typeof useTheme>['tokens']) {
     strategyLevel: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
     protectionText: { color: tokens.danger },
     action: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '800', letterSpacing: 0.7 },
-    itemTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },
-    body: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
-    reason: { color: tokens.textMuted, fontSize: 11, lineHeight: 16, fontWeight: '700' },
-    strategyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 5 },
-    primaryAction: { minHeight: 40, borderRadius: 12, backgroundColor: tokens.accent, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
-    primaryActionText: { color: '#FFFFFF', fontSize: 13, lineHeight: 17, fontWeight: '800' },
-    secondaryAction: { minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
-    secondaryActionText: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '800' },
-    feedback: { color: tokens.textMuted, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+    itemTitle: { color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+    body: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
+    reason: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 15, fontWeight: '700' },
+    strategyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+    primaryAction: { minHeight: 38, borderRadius: 11, backgroundColor: tokens.accent, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+    primaryActionText: { color: '#FFFFFF', fontSize: 12.5, lineHeight: 16, fontWeight: '800' },
+    secondaryAction: { minHeight: 38, borderRadius: 11, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+    secondaryActionText: { color: tokens.text, fontSize: 12.5, lineHeight: 16, fontWeight: '800' },
+    feedback: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
     pressed: { opacity: 0.76 },
     disabled: { opacity: 0.55 },
   });
