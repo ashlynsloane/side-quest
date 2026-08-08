@@ -34,4 +34,22 @@ describe('race strategy visibility', () => {
     expect(card).toContain("router.push('/race-intent'");
     expect(card).toContain("router.push('/(tabs)/coach'");
   });
+
+  it('explains how the effective strategy is expressed in the generated week', () => {
+    const card = source('apps/mobile/src/components/race-strategy-context-card.tsx');
+    const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
+    expect(card).toContain('loadCurrentWeeklyStrategyContext');
+    expect(card).toContain('weeklyStrategyStateLabel');
+    expect(card).toContain('RACE TARGET CONNECTION');
+    expect(card).toContain('weeklyDisciplineLine');
+    expect(weekly).toContain('buildWeeklyStrategyExpression');
+  });
+
+  it('reuses the latest reconciled planner result instead of rebuilding solely for presentation', () => {
+    const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+    const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
+    expect(runtime).toContain('getLatestWholeAthletePlanSnapshot');
+    expect(runtime).toContain('latestReconciledPlan = generated');
+    expect(weekly).toContain('getLatestWholeAthletePlanSnapshot');
+  });
 });
