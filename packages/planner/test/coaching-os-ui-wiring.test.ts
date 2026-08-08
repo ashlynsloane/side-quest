@@ -30,11 +30,14 @@ describe('Coaching OS mobile wiring', () => {
     expect(runtime).toContain('refreshCoachObservedOutcomes');
   });
 
-  it('keeps clarification, attention, and closed-loop history visible on Coach', () => {
-    const coach = source('apps/mobile/src/app/(tabs)/coach.tsx');
+  it('keeps clarification, attention, and closed-loop history visible on the conversation-first Coach screen', () => {
+    const route = source('apps/mobile/src/app/(tabs)/coach.tsx');
+    const coach = source('apps/mobile/src/components/coach-screen-v2.tsx');
     const closedLoop = source('apps/mobile/src/components/coach-closed-loop.tsx');
+    expect(route).toContain("@/components/coach-screen-v2");
     expect(coach).toContain('CoachOperatingInboxPanel');
     expect(coach).toContain("result.reason === 'needs_clarification'");
+    expect(coach).toContain('CoachClosedLoopPanel');
     expect(closedLoop).toContain('RECENT COACH DECISIONS');
     expect(closedLoop).toContain('completed as adjusted');
   });
