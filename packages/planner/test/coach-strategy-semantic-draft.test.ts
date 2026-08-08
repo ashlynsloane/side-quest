@@ -59,6 +59,34 @@ describe('Strategy Coach semantic draft', () => {
     expect(second.directive.strategyChange).toEqual(second.state.strategyDraft);
   });
 
+  it('replaces the previous top focus when a later turn maximizes a different discipline', () => {
+    const first = reduceCoachDialogue(emptyCoachDialogueState(), strategyFrame({
+      strategyChange: {
+        primaryFocus: 'bike',
+        disciplineObjectives: { bike: 'maximize', swim: 'maintain', run: 'maintain' },
+      },
+    }));
+    const second = reduceCoachDialogue(first.state, strategyFrame({
+      turnId: 'strategy-2',
+      strategyChange: {
+        primaryFocus: 'run',
+        disciplineObjectives: { run: 'maximize' },
+      },
+    }));
+
+    expect(second.state.strategyDraft?.primaryFocus).toBe('run');
+    expect(second.state.strategyDraft?.disciplineObjectives.run).toBe('maximize');
+    expect(second.state.strategyDraft?.disciplineObjectives.bike).toBe('develop');
+  });
+
+  it('creates a focused clarification for an unresolved top-focus conflict', () => {
+    const transition = reduceCoachDialogue(emptyCoachDialogueState(), strategyFrame({
+      strategyChange: undefined,
+      unresolved: ['single_top_focus'],
+    }));
+    expect(transition.directive.clarification?.prompt).toContain('Only one discipline can be the top focus');
+  });
+
   it('rejects an invalid strategy date window', () => {
     const result = validateCoachTurnFrame(strategyFrame({
       strategyChange: {
