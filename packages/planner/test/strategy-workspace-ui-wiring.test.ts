@@ -10,14 +10,16 @@ function source(path: string): string {
 }
 
 describe('Strategy Coach workspace wiring', () => {
-  it('provides a Today / Strategy mode switch without adding a bottom tab', () => {
+  it('provides a Today / Strategy mode switch without adding a sixth bottom tab', () => {
     const today = source('apps/mobile/src/components/coach-operating-inbox.tsx');
-    const strategyRoute = source('apps/mobile/src/app/coach-strategy.tsx');
+    const strategyRoute = source('apps/mobile/src/app/(tabs)/coach-strategy.tsx');
+    const tabs = source('apps/mobile/src/app/(tabs)/_layout.tsx');
     const switcher = source('apps/mobile/src/components/coach-mode-switch.tsx');
     expect(today).toContain('<CoachModeSwitch active="today"');
     expect(strategyRoute).toContain('<CoachModeSwitch active="strategy"');
-    expect(switcher).toContain("'/coach-strategy'");
+    expect(switcher).toContain("'/(tabs)/coach-strategy'");
     expect(switcher).toContain("'/(tabs)/coach'");
+    expect(tabs).toContain('<Tabs.Screen name="coach-strategy" options={{ href: null }} />');
   });
 
   it('keeps Strategy conversation separate from the Daily workout proposal runtime', () => {
