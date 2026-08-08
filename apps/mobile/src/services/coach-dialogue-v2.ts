@@ -129,6 +129,12 @@ export async function interpretCoachTurnV2(
       previousTargetDiscipline: legacyConversation?.activeTarget?.sessionDiscipline,
       previousSessionDate: legacyConversation?.activeTarget?.sessionDate,
       previousTargetEventId: legacyConversation?.activeTarget?.sessionId,
+      pendingQuestionKind: previousDialogue.pendingQuestion?.kind,
+      activeConcern: previousDialogue.activeConcern ? {
+        semanticId: previousDialogue.activeConcern.semanticId,
+        bodyArea: previousDialogue.activeConcern.bodyArea,
+        category: previousDialogue.activeConcern.category,
+      } : undefined,
       knownPlannedEvents,
     });
   }
