@@ -26,6 +26,7 @@ import {
 import {
   loadStrategyConversationState,
   setStrategyConversationEditingWindow,
+  setStrategyConversationNewWindow,
 } from './strategy-conversation-state';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
@@ -36,6 +37,8 @@ export interface CoachStrategyReview {
   schedule: ApprovedCoachStrategyScheduleState;
   approvedWindowState?: CoachStrategyWindowState;
   editingWindowId?: string;
+  creatingNewWindow?: boolean;
+  suggestedWindowStart?: string;
   draftTurnId?: string;
   hasUnapprovedChanges: boolean;
   latestRevision?: CoachStrategyScheduleRevision;
@@ -65,6 +68,8 @@ export async function loadCoachStrategyReview(): Promise<CoachStrategyReview | n
     schedule,
     approvedWindowState: approved ? coachStrategyWindowStateForWeek(approved.strategy, currentWeekStart()) : undefined,
     editingWindowId: conversation.editingWindowId,
+    creatingNewWindow: conversation.creatingNewWindow,
+    suggestedWindowStart: conversation.suggestedWindowStart,
     draftTurnId: dialogue.updatedAtTurnId,
     hasUnapprovedChanges: Boolean(draft && !draftMatches),
     latestRevision: latestUndoableCoachStrategyRevision(block.id) ?? undefined,
@@ -152,10 +157,12 @@ export async function beginNewCoachStrategyWindow(): Promise<CoachStrategyReview
   const saved = await getLatestTrainingBlock();
   const block = saved?.block;
   if (!block) throw new Error('The active training plan is no longer available.');
+  const schedule = loadApprovedCoachStrategySchedule(block.id);
+  const suggestedStart = suggestedNewWindowStart(schedule);
   const dialogue = loadCoachDialogueV2(block.id);
   saveCoachDialogueV2(block.id, { ...dialogue, strategyDraft: undefined });
   const conversation = loadStrategyConversationState(block.id);
-  setStrategyConversationEditingWindow(conversation, undefined);
+  setStrategyConversationNewWindow(conversation, suggestedStart);
   const review = await loadCoachStrategyReview();
   if (!review) throw new Error('Side Quest could not start a new strategy window.');
   return review;
@@ -225,6 +232,35 @@ export async function undoLatestCoachStrategyScheduleChange(): Promise<CoachStra
   const undo = markCoachStrategyRevisionReverted(revision.id, revision.before);
   if (!undo) throw new Error('The season strategy was restored, but Side Quest could not update its revision history.');
   return undo;
+}
+
+function suggestedNewWindowStart(schedule: ApprovedCoachStrategyScheduleState): string {
+  const current = currentWeekStart();
+  if (!schedule.windows.length) return current;
+  if (schedule.windows.some((window) => !window.strategy.endsAt)) {
+    throw new Error('The final season block is open-ended. Give that block an end date before adding another block after it.');
+  }
+  const lastEnd = schedule.windows
+    .map((window) => window.strategy.endsAt!)
+    .sort()
+    .at(-1);
+  if (!lastEnd) return current;
+  const afterLast = addDays(planningWeekStart(lastEnd), 7);
+  return afterLast > current ? afterLast : current;
+}
+
+function planningWeekStart(value: string): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  const day = date.getUTCDay();
+  const delta = day === 0 ? -6 : 1 - day;
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(value: string, days: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function sameStrategy(
