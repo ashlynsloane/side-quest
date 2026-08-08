@@ -1,4 +1,8 @@
 import type { CoachSemanticStrategyChange } from '@circuit/planner/coach-semantic-frame';
+import {
+  coachStrategyWindowStateForWeek,
+  type CoachStrategyWindowState,
+} from '@circuit/planner/coach-strategy-window';
 
 import { getLatestTrainingBlock } from './database';
 import { loadCoachDialogueV2, saveCoachDialogueV2 } from './coach-dialogue-v2';
@@ -14,6 +18,7 @@ export interface CoachStrategyReview {
   blockId: string;
   draft?: CoachSemanticStrategyChange;
   approved?: ApprovedCoachStrategyState;
+  approvedWindowState?: CoachStrategyWindowState;
   draftTurnId?: string;
   hasUnapprovedChanges: boolean;
 }
@@ -29,6 +34,7 @@ export async function loadCoachStrategyReview(): Promise<CoachStrategyReview | n
     blockId: block.id,
     draft,
     approved,
+    approvedWindowState: approved ? coachStrategyWindowStateForWeek(approved.strategy, currentWeekStart()) : undefined,
     draftTurnId: dialogue.updatedAtTurnId,
     hasUnapprovedChanges: Boolean(draft && !sameStrategy(draft, approved?.strategy)),
   };
@@ -124,4 +130,13 @@ function cloneStrategy(value: CoachSemanticStrategyChange): CoachSemanticStrateg
     disciplineObjectives: { ...value.disciplineObjectives },
     racePriority: value.racePriority ? { ...value.racePriority } : undefined,
   };
+}
+
+function currentWeekStart(): string {
+  const now = new Date();
+  const day = now.getDay();
+  const delta = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + delta);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
