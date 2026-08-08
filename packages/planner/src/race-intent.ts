@@ -1,9 +1,10 @@
 import type { EnduranceDiscipline, PerformanceGoalType } from '@circuit/domain';
 
-import type {
-  CoachSemanticStrategyChange,
-  CoachStrategyObjective,
-  CoachStrategyTradeoff,
+import {
+  topStrategyDisciplines,
+  type CoachSemanticStrategyChange,
+  type CoachStrategyObjective,
+  type CoachStrategyTradeoff,
 } from './coach-semantic-frame';
 
 export type RaceOverallObjective =
@@ -66,6 +67,33 @@ export function defaultRaceIntent(
   };
 }
 
+export function setRaceIntentDisciplinePriority(
+  intent: RaceIntentV2,
+  discipline: EnduranceDiscipline,
+  priority: CoachStrategyObjective,
+): RaceIntentV2 {
+  const disciplinePriorities = { ...intent.disciplinePriorities, [discipline]: priority };
+  const topPriority = priority === 'primary_focus' || priority === 'maximize';
+
+  if (topPriority) {
+    for (const [otherDiscipline, otherPriority] of Object.entries(disciplinePriorities)) {
+      if (otherDiscipline === discipline) continue;
+      if (otherPriority === 'primary_focus' || otherPriority === 'maximize') {
+        disciplinePriorities[otherDiscipline as EnduranceDiscipline] = 'develop';
+      }
+    }
+    return { ...intent, primaryDiscipline: discipline, disciplinePriorities };
+  }
+
+  const remainingTop = Object.entries(disciplinePriorities)
+    .find(([, objective]) => objective === 'primary_focus' || objective === 'maximize')?.[0] as EnduranceDiscipline | undefined;
+  return {
+    ...intent,
+    primaryDiscipline: intent.primaryDiscipline === discipline ? remainingTop : intent.primaryDiscipline,
+    disciplinePriorities,
+  };
+}
+
 export function validateRaceIntent(
   intent: RaceIntentV2,
   goalDisciplines: EnduranceDiscipline[],
@@ -85,6 +113,18 @@ export function validateRaceIntent(
       continue;
     }
     if (!isStrategyObjective(priority)) errors.push(`${discipline} has an invalid race priority.`);
+  }
+
+  const maximized = Object.entries(intent.disciplinePriorities)
+    .filter(([, priority]) => priority === 'maximize')
+    .map(([discipline]) => discipline as EnduranceDiscipline);
+  const topFocus = Object.entries(intent.disciplinePriorities)
+    .filter(([, priority]) => priority === 'primary_focus' || priority === 'maximize')
+    .map(([discipline]) => discipline as EnduranceDiscipline);
+  if (maximized.length > 1) errors.push('Only one discipline can be maximized at a time.');
+  if (topFocus.length > 1) errors.push('Only one discipline can hold the top race-development priority at a time.');
+  if (intent.primaryDiscipline && topFocus.length === 1 && topFocus[0] !== intent.primaryDiscipline) {
+    errors.push('The primary discipline must match the top race-development priority.');
   }
 
   for (const [discipline, target] of Object.entries(intent.disciplineTargets ?? {})) {
@@ -107,17 +147,17 @@ export function validateRaceIntent(
 
 export function raceIntentToCoachStrategy(intent: RaceIntentV2): CoachSemanticStrategyChange {
   const disciplineObjectives = { ...intent.disciplinePriorities };
+  const explicitTop = Object.entries(disciplineObjectives)
+    .find(([, objective]) => objective === 'maximize' || objective === 'primary_focus')?.[0] as EnduranceDiscipline | undefined;
   if (intent.primaryDiscipline && !disciplineObjectives[intent.primaryDiscipline]) {
     disciplineObjectives[intent.primaryDiscipline] = intent.overallObjective === 'discipline_performance'
       ? 'primary_focus'
       : 'develop';
   }
 
-  const primaryFocus = intent.primaryDiscipline && (
-    intent.overallObjective === 'discipline_performance'
-    || disciplineObjectives[intent.primaryDiscipline] === 'primary_focus'
-    || disciplineObjectives[intent.primaryDiscipline] === 'maximize'
-  ) ? intent.primaryDiscipline : undefined;
+  const primaryFocus = explicitTop ?? (intent.primaryDiscipline && intent.overallObjective === 'discipline_performance'
+    ? intent.primaryDiscipline
+    : undefined);
 
   return {
     primaryFocus,
@@ -130,7 +170,7 @@ export function raceIntentToCoachStrategy(intent: RaceIntentV2): CoachSemanticSt
 /**
  * Race intent is the baseline season/race emphasis. An explicitly approved
  * Strategy Coach directive is newer athlete intent and therefore overrides
- * only the fields it actually specifies.
+ * only the fields it actually specifies. Top-focus status remains exclusive.
  */
 export function mergeRaceIntentWithCoachStrategy(
   raceIntent: RaceIntentV2 | undefined,
@@ -138,8 +178,8 @@ export function mergeRaceIntentWithCoachStrategy(
 ): CoachSemanticStrategyChange | undefined {
   const baseline = raceIntent ? raceIntentToCoachStrategy(raceIntent) : undefined;
   if (!approvedStrategy) return baseline;
-  if (!baseline) return cloneStrategy(approvedStrategy);
-  return {
+  if (!baseline) return normalizeMergedStrategy(cloneStrategy(approvedStrategy), approvedStrategy);
+  const merged: CoachSemanticStrategyChange = {
     ...baseline,
     ...approvedStrategy,
     disciplineObjectives: {
@@ -151,12 +191,40 @@ export function mergeRaceIntentWithCoachStrategy(
       ? { ...(baseline.racePriority ?? {}), ...approvedStrategy.racePriority }
       : baseline.racePriority,
   };
+  return normalizeMergedStrategy(merged, approvedStrategy);
 }
 
 export function legacyPriorityForRaceIntent(intent: RaceIntentV2): LegacyRacePriority {
   if (intent.overallObjective === 'finish_comfortably') return 'finish';
   if (intent.overallObjective === 'best_overall' || intent.overallObjective === 'placement_qualification') return 'race';
   return 'perform';
+}
+
+function normalizeMergedStrategy(
+  merged: CoachSemanticStrategyChange,
+  newest: CoachSemanticStrategyChange,
+): CoachSemanticStrategyChange {
+  const newestTop = topStrategyDisciplines(newest)[0] ?? newest.primaryFocus;
+  const existingTop = topStrategyDisciplines(merged)[0] ?? merged.primaryFocus;
+  const preferredTop = newestTop ?? existingTop;
+  if (!preferredTop) return merged;
+
+  const disciplineObjectives = { ...merged.disciplineObjectives };
+  for (const [discipline, objective] of Object.entries(disciplineObjectives)) {
+    if (discipline === preferredTop) continue;
+    if (objective === 'primary_focus' || objective === 'maximize') {
+      disciplineObjectives[discipline as EnduranceDiscipline] = 'develop';
+    }
+  }
+  const newestPreferredObjective = newest.disciplineObjectives[preferredTop];
+  const currentPreferredObjective = disciplineObjectives[preferredTop];
+  disciplineObjectives[preferredTop] = newestPreferredObjective === 'maximize'
+    ? 'maximize'
+    : currentPreferredObjective === 'maximize'
+      ? 'maximize'
+      : 'primary_focus';
+
+  return { ...merged, primaryFocus: preferredTop, disciplineObjectives };
 }
 
 function buildRacePriority(
