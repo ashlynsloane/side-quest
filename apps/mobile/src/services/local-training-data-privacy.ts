@@ -7,6 +7,7 @@ import { clearCoachConversationState } from './coach-conversation-state';
 import { clearCoachDialogueV2 } from './coach-dialogue-v2';
 import { clearCoachObservedOutcomes, exportCoachObservedOutcomes } from './coach-observed-outcomes';
 import { clearApprovedCoachStrategy, COACH_STRATEGY_KEY } from './coach-strategy-state';
+import { clearRaceIntent, exportRaceIntentState } from './race-intent-state';
 import { clearAllSideQuestPlanSessionOverrides } from './side-quest-plan-overrides';
 import { clearWholeAthleteHealthPreferences } from './whole-athlete-plan-runtime';
 
@@ -23,6 +24,7 @@ export function exportLocalTrainingKeyValueData(): Record<string, unknown> {
     coachConversation: parseStored(COACH_CONVERSATION_KEY),
     coachSemanticDialogue: parseStored(COACH_DIALOGUE_V2_KEY),
     approvedCoachStrategy: parseStored(COACH_STRATEGY_KEY),
+    raceIntent: exportRaceIntentState(),
     coachClosedLoop: exportCoachClosedLoopState(),
     coachObservedOutcomes: exportCoachObservedOutcomes(),
     structuredPainContext: parseStored(PAIN_MEMORY_KEY),
@@ -41,6 +43,7 @@ export function clearLocalTrainingKeyValueData(): void {
   clearCoachConversationState();
   clearCoachDialogueV2();
   clearApprovedCoachStrategy();
+  clearRaceIntent();
   clearCoachClosedLoopState();
   clearCoachObservedOutcomes();
   clearPainContextMemory();
