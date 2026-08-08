@@ -1,6 +1,8 @@
 import type { PerformanceGoal } from '@circuit/domain';
-import { mergeRaceIntentWithCoachStrategy } from '@circuit/planner/race-intent';
-import { configureWholeAthleteCoachStrategy } from '@circuit/planner/whole-athlete-week';
+import {
+  configureWholeAthleteCoachStrategy,
+  configureWholeAthleteStrategyLayers,
+} from '@circuit/planner/whole-athlete-week';
 import Storage from 'expo-sqlite/kv-store';
 
 import {
@@ -29,7 +31,7 @@ const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
 };
 
 let reconciliationQueue: Promise<GeneratedWholeAthleteBlock | null> = Promise.resolve(null);
-let latestReconciledPlan: { blockId: string; plan: GeneratedWholeAthleteBlock } | null = null;
+let latestReconciledPlan: { blockId: string; generated: GeneratedWholeAthleteBlock } | null = null;
 
 export function getDefaultWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
   return { ...DEFAULT_HEALTH_PREFERENCES };
@@ -62,7 +64,7 @@ export function clearWholeAthleteHealthPreferences(): void {
 export function getLatestWholeAthletePlanSnapshot(blockId?: string): GeneratedWholeAthleteBlock | null {
   if (!latestReconciledPlan) return null;
   if (blockId && latestReconciledPlan.blockId !== blockId) return null;
-  return latestReconciledPlan.plan;
+  return latestReconciledPlan.generated;
 }
 
 export function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
@@ -85,7 +87,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
 
   const raceIntent = loadRaceIntent(saved.block.id)?.intent;
   const approvedStrategy = loadApprovedCoachStrategy(saved.block.id)?.strategy;
-  configureWholeAthleteCoachStrategy(mergeRaceIntentWithCoachStrategy(raceIntent, approvedStrategy));
+  configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy);
 
   const [activeCheckIn, ptProfile, readiness] = await Promise.all([
     getActiveTrainingCheckIn(),
@@ -102,7 +104,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     ptProfileActive: Boolean(ptProfile?.active),
     readiness,
   });
-  latestReconciledPlan = { blockId: saved.block.id, plan: generated };
+  latestReconciledPlan = { blockId: saved.block.id, generated };
   return generated;
 }
 
