@@ -1,7 +1,8 @@
 import type { CoachSemanticStrategyChange } from '@circuit/planner/coach-semantic-frame';
 
 import { getLatestTrainingBlock } from './database';
-import { interpretCoachTurnV2 } from './coach-dialogue-v2';
+import { interpretCoachTurnV2, loadCoachDialogueV2, saveCoachDialogueV2 } from './coach-dialogue-v2';
+import { loadCoachStrategyReview } from './coach-strategy-runtime';
 import {
   appendStrategyConversationTurn,
   loadStrategyConversationState,
@@ -22,6 +23,7 @@ export async function sendStrategyCoachMessage(message: string): Promise<Strateg
   const block = saved?.block;
   if (!block) throw new Error('Create a training plan before starting a Strategy Coach conversation.');
 
+  await rebaseExpiredStrategyDraft(block.id);
   let conversation = loadStrategyConversationState(block.id);
   conversation = appendStrategyConversationTurn(conversation, 'athlete', text);
   const semantic = await interpretCoachTurnV2(text, undefined);
@@ -59,6 +61,24 @@ export async function sendStrategyCoachMessage(message: string): Promise<Strateg
 export async function loadStrategyCoachConversation(): Promise<StrategyConversationState | null> {
   const saved = await getLatestTrainingBlock();
   return saved?.block ? loadStrategyConversationState(saved.block.id) : null;
+}
+
+async function rebaseExpiredStrategyDraft(blockId: string): Promise<void> {
+  const review = await loadCoachStrategyReview();
+  if (!review || review.blockId !== blockId || review.approvedWindowState !== 'expired' || review.hasUnapprovedChanges || !review.approved) return;
+  const dialogue = loadCoachDialogueV2(blockId);
+  if (!dialogue.strategyDraft) return;
+  const prior = review.approved.strategy;
+  saveCoachDialogueV2(blockId, {
+    ...dialogue,
+    strategyDraft: {
+      ...prior,
+      startsAt: undefined,
+      endsAt: undefined,
+      disciplineObjectives: { ...prior.disciplineObjectives },
+      racePriority: prior.racePriority ? { ...prior.racePriority } : undefined,
+    },
+  });
 }
 
 function strategyDraftSummary(strategy: CoachSemanticStrategyChange): string {
