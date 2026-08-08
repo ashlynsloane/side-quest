@@ -3,6 +3,7 @@ import type {
   CoachSemanticAction,
   CoachSemanticCorrection,
   CoachSemanticDiscipline,
+  CoachSemanticStrategyChange,
   CoachSemanticSymptom,
   CoachSemanticTrainingEvent,
   CoachTurnFrameV2,
@@ -37,6 +38,7 @@ export interface CoachDialogueStateV2 {
     discipline?: CoachSemanticDiscipline;
     date?: string;
   };
+  strategyDraft?: CoachSemanticStrategyChange;
   focusDate?: string;
   horizon: CoachConversationHorizon;
   pendingQuestion?: CoachDialogueQuestion;
@@ -55,6 +57,7 @@ export interface CoachPlannerDirectiveV2 {
   requestedDate?: string;
   requestedDurationMinutes?: number;
   requestedIntensity?: 'recovery' | 'easy' | 'moderate' | 'hard' | 'max';
+  strategyChange?: CoachSemanticStrategyChange;
   safetyFacts: {
     functionChanged: boolean;
     changedMovement: boolean;
@@ -83,6 +86,7 @@ export function reduceCoachDialogue(
   const events = mergeEvents(base.events, frame.events);
   const correctedConcern = applyConcernCorrection(base.activeConcern, frame.correction, frame.symptoms, frame.turnId);
   const activeConcern = correctedConcern ?? deriveConcern(base.activeConcern, frame.symptoms, frame.turnId);
+  const strategyDraft = mergeStrategyDraft(base.strategyDraft, frame.strategyChange);
   const focusDate = deriveFocusDate(base.focusDate, frame);
   const activePlannedTarget = deriveActiveTarget(base.activePlannedTarget, events, frame, focusDate);
   const pendingQuestion = deriveQuestion(frame, activePlannedTarget, activeConcern);
@@ -91,6 +95,7 @@ export function reduceCoachDialogue(
     events,
     activeConcern,
     activePlannedTarget,
+    strategyDraft,
     focusDate,
     horizon: frame.horizon,
     pendingQuestion,
@@ -127,6 +132,7 @@ export function buildPlannerDirective(state: CoachDialogueStateV2, frame: CoachT
     requestedDate: change?.date,
     requestedDurationMinutes: change?.durationMinutes,
     requestedIntensity: change?.intensity,
+    strategyChange: frame.intent === 'strategy_change' ? state.strategyDraft : undefined,
     safetyFacts: {
       functionChanged: Boolean(concern?.functionChanged ?? concern?.changedMovement ?? concern?.changedTraining ?? concern?.stoppedTraining),
       changedMovement: Boolean(concern?.changedMovement),
@@ -146,6 +152,24 @@ function mergeEvents(previous: CoachSemanticTrainingEvent[], incoming: CoachSema
     merged.set(event.semanticId, prior ? { ...prior, ...defined(event) } : event);
   }
   return [...merged.values()].slice(-40);
+}
+
+function mergeStrategyDraft(
+  previous: CoachSemanticStrategyChange | undefined,
+  incoming: CoachSemanticStrategyChange | undefined,
+): CoachSemanticStrategyChange | undefined {
+  if (!incoming) return previous;
+  return {
+    ...previous,
+    ...incoming,
+    disciplineObjectives: {
+      ...(previous?.disciplineObjectives ?? {}),
+      ...incoming.disciplineObjectives,
+    },
+    racePriority: incoming.racePriority
+      ? { ...(previous?.racePriority ?? {}), ...incoming.racePriority }
+      : previous?.racePriority,
+  };
 }
 
 function deriveConcern(
