@@ -7,6 +7,7 @@ import {
 import {
   buildWholeAthleteWeek,
   configureWholeAthleteCoachStrategy,
+  configureWholeAthleteStrategyLayers,
 } from '../src/whole-athlete-week-strategy';
 
 function input(overrides: Partial<WholeAthleteWeeklyPlannerInput> = {}): WholeAthleteWeeklyPlannerInput {
@@ -125,5 +126,29 @@ describe('whole-athlete strategy overlay', () => {
     });
     const request = input();
     expect(buildWholeAthleteWeek(request)).toEqual(buildBaseWholeAthleteWeek(request));
+  });
+
+  it('uses Race Intent before and after a temporary Strategy Coach override', () => {
+    configureWholeAthleteStrategyLayers({
+      version: 2,
+      overallObjective: 'discipline_performance',
+      primaryDiscipline: 'swim',
+      disciplinePriorities: { swim: 'primary_focus', bike: 'maintain', run: 'maintain' },
+      tradeoffTolerance: 'moderate_tradeoff',
+    }, {
+      startsAt: '2026-08-17',
+      endsAt: '2026-08-30',
+      primaryFocus: 'bike',
+      disciplineObjectives: { bike: 'maximize', swim: 'maintain', run: 'maintain' },
+      tradeoffTolerance: 'aggressive_specialization',
+    });
+
+    const before = buildWholeAthleteWeek(input({ weekStartDate: '2026-08-10' }));
+    const during = buildWholeAthleteWeek(input({ weekStartDate: '2026-08-17' }));
+    const after = buildWholeAthleteWeek(input({ weekStartDate: '2026-08-31' }));
+
+    expect(before.progressionBudget.primary).toBe('swim_volume');
+    expect(during.progressionBudget.primary).toBe('bike_volume');
+    expect(after.progressionBudget.primary).toBe('swim_volume');
   });
 });
