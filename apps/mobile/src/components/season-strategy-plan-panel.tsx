@@ -4,12 +4,13 @@ import { useCallback, useState } from 'react';
 import { SeasonStrategyPlan } from '@/components/season-strategy-plan';
 import { loadStrategyWorkspace, type StrategyWorkspaceData } from '@/services/strategy-workspace';
 
-export function SeasonStrategyPlanPanel() {
+export function SeasonStrategyPlanPanel({ onWorkspaceChanged }: { onWorkspaceChanged?: () => void }) {
   const [workspace, setWorkspace] = useState<StrategyWorkspaceData | null>(null);
 
   const reload = useCallback(async () => {
     setWorkspace(await loadStrategyWorkspace());
-  }, []);
+    onWorkspaceChanged?.();
+  }, [onWorkspaceChanged]);
 
   useFocusEffect(useCallback(() => {
     let live = true;
