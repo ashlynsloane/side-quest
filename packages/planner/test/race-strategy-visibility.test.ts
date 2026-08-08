@@ -45,6 +45,17 @@ describe('race strategy visibility', () => {
     expect(weekly).toContain('buildWeeklyStrategyExpression');
   });
 
+  it('shows race-target evidence without presenting it as a readiness score', () => {
+    const card = source('apps/mobile/src/components/race-strategy-context-card.tsx');
+    const loader = source('apps/mobile/src/services/race-target-evidence.ts');
+    const planner = source('packages/planner/src/race-target-evidence.ts');
+    expect(card).toContain('targetEvidence.evidenceLabel');
+    expect(card).toContain('targetEvidence.caveat');
+    expect(loader).toContain('buildRaceTargetEvidence');
+    expect(planner).toContain('not a race projection or readiness score');
+    expect(planner).toContain('does not treat arbitrary training duration as a race-distance time benchmark');
+  });
+
   it('reuses the latest reconciled planner result instead of rebuilding solely for presentation', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
