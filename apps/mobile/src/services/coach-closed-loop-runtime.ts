@@ -96,6 +96,7 @@ export async function buildCoachMessageProposalClosedLoop(
       return { ok: false, reason: 'needs_clarification', message: pending.question, conversation };
     }
     if (resolution.noTrainingChange) {
+      if (saved?.block) await interpretCoachTurnV2(message, quickSignal, existingConversation);
       let conversation = recordCoachClarificationResolution(existingConversation, pending);
       conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
       const coachResponse = resolution.coachResponse ?? 'Okay. I would not change the plan from that information alone.';
