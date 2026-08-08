@@ -15,13 +15,14 @@ describe('Strategy Coach wiring', () => {
     expect(plannerPackage).toContain('"./whole-athlete-week": "./src/whole-athlete-week-strategy.ts"');
   });
 
-  it('configures Race Intent and approved Strategy Coach as separate weekly layers during reconciliation', () => {
+  it('configures Race Intent and the full approved season schedule as separate weekly layers', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const overlay = source('packages/planner/src/whole-athlete-week-strategy.ts');
     expect(runtime).toContain('loadRaceIntent');
-    expect(runtime).toContain('loadApprovedCoachStrategy');
-    expect(runtime).toContain('configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy)');
-    expect(overlay).toContain('coachStrategyAppliesToWeek');
+    expect(runtime).toContain('loadApprovedCoachStrategySchedule');
+    expect(runtime).toContain('approvedSchedule.windows.map');
+    expect(runtime).toContain('configureWholeAthleteStrategyLayers');
+    expect(overlay).toContain('activeSeasonStrategyForWeek');
     expect(overlay).toContain('mergeRaceIntentWithCoachStrategy(configuredRaceIntent, approved)');
   });
 
@@ -43,6 +44,7 @@ describe('Strategy Coach wiring', () => {
   it('includes approved strategy in local export and erase controls', () => {
     const privacy = source('apps/mobile/src/services/local-training-data-privacy.ts');
     expect(privacy).toContain('approvedCoachStrategy');
+    expect(privacy).toContain('approvedCoachStrategySchedule');
     expect(privacy).toContain('clearApprovedCoachStrategy()');
   });
 
