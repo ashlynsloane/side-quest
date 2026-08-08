@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decideCoachClarification, resolveCoachClarificationAnswer } from '../src/coach-clarification';
+import {
+  decideCoachClarification,
+  isCoachClarificationCorrection,
+  resolveCoachClarificationAnswer,
+} from '../src/coach-clarification';
 import { interpretCoachMessage } from '../src/coach-message-adaptation';
 
 describe('coach clarification', () => {
@@ -28,7 +32,7 @@ describe('coach clarification', () => {
   it('turns an affirmative function answer into structured function-limiting context', () => {
     const resolved = resolveCoachClarificationAnswer('function', 'My hip feels weird today.', 'Yes, I started limping.');
     expect(resolved.resolved).toBe(true);
-    expect(resolved.effectiveMessage).toContain('modify the workout because of this pain');
+    expect(resolved.effectiveMessage).toContain('function-limiting injury-like symptom');
     const interpretation = interpretCoachMessage(resolved.effectiveMessage!);
     expect(interpretation.reason).toBe('pain');
     expect(interpretation.painContext?.functionalInterference).toBe('modified_session');
@@ -38,7 +42,12 @@ describe('coach clarification', () => {
     const resolved = resolveCoachClarificationAnswer('function', 'My hip feels weird today.', 'No, I moved and trained normally.');
     expect(resolved.resolved).toBe(true);
     expect(resolved.noTrainingChange).toBe(true);
-    expect(resolved.coachResponse).toContain('will not treat that sensation alone');
+    expect(resolved.coachResponse).toContain('would not change the plan');
+  });
+
+  it('recognizes a natural correction to a recently resolved function question', () => {
+    expect(isCoachClarificationCorrection('function', 'Well actually I did start limping yesterday.')).toBe(true);
+    expect(isCoachClarificationCorrection('function', 'I only have 30 minutes tomorrow.')).toBe(false);
   });
 
   it('keeps asking when the answer does not resolve the ambiguity', () => {
