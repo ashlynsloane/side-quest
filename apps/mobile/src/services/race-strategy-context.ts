@@ -3,6 +3,10 @@ import {
   mergeRaceIntentWithCoachStrategy,
   type RaceIntentV2,
 } from '@circuit/planner/race-intent';
+import {
+  coachStrategyWindowStateForWeek,
+  type CoachStrategyWindowState,
+} from '@circuit/planner/coach-strategy-window';
 import type {
   CoachSemanticDiscipline,
   CoachSemanticStrategyChange,
@@ -20,6 +24,7 @@ export interface RaceStrategyContext {
   raceIntent: RaceIntentV2;
   customizedRaceIntent: boolean;
   approvedStrategy?: CoachSemanticStrategyChange;
+  approvedStrategyWindowState?: CoachStrategyWindowState;
   effectiveStrategy: CoachSemanticStrategyChange;
 }
 
@@ -36,7 +41,11 @@ export async function loadRaceStrategyContext(): Promise<RaceStrategyContext | n
   const editor = await loadRaceIntentEditorState();
   if (!editor) return null;
   const approved = loadApprovedCoachStrategy(editor.blockId)?.strategy;
-  const effective = mergeRaceIntentWithCoachStrategy(editor.intent, approved);
+  const approvedStrategyWindowState = approved
+    ? coachStrategyWindowStateForWeek(approved, currentWeekStart())
+    : undefined;
+  const activeApproved = approvedStrategyWindowState === 'active' ? approved : undefined;
+  const effective = mergeRaceIntentWithCoachStrategy(editor.intent, activeApproved);
   if (!effective) return null;
   return {
     blockId: editor.blockId,
@@ -45,13 +54,15 @@ export async function loadRaceStrategyContext(): Promise<RaceStrategyContext | n
     raceIntent: editor.intent,
     customizedRaceIntent: editor.customized,
     approvedStrategy: approved,
+    approvedStrategyWindowState,
     effectiveStrategy: effective,
   };
 }
 
 export function presentRaceStrategyContext(context: RaceStrategyContext): RaceStrategyPresentation {
   const strategy = context.effectiveStrategy;
-  const sourceLabel = context.approvedStrategy
+  const activeOverride = context.approvedStrategyWindowState === 'active';
+  const sourceLabel = activeOverride
     ? 'RACE INTENT + STRATEGY COACH'
     : context.customizedRaceIntent
       ? 'RACE PRIORITIES'
@@ -135,4 +146,13 @@ function disciplineLabel(discipline: CoachSemanticDiscipline): string {
   if (discipline === 'bike') return 'Bike';
   if (discipline === 'run') return 'Run';
   return 'Strength';
+}
+
+function currentWeekStart(): string {
+  const now = new Date();
+  const day = now.getDay();
+  const delta = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + delta);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
