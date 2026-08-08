@@ -40,9 +40,12 @@ describe('Race Intent V2 mobile wiring', () => {
     expect(runtime).toContain('resetRaceIntent');
   });
 
-  it('uses race intent as baseline strategy while approved Strategy Coach can refine it', () => {
+  it('keeps Race Intent as the durable baseline around a date-scoped Strategy Coach override', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
-    expect(runtime).toContain('mergeRaceIntentWithCoachStrategy(raceIntent, approvedStrategy)');
+    const overlay = source('packages/planner/src/whole-athlete-week-strategy.ts');
+    expect(runtime).toContain('configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy)');
+    expect(overlay).toContain('mergeRaceIntentWithCoachStrategy(configuredRaceIntent, approved)');
+    expect(overlay).toContain('resolveConfiguredStrategy(input.weekStartDate)');
   });
 
   it('includes Race Intent V2 in local export and erase controls', () => {
