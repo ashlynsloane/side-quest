@@ -7,6 +7,12 @@ import {
 import { getLatestTrainingBlock } from './database';
 import { loadCoachDialogueV2, saveCoachDialogueV2 } from './coach-dialogue-v2';
 import {
+  latestUndoableCoachStrategyRevision,
+  markCoachStrategyRevisionReverted,
+  recordCoachStrategyScheduleRevision,
+  type CoachStrategyScheduleRevision,
+} from './coach-strategy-history-state';
+import {
   clearApprovedCoachStrategy,
   loadApprovedCoachStrategy,
   loadApprovedCoachStrategySchedule,
@@ -32,6 +38,7 @@ export interface CoachStrategyReview {
   editingWindowId?: string;
   draftTurnId?: string;
   hasUnapprovedChanges: boolean;
+  latestRevision?: CoachStrategyScheduleRevision;
 }
 
 export async function loadCoachStrategyReview(): Promise<CoachStrategyReview | null> {
@@ -60,6 +67,7 @@ export async function loadCoachStrategyReview(): Promise<CoachStrategyReview | n
     editingWindowId: conversation.editingWindowId,
     draftTurnId: dialogue.updatedAtTurnId,
     hasUnapprovedChanges: Boolean(draft && !draftMatches),
+    latestRevision: latestUndoableCoachStrategyRevision(block.id) ?? undefined,
   };
 }
 
@@ -84,10 +92,19 @@ export async function approveCurrentCoachStrategyDraft(): Promise<ApprovedCoachS
       ? `That strategy window cannot be added to the season plan: ${caught.message}`
       : 'That strategy window cannot be added to the season plan.');
   }
+  const nextSchedule = loadApprovedCoachStrategySchedule(block.id);
+  const existedBefore = previousSchedule.windows.some((window) => window.id === approved.id);
 
   try {
     await refreshLatestWholeAthletePlan();
     setStrategyConversationEditingWindow(conversation, undefined);
+    recordCoachStrategyScheduleRevision({
+      blockId: block.id,
+      action: existedBefore ? 'update' : 'add',
+      changedWindowId: approved.id,
+      before: previousSchedule.windows,
+      after: nextSchedule.windows,
+    });
   } catch (caught) {
     replaceApprovedCoachStrategySchedule(block.id, previousSchedule.windows);
     try { await refreshLatestWholeAthletePlan(); } catch { /* best-effort rollback reconciliation */ }
@@ -157,13 +174,20 @@ export async function stopApprovedCoachStrategy(windowId?: string): Promise<void
   if (!targetId) return;
   const previousDialogue = loadCoachDialogueV2(block.id);
   const previousConversation = loadStrategyConversationState(block.id);
-  removeApprovedCoachStrategyWindow(block.id, targetId);
+  const nextSchedule = removeApprovedCoachStrategyWindow(block.id, targetId);
   if (previousConversation.editingWindowId === targetId) {
     setStrategyConversationEditingWindow(previousConversation, undefined);
     saveCoachDialogueV2(block.id, { ...previousDialogue, strategyDraft: undefined });
   }
   try {
     await refreshLatestWholeAthletePlan();
+    recordCoachStrategyScheduleRevision({
+      blockId: block.id,
+      action: 'remove',
+      changedWindowId: targetId,
+      before: previousSchedule.windows,
+      after: nextSchedule.windows,
+    });
   } catch (caught) {
     replaceApprovedCoachStrategySchedule(block.id, previousSchedule.windows);
     saveCoachDialogueV2(block.id, previousDialogue);
@@ -173,6 +197,34 @@ export async function stopApprovedCoachStrategy(windowId?: string): Promise<void
       ? `The prior season strategy was restored because replanning failed: ${caught.message}`
       : 'The prior season strategy was restored because replanning failed.');
   }
+}
+
+export async function undoLatestCoachStrategyScheduleChange(): Promise<CoachStrategyScheduleRevision> {
+  const saved = await getLatestTrainingBlock();
+  const block = saved?.block;
+  if (!block) throw new Error('The active training plan is no longer available.');
+  const revision = latestUndoableCoachStrategyRevision(block.id);
+  if (!revision) throw new Error('There is no season strategy change to undo.');
+  const currentSchedule = loadApprovedCoachStrategySchedule(block.id);
+  const dialogue = loadCoachDialogueV2(block.id);
+  const conversation = loadStrategyConversationState(block.id);
+  replaceApprovedCoachStrategySchedule(block.id, revision.before);
+  saveCoachDialogueV2(block.id, { ...dialogue, strategyDraft: undefined });
+  setStrategyConversationEditingWindow(conversation, undefined);
+  try {
+    await refreshLatestWholeAthletePlan();
+  } catch (caught) {
+    replaceApprovedCoachStrategySchedule(block.id, currentSchedule.windows);
+    saveCoachDialogueV2(block.id, dialogue);
+    setStrategyConversationEditingWindow(conversation, conversation.editingWindowId);
+    try { await refreshLatestWholeAthletePlan(); } catch { /* best-effort rollback reconciliation */ }
+    throw new Error(caught instanceof Error
+      ? `The season strategy change could not be undone safely: ${caught.message}`
+      : 'The season strategy change could not be undone safely.');
+  }
+  const undo = markCoachStrategyRevisionReverted(revision.id, revision.before);
+  if (!undo) throw new Error('The season strategy was restored, but Side Quest could not update its revision history.');
+  return undo;
 }
 
 function sameStrategy(
