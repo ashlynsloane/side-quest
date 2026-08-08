@@ -65,7 +65,14 @@ export async function loadStrategyCoachConversation(): Promise<StrategyConversat
 
 async function rebaseExpiredStrategyDraft(blockId: string): Promise<void> {
   const review = await loadCoachStrategyReview();
-  if (!review || review.blockId !== blockId || review.approvedWindowState !== 'expired' || review.hasUnapprovedChanges || !review.approved) return;
+  if (
+    !review
+    || review.blockId !== blockId
+    || review.editingWindowId
+    || review.approvedWindowState !== 'expired'
+    || review.hasUnapprovedChanges
+    || !review.approved
+  ) return;
   const dialogue = loadCoachDialogueV2(blockId);
   if (!dialogue.strategyDraft) return;
   const prior = review.approved.strategy;
