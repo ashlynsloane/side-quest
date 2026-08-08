@@ -124,6 +124,34 @@ export async function buildCoachMessageProposalClosedLoop(
   const semanticTurn = saved?.block
     ? await interpretCoachTurnV2(effectiveMessage, quickSignal, existingConversation)
     : null;
+
+  if (semanticTurn?.frame.intent === 'strategy_change' && saved?.block) {
+    let conversation = loadCoachConversationState(saved.block.id);
+    const semanticClarification = semanticTurn.directive.clarification;
+    if (semanticClarification) {
+      const question = semanticClarification.prompt;
+      conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
+      conversation = appendCoachConversationTurn(conversation, 'coach', 'system', question);
+      conversation = saveCoachConversationState({
+        ...conversation,
+        pendingClarification: undefined,
+        recentClarification: undefined,
+      });
+      return { ok: false, reason: 'needs_clarification', message: question, conversation };
+    }
+    if (semanticTurn.state.strategyDraft) {
+      const response = strategyDraftMessage(semanticTurn.state.strategyDraft);
+      conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
+      conversation = appendCoachConversationTurn(conversation, 'coach', 'system', response);
+      conversation = saveCoachConversationState({
+        ...conversation,
+        pendingClarification: undefined,
+        recentClarification: undefined,
+      });
+      return { ok: false, reason: 'needs_clarification', message: response, conversation };
+    }
+  }
+
   const preview = interpretCoachMessage(effectiveMessage, quickSignal);
   const clarification = decideCoachClarification(effectiveMessage, preview);
   const semanticClarification = semanticTurn?.directive.clarification;
@@ -159,19 +187,6 @@ export async function buildCoachMessageProposalClosedLoop(
       question,
     });
     return { ok: false, reason: 'needs_clarification', message: question, conversation };
-  }
-
-  if (semanticTurn?.frame.intent === 'strategy_change' && semanticTurn.state.strategyDraft && saved?.block) {
-    let conversation = refreshedConversation ?? loadCoachConversationState(saved.block.id);
-    const response = strategyDraftMessage(semanticTurn.state.strategyDraft);
-    conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
-    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', response);
-    conversation = saveCoachConversationState({
-      ...conversation,
-      pendingClarification: undefined,
-      recentClarification: undefined,
-    });
-    return { ok: false, reason: 'needs_clarification', message: response, conversation };
   }
 
   const result = await buildCoachMessageProposal(effectiveMessage, quickSignal);
