@@ -1,12 +1,13 @@
-import type {
-  CoachConversationHorizon,
-  CoachSemanticAction,
-  CoachSemanticCorrection,
-  CoachSemanticDiscipline,
-  CoachSemanticStrategyChange,
-  CoachSemanticSymptom,
-  CoachSemanticTrainingEvent,
-  CoachTurnFrameV2,
+import {
+  topStrategyDisciplines,
+  type CoachConversationHorizon,
+  type CoachSemanticAction,
+  type CoachSemanticCorrection,
+  type CoachSemanticDiscipline,
+  type CoachSemanticStrategyChange,
+  type CoachSemanticSymptom,
+  type CoachSemanticTrainingEvent,
+  type CoachTurnFrameV2,
 } from './coach-semantic-frame';
 
 export interface CoachDialogueQuestion {
@@ -159,7 +160,7 @@ function mergeStrategyDraft(
   incoming: CoachSemanticStrategyChange | undefined,
 ): CoachSemanticStrategyChange | undefined {
   if (!incoming) return previous;
-  return {
+  const merged: CoachSemanticStrategyChange = {
     ...previous,
     ...incoming,
     disciplineObjectives: {
@@ -170,6 +171,19 @@ function mergeStrategyDraft(
       ? { ...(previous?.racePriority ?? {}), ...incoming.racePriority }
       : previous?.racePriority,
   };
+  const incomingTop = topStrategyDisciplines(incoming)[0] ?? incoming.primaryFocus;
+  if (!incomingTop) return merged;
+
+  const disciplineObjectives = { ...merged.disciplineObjectives };
+  for (const [discipline, objective] of Object.entries(disciplineObjectives)) {
+    if (discipline === incomingTop) continue;
+    if (objective === 'primary_focus' || objective === 'maximize') {
+      disciplineObjectives[discipline as CoachSemanticDiscipline] = 'develop';
+    }
+  }
+  const incomingObjective = incoming.disciplineObjectives[incomingTop];
+  disciplineObjectives[incomingTop] = incomingObjective === 'maximize' ? 'maximize' : 'primary_focus';
+  return { ...merged, primaryFocus: incomingTop, disciplineObjectives };
 }
 
 function deriveConcern(
@@ -259,7 +273,14 @@ function deriveQuestion(
   concern: CoachDialogueConcern | undefined,
 ): CoachDialogueQuestion | undefined {
   if (frame.unresolved.length) {
-    return { kind: 'clarify_request', prompt: 'I need one more detail before I change the plan.', missing: frame.unresolved };
+    const focusConflict = frame.unresolved.includes('single_top_focus');
+    return {
+      kind: 'clarify_request',
+      prompt: focusConflict
+        ? 'Only one discipline can be the top focus. Which one do you want Side Quest to prioritize most?'
+        : 'I need one more detail before I change the plan.',
+      missing: frame.unresolved,
+    };
   }
   if (
     frame.intent === 'report_symptom'
