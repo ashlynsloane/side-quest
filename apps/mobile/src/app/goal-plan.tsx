@@ -1,34 +1,40 @@
 import type { TrainingBlockPlan } from '@circuit/domain';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import LegacyGoalPlanScreen from '@/components/legacy-goal-plan-screen';
+import { V23Icon } from '@/components/v23-ui';
 import { getLatestTrainingBlock } from '@/services/database';
 import { useTheme } from '@/state/theme-context';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
+import type { DesignTokens } from '@/theme';
 
 const PLAN_WATCH_INTERVAL_MS = 1000;
 
 export default function GoalPlanScreen() {
   const router = useRouter();
   const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const hasRacePlan = useCanonicalWholeAthletePlan();
   return <View style={styles.root}>
     <LegacyGoalPlanScreen />
-    {hasRacePlan ? <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Edit race priorities"
-      onPress={() => router.push('/race-intent' as Href)}
-      style={({ pressed }) => [
-        styles.raceIntentButton,
-        { backgroundColor: tokens.accent, shadowColor: tokens.text },
-        pressed && styles.pressed,
-      ]}
-    >
-      <Text style={styles.raceIntentEyebrow}>RACE INTENT V2</Text>
-      <Text style={styles.raceIntentLabel}>Race priorities</Text>
-    </Pressable> : null}
+    {hasRacePlan ? <View style={styles.dockWrap} pointerEvents="box-none">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Edit race priorities"
+        onPress={() => router.push('/race-intent' as Href)}
+        style={({ pressed }) => [styles.raceIntentDock, pressed && styles.pressed]}
+      >
+        <View style={styles.dockIcon}><V23Icon name="goal" color={tokens.accent} size={19} /></View>
+        <View style={styles.dockCopy}>
+          <Text style={styles.dockEyebrow}>RACE STRATEGY</Text>
+          <Text style={styles.dockTitle}>Set race priorities</Text>
+          <Text style={styles.dockBody}>Choose the outcome, top discipline, and tradeoffs.</Text>
+        </View>
+        <V23Icon name="chevron" color={tokens.textMuted} size={17} />
+      </Pressable>
+    </View> : null}
   </View>;
 }
 
@@ -90,22 +96,32 @@ function blockSignature(block: TrainingBlockPlan | null): string {
   });
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-  raceIntentButton: {
-    position: 'absolute',
-    right: 16,
-    bottom: 18,
-    minWidth: 142,
-    borderRadius: 17,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 9,
-    elevation: 5,
-  },
-  raceIntentEyebrow: { color: '#FFFFFF', opacity: 0.76, fontSize: 8.5, lineHeight: 11, fontWeight: '900', letterSpacing: 0.8 },
-  raceIntentLabel: { color: '#FFFFFF', fontSize: 14, lineHeight: 19, fontWeight: '900' },
-  pressed: { opacity: 0.82 },
-});
+function makeStyles(tokens: DesignTokens) {
+  return StyleSheet.create({
+    root: { flex: 1 },
+    dockWrap: { position: 'absolute', left: 12, right: 12, bottom: 12 },
+    raceIntentDock: {
+      minHeight: 72,
+      borderRadius: 19,
+      borderWidth: 1,
+      borderColor: tokens.border,
+      backgroundColor: tokens.surface,
+      paddingHorizontal: 13,
+      paddingVertical: 11,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      shadowColor: '#01234D',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.09,
+      shadowRadius: 12,
+      elevation: 4,
+    },
+    dockIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
+    dockCopy: { flex: 1, minWidth: 0, gap: 1 },
+    dockEyebrow: { color: tokens.accent, fontSize: 8.5, lineHeight: 11, fontWeight: '900', letterSpacing: 0.8 },
+    dockTitle: { color: tokens.text, fontSize: 14, lineHeight: 18, fontWeight: '900' },
+    dockBody: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14 },
+    pressed: { opacity: 0.8 },
+  });
+}
