@@ -15,12 +15,14 @@ describe('Strategy Coach wiring', () => {
     expect(plannerPackage).toContain('"./whole-athlete-week": "./src/whole-athlete-week-strategy.ts"');
   });
 
-  it('merges baseline race intent with only athlete-approved Strategy Coach state during reconciliation', () => {
+  it('configures Race Intent and approved Strategy Coach as separate weekly layers during reconciliation', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+    const overlay = source('packages/planner/src/whole-athlete-week-strategy.ts');
     expect(runtime).toContain('loadRaceIntent');
     expect(runtime).toContain('loadApprovedCoachStrategy');
-    expect(runtime).toContain('mergeRaceIntentWithCoachStrategy(raceIntent, approvedStrategy)');
-    expect(runtime).toContain('configureWholeAthleteCoachStrategy');
+    expect(runtime).toContain('configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy)');
+    expect(overlay).toContain('coachStrategyAppliesToWeek');
+    expect(overlay).toContain('mergeRaceIntentWithCoachStrategy(configuredRaceIntent, approved)');
   });
 
   it('keeps strategy turns out of the Daily Coach workout-adaptation path', () => {
