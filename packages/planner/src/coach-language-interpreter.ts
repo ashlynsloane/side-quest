@@ -53,9 +53,9 @@ export async function runCoachLanguageInterpreter(
 }
 
 /**
- * This is the contract for a future server-backed language model. The model is
- * only an interpretation layer: it returns a semantic frame. It never receives
- * authority to create or mutate training sessions directly.
+ * Contract for a future server-backed language model. The model is only an
+ * interpretation layer: it returns semantic facts and never receives authority
+ * to create, prescribe, or mutate training sessions directly.
  */
 export function coachInterpreterSystemContract(): string {
   return [
@@ -65,8 +65,11 @@ export function coachInterpreterSystemContract(): string {
     'Do not make a completed workout the target of a requested change.',
     'Separate the workout that caused a symptom from the workout the athlete wants changed.',
     'Mentioning a date is not the same as requesting a move.',
-    'Use unresolved when the target, time, symptom function, or requested action is ambiguous.',
+    'Use functionChanged when the athlete says function changed but does not distinguish movement from training.',
+    'Use unresolved when the target, time, symptom function, requested action, or strategy tradeoff is ambiguous.',
     'Corrections should identify which prior fact is being replaced.',
+    'For long-horizon goals, use intent=strategy_change and populate strategyChange rather than inventing weekly sessions.',
+    'A strategyChange may describe discipline objectives and tradeoff tolerance, but it may not prescribe the resulting training allocation.',
     'Do not diagnose injuries, illnesses, or menstrual disorders.',
   ].join('\n');
 }
