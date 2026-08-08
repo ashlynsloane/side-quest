@@ -17,7 +17,8 @@ describe('Race Intent V2 mobile wiring', () => {
   it('exposes race priorities from the goal-plan surface without rewriting the legacy setup screen', () => {
     const route = source('apps/mobile/src/app/goal-plan.tsx');
     expect(route).toContain('LegacyGoalPlanScreen');
-    expect(route).toContain('Race priorities');
+    expect(route).toContain('raceIntentDock');
+    expect(route).toContain('Set race priorities');
     expect(route).toContain("router.push('/race-intent'");
   });
 
