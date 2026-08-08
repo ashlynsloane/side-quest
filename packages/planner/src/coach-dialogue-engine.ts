@@ -18,6 +18,7 @@ export interface CoachDialogueConcern {
   semanticId: string;
   bodyArea?: string;
   category?: CoachSemanticSymptom['category'];
+  functionChanged?: boolean;
   changedMovement?: boolean;
   changedTraining?: boolean;
   stoppedTraining?: boolean;
@@ -55,6 +56,7 @@ export interface CoachPlannerDirectiveV2 {
   requestedDurationMinutes?: number;
   requestedIntensity?: 'recovery' | 'easy' | 'moderate' | 'hard' | 'max';
   safetyFacts: {
+    functionChanged: boolean;
     changedMovement: boolean;
     changedTraining: boolean;
     stoppedTraining: boolean;
@@ -126,6 +128,7 @@ export function buildPlannerDirective(state: CoachDialogueStateV2, frame: CoachT
     requestedDurationMinutes: change?.durationMinutes,
     requestedIntensity: change?.intensity,
     safetyFacts: {
+      functionChanged: Boolean(concern?.functionChanged ?? concern?.changedMovement ?? concern?.changedTraining ?? concern?.stoppedTraining),
       changedMovement: Boolean(concern?.changedMovement),
       changedTraining: Boolean(concern?.changedTraining),
       stoppedTraining: Boolean(concern?.stoppedTraining),
@@ -156,6 +159,7 @@ function deriveConcern(
     semanticId: latest.semanticId,
     bodyArea: latest.bodyArea ?? previous?.bodyArea,
     category: latest.category ?? previous?.category,
+    functionChanged: latest.functionChanged ?? previous?.functionChanged,
     changedMovement: latest.changedMovement ?? previous?.changedMovement,
     changedTraining: latest.changedTraining ?? previous?.changedTraining,
     stoppedTraining: latest.stoppedTraining ?? previous?.stoppedTraining,
@@ -177,6 +181,7 @@ function applyConcernCorrection(
   if (correction.target === 'symptom_function') {
     return {
       ...previous,
+      functionChanged: latest.functionChanged ?? previous.functionChanged,
       changedMovement: latest.changedMovement ?? previous.changedMovement,
       changedTraining: latest.changedTraining ?? previous.changedTraining,
       stoppedTraining: latest.stoppedTraining ?? previous.stoppedTraining,
@@ -232,7 +237,13 @@ function deriveQuestion(
   if (frame.unresolved.length) {
     return { kind: 'clarify_request', prompt: 'I need one more detail before I change the plan.', missing: frame.unresolved };
   }
-  if (frame.intent === 'report_symptom' && concern && concern.changedMovement === undefined && concern.changedTraining === undefined) {
+  if (
+    frame.intent === 'report_symptom'
+    && concern
+    && concern.functionChanged === undefined
+    && concern.changedMovement === undefined
+    && concern.changedTraining === undefined
+  ) {
     return { kind: 'clarify_function', prompt: 'Did it change your movement or training?', missing: ['symptom_function'] };
   }
   if (frame.intent === 'modify_planned_session' && !target) {
