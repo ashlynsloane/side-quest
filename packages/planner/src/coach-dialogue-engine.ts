@@ -82,7 +82,7 @@ export function reduceCoachDialogue(
   const correctedConcern = applyConcernCorrection(base.activeConcern, frame.correction, frame.symptoms, frame.turnId);
   const activeConcern = correctedConcern ?? deriveConcern(base.activeConcern, frame.symptoms, frame.turnId);
   const focusDate = deriveFocusDate(base.focusDate, frame);
-  const activePlannedTarget = deriveActiveTarget(base.activePlannedTarget, events, frame);
+  const activePlannedTarget = deriveActiveTarget(base.activePlannedTarget, events, frame, focusDate);
   const pendingQuestion = deriveQuestion(frame, activePlannedTarget, activeConcern);
   const state: CoachDialogueStateV2 = {
     version: 2,
@@ -203,6 +203,7 @@ function deriveActiveTarget(
   previous: CoachDialogueStateV2['activePlannedTarget'],
   events: CoachSemanticTrainingEvent[],
   frame: CoachTurnFrameV2,
+  focusDate: string | undefined,
 ): CoachDialogueStateV2['activePlannedTarget'] {
   const explicit = frame.requestedChange?.targetEventSemanticId
     ? events.find((event) => event.semanticId === frame.requestedChange?.targetEventSemanticId)
@@ -213,6 +214,11 @@ function deriveActiveTarget(
 
   const changeTarget = frame.events.find((event) => event.relationToTurn === 'change_target' && event.temporalRole !== 'completed');
   if (changeTarget) return targetFromEvent(changeTarget);
+
+  if (frame.intent === 'ask_about_future_training' && focusDate) {
+    const onDate = frame.events.filter((event) => event.date === focusDate && event.temporalRole !== 'completed');
+    return onDate.length === 1 ? targetFromEvent(onDate[0]!) : undefined;
+  }
 
   if (frame.intent === 'report_completed_training' || frame.intent === 'report_symptom') return previous;
   return previous;
@@ -243,6 +249,21 @@ function resolveEditableTarget(state: CoachDialogueStateV2, frame: CoachTurnFram
       ? state.events.find((event) => event.eventId === change.targetEventId)
       : undefined;
   if (explicit) return explicit.temporalRole === 'completed' ? undefined : explicit;
+
+  if ((frame.intent === 'report_symptom' || frame.intent === 'report_completed_training') && !change) return undefined;
+
+  const focusDate = change?.date ?? (frame.intent === 'ask_about_future_training' ? state.focusDate : undefined);
+  if (focusDate) {
+    const onDate = state.events.filter((event) => event.date === focusDate && event.temporalRole !== 'completed');
+    if (change?.discipline) {
+      const matching = onDate.find((event) => event.discipline === change.discipline);
+      if (matching) return matching;
+    }
+    if (onDate.length === 1) return onDate[0];
+    const directContext = onDate.find((event) => event.relationToTurn === 'change_target');
+    if (directContext) return directContext;
+  }
+
   if (state.activePlannedTarget) {
     const target = state.events.find((event) => event.semanticId === state.activePlannedTarget?.semanticId);
     if (target?.temporalRole !== 'completed') return target;
