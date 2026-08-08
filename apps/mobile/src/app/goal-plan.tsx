@@ -112,6 +112,12 @@ export default function GoalPlanScreen() {
     </V23Screen>;
   }
 
+  // Capture the successfully loaded setup state for event-handler closures.
+  // React state remains nullable while loading, but everything below the guard
+  // operates on a fully initialized Goal Setup environment and draft.
+  const activeEnvironment = environment;
+  const activeDraft = draft;
+
   const option = goalSetupOption(draft.goalType);
   const recommendation = recommendedStrengthDoseForDraft(draft);
   const weeks = weeksUntilEvent(draft);
@@ -169,21 +175,21 @@ export default function GoalPlanScreen() {
       patch({ equipmentProfileId: undefined, equipment: ['bodyweight'] });
       return;
     }
-    const profile = environment.equipmentProfiles.find((candidate) => candidate.id === profileId);
+    const profile = activeEnvironment.equipmentProfiles.find((candidate) => candidate.id === profileId);
     if (profile) patch({ equipmentProfileId: profile.id, equipment: profile.equipment });
   }
 
   function choosePrimaryDiscipline(primaryDiscipline: EnduranceDiscipline | undefined) {
-    patch({ primaryDiscipline, disciplineTargetKind: primaryDiscipline ? draft.disciplineTargetKind : undefined, disciplineTargetValue: primaryDiscipline ? draft.disciplineTargetValue : undefined });
+    patch({ primaryDiscipline, disciplineTargetKind: primaryDiscipline ? activeDraft.disciplineTargetKind : undefined, disciplineTargetValue: primaryDiscipline ? activeDraft.disciplineTargetValue : undefined });
   }
 
   function goNext() {
-    if (step === 'goal' && isRaceGoal && (!draft.eventDate || weeks < 0)) {
+    if (step === 'goal' && isRaceGoal && (!activeDraft.eventDate || weeks < 0)) {
       setError('Add a valid event date before continuing.');
       return;
     }
     if (step === 'capacity') {
-      const capacityErrors = validateGoalSetupDraft(draft).filter((item) => item.includes('capacity') || item.includes('endurance hours'));
+      const capacityErrors = validateGoalSetupDraft(activeDraft).filter((item) => item.includes('capacity') || item.includes('endurance hours'));
       if (capacityErrors[0]) { setError(capacityErrors[0]); return; }
     }
     setStep(STEPS[Math.min(STEPS.length - 1, stepIndex + 1)] ?? 'review');
@@ -198,7 +204,7 @@ export default function GoalPlanScreen() {
 
   async function buildPlan() {
     if (busy) return;
-    const errors = validateGoalSetupDraft(draft);
+    const errors = validateGoalSetupDraft(activeDraft);
     if (errors[0]) { setError(errors[0]); return; }
     setBusy(true);
     setError(null);
@@ -207,7 +213,7 @@ export default function GoalPlanScreen() {
         onboarding.acknowledgeStrengthModel(true);
         onboarding.acknowledgePrivacyModel(true);
       }
-      await buildAndSaveGoalSetup(draft, exercises);
+      await buildAndSaveGoalSetup(activeDraft, exercises);
       if (params.onboarding === '1') await onboarding.complete();
       router.replace('/(tabs)/plan' as Href);
     } catch (caught) {
