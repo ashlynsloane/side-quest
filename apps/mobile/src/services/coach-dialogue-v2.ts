@@ -8,11 +8,14 @@ import Storage from 'expo-sqlite/kv-store';
 
 import { getLatestTrainingBlock, getTrainingCalendarEvents } from './database';
 import type { CoachConversationState } from './coach-conversation-state';
+import { remoteCoachLanguageConfigured, remoteCoachLanguageInterpreter } from './coach-remote-language-interpreter';
 import { isSideQuestGeneratedPlanEvent } from './whole-athlete-plan';
 
 const COACH_DIALOGUE_V2_KEY = 'circuit.coach-dialogue.v2';
 const MAX_AGE_DAYS = 14;
-let registeredInterpreter: CoachLanguageInterpreter | null = null;
+let registeredInterpreter: CoachLanguageInterpreter | null = remoteCoachLanguageConfigured
+  ? remoteCoachLanguageInterpreter
+  : null;
 
 type KnownPlannedEvent = {
   eventId: string;
