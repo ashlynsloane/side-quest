@@ -56,11 +56,12 @@ describe('race strategy visibility', () => {
     expect(planner).toContain('does not treat arbitrary training duration as a race-distance time benchmark');
   });
 
-  it('reuses the latest reconciled planner result instead of rebuilding solely for presentation', () => {
+  it('reuses only the active block’s latest reconciled planner result', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
-    expect(runtime).toContain('getLatestWholeAthletePlanSnapshot');
-    expect(runtime).toContain('latestReconciledPlan = generated');
-    expect(weekly).toContain('getLatestWholeAthletePlanSnapshot');
+    expect(runtime).toContain('getLatestWholeAthletePlanSnapshot(blockId?: string)');
+    expect(runtime).toContain('latestReconciledPlan = { blockId: saved.block.id, plan: generated }');
+    expect(runtime).toContain('latestReconciledPlan.blockId !== blockId');
+    expect(weekly).toContain('getLatestWholeAthletePlanSnapshot(race.blockId)');
   });
 });
