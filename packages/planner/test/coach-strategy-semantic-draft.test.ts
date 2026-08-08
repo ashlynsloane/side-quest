@@ -28,7 +28,7 @@ describe('Strategy Coach semantic draft', () => {
   it('requires strategy details or an explicit unresolved slot', () => {
     const result = validateCoachTurnFrame(strategyFrame({ strategyChange: undefined, unresolved: [] }));
     expect(result.valid).toBe(false);
-    expect(result.errors).toContain('strategy_change requires strategyChange details or unresolved fields.');
+    expect(result.errors).toContain('strategy_change requires meaningful strategy details or unresolved fields.');
   });
 
   it('accepts discipline-specific long-horizon priorities', () => {
