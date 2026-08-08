@@ -9,6 +9,10 @@ import { clearCoachObservedOutcomes, exportCoachObservedOutcomes } from './coach
 import { clearApprovedCoachStrategy, COACH_STRATEGY_KEY } from './coach-strategy-state';
 import { clearRaceIntent, exportRaceIntentState } from './race-intent-state';
 import { clearAllSideQuestPlanSessionOverrides } from './side-quest-plan-overrides';
+import {
+  clearStrategyConversationState,
+  exportStrategyConversationState,
+} from './strategy-conversation-state';
 import { clearWholeAthleteHealthPreferences } from './whole-athlete-plan-runtime';
 
 const COACH_CONVERSATION_KEY = 'circuit.coach-conversation.v1';
@@ -22,6 +26,7 @@ export function exportLocalTrainingKeyValueData(): Record<string, unknown> {
   const activeWorkoutStorageKey = Storage.getItemSync(ACTIVE_WORKOUT_INDEX_KEY);
   return {
     coachConversation: parseStored(COACH_CONVERSATION_KEY),
+    strategyConversation: exportStrategyConversationState(),
     coachSemanticDialogue: parseStored(COACH_DIALOGUE_V2_KEY),
     approvedCoachStrategy: parseStored(COACH_STRATEGY_KEY),
     raceIntent: exportRaceIntentState(),
@@ -41,6 +46,7 @@ export function clearLocalTrainingKeyValueData(): void {
   Storage.removeItemSync(ACTIVE_WORKOUT_INDEX_KEY);
   Storage.removeItemSync(LIVE_WORKOUT_KEY);
   clearCoachConversationState();
+  clearStrategyConversationState();
   clearCoachDialogueV2();
   clearApprovedCoachStrategy();
   clearRaceIntent();
