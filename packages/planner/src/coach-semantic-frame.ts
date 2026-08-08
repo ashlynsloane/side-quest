@@ -22,6 +22,8 @@ export type CoachConversationHorizon =
 export type CoachEventTemporalRole = 'completed' | 'current' | 'planned' | 'proposed';
 export type CoachSemanticDiscipline = 'swim' | 'bike' | 'run' | 'strength';
 export type CoachSemanticAction = 'move' | 'shorten' | 'replace' | 'skip' | 'evaluate' | 'add' | 'none';
+export type CoachStrategyObjective = 'minimum_viable' | 'maintain' | 'develop' | 'primary_focus' | 'maximize';
+export type CoachStrategyTradeoff = 'preserve_balance' | 'moderate_tradeoff' | 'aggressive_specialization';
 
 export interface CoachSemanticTrainingEvent {
   semanticId: string;
@@ -57,6 +59,19 @@ export interface CoachSemanticRequestedChange {
   intensity?: 'recovery' | 'easy' | 'moderate' | 'hard' | 'max';
 }
 
+export interface CoachSemanticStrategyChange {
+  startsAt?: string;
+  endsAt?: string;
+  primaryFocus?: CoachSemanticDiscipline;
+  disciplineObjectives: Partial<Record<CoachSemanticDiscipline, CoachStrategyObjective>>;
+  tradeoffTolerance?: CoachStrategyTradeoff;
+  racePriority?: {
+    discipline?: Exclude<CoachSemanticDiscipline, 'strength'>;
+    objective?: 'finish' | 'strong_split' | 'personal_best' | 'time_goal' | 'placement';
+    target?: string;
+  };
+}
+
 export interface CoachSemanticCorrection {
   target: 'symptom_function' | 'symptom_trajectory' | 'event_status' | 'requested_change' | 'general';
   replacesTurnId?: string;
@@ -71,6 +86,7 @@ export interface CoachTurnFrameV2 {
   events: CoachSemanticTrainingEvent[];
   symptoms: CoachSemanticSymptom[];
   requestedChange?: CoachSemanticRequestedChange;
+  strategyChange?: CoachSemanticStrategyChange;
   correction?: CoachSemanticCorrection;
   constraints: string[];
   unresolved: string[];
@@ -98,7 +114,11 @@ export function validateCoachTurnFrame(input: unknown): CoachFrameValidationResu
   if (!Array.isArray(frame.unresolved) || !frame.unresolved.every((item) => typeof item === 'string')) errors.push('unresolved must be strings.');
   if (typeof frame.confidence !== 'number' || frame.confidence < 0 || frame.confidence > 1) errors.push('confidence must be between 0 and 1.');
   if (frame.requestedChange && !isRequestedChange(frame.requestedChange)) errors.push('requestedChange is invalid.');
+  if (frame.strategyChange && !isStrategyChange(frame.strategyChange)) errors.push('strategyChange is invalid.');
   if (frame.correction && !isCorrection(frame.correction)) errors.push('correction is invalid.');
+  if (frame.intent === 'strategy_change' && !frame.strategyChange && !(frame.unresolved?.length)) {
+    errors.push('strategy_change requires strategyChange details or unresolved fields.');
+  }
 
   if (errors.length) return { valid: false, errors };
   const normalized = frame as CoachTurnFrameV2;
@@ -171,6 +191,33 @@ function isRequestedChange(value: unknown): value is CoachSemanticRequestedChang
     && (change.action === 'move' || change.action === 'shorten' || change.action === 'replace' || change.action === 'skip' || change.action === 'evaluate' || change.action === 'add' || change.action === 'none')
     && (change.date === undefined || isIsoDate(change.date)),
   );
+}
+
+function isStrategyChange(value: unknown): value is CoachSemanticStrategyChange {
+  const strategy = value as Partial<CoachSemanticStrategyChange> | null | undefined;
+  if (!strategy || !strategy.disciplineObjectives || typeof strategy.disciplineObjectives !== 'object') return false;
+  if (strategy.startsAt !== undefined && !isIsoDate(strategy.startsAt)) return false;
+  if (strategy.endsAt !== undefined && !isIsoDate(strategy.endsAt)) return false;
+  if (strategy.startsAt && strategy.endsAt && strategy.endsAt < strategy.startsAt) return false;
+  if (strategy.primaryFocus !== undefined && !isDiscipline(strategy.primaryFocus)) return false;
+  if (strategy.tradeoffTolerance !== undefined && strategy.tradeoffTolerance !== 'preserve_balance' && strategy.tradeoffTolerance !== 'moderate_tradeoff' && strategy.tradeoffTolerance !== 'aggressive_specialization') return false;
+  for (const [discipline, objective] of Object.entries(strategy.disciplineObjectives)) {
+    if (!isDiscipline(discipline) || !isStrategyObjective(objective)) return false;
+  }
+  if (strategy.racePriority) {
+    const race = strategy.racePriority;
+    if (race.discipline !== undefined && race.discipline !== 'swim' && race.discipline !== 'bike' && race.discipline !== 'run') return false;
+    if (race.objective !== undefined && race.objective !== 'finish' && race.objective !== 'strong_split' && race.objective !== 'personal_best' && race.objective !== 'time_goal' && race.objective !== 'placement') return false;
+  }
+  return true;
+}
+
+function isDiscipline(value: unknown): value is CoachSemanticDiscipline {
+  return value === 'swim' || value === 'bike' || value === 'run' || value === 'strength';
+}
+
+function isStrategyObjective(value: unknown): value is CoachStrategyObjective {
+  return value === 'minimum_viable' || value === 'maintain' || value === 'develop' || value === 'primary_focus' || value === 'maximize';
 }
 
 function isCorrection(value: unknown): value is CoachSemanticCorrection {
