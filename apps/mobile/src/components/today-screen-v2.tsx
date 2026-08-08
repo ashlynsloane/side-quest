@@ -175,7 +175,7 @@ function TodayCall({
   const title = strength
     ? strength.title
     : calendar
-      ? conciseSessionLabel({ discipline: calendar.discipline, title: calendar.title })
+      ? conciseSessionLabel({ discipline: calendar.discipline, title: calendar.title }) ?? calendar.title ?? 'Scheduled training'
       : 'Your day is open';
   const meta = strength
     ? `${Math.round(strength.workout.totalWorkSeconds / 60)} min · ${friendlyLoad(strength.intendedLoad)}`
@@ -232,7 +232,7 @@ function SecondarySessions({
     /> : null}
     {calendar ? <SessionRow
       kind={calendar.discipline}
-      title={conciseSessionLabel({ discipline: calendar.discipline, title: calendar.title })}
+      title={conciseSessionLabel({ discipline: calendar.discipline, title: calendar.title }) ?? calendar.title ?? 'Scheduled training'}
       body={calendarTime(calendar)}
       tokens={tokens}
       styles={styles}
