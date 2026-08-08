@@ -97,14 +97,33 @@ export function validateCoachTurnFrame(input: unknown): CoachFrameValidationResu
   if (!Array.isArray(frame.unresolved) || !frame.unresolved.every((item) => typeof item === 'string')) errors.push('unresolved must be strings.');
   if (typeof frame.confidence !== 'number' || frame.confidence < 0 || frame.confidence > 1) errors.push('confidence must be between 0 and 1.');
   if (frame.requestedChange && !isRequestedChange(frame.requestedChange)) errors.push('requestedChange is invalid.');
+  if (frame.correction && !isCorrection(frame.correction)) errors.push('correction is invalid.');
 
   if (errors.length) return { valid: false, errors };
   const normalized = frame as CoachTurnFrameV2;
-  const target = resolveRequestedTarget(normalized);
-  if (target?.temporalRole === 'completed' && normalized.requestedChange?.action !== 'evaluate') {
-    return { valid: false, errors: ['A completed event cannot be an editable training target.'] };
+  const duplicateEventIds = duplicateValues(normalized.events.map((event) => event.semanticId));
+  if (duplicateEventIds.length) errors.push(`Duplicate event semanticId: ${duplicateEventIds.join(', ')}.`);
+  const duplicateSymptomIds = duplicateValues(normalized.symptoms.map((symptom) => symptom.semanticId));
+  if (duplicateSymptomIds.length) errors.push(`Duplicate symptom semanticId: ${duplicateSymptomIds.join(', ')}.`);
+
+  for (const symptom of normalized.symptoms) {
+    if (symptom.sourceEventSemanticId && !normalized.events.some((event) => event.semanticId === symptom.sourceEventSemanticId)) {
+      errors.push(`Symptom ${symptom.semanticId} references an event that is not present in the frame.`);
+    }
   }
-  return { valid: true, frame: normalized, errors: [] };
+
+  const change = normalized.requestedChange;
+  const target = resolveRequestedTarget(normalized);
+  if (change?.targetEventSemanticId && !target) errors.push('requestedChange.targetEventSemanticId must reference an event in the frame.');
+  if (change?.targetEventId && !target) errors.push('requestedChange.targetEventId must reference an event in the frame.');
+  if (target?.temporalRole === 'completed' && change?.action !== 'evaluate') {
+    errors.push('A completed event cannot be an editable training target.');
+  }
+  if (change?.durationMinutes !== undefined && (!Number.isFinite(change.durationMinutes) || change.durationMinutes <= 0 || change.durationMinutes > 1_440)) {
+    errors.push('requestedChange.durationMinutes must be between 1 and 1440.');
+  }
+
+  return errors.length ? { valid: false, errors } : { valid: true, frame: normalized, errors: [] };
 }
 
 export function resolveRequestedTarget(frame: CoachTurnFrameV2): CoachSemanticTrainingEvent | undefined {
@@ -128,15 +147,49 @@ function isHorizon(value: unknown): value is CoachConversationHorizon {
 
 function isEvent(value: unknown): value is CoachSemanticTrainingEvent {
   const event = value as Partial<CoachSemanticTrainingEvent> | null | undefined;
-  return Boolean(event?.semanticId && (event.temporalRole === 'completed' || event.temporalRole === 'current' || event.temporalRole === 'planned' || event.temporalRole === 'proposed'));
+  return Boolean(
+    event?.semanticId
+    && (event.temporalRole === 'completed' || event.temporalRole === 'current' || event.temporalRole === 'planned' || event.temporalRole === 'proposed')
+    && (event.date === undefined || isIsoDate(event.date))
+    && (event.durationMinutes === undefined || (Number.isFinite(event.durationMinutes) && event.durationMinutes > 0 && event.durationMinutes <= 1_440)),
+  );
 }
 
 function isSymptom(value: unknown): value is CoachSemanticSymptom {
   const symptom = value as Partial<CoachSemanticSymptom> | null | undefined;
-  return Boolean(symptom?.semanticId && (symptom.severity0to10 === undefined || (symptom.severity0to10 >= 0 && symptom.severity0to10 <= 10)));
+  return Boolean(
+    symptom?.semanticId
+    && (symptom.severity0to10 === undefined || (Number.isFinite(symptom.severity0to10) && symptom.severity0to10 >= 0 && symptom.severity0to10 <= 10)),
+  );
 }
 
 function isRequestedChange(value: unknown): value is CoachSemanticRequestedChange {
   const change = value as Partial<CoachSemanticRequestedChange> | null | undefined;
-  return Boolean(change && (change.action === 'move' || change.action === 'shorten' || change.action === 'replace' || change.action === 'skip' || change.action === 'evaluate' || change.action === 'add' || change.action === 'none'));
+  return Boolean(
+    change
+    && (change.action === 'move' || change.action === 'shorten' || change.action === 'replace' || change.action === 'skip' || change.action === 'evaluate' || change.action === 'add' || change.action === 'none')
+    && (change.date === undefined || isIsoDate(change.date)),
+  );
+}
+
+function isCorrection(value: unknown): value is CoachSemanticCorrection {
+  const correction = value as Partial<CoachSemanticCorrection> | null | undefined;
+  return Boolean(
+    correction
+    && (correction.target === 'symptom_function' || correction.target === 'symptom_trajectory' || correction.target === 'event_status' || correction.target === 'requested_change' || correction.target === 'general'),
+  );
+}
+
+function isIsoDate(value: string): boolean {
+  return /^20\d{2}-\d{2}-\d{2}$/.test(value) && Number.isFinite(new Date(`${value}T12:00:00Z`).getTime());
+}
+
+function duplicateValues(values: string[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) duplicates.add(value);
+    seen.add(value);
+  }
+  return [...duplicates];
 }
