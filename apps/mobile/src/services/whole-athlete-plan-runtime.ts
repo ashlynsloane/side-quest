@@ -1,4 +1,5 @@
 import type { PerformanceGoal } from '@circuit/domain';
+import { mergeRaceIntentWithCoachStrategy } from '@circuit/planner/race-intent';
 import { configureWholeAthleteCoachStrategy } from '@circuit/planner/whole-athlete-week';
 import Storage from 'expo-sqlite/kv-store';
 
@@ -9,6 +10,7 @@ import {
   getTodayReadinessCheckIn,
 } from './database';
 import { loadApprovedCoachStrategy } from './coach-strategy-state';
+import { loadRaceIntent } from './race-intent-state';
 import {
   clearSideQuestGeneratedPlanEvents,
   generateAndPersistWholeAthleteBlock,
@@ -73,8 +75,9 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     return null;
   }
 
-  const approvedStrategy = loadApprovedCoachStrategy(saved.block.id);
-  configureWholeAthleteCoachStrategy(approvedStrategy?.strategy);
+  const raceIntent = loadRaceIntent(saved.block.id)?.intent;
+  const approvedStrategy = loadApprovedCoachStrategy(saved.block.id)?.strategy;
+  configureWholeAthleteCoachStrategy(mergeRaceIntentWithCoachStrategy(raceIntent, approvedStrategy));
 
   const [activeCheckIn, ptProfile, readiness] = await Promise.all([
     getActiveTrainingCheckIn(),
