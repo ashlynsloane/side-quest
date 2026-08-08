@@ -50,10 +50,14 @@ describe('Side Quest UI consolidation', () => {
     expect(inbox).toContain('Nothing in the training plan changes until you approve');
   });
 
-  it('replaces the detached Race Intent badge with a full-width race-strategy dock', () => {
+  it('replaces the legacy goal form with the same progressive product hierarchy', () => {
     const goalPlan = source('apps/mobile/src/app/goal-plan.tsx');
-    expect(goalPlan).toContain('raceIntentDock');
-    expect(goalPlan).toContain('Set race priorities');
-    expect(goalPlan).not.toContain('raceIntentButton');
+    expect(goalPlan).toContain('ProductHero');
+    expect(goalPlan).toContain('SetupProgress');
+    expect(goalPlan).toContain('1 · GOAL');
+    expect(goalPlan).toContain('5 · REVIEW');
+    expect(goalPlan).toContain('Build my plan');
+    expect(goalPlan).not.toContain('LegacyGoalPlanScreen');
+    expect(goalPlan).not.toContain('raceIntentDock');
   });
 });
