@@ -3,6 +3,7 @@ import {
   decideCoachClarification,
   isCoachClarificationCorrection,
   resolveCoachClarificationAnswer,
+  type CoachClarificationKind,
 } from '@circuit/planner/coach-clarification';
 import {
   buildCoachDecisionExplanation,
@@ -47,6 +48,7 @@ import {
   type CoachClosedLoopSummary,
   type CoachFollowUpResponse,
 } from './coach-closed-loop-state';
+import { interpretCoachTurnV2 } from './coach-dialogue-v2';
 import {
   getSideQuestPlanSessionOverride,
   restoreSideQuestPlanSessionOverride,
@@ -116,8 +118,12 @@ export async function buildCoachMessageProposalClosedLoop(
     }
   }
 
+  const semanticTurn = saved?.block
+    ? await interpretCoachTurnV2(effectiveMessage, quickSignal, existingConversation)
+    : null;
   const preview = interpretCoachMessage(effectiveMessage, quickSignal);
   const clarification = decideCoachClarification(effectiveMessage, preview);
+  const semanticClarification = semanticTurn?.directive.clarification;
   const refreshedConversation = saved?.block ? loadCoachConversationState(saved.block.id) : existingConversation;
   const activeThread = Boolean(
     refreshedConversation
@@ -137,6 +143,19 @@ export async function buildCoachMessageProposalClosedLoop(
       question: clarification.question,
     });
     return { ok: false, reason: 'needs_clarification', message: clarification.question, conversation };
+  }
+
+  if (semanticClarification && !clarification.required && saved?.block) {
+    let conversation = refreshedConversation ?? loadCoachConversationState(saved.block.id);
+    const question = semanticClarification.prompt;
+    conversation = appendCoachConversationTurn(conversation, 'athlete', 'message', message.trim());
+    conversation = appendCoachConversationTurn(conversation, 'coach', 'system', question);
+    conversation = recordCoachClarification(conversation, {
+      kind: semanticClarificationKind(semanticClarification.kind),
+      originalMessage: effectiveMessage,
+      question,
+    });
+    return { ok: false, reason: 'needs_clarification', message: question, conversation };
   }
 
   const result = await buildCoachMessageProposal(effectiveMessage, quickSignal);
@@ -349,4 +368,10 @@ function replaceStrengthSession(block: TrainingBlockPlan, sessionId: string, rep
 function recentClarificationIsFresh(resolvedAt: string): boolean {
   const ageMs = Date.now() - new Date(resolvedAt).getTime();
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= CLARIFICATION_CORRECTION_WINDOW_HOURS * 60 * 60 * 1000;
+}
+
+function semanticClarificationKind(kind: 'clarify_target' | 'clarify_function' | 'clarify_time' | 'clarify_request'): Exclude<CoachClarificationKind, 'none'> {
+  if (kind === 'clarify_target') return 'target_session';
+  if (kind === 'clarify_function') return 'function';
+  return 'constraint';
 }
