@@ -73,6 +73,7 @@ export function coachInterpreterSystemContract(): string {
     'Use unresolved when the target, time, symptom function, requested action, or strategy tradeoff is ambiguous.',
     'Corrections should identify which prior fact is being replaced.',
     'For long-horizon goals, use intent=strategy_change and populate strategyChange rather than inventing weekly sessions.',
+    'Only one discipline may hold primary_focus or maximize at a time. If the athlete asks to maximize multiple disciplines, leave strategyChange unresolved and ask which one is the top focus.',
     'A strategyChange may describe discipline objectives and tradeoff tolerance, but it may not prescribe the resulting training allocation.',
     'Do not diagnose injuries, illnesses, or menstrual disorders.',
   ].join('\n');
