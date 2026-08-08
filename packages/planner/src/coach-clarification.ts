@@ -96,13 +96,13 @@ export function resolveCoachClarificationAnswer(
     if (stopped) {
       return {
         resolved: true,
-        effectiveMessage: `${originalMessage} This concern stopped the workout. ${answer}`,
+        effectiveMessage: `${originalMessage} This concern stopped the workout. For training decisions, treat this as a function-limiting injury-like symptom. ${answer}`,
       };
     }
     if (modified) {
       return {
         resolved: true,
-        effectiveMessage: `${originalMessage} This concern changed my movement or training. ${answer}`,
+        effectiveMessage: `${originalMessage} This concern changed my movement or training. For training decisions, treat this as a function-limiting injury-like symptom. ${answer}`,
       };
     }
     if (denied) {
