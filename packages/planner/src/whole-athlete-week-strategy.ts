@@ -50,16 +50,16 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   if (!policy.active) return baselinePlan;
 
   // Strategy can never turn a health-constrained week into a progression week.
-  // The baseline planner has already resolved build/hold/protect/recover from
-  // the full health context, so non-build states are returned unchanged except
-  // for transparent strategy context.
-  if (baselinePlan.planningState !== 'build') {
+  // Taper and race week also preserve the original race-oriented allocation.
+  if (baselinePlan.planningState !== 'build' || input.phase === 'taper' || input.phase === 'race_week') {
     return annotateStrategy(baselinePlan, policy, [
-      'Strategy emphasis is remembered but does not override the current training-stress ceiling.',
+      input.phase === 'taper' || input.phase === 'race_week'
+        ? 'Strategy emphasis is remembered, but taper and race-week allocation stay race-first.'
+        : 'Strategy emphasis is remembered but does not override the current training-stress ceiling.',
     ]);
   }
 
-  const baseFrequency = frequencyPlanFromBaseline(baselinePlan);
+  const baseFrequency = frequencyPlanFromBaseline(baselinePlan, input);
   const strategyFrequency = applyCoachStrategyToFrequencyTargets(
     baseFrequency,
     policy,
@@ -71,8 +71,9 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
     // Full frequency targets derived from the already-resolved baseline preserve
     // race-specific minimums and any explicit caller overrides.
     frequencyTargets: strategyFrequency,
-    // This controls only which discipline receives scarce quality/progression
-    // priority. The original race frequencies remain explicit above.
+    // This controls which discipline receives first claim on scarce
+    // quality/progression capacity. Frequency targets above remain anchored to
+    // the athlete's actual race goal.
     goalType: effectiveGoalType,
   };
   const adjusted = buildBaseWholeAthleteWeek(strategyInput);
@@ -110,15 +111,19 @@ function annotateStrategy(
   };
 }
 
-function frequencyPlanFromBaseline(plan: WholeAthleteWeekPlan): StrategyFrequencyPlan {
-  return Object.fromEntries(plan.disciplineSummary.map((summary) => [summary.discipline, {
-    min: summary.targetMin,
-    preferred: summary.targetPreferred,
-    // The baseline summary does not expose max. Use a conservative ceiling that
-    // cannot exceed seven and is at least the resolved preferred target. The
-    // caller's explicit max is restored below when available.
-    max: Math.max(summary.targetPreferred, summary.targetMin),
-  }])) as StrategyFrequencyPlan;
+function frequencyPlanFromBaseline(
+  plan: WholeAthleteWeekPlan,
+  input: WholeAthleteWeeklyPlannerInput,
+): StrategyFrequencyPlan {
+  return Object.fromEntries(plan.disciplineSummary.map((summary) => {
+    const explicitMax = input.frequencyTargets?.[summary.discipline]?.max;
+    const max = explicitMax ?? defaultFrequencyMax(input.goalType, summary.discipline);
+    return [summary.discipline, {
+      min: summary.targetMin,
+      preferred: summary.targetPreferred,
+      max: Math.max(summary.targetMin, Math.min(7, max)),
+    }];
+  })) as StrategyFrequencyPlan;
 }
 
 function baselinesForStrategy(input: WholeAthleteWeeklyPlannerInput): Partial<Record<TrainableDiscipline, CoachStrategyBaseline>> {
@@ -138,12 +143,7 @@ function strategyOrientationGoalType(
   if (!policy.primaryFocus || policy.progressionPriority.length === 0) return original;
   if (policy.primaryFocus === 'swim') return 'swim_speed';
   if (policy.primaryFocus === 'run') return 'road_half_marathon';
-  if (policy.primaryFocus === 'bike') {
-    // Triathlon/ironman already gives cycling first claim on build/peak
-    // progression. For non-triathlon goals, do not masquerade as a race type
-    // that would imply a different event structure.
-    return isTriathlonGoal(original) ? original : original;
-  }
+  if (policy.primaryFocus === 'bike') return original;
   if (policy.primaryFocus === 'strength' && (phase === 'offseason' || phase === 'base')) return 'general_offseason';
   return original;
 }
@@ -156,8 +156,22 @@ function goalDisciplinesForType(goal: PerformanceGoalType): EnduranceDiscipline[
   return ['swim', 'bike', 'run'];
 }
 
-function isTriathlonGoal(goal: PerformanceGoalType): boolean {
-  return goal === 'triathlon_sprint' || goal === 'triathlon_olympic' || goal === 'ironman_70_3' || goal === 'ironman_full';
+function defaultFrequencyMax(goal: PerformanceGoalType, discipline: TrainableDiscipline): number {
+  const maxima: Record<PerformanceGoalType, Record<TrainableDiscipline, number>> = {
+    triathlon_sprint: { swim: 3, bike: 4, run: 4, strength: 3 },
+    triathlon_olympic: { swim: 4, bike: 4, run: 4, strength: 3 },
+    ironman_70_3: { swim: 5, bike: 5, run: 5, strength: 3 },
+    ironman_full: { swim: 5, bike: 5, run: 5, strength: 3 },
+    swimrun: { swim: 5, bike: 2, run: 5, strength: 3 },
+    road_10k: { swim: 2, bike: 2, run: 6, strength: 3 },
+    road_half_marathon: { swim: 2, bike: 2, run: 6, strength: 3 },
+    road_marathon: { swim: 2, bike: 2, run: 6, strength: 3 },
+    trail_50k: { swim: 2, bike: 2, run: 6, strength: 3 },
+    trail_100k: { swim: 2, bike: 2, run: 7, strength: 3 },
+    swim_speed: { swim: 6, bike: 2, run: 2, strength: 3 },
+    general_offseason: { swim: 2, bike: 2, run: 2, strength: 4 },
+  };
+  return maxima[goal][discipline];
 }
 
 function cloneStrategy(strategy: CoachSemanticStrategyChange): CoachSemanticStrategyChange {
