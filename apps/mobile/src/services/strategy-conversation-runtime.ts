@@ -46,11 +46,27 @@ export async function sendStrategyCoachMessage(message: string): Promise<Strateg
     return { conversation, response, draft: semantic.state.strategyDraft, needsClarification: true };
   }
 
-  const draft = semantic.state.strategyDraft;
+  let draft = semantic.state.strategyDraft;
   if (!draft) {
     const response = 'I need one more strategy detail before I can build a reviewable draft.';
     conversation = appendStrategyConversationTurn(conversation, 'coach', response);
     return { conversation, response, needsClarification: true };
+  }
+
+  if (
+    semantic.usedFallback
+    && conversation.creatingNewWindow
+    && conversation.suggestedWindowStart
+  ) {
+    const placement = placeRelativeFallbackDraft(draft, conversation.suggestedWindowStart);
+    if (!placement.ok) {
+      conversation = appendStrategyConversationTurn(conversation, 'coach', placement.message);
+      return { conversation, response: placement.message, draft, needsClarification: true };
+    }
+    if (placement.changed) {
+      draft = placement.strategy;
+      saveCoachDialogueV2(block.id, { ...semantic.state, strategyDraft: draft });
+    }
   }
 
   const response = `${strategyDraftSummary(draft)}\n\nDraft updated. Nothing in the training plan changes until you approve it.`;
@@ -88,6 +104,41 @@ async function rebaseExpiredStrategyDraft(blockId: string): Promise<void> {
   });
 }
 
+function placeRelativeFallbackDraft(
+  strategy: CoachSemanticStrategyChange,
+  suggestedStart: string,
+): { ok: true; strategy: CoachSemanticStrategyChange; changed: boolean } | { ok: false; message: string } {
+  const today = localDate();
+  const hasRelativeStart = strategy.startsAt === today;
+  const hasNoStart = !strategy.startsAt;
+
+  // The deterministic interpreter only manufactures today's date for relative
+  // windows such as "next 8 weeks." Explicit future dates are left untouched.
+  if (!hasRelativeStart && !hasNoStart) return { ok: true, strategy, changed: false };
+
+  if (hasNoStart && strategy.endsAt && strategy.endsAt < suggestedStart) {
+    return {
+      ok: false,
+      message: `That end date falls before the next available season block, which begins ${formatDate(suggestedStart)}. Give this block a later end date or edit an existing block instead.`,
+    };
+  }
+
+  let endsAt = strategy.endsAt;
+  if (hasRelativeStart && strategy.endsAt) {
+    const spanDays = differenceDays(strategy.startsAt!, strategy.endsAt);
+    endsAt = addDays(suggestedStart, Math.max(0, spanDays));
+  }
+
+  const placed: CoachSemanticStrategyChange = {
+    ...strategy,
+    startsAt: suggestedStart,
+    endsAt,
+    disciplineObjectives: { ...strategy.disciplineObjectives },
+    racePriority: strategy.racePriority ? { ...strategy.racePriority } : undefined,
+  };
+  return { ok: true, strategy: placed, changed: placed.startsAt !== strategy.startsAt || placed.endsAt !== strategy.endsAt };
+}
+
 function strategyDraftSummary(strategy: CoachSemanticStrategyChange): string {
   const parts: string[] = [];
   if (strategy.primaryFocus) parts.push(`${label(strategy.primaryFocus)} is the top focus.`);
@@ -102,6 +153,27 @@ function strategyDraftSummary(strategy: CoachSemanticStrategyChange): string {
     parts.push(`Race priority · ${discipline}${strategy.racePriority.objective.replaceAll('_', ' ')}`);
   }
   return parts.join('\n') || 'Long-horizon strategy draft updated.';
+}
+
+function differenceDays(start: string, end: string): number {
+  const startTime = new Date(`${start}T12:00:00Z`).getTime();
+  const endTime = new Date(`${end}T12:00:00Z`).getTime();
+  return Math.round((endTime - startTime) / 86_400_000);
+}
+
+function addDays(value: string, days: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function localDate(): string {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(`${value}T12:00:00`));
 }
 
 function label(value: string): string {
