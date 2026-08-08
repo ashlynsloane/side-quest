@@ -9,6 +9,10 @@ import {
   type RaceStrategyContext,
 } from './race-strategy-context';
 import {
+  loadRaceTargetEvidence,
+  type RaceTargetEvidence,
+} from './race-target-evidence';
+import {
   getLatestWholeAthletePlanSnapshot,
   refreshLatestWholeAthletePlan,
 } from './whole-athlete-plan-runtime';
@@ -17,6 +21,7 @@ export interface CurrentWeeklyStrategyContext {
   race: RaceStrategyContext;
   week: WholeAthleteWeekPlan;
   expression: WeeklyStrategyExpression;
+  targetEvidence: RaceTargetEvidence;
   isCurrentWeek: boolean;
 }
 
@@ -36,10 +41,12 @@ export async function loadCurrentWeeklyStrategyContext(
   const week = current ?? next ?? generated.weeks.at(-1);
   if (!week) return null;
 
+  const targetEvidence = await loadRaceTargetEvidence(race);
   return {
     race,
     week,
     expression: buildWeeklyStrategyExpression(week, race.effectiveStrategy),
+    targetEvidence,
     isCurrentWeek: week === current,
   };
 }
