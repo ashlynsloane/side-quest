@@ -146,7 +146,7 @@ export function resetDraftForGoal(
     eventDate,
     terrain: defaultTerrain(goalType),
     primaryDiscipline: disciplines.length === 1 ? disciplines[0] : undefined,
-    overallObjective: goalType === 'general_offseason' ? 'strong_finish' : 'strong_finish',
+    overallObjective: 'strong_finish',
     overallTarget: undefined,
     disciplineTargetKind: undefined,
     disciplineTargetValue: undefined,
@@ -374,7 +374,7 @@ function buildInitialDraft(
     equipmentProfileId: defaultProfile?.id,
     equipment: defaultProfile?.equipment ?? ['bodyweight'],
     restriction: 'none',
-    blockLength: existingBlock?.block.goal.type === goalType ? existingBlock.block.numberOfWeeks : suggestedBlockLength(weeks),
+    blockLength: existingBlock?.goal.type === goalType ? existingBlock.numberOfWeeks : suggestedBlockLength(weeks),
   };
 }
 
