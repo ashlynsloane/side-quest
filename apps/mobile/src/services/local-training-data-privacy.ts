@@ -4,11 +4,13 @@ import { ACTIVE_WORKOUT_INDEX_KEY } from './active-workout-persistence';
 import { clearPainContextMemory } from './athlete-context-memory';
 import { clearCoachClosedLoopState, exportCoachClosedLoopState } from './coach-closed-loop-state';
 import { clearCoachConversationState } from './coach-conversation-state';
+import { clearCoachDialogueV2 } from './coach-dialogue-v2';
 import { clearCoachObservedOutcomes, exportCoachObservedOutcomes } from './coach-observed-outcomes';
 import { clearAllSideQuestPlanSessionOverrides } from './side-quest-plan-overrides';
 import { clearWholeAthleteHealthPreferences } from './whole-athlete-plan-runtime';
 
 const COACH_CONVERSATION_KEY = 'circuit.coach-conversation.v1';
+const COACH_DIALOGUE_V2_KEY = 'circuit.coach-dialogue.v2';
 const PAIN_MEMORY_KEY = 'circuit.athlete-pain-context.v1';
 const PLAN_OVERRIDES_KEY = 'circuit.side-quest-plan-overrides.v1';
 const HEALTH_PREFERENCES_KEY = 'circuit.whole-athlete-health.v1';
@@ -18,6 +20,7 @@ export function exportLocalTrainingKeyValueData(): Record<string, unknown> {
   const activeWorkoutStorageKey = Storage.getItemSync(ACTIVE_WORKOUT_INDEX_KEY);
   return {
     coachConversation: parseStored(COACH_CONVERSATION_KEY),
+    coachSemanticDialogue: parseStored(COACH_DIALOGUE_V2_KEY),
     coachClosedLoop: exportCoachClosedLoopState(),
     coachObservedOutcomes: exportCoachObservedOutcomes(),
     structuredPainContext: parseStored(PAIN_MEMORY_KEY),
@@ -34,6 +37,7 @@ export function clearLocalTrainingKeyValueData(): void {
   Storage.removeItemSync(ACTIVE_WORKOUT_INDEX_KEY);
   Storage.removeItemSync(LIVE_WORKOUT_KEY);
   clearCoachConversationState();
+  clearCoachDialogueV2();
   clearCoachClosedLoopState();
   clearCoachObservedOutcomes();
   clearPainContextMemory();
