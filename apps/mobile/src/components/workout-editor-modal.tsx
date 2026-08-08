@@ -15,6 +15,8 @@ import { V23Icon } from '@/components/v23-ui';
 import { useTheme } from '@/state/theme-context';
 import type { DesignTokens } from '@/theme';
 
+type ExerciseTarget = { stationId: string; exerciseId: string };
+
 export function WorkoutEditorModal({
   workout,
   originalWorkout,
@@ -34,12 +36,14 @@ export function WorkoutEditorModal({
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [draft, setDraft] = useState<GeneratedWorkout>(() => cloneWorkout(workout));
   const [addTarget, setAddTarget] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<ExerciseTarget | null>(null);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!visible) return;
     setDraft(cloneWorkout(workout));
     setAddTarget(null);
+    setEditTarget(null);
     setSearch('');
   }, [visible, workout]);
 
@@ -47,6 +51,10 @@ export function WorkoutEditorModal({
     if (addTarget) {
       setAddTarget(null);
       setSearch('');
+      return;
+    }
+    if (editTarget) {
+      setEditTarget(null);
       return;
     }
     onClose();
@@ -80,6 +88,7 @@ export function WorkoutEditorModal({
           .map((item, index) => ({ ...item, order: index + 1 })),
       };
     });
+    setEditTarget(null);
   }
 
   function moveExercise(stationId: string, exerciseId: string, delta: -1 | 1) {
@@ -128,6 +137,11 @@ export function WorkoutEditorModal({
       .slice(0, 60);
   }, [addTarget, draft.request.availableEquipment, draft.stations, exercises, search]);
 
+  const editingStation = editTarget ? draft.stations.find((station) => station.id === editTarget.stationId) ?? null : null;
+  const editingExercise = editTarget
+    ? editingStation?.exercises.find((item) => item.exerciseId === editTarget.exerciseId) ?? null
+    : null;
+
   return (
     <Modal
       visible={visible}
@@ -145,11 +159,22 @@ export function WorkoutEditorModal({
             onBack={closeCurrentLayer}
             onChoose={(exercise) => addExercise(addTarget, exercise)}
             styles={styles}
-            mutedColor={tokens.textMuted}
+            tokens={tokens}
+          />
+        ) : editingStation && editingExercise && editTarget ? (
+          <ExerciseEditor
+            station={editingStation}
+            item={editingExercise}
+            onBack={closeCurrentLayer}
+            onUpdate={(update) => updateExercise(editTarget.stationId, editTarget.exerciseId, update)}
+            onMove={(delta) => moveExercise(editTarget.stationId, editTarget.exerciseId, delta)}
+            onRemove={() => removeExercise(editTarget.stationId, editTarget.exerciseId)}
+            styles={styles}
+            tokens={tokens}
           />
         ) : (
           <>
-            <EditorHeader onCancel={onClose} onSave={saveAndClose} styles={styles} />
+            <EditorHeader onClose={onClose} onSave={saveAndClose} styles={styles} tokens={tokens} />
             <ScrollView
               contentContainerStyle={styles.content}
               keyboardShouldPersistTaps="handled"
@@ -157,116 +182,83 @@ export function WorkoutEditorModal({
               automaticallyAdjustKeyboardInsets
               showsVerticalScrollIndicator={false}
             >
+              <View style={styles.intro}>
+                <Text style={styles.eyebrow}>WORKOUT EDITOR</Text>
+                <Text style={styles.pageTitle}>Change the structure without rebuilding the workout.</Text>
+                <Text style={styles.pageBody}>Station time, exercise order, prescriptions, and added movements stay in this draft until you save.</Text>
+              </View>
+
               <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>{draft.name}</Text>
-                <Text style={styles.summaryMeta}>{Math.round(draft.estimatedElapsedSeconds / 60)} min total · {draft.stations.length} stations</Text>
-                <Pressable onPress={() => setDraft(cloneWorkout(originalWorkout))} style={styles.resetButton} hitSlop={8}>
-                  <Text style={styles.resetText}>Reset generated workout</Text>
+                <View style={styles.summaryTop}>
+                  <View style={styles.summaryCopy}>
+                    <Text style={styles.summaryTitle}>{draft.name}</Text>
+                    <Text style={styles.summaryMeta}>{Math.round(draft.estimatedElapsedSeconds / 60)} min · {draft.stations.length} stations · {exerciseCount(draft)} exercises</Text>
+                  </View>
+                  <View style={styles.draftPill}><Text style={styles.draftPillText}>Draft</Text></View>
+                </View>
+                <Pressable accessibilityRole="button" onPress={() => setDraft(cloneWorkout(originalWorkout))} style={({ pressed }) => [styles.resetButton, pressed && styles.pressed]}>
+                  <V23Icon name="adjust" color={tokens.accent} size={15} />
+                  <Text style={styles.resetText}>Reset to generated workout</Text>
                 </Pressable>
+              </View>
+
+              <View style={styles.sectionHeading}>
+                <Text style={styles.sectionEyebrow}>STATIONS</Text>
+                <Text style={styles.sectionTitle}>Edit one decision at a time.</Text>
               </View>
 
               {draft.stations.map((station) => (
                 <View key={station.id} style={styles.stationCard}>
                   <View style={styles.stationHeader}>
+                    <View style={styles.stationNumber}><Text style={styles.stationNumberText}>{station.order}</Text></View>
                     <View style={styles.stationCopy}>
-                      <Text style={styles.eyebrow}>STATION {station.order}</Text>
                       <Text style={styles.stationTitle}>{station.purpose}</Text>
+                      <Text style={styles.stationMeta}>{station.exercises.length} exercise{station.exercises.length === 1 ? '' : 's'}</Text>
                     </View>
-                    <View style={styles.durationControl}>
-                      <Pressable
-                        accessibilityLabel={`Reduce station ${station.order} duration`}
-                        onPress={() => updateStation(station.id, (item) => ({ ...item, durationSeconds: Math.max(60, item.durationSeconds - 60) }))}
-                        style={styles.stepButton}
-                        hitSlop={5}
-                      >
-                        <Text style={styles.stepText}>−</Text>
-                      </Pressable>
-                      <Text style={styles.durationText}>{Math.round(station.durationSeconds / 60)} min</Text>
-                      <Pressable
-                        accessibilityLabel={`Increase station ${station.order} duration`}
-                        onPress={() => updateStation(station.id, (item) => ({ ...item, durationSeconds: Math.min(1800, item.durationSeconds + 60) }))}
-                        style={styles.stepButton}
-                        hitSlop={5}
-                      >
-                        <Text style={styles.stepText}>+</Text>
-                      </Pressable>
-                    </View>
+                    <DurationControl
+                      station={station}
+                      onChange={(durationSeconds) => updateStation(station.id, (item) => ({ ...item, durationSeconds }))}
+                      styles={styles}
+                    />
                   </View>
 
-                  {station.exercises.map((item, index) => {
-                    const onlyExercise = station.exercises.length <= 1;
-                    return (
-                      <View key={item.exerciseId} style={styles.exerciseCard}>
-                        <View style={styles.exerciseHeader}>
+                  <View style={styles.exerciseList}>
+                    {station.exercises.map((item, index) => (
+                      <Pressable
+                        key={item.exerciseId}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${item.exerciseSnapshot.name}`}
+                        onPress={() => setEditTarget({ stationId: station.id, exerciseId: item.exerciseId })}
+                        style={({ pressed }) => [styles.exerciseRow, index > 0 && styles.exerciseRowBorder, pressed && styles.pressed]}
+                      >
+                        <View style={styles.exerciseOrder}><Text style={styles.exerciseOrderText}>{index + 1}</Text></View>
+                        <View style={styles.exerciseCopy}>
                           <Text style={styles.exerciseName}>{item.exerciseSnapshot.name}</Text>
-                          <View style={styles.reorderRow}>
-                            <Pressable
-                              accessibilityLabel={`Move ${item.exerciseSnapshot.name} up`}
-                              disabled={index === 0}
-                              onPress={() => moveExercise(station.id, item.exerciseId, -1)}
-                              style={[styles.iconButton, index === 0 && styles.disabled]}
-                            >
-                              <Text style={styles.iconButtonText}>↑</Text>
-                            </Pressable>
-                            <Pressable
-                              accessibilityLabel={`Move ${item.exerciseSnapshot.name} down`}
-                              disabled={index === station.exercises.length - 1}
-                              onPress={() => moveExercise(station.id, item.exerciseId, 1)}
-                              style={[styles.iconButton, index === station.exercises.length - 1 && styles.disabled]}
-                            >
-                              <Text style={styles.iconButtonText}>↓</Text>
-                            </Pressable>
-                            <Pressable
-                              accessibilityLabel={`Remove ${item.exerciseSnapshot.name}`}
-                              disabled={onlyExercise}
-                              onPress={() => removeExercise(station.id, item.exerciseId)}
-                              style={[styles.removeButton, onlyExercise && styles.disabled]}
-                            >
-                              <Text style={styles.removeText}>Remove</Text>
-                            </Pressable>
-                          </View>
+                          <Text style={styles.exerciseMeta}>{formatTarget(item.target, item.unit)} · {item.exerciseSnapshot.category}</Text>
                         </View>
+                        <View style={styles.editPill}><Text style={styles.editPillText}>Edit</Text></View>
+                        <V23Icon name="chevron" color={tokens.textMuted} size={15} />
+                      </Pressable>
+                    ))}
+                  </View>
 
-                        <View style={styles.prescriptionRow}>
-                          <View style={styles.field}>
-                            <Text style={styles.fieldLabel}>{item.unit === 'seconds' ? 'SECONDS' : item.unit === 'per_side' ? 'REPS / SIDE' : 'REPS'}</Text>
-                            <TextInput
-                              value={String(item.target)}
-                              onChangeText={(value) => updateExercise(station.id, item.exerciseId, { target: Math.max(1, Number(value.replace(/[^0-9.]/g, '')) || 1) })}
-                              keyboardType="decimal-pad"
-                              selectTextOnFocus
-                              style={styles.input}
-                            />
-                          </View>
-                          <View style={styles.unitGroup}>
-                            {(['total', 'per_side', 'seconds'] as const).map((unit) => (
-                              <Pressable
-                                key={unit}
-                                onPress={() => updateExercise(station.id, item.exerciseId, { unit })}
-                                style={[styles.unitButton, item.unit === unit && styles.unitButtonSelected]}
-                              >
-                                <Text style={[styles.unitText, item.unit === unit && styles.unitTextSelected]}>{unit === 'total' ? 'reps' : unit === 'per_side' ? '/side' : 'sec'}</Text>
-                              </Pressable>
-                            ))}
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
-
-                  <Pressable onPress={() => setAddTarget(station.id)} style={styles.addButton}>
-                    <Text style={styles.addButtonText}>＋ Add exercise</Text>
+                  <Pressable accessibilityRole="button" onPress={() => setAddTarget(station.id)} style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
+                    <View style={styles.addIcon}><Text style={styles.addIconText}>＋</Text></View>
+                    <View style={styles.addCopy}><Text style={styles.addButtonText}>Add an exercise</Text><Text style={styles.addButtonMeta}>Only equipment-compatible movements are shown.</Text></View>
+                    <V23Icon name="chevron" color={tokens.textMuted} size={15} />
                   </Pressable>
                 </View>
               ))}
             </ScrollView>
 
             <View style={styles.bottomBar}>
-              <Pressable accessibilityRole="button" onPress={onClose} style={styles.bottomCancel}>
-                <Text style={styles.bottomCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" onPress={saveAndClose} style={styles.bottomSave}>
+              <View style={styles.bottomCopy}>
+                <Text style={styles.bottomLabel}>UNSAVED EDITS</Text>
+                <Text style={styles.bottomMeta}>{Math.round(draft.estimatedElapsedSeconds / 60)} min · {exerciseCount(draft)} exercises</Text>
+              </View>
+              <Pressable accessibilityRole="button" onPress={saveAndClose} style={({ pressed }) => [styles.bottomSave, pressed && styles.pressed]}>
                 <Text style={styles.bottomSaveText}>Save changes</Text>
+                <V23Icon name="check" color="#FFFFFF" size={16} />
               </Pressable>
             </View>
           </>
@@ -277,25 +269,134 @@ export function WorkoutEditorModal({
 }
 
 function EditorHeader({
-  onCancel,
+  onClose,
   onSave,
   styles,
+  tokens,
 }: {
-  onCancel: () => void;
+  onClose: () => void;
   onSave: () => void;
   styles: ReturnType<typeof makeStyles>;
+  tokens: DesignTokens;
 }) {
   return (
     <View style={styles.topBar}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Close workout editor" onPress={onCancel} style={styles.topAction} hitSlop={8}>
-        <Text style={styles.topActionText}>Cancel</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Close workout editor" onPress={onClose} style={({ pressed }) => [styles.topSideAction, pressed && styles.pressed]} hitSlop={8}>
+        <V23Icon name="back" color={tokens.text} size={18} />
+        <Text style={styles.topSideText}>Close</Text>
       </Pressable>
       <Text style={styles.topTitle}>Edit workout</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Save workout changes" onPress={onSave} style={styles.topAction} hitSlop={8}>
-        <Text style={styles.saveText}>Done</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Save workout changes" onPress={onSave} style={({ pressed }) => [styles.topSaveAction, pressed && styles.pressed]} hitSlop={8}>
+        <Text style={styles.topSaveText}>Save</Text>
       </Pressable>
     </View>
   );
+}
+
+function DurationControl({ station, onChange, styles }: { station: WorkoutStation; onChange: (durationSeconds: number) => void; styles: ReturnType<typeof makeStyles> }) {
+  const minutes = Math.round(station.durationSeconds / 60);
+  return <View style={styles.durationWrap}>
+    <Text style={styles.durationLabel}>WORK</Text>
+    <View style={styles.durationControl}>
+      <Pressable accessibilityLabel={`Reduce station ${station.order} duration`} onPress={() => onChange(Math.max(60, station.durationSeconds - 60))} style={styles.stepButton} hitSlop={5}><Text style={styles.stepText}>−</Text></Pressable>
+      <Text style={styles.durationText}>{minutes}m</Text>
+      <Pressable accessibilityLabel={`Increase station ${station.order} duration`} onPress={() => onChange(Math.min(1800, station.durationSeconds + 60))} style={styles.stepButton} hitSlop={5}><Text style={styles.stepText}>+</Text></Pressable>
+    </View>
+  </View>;
+}
+
+function ExerciseEditor({
+  station,
+  item,
+  onBack,
+  onUpdate,
+  onMove,
+  onRemove,
+  styles,
+  tokens,
+}: {
+  station: WorkoutStation;
+  item: WorkoutExercisePrescription;
+  onBack: () => void;
+  onUpdate: (update: Partial<WorkoutExercisePrescription>) => void;
+  onMove: (delta: -1 | 1) => void;
+  onRemove: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  tokens: DesignTokens;
+}) {
+  const index = station.exercises.findIndex((exercise) => exercise.exerciseId === item.exerciseId);
+  const onlyExercise = station.exercises.length <= 1;
+
+  return <>
+    <LayerHeader label="Edit exercise" onBack={onBack} styles={styles} tokens={tokens} />
+    <ScrollView contentContainerStyle={styles.layerContent} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false}>
+      <View style={styles.exerciseHero}>
+        <View style={styles.exerciseHeroIcon}><V23Icon name="train" color={tokens.accent} size={20} /></View>
+        <View style={styles.exerciseHeroCopy}>
+          <Text style={styles.layerEyebrow}>STATION {station.order}</Text>
+          <Text style={styles.layerTitle}>{item.exerciseSnapshot.name}</Text>
+          <Text style={styles.layerBody}>{item.exerciseSnapshot.shortDescription || item.exerciseSnapshot.category}</Text>
+        </View>
+      </View>
+
+      <View style={styles.editorSection}>
+        <Text style={styles.editorSectionLabel}>PRESCRIPTION</Text>
+        <Text style={styles.editorSectionTitle}>What should one round ask for?</Text>
+        <View style={styles.prescriptionRow}>
+          <View style={styles.targetField}>
+            <Text style={styles.fieldLabel}>{item.unit === 'seconds' ? 'SECONDS' : item.unit === 'per_side' ? 'REPS / SIDE' : 'REPS'}</Text>
+            <TextInput
+              value={String(item.target)}
+              onChangeText={(value) => onUpdate({ target: Math.max(1, Number(value.replace(/[^0-9.]/g, '')) || 1) })}
+              keyboardType="decimal-pad"
+              selectTextOnFocus
+              style={styles.input}
+            />
+          </View>
+          <View style={styles.unitWrap}>
+            <Text style={styles.fieldLabel}>FORMAT</Text>
+            <View style={styles.unitGroup}>
+              {(['total', 'per_side', 'seconds'] as const).map((unit) => (
+                <Pressable key={unit} onPress={() => onUpdate({ unit })} style={[styles.unitButton, item.unit === unit && styles.unitButtonSelected]}>
+                  <Text style={[styles.unitText, item.unit === unit && styles.unitTextSelected]}>{unit === 'total' ? 'reps' : unit === 'per_side' ? '/side' : 'sec'}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.editorSection}>
+        <Text style={styles.editorSectionLabel}>POSITION</Text>
+        <Text style={styles.editorSectionTitle}>Move it within this station.</Text>
+        <View style={styles.positionRow}>
+          <Pressable accessibilityRole="button" disabled={index <= 0} onPress={() => onMove(-1)} style={({ pressed }) => [styles.positionButton, index <= 0 && styles.disabled, pressed && styles.pressed]}>
+            <Text style={styles.positionArrow}>↑</Text><Text style={styles.positionText}>Earlier</Text>
+          </Pressable>
+          <View style={styles.positionStatus}><Text style={styles.positionStatusLabel}>POSITION</Text><Text style={styles.positionStatusValue}>{index + 1} of {station.exercises.length}</Text></View>
+          <Pressable accessibilityRole="button" disabled={index >= station.exercises.length - 1} onPress={() => onMove(1)} style={({ pressed }) => [styles.positionButton, index >= station.exercises.length - 1 && styles.disabled, pressed && styles.pressed]}>
+            <Text style={styles.positionArrow}>↓</Text><Text style={styles.positionText}>Later</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.editorSection}>
+        <Text style={styles.editorSectionLabel}>WORKOUT STRUCTURE</Text>
+        <Pressable accessibilityRole="button" disabled={onlyExercise} onPress={onRemove} style={({ pressed }) => [styles.removeExerciseButton, onlyExercise && styles.disabled, pressed && styles.pressed]}>
+          <View style={styles.removeExerciseCopy}>
+            <Text style={styles.removeExerciseTitle}>Remove from this station</Text>
+            <Text style={styles.removeExerciseBody}>{onlyExercise ? 'Each station needs at least one exercise.' : 'This only changes the current workout draft.'}</Text>
+          </View>
+          <Text style={styles.removeExerciseText}>Remove</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
+    <View style={styles.layerFooter}>
+      <Pressable accessibilityRole="button" onPress={onBack} style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}>
+        <Text style={styles.doneButtonText}>Done editing exercise</Text><V23Icon name="check" color="#FFFFFF" size={16} />
+      </Pressable>
+    </View>
+  </>;
 }
 
 function ExercisePicker({
@@ -305,7 +406,7 @@ function ExercisePicker({
   onBack,
   onChoose,
   styles,
-  mutedColor,
+  tokens,
 }: {
   candidates: Exercise[];
   search: string;
@@ -313,42 +414,43 @@ function ExercisePicker({
   onBack: () => void;
   onChoose: (exercise: Exercise) => void;
   styles: ReturnType<typeof makeStyles>;
-  mutedColor: string;
+  tokens: DesignTokens;
 }) {
-  return (
-    <>
-      <View style={styles.topBar}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Return to workout editor" onPress={onBack} style={styles.topAction} hitSlop={8}>
-          <View style={styles.backAction}><V23Icon name="back" color={mutedColor} size={18} /><Text style={styles.topActionText}>Back</Text></View>
+  return <>
+    <LayerHeader label="Add exercise" onBack={onBack} styles={styles} tokens={tokens} />
+    <View style={styles.pickerIntro}>
+      <Text style={styles.layerEyebrow}>COMPATIBLE WITH THIS WORKOUT</Text>
+      <Text style={styles.pickerTitle}>Add a movement to the station.</Text>
+      <Text style={styles.layerBody}>Only active AMRAP exercises that fit the workout’s available equipment are shown.</Text>
+    </View>
+    <View style={styles.searchWrap}>
+      <V23Icon name="search" color={tokens.textMuted} size={18} />
+      <TextInput value={search} onChangeText={onSearch} placeholder="Search exercises" placeholderTextColor={tokens.textMuted} style={styles.searchInput} autoFocus />
+    </View>
+    <ScrollView contentContainerStyle={styles.candidateList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      {candidates.map((exercise) => (
+        <Pressable key={exercise.id} accessibilityRole="button" onPress={() => onChoose(exercise)} style={({ pressed }) => [styles.candidateRow, pressed && styles.pressed]}>
+          <View style={styles.candidateIcon}><V23Icon name="train" color={tokens.accent} size={17} /></View>
+          <View style={styles.candidateCopy}>
+            <Text style={styles.candidateName}>{exercise.name}</Text>
+            <Text style={styles.candidateMeta}>{exercise.category} · {exercise.equipmentOptions[0]?.label ?? 'Bodyweight'}</Text>
+          </View>
+          <View style={styles.addCandidatePill}><Text style={styles.addCandidateText}>Add</Text></View>
         </Pressable>
-        <Text style={styles.topTitle}>Add exercise</Text>
-        <View style={styles.topAction} />
-      </View>
-      <View style={styles.searchWrap}>
-        <V23Icon name="search" color={mutedColor} size={18} />
-        <TextInput
-          value={search}
-          onChangeText={onSearch}
-          placeholder="Search exercises"
-          placeholderTextColor={mutedColor}
-          style={styles.searchInput}
-          autoFocus
-        />
-      </View>
-      <ScrollView contentContainerStyle={styles.candidateList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {candidates.map((exercise) => (
-          <Pressable key={exercise.id} onPress={() => onChoose(exercise)} style={({ pressed }) => [styles.candidateRow, pressed && styles.pressed]}>
-            <View style={styles.candidateCopy}>
-              <Text style={styles.candidateName}>{exercise.name}</Text>
-              <Text style={styles.candidateMeta}>{exercise.category} · {exercise.equipmentOptions[0]?.label ?? 'Bodyweight'}</Text>
-            </View>
-            <V23Icon name="chevron" color={mutedColor} size={17} />
-          </Pressable>
-        ))}
-        {!candidates.length ? <Text style={styles.emptyText}>No compatible exercises match this search.</Text> : null}
-      </ScrollView>
-    </>
-  );
+      ))}
+      {!candidates.length ? <View style={styles.emptyState}><V23Icon name="search" color={tokens.textMuted} size={22} /><Text style={styles.emptyTitle}>No compatible match</Text><Text style={styles.emptyText}>Try a broader exercise name. Equipment and workout compatibility filters stay in force.</Text></View> : null}
+    </ScrollView>
+  </>;
+}
+
+function LayerHeader({ label, onBack, styles, tokens }: { label: string; onBack: () => void; styles: ReturnType<typeof makeStyles>; tokens: DesignTokens }) {
+  return <View style={styles.topBar}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Back from ${label}`} onPress={onBack} style={({ pressed }) => [styles.topSideAction, pressed && styles.pressed]} hitSlop={8}>
+      <V23Icon name="back" color={tokens.text} size={18} /><Text style={styles.topSideText}>Back</Text>
+    </Pressable>
+    <Text style={styles.topTitle}>{label}</Text>
+    <View style={styles.topSaveAction} />
+  </View>;
 }
 
 export function recalculateWorkout(workout: GeneratedWorkout): GeneratedWorkout {
@@ -372,63 +474,136 @@ function cloneWorkout(workout: GeneratedWorkout): GeneratedWorkout {
   return JSON.parse(JSON.stringify(workout)) as GeneratedWorkout;
 }
 
+function exerciseCount(workout: GeneratedWorkout): number {
+  return workout.stations.reduce((total, station) => total + station.exercises.length, 0);
+}
+
+function formatTarget(target: number, unit: WorkoutExercisePrescription['unit']): string {
+  if (unit === 'seconds') return `${target} sec`;
+  return unit === 'per_side' ? `${target}/side` : `${target} reps`;
+}
+
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: tokens.canvas },
     topBar: { minHeight: 58, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: tokens.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, zIndex: 5 },
-    topAction: { minWidth: 74, minHeight: 48, justifyContent: 'center' },
-    topActionText: { color: tokens.textMuted, fontSize: 15, fontWeight: '700' },
-    saveText: { color: tokens.accent, fontSize: 15, fontWeight: '800', textAlign: 'right' },
-    topTitle: { color: tokens.text, fontSize: 17, fontWeight: '800' },
-    backAction: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-    content: { padding: 16, paddingBottom: 28, gap: 14 },
-    summaryCard: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: 20, padding: 16, gap: 5 },
-    summaryTitle: { color: tokens.text, fontSize: 22, fontWeight: '800' },
-    summaryMeta: { color: tokens.textMuted, fontSize: 14 },
-    resetButton: { alignSelf: 'flex-start', marginTop: 5, paddingVertical: 5 },
-    resetText: { color: tokens.accent, fontSize: 13, fontWeight: '700' },
-    stationCard: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: 22, padding: 15, gap: 12 },
-    stationHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-    stationCopy: { flex: 1, minWidth: 0 },
-    eyebrow: { color: tokens.accent, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-    stationTitle: { color: tokens.text, fontSize: 19, fontWeight: '800', marginTop: 2 },
-    durationControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: tokens.surfaceMuted, borderRadius: 999, padding: 4, gap: 6 },
-    stepButton: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: tokens.surface },
-    stepText: { color: tokens.accent, fontSize: 21, fontWeight: '700' },
-    durationText: { minWidth: 48, textAlign: 'center', color: tokens.text, fontWeight: '800' },
-    exerciseCard: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, paddingTop: 12, gap: 10 },
-    exerciseHeader: { gap: 8 },
-    exerciseName: { color: tokens.text, fontSize: 16, fontWeight: '800' },
-    reorderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
-    iconButton: { minHeight: 34, minWidth: 38, borderRadius: 10, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-    iconButtonText: { color: tokens.accent, fontSize: 15, fontWeight: '800' },
-    removeButton: { minHeight: 34, borderRadius: 10, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-    removeText: { color: tokens.danger, fontSize: 12, fontWeight: '700' },
-    disabled: { opacity: 0.35 },
+    topSideAction: { width: 84, minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 3 },
+    topSideText: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '800' },
+    topSaveAction: { width: 84, minHeight: 46, alignItems: 'flex-end', justifyContent: 'center' },
+    topSaveText: { color: tokens.accent, fontSize: 13, lineHeight: 17, fontWeight: '900' },
+    topTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '900' },
+    content: { paddingHorizontal: 16, paddingTop: 17, paddingBottom: 30, gap: 15 },
+
+    intro: { gap: 4, paddingHorizontal: 2 },
+    eyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.95 },
+    pageTitle: { color: tokens.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: -0.4 },
+    pageBody: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
+
+    summaryCard: { backgroundColor: tokens.surfaceMuted, borderRadius: 18, padding: 14, gap: 10 },
+    summaryTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    summaryCopy: { flex: 1, minWidth: 0, gap: 2 },
+    summaryTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+    summaryMeta: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
+    draftPill: { borderRadius: 999, backgroundColor: tokens.surface, paddingHorizontal: 8, paddingVertical: 5 },
+    draftPillText: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.5 },
+    resetButton: { alignSelf: 'flex-start', minHeight: 34, borderRadius: 17, backgroundColor: tokens.surface, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
+    resetText: { color: tokens.accent, fontSize: 11.5, lineHeight: 15, fontWeight: '800' },
+
+    sectionHeading: { gap: 2, paddingHorizontal: 2 },
+    sectionEyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
+    sectionTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+
+    stationCard: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: 21, padding: 13, gap: 10 },
+    stationHeader: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+    stationNumber: { width: 32, height: 32, borderRadius: 11, backgroundColor: tokens.header, alignItems: 'center', justifyContent: 'center' },
+    stationNumberText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
+    stationCopy: { flex: 1, minWidth: 0, gap: 1 },
+    stationTitle: { color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '900' },
+    stationMeta: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14 },
+    durationWrap: { gap: 3, alignItems: 'center' },
+    durationLabel: { color: tokens.textMuted, fontSize: 8, lineHeight: 10, fontWeight: '900', letterSpacing: 0.7 },
+    durationControl: { flexDirection: 'row', alignItems: 'center', backgroundColor: tokens.surfaceMuted, borderRadius: 999, padding: 3, gap: 3 },
+    stepButton: { width: 29, height: 29, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: tokens.surface },
+    stepText: { color: tokens.accent, fontSize: 18, lineHeight: 20, fontWeight: '800' },
+    durationText: { minWidth: 34, textAlign: 'center', color: tokens.text, fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
+
+    exerciseList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border },
+    exerciseRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8 },
+    exerciseRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border },
+    exerciseOrder: { width: 27, height: 27, borderRadius: 14, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    exerciseOrderText: { color: tokens.textMuted, fontSize: 10.5, fontWeight: '900' },
+    exerciseCopy: { flex: 1, minWidth: 0, gap: 2 },
+    exerciseName: { color: tokens.text, fontSize: 13.5, lineHeight: 18, fontWeight: '900' },
+    exerciseMeta: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14 },
+    editPill: { borderRadius: 999, backgroundColor: tokens.accentSoft, paddingHorizontal: 8, paddingVertical: 5 },
+    editPillText: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900' },
+
+    addButton: { minHeight: 58, borderRadius: 14, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 10, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 9 },
+    addIcon: { width: 29, height: 29, borderRadius: 15, backgroundColor: tokens.surface, alignItems: 'center', justifyContent: 'center' },
+    addIconText: { color: tokens.accent, fontSize: 16, lineHeight: 18, fontWeight: '900' },
+    addCopy: { flex: 1, minWidth: 0, gap: 1 },
+    addButtonText: { color: tokens.text, fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
+    addButtonMeta: { color: tokens.textMuted, fontSize: 10, lineHeight: 13 },
+
+    bottomBar: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, backgroundColor: tokens.surface },
+    bottomCopy: { flex: 1, minWidth: 0, gap: 1 },
+    bottomLabel: { color: tokens.accent, fontSize: 8.5, lineHeight: 11, fontWeight: '900', letterSpacing: 0.75 },
+    bottomMeta: { color: tokens.textMuted, fontSize: 11, lineHeight: 15 },
+    bottomSave: { minHeight: 45, borderRadius: 14, backgroundColor: tokens.header, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    bottomSaveText: { color: '#FFFFFF', fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
+
+    layerContent: { paddingHorizontal: 16, paddingTop: 17, paddingBottom: 34, gap: 14 },
+    layerEyebrow: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.85 },
+    layerTitle: { color: tokens.text, fontSize: 24, lineHeight: 29, fontWeight: '900', letterSpacing: -0.35 },
+    layerBody: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
+    exerciseHero: { borderRadius: 20, backgroundColor: tokens.surfaceMuted, padding: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
+    exerciseHeroIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: tokens.surface, alignItems: 'center', justifyContent: 'center' },
+    exerciseHeroCopy: { flex: 1, minWidth: 0, gap: 3 },
+    editorSection: { borderRadius: 19, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 14, gap: 10 },
+    editorSectionLabel: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.85 },
+    editorSectionTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '900' },
     prescriptionRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
-    field: { width: 96, gap: 5 },
-    fieldLabel: { color: tokens.textMuted, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
-    input: { minHeight: 44, borderWidth: 1, borderColor: tokens.borderStrong, borderRadius: 12, paddingHorizontal: 12, color: tokens.text, fontSize: 17, fontWeight: '800', textAlign: 'center', backgroundColor: tokens.surfaceRaised },
-    unitGroup: { flex: 1, flexDirection: 'row', gap: 5 },
-    unitButton: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: tokens.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    targetField: { width: 102, gap: 5 },
+    unitWrap: { flex: 1, gap: 5 },
+    fieldLabel: { color: tokens.textMuted, fontSize: 8.5, lineHeight: 11, fontWeight: '900', letterSpacing: 0.7 },
+    input: { minHeight: 47, borderWidth: 1, borderColor: tokens.border, borderRadius: 13, paddingHorizontal: 10, color: tokens.text, fontSize: 17, fontWeight: '900', textAlign: 'center', backgroundColor: tokens.surfaceMuted },
+    unitGroup: { flexDirection: 'row', gap: 5 },
+    unitButton: { flex: 1, minHeight: 47, borderWidth: 1, borderColor: tokens.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: tokens.surface },
     unitButtonSelected: { backgroundColor: tokens.accentSoft, borderColor: tokens.accent },
-    unitText: { color: tokens.textMuted, fontSize: 11, fontWeight: '700' },
-    unitTextSelected: { color: tokens.accent },
-    addButton: { minHeight: 46, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: tokens.borderStrong, alignItems: 'center', justifyContent: 'center' },
-    addButtonText: { color: tokens.accent, fontSize: 14, fontWeight: '800' },
-    bottomBar: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 11, paddingBottom: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, backgroundColor: tokens.surface },
-    bottomCancel: { minHeight: 50, minWidth: 100, borderRadius: 15, borderWidth: 1, borderColor: tokens.borderStrong, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-    bottomCancelText: { color: tokens.text, fontSize: 14.5, fontWeight: '800' },
-    bottomSave: { flex: 1, minHeight: 50, borderRadius: 15, backgroundColor: tokens.header, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
-    bottomSaveText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '800' },
-    searchWrap: { margin: 16, marginBottom: 4, minHeight: 48, borderRadius: 15, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 13 },
-    searchInput: { flex: 1, color: tokens.text, fontSize: 16 },
-    candidateList: { padding: 16, paddingBottom: 60 },
-    candidateRow: { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, paddingVertical: 10 },
-    candidateCopy: { flex: 1, minWidth: 0 },
-    candidateName: { color: tokens.text, fontSize: 16, fontWeight: '800' },
-    candidateMeta: { color: tokens.textMuted, fontSize: 13, marginTop: 3 },
-    emptyText: { color: tokens.textMuted, fontSize: 15, textAlign: 'center', paddingVertical: 36 },
-    pressed: { opacity: 0.7 },
+    unitText: { color: tokens.textMuted, fontSize: 10.5, fontWeight: '800' },
+    unitTextSelected: { color: tokens.accent, fontWeight: '900' },
+    positionRow: { flexDirection: 'row', alignItems: 'stretch', gap: 7 },
+    positionButton: { flex: 1, minHeight: 57, borderRadius: 13, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center', gap: 2 },
+    positionArrow: { color: tokens.accent, fontSize: 17, lineHeight: 20, fontWeight: '900' },
+    positionText: { color: tokens.text, fontSize: 10.5, lineHeight: 14, fontWeight: '800' },
+    positionStatus: { minWidth: 86, borderRadius: 13, backgroundColor: tokens.header, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 },
+    positionStatusLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 7.5, lineHeight: 10, fontWeight: '900', letterSpacing: 0.65 },
+    positionStatusValue: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+    removeExerciseButton: { minHeight: 62, borderRadius: 14, backgroundColor: tokens.surfaceMuted, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    removeExerciseCopy: { flex: 1, minWidth: 0, gap: 2 },
+    removeExerciseTitle: { color: tokens.text, fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
+    removeExerciseBody: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14 },
+    removeExerciseText: { color: tokens.danger, fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
+    layerFooter: { paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, backgroundColor: tokens.surface },
+    doneButton: { minHeight: 47, borderRadius: 14, backgroundColor: tokens.header, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    doneButtonText: { color: '#FFFFFF', fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
+
+    pickerIntro: { paddingHorizontal: 16, paddingTop: 16, gap: 4 },
+    pickerTitle: { color: tokens.text, fontSize: 22, lineHeight: 27, fontWeight: '900', letterSpacing: -0.3 },
+    searchWrap: { marginHorizontal: 16, marginTop: 13, minHeight: 48, borderRadius: 15, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 13 },
+    searchInput: { flex: 1, color: tokens.text, fontSize: 15 },
+    candidateList: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 50 },
+    candidateRow: { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, paddingVertical: 9 },
+    candidateIcon: { width: 37, height: 37, borderRadius: 12, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
+    candidateCopy: { flex: 1, minWidth: 0, gap: 2 },
+    candidateName: { color: tokens.text, fontSize: 14, lineHeight: 19, fontWeight: '900' },
+    candidateMeta: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14 },
+    addCandidatePill: { borderRadius: 999, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 9, paddingVertical: 6 },
+    addCandidateText: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900' },
+    emptyState: { alignItems: 'center', gap: 5, paddingVertical: 38, paddingHorizontal: 20 },
+    emptyTitle: { color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '900' },
+    emptyText: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 17, textAlign: 'center' },
+    disabled: { opacity: 0.35 },
+    pressed: { opacity: 0.72 },
   });
 }
