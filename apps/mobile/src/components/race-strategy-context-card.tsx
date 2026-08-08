@@ -88,9 +88,12 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
       <Text style={styles.weekRange}>{formatWeekRange(weekly.week.weekStartDate, weekly.week.weekEndDate)}</Text>
       <Text style={styles.weekSummary}>{weekly.expression.summary}</Text>
       <Text style={styles.weekDisciplines}>{weeklyDisciplineLine(weekly.expression)}</Text>
-      {targetSupport ? <View style={styles.targetBox}>
+      {targetSupport || weekly.targetEvidence.status !== 'none' ? <View style={styles.targetBox}>
         <Text style={styles.targetLabel}>RACE TARGET CONNECTION</Text>
-        <Text style={styles.targetBody}>{targetSupport}</Text>
+        {targetSupport ? <Text style={styles.targetBody}>{targetSupport}</Text> : null}
+        {weekly.targetEvidence.targetLabel ? <Text style={styles.targetTitle}>{weekly.targetEvidence.targetLabel}</Text> : null}
+        {weekly.targetEvidence.evidenceLabel ? <Text style={styles.targetEvidence}>{weekly.targetEvidence.evidenceLabel}</Text> : null}
+        {weekly.targetEvidence.caveat ? <Text style={styles.targetCaveat}>{weekly.targetEvidence.caveat}</Text> : null}
       </View> : null}
       <View style={styles.reasonList}>
         {weekly.expression.reasons.slice(0, 3).map((reason) => <Text key={reason} style={styles.reasonText}>• {reason}</Text>)}
@@ -142,6 +145,9 @@ function makeStyles(tokens: DesignTokens) {
     targetBox: { borderRadius: 12, backgroundColor: tokens.accentSoft, padding: 10, gap: 3 },
     targetLabel: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
     targetBody: { color: tokens.text, fontSize: 11.5, lineHeight: 16 },
+    targetTitle: { color: tokens.text, fontSize: 12, lineHeight: 17, fontWeight: '800', marginTop: 2 },
+    targetEvidence: { color: tokens.text, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
+    targetCaveat: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 15 },
     reasonList: { gap: 3 },
     reasonText: { color: tokens.textMuted, fontSize: 11, lineHeight: 16 },
     overrideNote: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 17 },
