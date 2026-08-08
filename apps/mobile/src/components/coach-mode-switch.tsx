@@ -15,9 +15,10 @@ export function CoachModeSwitch({ active }: { active: 'today' | 'strategy' }) {
     router.replace((mode === 'today' ? '/(tabs)/coach' : '/coach-strategy') as Href);
   }
 
-  return <View style={styles.shell} accessibilityRole="tablist">
+  return <View style={styles.shell}>
     <Pressable
-      accessibilityRole="tab"
+      accessibilityRole="button"
+      accessibilityLabel="Daily Coach"
       accessibilityState={{ selected: active === 'today' }}
       onPress={() => open('today')}
       style={[styles.tab, active === 'today' && styles.tabActive]}
@@ -25,7 +26,8 @@ export function CoachModeSwitch({ active }: { active: 'today' | 'strategy' }) {
       <Text style={[styles.label, active === 'today' && styles.labelActive]}>Today</Text>
     </Pressable>
     <Pressable
-      accessibilityRole="tab"
+      accessibilityRole="button"
+      accessibilityLabel="Strategy Coach"
       accessibilityState={{ selected: active === 'strategy' }}
       onPress={() => open('strategy')}
       style={[styles.tab, active === 'strategy' && styles.tabActive]}
