@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
+import { RaceStrategyContextCard } from '@/components/race-strategy-context-card';
 import { SportIcon, normalizeSportKind } from '@/components/sport-icon';
 import { V23Card, V23Chip, V23GroupedList, V23Icon, V23Row, V23Screen, V23SportPill, V23StatusCard } from '@/components/v23-ui';
 import {
@@ -138,6 +139,8 @@ export default function PlanTab() {
       featured
       onPress={() => router.push('/training-guardrails' as Href)}
     />
+
+    {block ? <RaceStrategyContextCard surface="plan" /> : null}
 
     {block ? <V23Card style={styles.blockSummary}>
       <Text style={styles.blockLabel}>Current block</Text>
