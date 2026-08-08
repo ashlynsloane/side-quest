@@ -8,6 +8,11 @@ import {
   type StrategyFrequencyPlan,
 } from './coach-strategy-policy';
 import type { CoachSemanticStrategyChange } from './coach-semantic-frame';
+import { coachStrategyAppliesToWeek } from './coach-strategy-window';
+import {
+  mergeRaceIntentWithCoachStrategy,
+  type RaceIntentV2,
+} from './race-intent';
 import {
   buildWholeAthleteWeek as buildBaseWholeAthleteWeek,
   type TrainableDiscipline,
@@ -19,24 +24,41 @@ import { validateUnifiedWeek } from './unified-training';
 export * from './whole-athlete-week';
 
 let configuredStrategy: CoachSemanticStrategyChange | undefined;
+let configuredRaceIntent: RaceIntentV2 | undefined;
+let configuredApprovedStrategy: CoachSemanticStrategyChange | undefined;
 
 /**
- * Runtime-scoped strategy overlay. Mobile reconciliation is serialized, so the
- * current approved strategy can be configured immediately before generation.
- * The underlying weekly planner remains pure and is still available directly
- * from ./whole-athlete-week for isolated planner tests.
+ * Backward-compatible single strategy configuration used by isolated planner
+ * tests and non-race callers.
  */
 export function configureWholeAthleteCoachStrategy(strategy?: CoachSemanticStrategyChange): void {
   configuredStrategy = strategy ? cloneStrategy(strategy) : undefined;
+  configuredRaceIntent = undefined;
+  configuredApprovedStrategy = undefined;
 }
 
-export function getConfiguredWholeAthleteCoachStrategy(): CoachSemanticStrategyChange | undefined {
-  return configuredStrategy ? cloneStrategy(configuredStrategy) : undefined;
+/**
+ * Race Intent is the durable baseline. Strategy Coach is a date-scoped overlay.
+ * The effective strategy is resolved independently for every generated week so
+ * a future/expired override cannot suppress the underlying race priorities.
+ */
+export function configureWholeAthleteStrategyLayers(
+  raceIntent?: RaceIntentV2,
+  approvedStrategy?: CoachSemanticStrategyChange,
+): void {
+  configuredStrategy = undefined;
+  configuredRaceIntent = raceIntent ? cloneRaceIntent(raceIntent) : undefined;
+  configuredApprovedStrategy = approvedStrategy ? cloneStrategy(approvedStrategy) : undefined;
+}
+
+export function getConfiguredWholeAthleteCoachStrategy(weekStartDate?: string): CoachSemanticStrategyChange | undefined {
+  const resolved = resolveConfiguredStrategy(weekStartDate);
+  return resolved ? cloneStrategy(resolved) : undefined;
 }
 
 export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): WholeAthleteWeekPlan {
   const baselinePlan = buildBaseWholeAthleteWeek(input);
-  const strategy = configuredStrategy;
+  const strategy = resolveConfiguredStrategy(input.weekStartDate);
   if (!strategy) return baselinePlan;
 
   const goalDisciplines = goalDisciplinesForType(input.goalType);
@@ -93,6 +115,15 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   return annotateStrategy({ ...adjusted, quality }, policy, effectiveGoalType !== input.goalType
     ? [`Discretionary progression is oriented toward ${policy.primaryFocus ?? 'the selected focus'} while race-specific minimums remain anchored to ${input.goalType.replaceAll('_', ' ')}.`]
     : []);
+}
+
+function resolveConfiguredStrategy(weekStartDate?: string): CoachSemanticStrategyChange | undefined {
+  if (configuredStrategy) return configuredStrategy;
+  const approved = configuredApprovedStrategy
+    && (!weekStartDate || coachStrategyAppliesToWeek(configuredApprovedStrategy, weekStartDate))
+    ? configuredApprovedStrategy
+    : undefined;
+  return mergeRaceIntentWithCoachStrategy(configuredRaceIntent, approved);
 }
 
 function annotateStrategy(
@@ -179,6 +210,16 @@ function cloneStrategy(strategy: CoachSemanticStrategyChange): CoachSemanticStra
     ...strategy,
     disciplineObjectives: { ...strategy.disciplineObjectives },
     racePriority: strategy.racePriority ? { ...strategy.racePriority } : undefined,
+  };
+}
+
+function cloneRaceIntent(intent: RaceIntentV2): RaceIntentV2 {
+  return {
+    ...intent,
+    disciplinePriorities: { ...intent.disciplinePriorities },
+    disciplineTargets: intent.disciplineTargets
+      ? Object.fromEntries(Object.entries(intent.disciplineTargets).map(([discipline, target]) => [discipline, target ? { ...target } : target])) as RaceIntentV2['disciplineTargets']
+      : undefined,
   };
 }
 
