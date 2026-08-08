@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import { CoachModeSwitch } from '@/components/coach-mode-switch';
 import { CoachStrategyWorkspace } from '@/components/coach-strategy-workspace';
@@ -8,6 +8,7 @@ import { useTheme } from '@/state/theme-context';
 
 export default function CoachStrategyScreen() {
   const { tokens } = useTheme();
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const contentStyle = useMemo(
     () => ({ gap: 18, paddingTop: 22, paddingBottom: 36, backgroundColor: tokens.canvas }),
     [tokens.canvas],
@@ -15,7 +16,7 @@ export default function CoachStrategyScreen() {
 
   return <V23Screen contentStyle={contentStyle}>
     <CoachModeSwitch active="strategy" />
-    <SeasonStrategyPlanPanel />
-    <CoachStrategyWorkspace />
+    <SeasonStrategyPlanPanel onWorkspaceChanged={() => setWorkspaceRevision((value) => value + 1)} />
+    <CoachStrategyWorkspace key={workspaceRevision} />
   </V23Screen>;
 }
