@@ -8,11 +8,11 @@ import {
   type StrategyFrequencyPlan,
 } from './coach-strategy-policy';
 import type { CoachSemanticStrategyChange } from './coach-semantic-frame';
-import { coachStrategyAppliesToWeek } from './coach-strategy-window';
 import {
   mergeRaceIntentWithCoachStrategy,
   type RaceIntentV2,
 } from './race-intent';
+import { activeSeasonStrategyForWeek, type SeasonStrategyEntry } from './season-strategy';
 import {
   buildWholeAthleteWeek as buildBaseWholeAthleteWeek,
   type TrainableDiscipline,
@@ -25,7 +25,7 @@ export * from './whole-athlete-week';
 
 let configuredStrategy: CoachSemanticStrategyChange | undefined;
 let configuredRaceIntent: RaceIntentV2 | undefined;
-let configuredApprovedStrategy: CoachSemanticStrategyChange | undefined;
+let configuredApprovedStrategies: CoachSemanticStrategyChange[] = [];
 
 /**
  * Backward-compatible single strategy configuration used by isolated planner
@@ -34,21 +34,23 @@ let configuredApprovedStrategy: CoachSemanticStrategyChange | undefined;
 export function configureWholeAthleteCoachStrategy(strategy?: CoachSemanticStrategyChange): void {
   configuredStrategy = strategy ? cloneStrategy(strategy) : undefined;
   configuredRaceIntent = undefined;
-  configuredApprovedStrategy = undefined;
+  configuredApprovedStrategies = [];
 }
 
 /**
- * Race Intent is the durable baseline. Strategy Coach is a date-scoped overlay.
- * The effective strategy is resolved independently for every generated week so
- * a future/expired override cannot suppress the underlying race priorities.
+ * Race Intent is the durable baseline. Strategy Coach supplies zero or more
+ * non-overlapping date-scoped season windows. The effective strategy is
+ * resolved independently for every generated week.
  */
 export function configureWholeAthleteStrategyLayers(
   raceIntent?: RaceIntentV2,
-  approvedStrategy?: CoachSemanticStrategyChange,
+  approvedStrategies?: CoachSemanticStrategyChange | CoachSemanticStrategyChange[],
 ): void {
   configuredStrategy = undefined;
   configuredRaceIntent = raceIntent ? cloneRaceIntent(raceIntent) : undefined;
-  configuredApprovedStrategy = approvedStrategy ? cloneStrategy(approvedStrategy) : undefined;
+  configuredApprovedStrategies = approvedStrategies
+    ? (Array.isArray(approvedStrategies) ? approvedStrategies : [approvedStrategies]).map(cloneStrategy)
+    : [];
 }
 
 export function getConfiguredWholeAthleteCoachStrategy(weekStartDate?: string): CoachSemanticStrategyChange | undefined {
@@ -90,18 +92,11 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   const effectiveGoalType = strategyOrientationGoalType(input.goalType, policy, input.phase);
   const strategyInput: WholeAthleteWeeklyPlannerInput = {
     ...input,
-    // Full frequency targets derived from the already-resolved baseline preserve
-    // race-specific minimums and any explicit caller overrides.
     frequencyTargets: strategyFrequency,
-    // This controls which discipline receives first claim on scarce
-    // quality/progression capacity. Frequency targets above remain anchored to
-    // the athlete's actual race goal.
     goalType: effectiveGoalType,
   };
   const adjusted = buildBaseWholeAthleteWeek(strategyInput);
 
-  // Re-run quality validation against the athlete's real goal rather than the
-  // internal orientation used to allocate discretionary progression.
   const quality = validateUnifiedWeek(adjusted.sessions, {
     availableMinutes: input.availableMinutes,
     phase: input.phase,
@@ -119,11 +114,18 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
 
 function resolveConfiguredStrategy(weekStartDate?: string): CoachSemanticStrategyChange | undefined {
   if (configuredStrategy) return configuredStrategy;
-  const approved = configuredApprovedStrategy
-    && (!weekStartDate || coachStrategyAppliesToWeek(configuredApprovedStrategy, weekStartDate))
-    ? configuredApprovedStrategy
-    : undefined;
+  const approved = resolveApprovedStrategy(weekStartDate);
   return mergeRaceIntentWithCoachStrategy(configuredRaceIntent, approved);
+}
+
+function resolveApprovedStrategy(weekStartDate?: string): CoachSemanticStrategyChange | undefined {
+  if (!configuredApprovedStrategies.length) return undefined;
+  if (!weekStartDate) return cloneStrategy(configuredApprovedStrategies[0]!);
+  const entries: SeasonStrategyEntry[] = configuredApprovedStrategies.map((strategy, index) => ({
+    id: `configured_${index}`,
+    strategy,
+  }));
+  return activeSeasonStrategyForWeek(entries, weekStartDate)?.strategy;
 }
 
 function annotateStrategy(
