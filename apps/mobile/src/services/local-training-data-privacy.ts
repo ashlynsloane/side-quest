@@ -7,6 +7,10 @@ import { clearCoachConversationState } from './coach-conversation-state';
 import { clearCoachDialogueV2 } from './coach-dialogue-v2';
 import { clearCoachObservedOutcomes, exportCoachObservedOutcomes } from './coach-observed-outcomes';
 import {
+  clearCoachStrategyHistoryState,
+  exportCoachStrategyHistoryState,
+} from './coach-strategy-history-state';
+import {
   clearApprovedCoachStrategy,
   exportApprovedCoachStrategyScheduleState,
   COACH_STRATEGY_KEY,
@@ -34,6 +38,7 @@ export function exportLocalTrainingKeyValueData(): Record<string, unknown> {
     coachSemanticDialogue: parseStored(COACH_DIALOGUE_V2_KEY),
     approvedCoachStrategy: parseStored(COACH_STRATEGY_KEY),
     approvedCoachStrategySchedule: exportApprovedCoachStrategyScheduleState(),
+    coachStrategyHistory: exportCoachStrategyHistoryState(),
     raceIntent: exportRaceIntentState(),
     coachClosedLoop: exportCoachClosedLoopState(),
     coachObservedOutcomes: exportCoachObservedOutcomes(),
@@ -54,6 +59,7 @@ export function clearLocalTrainingKeyValueData(): void {
   clearStrategyConversationState();
   clearCoachDialogueV2();
   clearApprovedCoachStrategy();
+  clearCoachStrategyHistoryState();
   clearRaceIntent();
   clearCoachClosedLoopState();
   clearCoachObservedOutcomes();
