@@ -53,6 +53,7 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
   const presentation = presentRaceStrategyContext(context);
   const tradeoff = tradeoffLabel(context.effectiveStrategy.tradeoffTolerance);
   const targetSupport = weekly ? weeklyTargetSupportText(weekly.expression) : undefined;
+  const activeOverride = context.approvedStrategyWindowState === 'active';
 
   return <V23Card elevated style={styles.card}>
     <View style={styles.header}>
@@ -66,7 +67,9 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
     {presentation.summary ? <Text style={styles.summary}>{presentation.summary}</Text> : null}
     <View style={styles.chips}>
       {tradeoff ? <V23Chip tone="info">{tradeoff}</V23Chip> : null}
-      {context.approvedStrategy ? <V23Chip tone="warm">Strategy Coach override</V23Chip> : null}
+      {activeOverride ? <V23Chip tone="warm">Strategy Coach override</V23Chip> : null}
+      {context.approvedStrategyWindowState === 'scheduled' ? <V23Chip tone="warm">Strategy scheduled</V23Chip> : null}
+      {context.approvedStrategyWindowState === 'expired' ? <V23Chip tone="neutral">Prior strategy expired</V23Chip> : null}
       {presentation.target ? <V23Chip tone="neutral">{presentation.target}</V23Chip> : null}
     </View>
 
@@ -100,13 +103,15 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
       </View>
     </View> : null}
 
-    {context.approvedStrategy ? <Text style={styles.overrideNote}>Your approved Strategy Coach directive is layered on top of the saved race intent. Removing that directive returns to the race-priority baseline.</Text> : null}
+    {activeOverride ? <Text style={styles.overrideNote}>The approved Strategy Coach directive is active on top of Race Intent for this planning week. Outside its window, Race Intent resumes automatically.</Text> : null}
+    {context.approvedStrategyWindowState === 'scheduled' ? <Text style={styles.overrideNote}>A Strategy Coach override is saved for a future planning window. Race Intent is still driving the current week.</Text> : null}
+    {context.approvedStrategyWindowState === 'expired' ? <Text style={styles.overrideNote}>The saved Strategy Coach window has ended. Race Intent is already back in control; the old directive is retained only for context until you clear or replace it.</Text> : null}
 
     <View style={styles.actions}>
       <Pressable onPress={() => router.push('/race-intent' as Href)} style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed]}>
         <Text style={styles.primaryActionText}>Edit race priorities</Text>
       </Pressable>
-      {surface === 'plan' ? <Pressable onPress={() => router.push('/(tabs)/coach' as Href)} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
+      {surface === 'plan' ? <Pressable onPress={() => router.push('/coach-strategy' as Href)} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
         <Text style={styles.secondaryActionText}>Talk strategy</Text>
       </Pressable> : null}
     </View>
