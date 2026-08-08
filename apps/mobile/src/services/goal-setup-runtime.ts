@@ -39,6 +39,7 @@ import {
   type EquipmentProfile,
 } from './database';
 import { applyRaceIntent } from './race-intent-runtime';
+import { loadRaceIntent } from './race-intent-state';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
 export type GoalSetupRestriction = 'none' | 'lower_body' | 'upper_body' | 'back' | 'other';
@@ -120,15 +121,20 @@ export async function loadGoalSetupEnvironment(requestedGoal?: PerformanceGoalTy
     getActiveTrainingCheckIn(),
     ensureDefaultEquipmentProfiles(),
   ]);
+  const existingBlock = savedBlock?.block ?? null;
   const goalType = requestedGoal ?? existingGoal?.type ?? 'ironman_70_3';
   const defaultProfile = equipmentProfiles.find((profile) => profile.isDefault) ?? equipmentProfiles[0];
+  const initialDraft = buildInitialDraft(goalType, existingGoal, existingBlock, defaultProfile);
+  const savedIntent = existingBlock && existingBlock.goal.type === goalType
+    ? loadRaceIntent(existingBlock.id)?.intent
+    : undefined;
   return {
     existingGoal,
-    existingBlock: savedBlock?.block ?? null,
+    existingBlock,
     ptProfile,
     activeCheckIn,
     equipmentProfiles,
-    draft: buildInitialDraft(goalType, existingGoal, savedBlock?.block ?? null, defaultProfile),
+    draft: savedIntent ? hydrateDraftWithRaceIntent(initialDraft, savedIntent) : initialDraft,
   };
 }
 
@@ -148,6 +154,8 @@ export function resetDraftForGoal(
     primaryDiscipline: disciplines.length === 1 ? disciplines[0] : undefined,
     overallObjective: 'strong_finish',
     overallTarget: undefined,
+    focusLevel: 'primary_focus',
+    tradeoffTolerance: 'preserve_balance',
     disciplineTargetKind: undefined,
     disciplineTargetValue: undefined,
     blockLength: suggestedBlockLength(weeks),
@@ -156,7 +164,8 @@ export function resetDraftForGoal(
 }
 
 export function recommendedStrengthDoseForDraft(draft: GoalSetupDraft) {
-  return recommendStrengthDose(capacityForDraft(draft), draft.goalType, weeksUntilEvent(draft));
+  const horizon = weeksUntilEvent(draft);
+  return recommendStrengthDose(capacityForDraft(draft), draft.goalType, Math.max(0, horizon));
 }
 
 export function buildRaceIntentForDraft(draft: GoalSetupDraft): RaceIntentV2 | undefined {
@@ -372,9 +381,25 @@ function buildInitialDraft(
     preferredStrengthDays: ['tuesday', 'thursday', 'saturday'],
     enduranceSchedule: defaultEnduranceSchedule(option.disciplines),
     equipmentProfileId: defaultProfile?.id,
-    equipment: defaultProfile?.equipment ?? ['bodyweight'],
+    equipment: defaultProfile?.equipment ?? (['bodyweight'] as EquipmentId[]),
     restriction: 'none',
     blockLength: existingBlock?.goal.type === goalType ? existingBlock.numberOfWeeks : suggestedBlockLength(weeks),
+  };
+}
+
+function hydrateDraftWithRaceIntent(draft: GoalSetupDraft, intent: RaceIntentV2): GoalSetupDraft {
+  const primary = intent.primaryDiscipline;
+  const primaryPriority = primary ? intent.disciplinePriorities[primary] : undefined;
+  const target = primary ? intent.disciplineTargets?.[primary] : undefined;
+  return {
+    ...draft,
+    overallObjective: intent.overallObjective,
+    overallTarget: intent.overallTarget,
+    primaryDiscipline: primary,
+    focusLevel: primaryPriority === 'maximize' ? 'maximize' : 'primary_focus',
+    tradeoffTolerance: intent.tradeoffTolerance,
+    disciplineTargetKind: target?.kind,
+    disciplineTargetValue: target?.value,
   };
 }
 
