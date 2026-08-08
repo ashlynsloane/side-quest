@@ -82,6 +82,6 @@ describe('Unified Goal Setup V2', () => {
     expect(route).toContain('Ready to build the plan.');
     expect(route).toContain('Apply and rebuild plan');
     expect(route).toContain('Build my plan');
-    expect(route).toContain('buildAndSaveGoalSetup(draft, exercises)');
+    expect(route).toContain('buildAndSaveGoalSetup(activeDraft, exercises)');
   });
 });
