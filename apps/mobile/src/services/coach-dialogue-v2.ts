@@ -14,6 +14,13 @@ const COACH_DIALOGUE_V2_KEY = 'circuit.coach-dialogue.v2';
 const MAX_AGE_DAYS = 14;
 let registeredInterpreter: CoachLanguageInterpreter | null = null;
 
+type KnownPlannedEvent = {
+  eventId: string;
+  title: string;
+  discipline?: 'swim' | 'bike' | 'run' | 'strength';
+  date: string;
+};
+
 interface PersistedCoachDialogueV2 {
   version: 2;
   blockId: string;
@@ -76,7 +83,7 @@ export async function interpretCoachTurnV2(
     from: `${first.weekStartDate}T00:00:00.000Z`,
     to: `${addDays(last.weekStartDate, 6)}T23:59:59.999Z`,
   });
-  const knownPlannedEvents = [
+  const knownPlannedEvents: KnownPlannedEvent[] = [
     ...block.weeks.flatMap((week) => week.sessions)
       .filter((session) => session.completionStatus === 'planned' || session.completionStatus === 'modified')
       .map((session) => ({ eventId: session.id, title: session.title, discipline: 'strength' as const, date: session.date })),
@@ -107,7 +114,7 @@ export async function interpretCoachTurnV2(
         pendingQuestion: previousDialogue.pendingQuestion?.prompt,
       },
     });
-    if (interpreted.ok && interpreted.frame) {
+    if (interpreted.ok && interpreted.frame && frameBindsToLivePlan(interpreted.frame, knownPlannedEvents)) {
       frame = { ...interpreted.frame, turnId, source: 'language_model' };
       interpreterId = interpreted.interpreterId;
       usedFallback = false;
@@ -131,6 +138,27 @@ export async function interpretCoachTurnV2(
   const transition = reduceCoachDialogue(previousDialogue, validation.frame);
   saveCoachDialogueV2(block.id, transition.state);
   return { ...transition, frame: validation.frame, interpreterId, usedFallback };
+}
+
+function frameBindsToLivePlan(frame: CoachTurnFrameV2, known: KnownPlannedEvent[]): boolean {
+  const byId = new Map(known.map((event) => [event.eventId, event]));
+  for (const event of frame.events) {
+    if ((event.temporalRole !== 'planned' && event.temporalRole !== 'current') || !event.eventId) continue;
+    const live = byId.get(event.eventId);
+    if (!live) return false;
+    if (event.date && event.date !== live.date) return false;
+    if (event.discipline && live.discipline && event.discipline !== live.discipline) return false;
+  }
+
+  const targetId = frame.requestedChange?.targetEventId;
+  if (targetId && frame.requestedChange?.action !== 'add' && !byId.has(targetId)) return false;
+  if (frame.requestedChange?.targetEventSemanticId) {
+    const target = frame.events.find((event) => event.semanticId === frame.requestedChange?.targetEventSemanticId);
+    if (!target) return false;
+    if (target.temporalRole === 'completed' && frame.requestedChange.action !== 'evaluate') return false;
+    if (target.eventId && target.temporalRole !== 'completed' && !byId.has(target.eventId)) return false;
+  }
+  return true;
 }
 
 function isAdjustableEnduranceEvent(event: TrainingCalendarEvent): boolean {
