@@ -140,6 +140,7 @@ export async function interpretCoachTurnV2(
         bodyArea: previousDialogue.activeConcern.bodyArea,
         category: previousDialogue.activeConcern.category,
       } : undefined,
+      strategyDraft: previousDialogue.strategyDraft,
       knownPlannedEvents,
     });
   }
