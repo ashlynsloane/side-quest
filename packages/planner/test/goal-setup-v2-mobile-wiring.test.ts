@@ -55,6 +55,15 @@ describe('Unified Goal Setup V2', () => {
     expect(runtime).toContain('applyRaceIntent');
   });
 
+  it('hydrates existing Race Intent so ordinary plan edits do not erase saved strategy', () => {
+    const runtime = source('apps/mobile/src/services/goal-setup-runtime.ts');
+    expect(runtime).toContain('loadRaceIntent(existingBlock.id)');
+    expect(runtime).toContain('hydrateDraftWithRaceIntent');
+    expect(runtime).toContain('overallObjective: intent.overallObjective');
+    expect(runtime).toContain("primaryPriority === 'maximize' ? 'maximize' : 'primary_focus'");
+    expect(runtime).toContain('disciplineTargetKind: target?.kind');
+  });
+
   it('preserves planner, protection, equipment, and reconciliation behavior behind the new UI', () => {
     const runtime = source('apps/mobile/src/services/goal-setup-runtime.ts');
     expect(runtime).toContain('generateTrainingBlock');
