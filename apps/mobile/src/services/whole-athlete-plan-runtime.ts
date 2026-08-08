@@ -11,7 +11,7 @@ import {
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
 } from './database';
-import { loadApprovedCoachStrategy } from './coach-strategy-state';
+import { loadApprovedCoachStrategySchedule } from './coach-strategy-state';
 import { loadRaceIntent } from './race-intent-state';
 import {
   clearSideQuestGeneratedPlanEvents,
@@ -69,9 +69,6 @@ export function getLatestWholeAthletePlanSnapshot(blockId?: string): GeneratedWh
 
 export function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
   const next = reconciliationQueue.then(runWholeAthleteReconciliation, runWholeAthleteReconciliation);
-  // Keep later requests serial even if this caller observes a rejection. Each queued
-  // reconciliation reads the latest saved block when it begins, so a newer plan
-  // change cannot be overwritten by an older concurrent refresh.
   reconciliationQueue = next.catch(() => null);
   return next;
 }
@@ -86,8 +83,11 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
   }
 
   const raceIntent = loadRaceIntent(saved.block.id)?.intent;
-  const approvedStrategy = loadApprovedCoachStrategy(saved.block.id)?.strategy;
-  configureWholeAthleteStrategyLayers(raceIntent, approvedStrategy);
+  const approvedSchedule = loadApprovedCoachStrategySchedule(saved.block.id);
+  configureWholeAthleteStrategyLayers(
+    raceIntent,
+    approvedSchedule.windows.map((window) => window.strategy),
+  );
 
   const [activeCheckIn, ptProfile, readiness] = await Promise.all([
     getActiveTrainingCheckIn(),
