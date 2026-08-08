@@ -1,6 +1,7 @@
 import {
   buildStrategyMacrocycle,
   type StrategyMacrocycleView,
+  type StrategySeasonWindowView,
 } from '@circuit/planner/strategy-macrocycle';
 
 import { getLatestTrainingBlock } from './database';
@@ -44,7 +45,7 @@ export async function loadStrategyWorkspace(): Promise<StrategyWorkspaceData | n
   });
   const macrocycle = buildStrategyMacrocycle({
     raceIntent: editor.intent,
-    approvedStrategy: review.approved?.strategy,
+    approvedStrategies: review.schedule.windows,
     weeks,
     referenceWeekStart: currentWeekStart(),
   });
@@ -62,27 +63,40 @@ export async function loadStrategyWorkspace(): Promise<StrategyWorkspaceData | n
 }
 
 export function strategyWindowLabel(data: StrategyWorkspaceData): string {
-  const state = data.macrocycle.approvedWindowState;
-  if (!state) return 'Race Intent baseline';
-  if (state === 'scheduled') return 'Strategy scheduled';
-  if (state === 'expired') return 'Strategy window ended';
-  return 'Strategy active';
+  const macro = data.macrocycle;
+  if (!data.review.schedule.windows.length) return 'Race Intent baseline';
+  if (macro.approvedWindowState === 'active') return 'Season block active';
+  if (macro.approvedWindowState === 'scheduled') return 'Season block scheduled';
+  return 'Season blocks complete';
 }
 
 export function strategyWindowSummary(data: StrategyWorkspaceData): string {
   const macro = data.macrocycle;
-  if (!data.review.approved) return 'No Strategy Coach override is approved. Race Intent is driving the long-horizon allocation.';
-  if (macro.approvedWindowState === 'scheduled') {
-    return `The approved strategy begins ${formatDate(macro.approvedStartsAt) ?? 'in a future planning week'}. Until then, Race Intent remains the planning baseline.`;
+  const windows = data.review.schedule.windows;
+  if (!windows.length) return 'No Strategy Coach blocks are approved. Race Intent is driving the long-horizon allocation.';
+
+  const active = macro.activeWindowId
+    ? macro.seasonWindows.find((window) => window.id === macro.activeWindowId)
+    : undefined;
+  const next = macro.nextWindowId
+    ? macro.seasonWindows.find((window) => window.id === macro.nextWindowId)
+    : undefined;
+
+  if (active) {
+    const end = formatDate(active.endsAt) ?? 'an open-ended finish';
+    const nextText = next ? ` Next: ${next.label} begins ${formatDate(next.startsAt) ?? 'in a future planning week'}.` : '';
+    return `${active.label} is controlling the current strategy window through ${end}.${nextText} Race Intent remains the baseline in any gap between approved blocks.`;
   }
-  if (macro.approvedWindowState === 'expired') {
-    return `The approved strategy window ended ${formatDate(macro.approvedEndsAt) ?? 'before this planning week'}. The planner has returned to Race Intent automatically.`;
+  if (next) {
+    return `${next.label} begins ${formatDate(next.startsAt) ?? 'in a future planning week'}. Until then, Race Intent controls the plan. ${windows.length} approved season block${windows.length === 1 ? '' : 's'} ${windows.length === 1 ? 'is' : 'are'} saved.`;
   }
-  if (macro.approvedEndsAt) {
-    const returnLabel = macro.returnToRaceIntentWeek ? ` The first full planning week back on Race Intent begins ${formatDate(macro.returnToRaceIntentWeek)}.` : '';
-    return `The approved Strategy Coach override is active through ${formatDate(macro.approvedEndsAt)}.${returnLabel}`;
-  }
-  return 'The approved Strategy Coach override is open-ended. Race Intent remains underneath it as the protected baseline.';
+  return `${windows.length} approved Strategy Coach block${windows.length === 1 ? '' : 's'} ${windows.length === 1 ? 'has' : 'have'} finished. Race Intent is controlling the plan now.`;
+}
+
+export function seasonWindowStateLabel(window: StrategySeasonWindowView): string {
+  if (window.state === 'active') return 'ACTIVE';
+  if (window.state === 'scheduled') return 'UPCOMING';
+  return 'COMPLETED';
 }
 
 export function phaseLabel(value: string): string {
