@@ -1,5 +1,6 @@
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import { reduceCoachDialogue, emptyCoachDialogueState, type CoachDialogueTransition, type CoachDialogueStateV2 } from '@circuit/planner/coach-dialogue-engine';
+import { runCoachLanguageInterpreter, type CoachLanguageInterpreter } from '@circuit/planner/coach-language-interpreter';
 import { buildDeterministicCoachTurnFrame } from '@circuit/planner/coach-semantic-fallback';
 import { validateCoachTurnFrame, type CoachTurnFrameV2 } from '@circuit/planner/coach-semantic-frame';
 import type { CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
@@ -11,6 +12,7 @@ import { isSideQuestGeneratedPlanEvent } from './whole-athlete-plan';
 
 const COACH_DIALOGUE_V2_KEY = 'circuit.coach-dialogue.v2';
 const MAX_AGE_DAYS = 14;
+let registeredInterpreter: CoachLanguageInterpreter | null = null;
 
 interface PersistedCoachDialogueV2 {
   version: 2;
@@ -21,6 +23,12 @@ interface PersistedCoachDialogueV2 {
 
 export interface CoachSemanticTurnResult extends CoachDialogueTransition {
   frame: CoachTurnFrameV2;
+  interpreterId: string;
+  usedFallback: boolean;
+}
+
+export function registerCoachLanguageInterpreter(interpreter: CoachLanguageInterpreter | null): void {
+  registeredInterpreter = interpreter;
 }
 
 export function loadCoachDialogueV2(blockId: string): CoachDialogueStateV2 {
@@ -79,22 +87,50 @@ export async function interpretCoachTurnV2(
       date: event.startAt.slice(0, 10),
     })),
   ];
-
+  const previousDialogue = loadCoachDialogueV2(block.id);
   const turnId = `semantic_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const frame = buildDeterministicCoachTurnFrame(message, quickSignal, {
-    turnId,
-    referenceDate: localDate(),
-    previousInterpretation: legacyConversation?.lastInterpretation,
-    previousTargetDiscipline: legacyConversation?.activeTarget?.sessionDiscipline,
-    previousSessionDate: legacyConversation?.activeTarget?.sessionDate,
-    previousTargetEventId: legacyConversation?.activeTarget?.sessionId,
-    knownPlannedEvents,
-  });
+
+  let frame: CoachTurnFrameV2 | undefined;
+  let interpreterId = 'deterministic-fallback';
+  let usedFallback = true;
+  if (registeredInterpreter) {
+    const interpreted = await runCoachLanguageInterpreter(registeredInterpreter, {
+      message,
+      referenceDate: localDate(),
+      knownPlannedEvents,
+      dialogueSummary: {
+        activeConcern: previousDialogue.activeConcern
+          ? [previousDialogue.activeConcern.bodyArea, previousDialogue.activeConcern.category].filter(Boolean).join(' ') || 'active symptom concern'
+          : undefined,
+        activeTargetEventId: previousDialogue.activePlannedTarget?.eventId,
+        focusDate: previousDialogue.focusDate,
+        pendingQuestion: previousDialogue.pendingQuestion?.prompt,
+      },
+    });
+    if (interpreted.ok && interpreted.frame) {
+      frame = { ...interpreted.frame, turnId, source: 'language_model' };
+      interpreterId = interpreted.interpreterId;
+      usedFallback = false;
+    }
+  }
+
+  if (!frame) {
+    frame = buildDeterministicCoachTurnFrame(message, quickSignal, {
+      turnId,
+      referenceDate: localDate(),
+      previousInterpretation: legacyConversation?.lastInterpretation,
+      previousTargetDiscipline: legacyConversation?.activeTarget?.sessionDiscipline,
+      previousSessionDate: legacyConversation?.activeTarget?.sessionDate,
+      previousTargetEventId: legacyConversation?.activeTarget?.sessionId,
+      knownPlannedEvents,
+    });
+  }
+
   const validation = validateCoachTurnFrame(frame);
   if (!validation.valid || !validation.frame) return null;
-  const transition = reduceCoachDialogue(loadCoachDialogueV2(block.id), validation.frame);
+  const transition = reduceCoachDialogue(previousDialogue, validation.frame);
   saveCoachDialogueV2(block.id, transition.state);
-  return { ...transition, frame: validation.frame };
+  return { ...transition, frame: validation.frame, interpreterId, usedFallback };
 }
 
 function isAdjustableEnduranceEvent(event: TrainingCalendarEvent): boolean {
