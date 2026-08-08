@@ -192,7 +192,7 @@ export function resolveCoachConversationMessage(
       : explicitReplacement && context.previousTargetDiscipline
         ? context.previousTargetDiscipline
         : freshTargetDiscipline
-          ?? interpretation.targetDiscipline
+          ?? (freshTargetIsRetrospective ? undefined : interpretation.targetDiscipline)
           ?? context.previousTargetDiscipline;
   interpretation = { ...interpretation, targetDiscipline };
 
