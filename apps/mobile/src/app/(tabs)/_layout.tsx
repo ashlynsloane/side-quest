@@ -23,6 +23,7 @@ export default function TabLayout() {
     <Tabs.Screen name="train" options={{ title: 'Train', tabBarIcon: ({ focused }) => <TabIcon kind="train" focused={focused} /> }} />
     <Tabs.Screen name="coach" options={{ title: 'Coach', tabBarIcon: ({ focused }) => <TabIcon kind="insights" focused={focused} /> }} />
     <Tabs.Screen name="profile" options={{ title: 'You', tabBarIcon: ({ focused }) => <TabIcon kind="profile" focused={focused} /> }} />
+    <Tabs.Screen name="coach-strategy" options={{ href: null }} />
     <Tabs.Screen name="library" options={{ href: null }} />
   </Tabs>;
 }
