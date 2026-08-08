@@ -2,7 +2,8 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { V23Card, V23Chip, V23Icon } from '@/components/v23-ui';
+import { ProductDisclosure } from '@/components/product-ui';
+import { V23Chip, V23Icon } from '@/components/v23-ui';
 import {
   loadRaceStrategyContext,
   presentRaceStrategyContext,
@@ -25,6 +26,7 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [context, setContext] = useState<RaceStrategyContext | null>(null);
   const [weekly, setWeekly] = useState<CurrentWeeklyStrategyContext | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -54,58 +56,64 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
   const tradeoff = tradeoffLabel(context.effectiveStrategy.tradeoffTolerance);
   const targetSupport = weekly ? weeklyTargetSupportText(weekly.expression) : undefined;
   const activeOverride = context.approvedStrategyWindowState === 'active';
+  const weekState = weekly ? weeklyStrategyStateLabel(weekly.expression.state) : undefined;
 
-  return <V23Card elevated style={styles.card}>
+  return <View style={styles.card}>
     <View style={styles.header}>
-      <View style={styles.icon}><V23Icon name="goal" color={tokens.accent} size={20} /></View>
+      <View style={styles.icon}><V23Icon name="goal" color={tokens.accent} size={19} /></View>
       <View style={styles.headerCopy}>
         <Text style={styles.eyebrow}>{presentation.sourceLabel}</Text>
         <Text style={styles.title}>{presentation.title}</Text>
+        {presentation.summary ? <Text style={styles.summary} numberOfLines={2}>{presentation.summary}</Text> : null}
       </View>
     </View>
 
-    {presentation.summary ? <Text style={styles.summary}>{presentation.summary}</Text> : null}
     <View style={styles.chips}>
-      {tradeoff ? <V23Chip tone="info">{tradeoff}</V23Chip> : null}
+      {weekly && weekState ? <V23Chip tone={weekly.expression.state === 'held' ? 'warm' : weekly.expression.state === 'expressed' ? 'info' : 'neutral'}>{weekState}</V23Chip> : null}
+      {tradeoff ? <V23Chip tone="neutral">{tradeoff}</V23Chip> : null}
       {activeOverride ? <V23Chip tone="warm">Strategy Coach override</V23Chip> : null}
       {context.approvedStrategyWindowState === 'scheduled' ? <V23Chip tone="warm">Strategy scheduled</V23Chip> : null}
-      {context.approvedStrategyWindowState === 'expired' ? <V23Chip tone="neutral">Prior strategy expired</V23Chip> : null}
       {presentation.target ? <V23Chip tone="neutral">{presentation.target}</V23Chip> : null}
     </View>
 
-    <View style={styles.whyBox}>
-      <Text style={styles.whyLabel}>WHY THIS AFFECTS THE PLAN</Text>
-      <Text style={styles.whyBody}>{presentation.rationale}</Text>
-    </View>
-
-    {weekly ? <View style={styles.weekBox}>
-      <View style={styles.weekTop}>
-        <View style={styles.weekTopCopy}>
-          <Text style={styles.weekLabel}>{weekly.isCurrentWeek ? 'THIS WEEK' : 'NEXT PLANNED WEEK'}</Text>
-          <Text style={styles.weekTitle}>{weekly.expression.headline}</Text>
-        </View>
-        <V23Chip tone={weekly.expression.state === 'held' ? 'warm' : weekly.expression.state === 'expressed' ? 'info' : 'neutral'}>
-          {weeklyStrategyStateLabel(weekly.expression.state)}
-        </V23Chip>
-      </View>
-      <Text style={styles.weekRange}>{formatWeekRange(weekly.week.weekStartDate, weekly.week.weekEndDate)}</Text>
-      <Text style={styles.weekSummary}>{weekly.expression.summary}</Text>
-      <Text style={styles.weekDisciplines}>{weeklyDisciplineLine(weekly.expression)}</Text>
-      {targetSupport || weekly.targetEvidence.status !== 'none' ? <View style={styles.targetBox}>
-        <Text style={styles.targetLabel}>RACE TARGET CONNECTION</Text>
-        {targetSupport ? <Text style={styles.targetBody}>{targetSupport}</Text> : null}
-        {weekly.targetEvidence.targetLabel ? <Text style={styles.targetTitle}>{weekly.targetEvidence.targetLabel}</Text> : null}
-        {weekly.targetEvidence.evidenceLabel ? <Text style={styles.targetEvidence}>{weekly.targetEvidence.evidenceLabel}</Text> : null}
-        {weekly.targetEvidence.caveat ? <Text style={styles.targetCaveat}>{weekly.targetEvidence.caveat}</Text> : null}
-      </View> : null}
-      <View style={styles.reasonList}>
-        {weekly.expression.reasons.slice(0, 3).map((reason) => <Text key={reason} style={styles.reasonText}>• {reason}</Text>)}
+    {weekly ? <View style={styles.weekLine}>
+      <View style={styles.weekAccent} />
+      <View style={styles.weekCopy}>
+        <Text style={styles.weekLabel}>{weekly.isCurrentWeek ? 'THIS WEEK' : 'NEXT PLANNED WEEK'} · {formatWeekRange(weekly.week.weekStartDate, weekly.week.weekEndDate)}</Text>
+        <Text style={styles.weekTitle}>{weekly.expression.headline}</Text>
+        <Text style={styles.weekDisciplines}>{weeklyDisciplineLine(weekly.expression)}</Text>
       </View>
     </View> : null}
 
-    {activeOverride ? <Text style={styles.overrideNote}>The approved Strategy Coach directive is active on top of Race Intent for this planning week. Outside its window, Race Intent resumes automatically.</Text> : null}
-    {context.approvedStrategyWindowState === 'scheduled' ? <Text style={styles.overrideNote}>A Strategy Coach override is saved for a future planning window. Race Intent is still driving the current week.</Text> : null}
-    {context.approvedStrategyWindowState === 'expired' ? <Text style={styles.overrideNote}>The saved Strategy Coach window has ended. Race Intent is already back in control; the old directive is retained only for context until you clear or replace it.</Text> : null}
+    <ProductDisclosure
+      title="Why this week?"
+      summary={weekly?.expression.summary ?? 'See how race priorities are shaping the plan.'}
+      expanded={expanded}
+      onPress={() => setExpanded((value) => !value)}
+    >
+      <View style={styles.whyBox}>
+        <Text style={styles.whyLabel}>WHY THIS AFFECTS THE PLAN</Text>
+        <Text style={styles.whyBody}>{presentation.rationale}</Text>
+      </View>
+
+      {weekly ? <>
+        <Text style={styles.weekSummary}>{weekly.expression.summary}</Text>
+        {targetSupport || weekly.targetEvidence.status !== 'none' ? <View style={styles.targetBox}>
+          <Text style={styles.targetLabel}>RACE TARGET CONNECTION</Text>
+          {targetSupport ? <Text style={styles.targetBody}>{targetSupport}</Text> : null}
+          {weekly.targetEvidence.targetLabel ? <Text style={styles.targetTitle}>{weekly.targetEvidence.targetLabel}</Text> : null}
+          {weekly.targetEvidence.evidenceLabel ? <Text style={styles.targetEvidence}>{weekly.targetEvidence.evidenceLabel}</Text> : null}
+          {weekly.targetEvidence.caveat ? <Text style={styles.targetCaveat}>{weekly.targetEvidence.caveat}</Text> : null}
+        </View> : null}
+        <View style={styles.reasonList}>
+          {weekly.expression.reasons.slice(0, 3).map((reason) => <Text key={reason} style={styles.reasonText}>• {reason}</Text>)}
+        </View>
+      </> : null}
+
+      {activeOverride ? <Text style={styles.overrideNote}>The approved Strategy Coach directive is active on top of Race Intent for this planning week. Outside its window, Race Intent resumes automatically.</Text> : null}
+      {context.approvedStrategyWindowState === 'scheduled' ? <Text style={styles.overrideNote}>A Strategy Coach override is saved for a future planning window. Race Intent is still driving the current week.</Text> : null}
+      {context.approvedStrategyWindowState === 'expired' ? <Text style={styles.overrideNote}>The prior Strategy Coach window has ended. Race Intent is already back in control.</Text> : null}
+    </ProductDisclosure>
 
     <View style={styles.actions}>
       <Pressable onPress={() => router.push('/race-intent' as Href)} style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed]}>
@@ -115,7 +123,7 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
         <Text style={styles.secondaryActionText}>Talk strategy</Text>
       </Pressable> : null}
     </View>
-  </V23Card>;
+  </View>;
 }
 
 function formatWeekRange(start: string, end: string): string {
@@ -128,25 +136,24 @@ function formatWeekRange(start: string, end: string): string {
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
-    card: { gap: 11, padding: 16 },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-    icon: { width: 40, height: 40, borderRadius: 13, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
+    card: { borderRadius: 20, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 15, paddingTop: 15, paddingBottom: 10, gap: 10 },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    icon: { width: 38, height: 38, borderRadius: 12, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
     headerCopy: { flex: 1, minWidth: 0 },
-    eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
-    title: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900', marginTop: 2 },
-    summary: { color: tokens.text, fontSize: 13.5, lineHeight: 20, fontWeight: '700' },
-    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-    whyBox: { borderRadius: 14, backgroundColor: tokens.surfaceMuted, padding: 12, gap: 4 },
-    whyLabel: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.85 },
-    whyBody: { color: tokens.text, fontSize: 12.5, lineHeight: 18 },
-    weekBox: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, paddingTop: 13, gap: 8 },
-    weekTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-    weekTopCopy: { flex: 1, minWidth: 0 },
-    weekLabel: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
-    weekTitle: { color: tokens.text, fontSize: 17, lineHeight: 22, fontWeight: '900', marginTop: 2 },
-    weekRange: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
-    weekSummary: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
-    weekDisciplines: { color: tokens.text, fontSize: 12.5, lineHeight: 19, fontWeight: '700' },
+    eyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
+    title: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '900', marginTop: 1 },
+    summary: { color: tokens.textMuted, fontSize: 12, lineHeight: 17, marginTop: 2 },
+    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    weekLine: { flexDirection: 'row', gap: 10, paddingVertical: 4 },
+    weekAccent: { width: 3, borderRadius: 2, backgroundColor: tokens.accent },
+    weekCopy: { flex: 1, minWidth: 0, gap: 2 },
+    weekLabel: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.7 },
+    weekTitle: { color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '900' },
+    weekDisciplines: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
+    whyBox: { borderRadius: 13, backgroundColor: tokens.surfaceMuted, padding: 11, gap: 4 },
+    whyLabel: { color: tokens.textMuted, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
+    whyBody: { color: tokens.text, fontSize: 12, lineHeight: 17 },
+    weekSummary: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
     targetBox: { borderRadius: 12, backgroundColor: tokens.accentSoft, padding: 10, gap: 3 },
     targetLabel: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
     targetBody: { color: tokens.text, fontSize: 11.5, lineHeight: 16 },
@@ -156,11 +163,11 @@ function makeStyles(tokens: DesignTokens) {
     reasonList: { gap: 3 },
     reasonText: { color: tokens.textMuted, fontSize: 11, lineHeight: 16 },
     overrideNote: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 17 },
-    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    primaryAction: { minHeight: 40, borderRadius: 12, backgroundColor: tokens.accent, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
-    primaryActionText: { color: '#FFFFFF', fontSize: 13, lineHeight: 17, fontWeight: '800' },
-    secondaryAction: { minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
-    secondaryActionText: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '800' },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 1 },
+    primaryAction: { minHeight: 38, borderRadius: 11, backgroundColor: tokens.accent, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+    primaryActionText: { color: '#FFFFFF', fontSize: 12.5, lineHeight: 16, fontWeight: '800' },
+    secondaryAction: { minHeight: 38, borderRadius: 11, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center' },
+    secondaryActionText: { color: tokens.text, fontSize: 12.5, lineHeight: 16, fontWeight: '800' },
     pressed: { opacity: 0.76 },
   });
 }
