@@ -10,14 +10,18 @@ function source(path: string): string {
 }
 
 describe('Coaching OS mobile wiring', () => {
-  it('canonicalizes the whole-athlete plan while goal setup remains open', () => {
+  it('uses one Goal Setup runtime for plan generation, protection context, and whole-athlete reconciliation', () => {
     const route = source('apps/mobile/src/app/goal-plan.tsx');
-    const legacy = source('apps/mobile/src/components/legacy-goal-plan-screen.tsx');
-    expect(route).toContain('refreshLatestWholeAthletePlan');
-    expect(route).toContain('blockSignature');
-    expect(route).toContain('LegacyGoalPlanScreen');
-    expect(legacy).toContain('generateTrainingBlock');
-    expect(legacy).toContain('saveTrainingBlock');
+    const runtime = source('apps/mobile/src/services/goal-setup-runtime.ts');
+    expect(route).toContain('buildAndSaveGoalSetup');
+    expect(route).not.toContain('LegacyGoalPlanScreen');
+    expect(runtime).toContain('generateTrainingBlock');
+    expect(runtime).toContain('adaptTrainingBlock');
+    expect(runtime).toContain('getLatestPTProfile');
+    expect(runtime).toContain('getActiveTrainingCheckIn');
+    expect(runtime).toContain('saveTrainingBlock');
+    expect(runtime).toContain('applyRaceIntent');
+    expect(runtime).toContain('refreshLatestWholeAthletePlan');
   });
 
   it('refreshes observed Coach execution after integration and plan reconciliation', () => {
