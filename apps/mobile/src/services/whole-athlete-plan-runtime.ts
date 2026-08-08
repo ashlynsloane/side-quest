@@ -29,6 +29,7 @@ const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
 };
 
 let reconciliationQueue: Promise<GeneratedWholeAthleteBlock | null> = Promise.resolve(null);
+let latestReconciledPlan: GeneratedWholeAthleteBlock | null = null;
 
 export function getDefaultWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
   return { ...DEFAULT_HEALTH_PREFERENCES };
@@ -58,6 +59,10 @@ export function clearWholeAthleteHealthPreferences(): void {
   Storage.removeItemSync(HEALTH_PREFERENCES_KEY);
 }
 
+export function getLatestWholeAthletePlanSnapshot(): GeneratedWholeAthleteBlock | null {
+  return latestReconciledPlan;
+}
+
 export function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
   const next = reconciliationQueue.then(runWholeAthleteReconciliation, runWholeAthleteReconciliation);
   // Keep later requests serial even if this caller observes a rejection. Each queued
@@ -71,6 +76,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
   const saved = await getLatestTrainingBlock();
   if (!saved?.block) {
     configureWholeAthleteCoachStrategy(undefined);
+    latestReconciledPlan = null;
     await clearSideQuestGeneratedPlanEvents();
     return null;
   }
@@ -85,7 +91,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     getTodayReadinessCheckIn(),
   ]);
   const goal = saved.block.goal;
-  return generateAndPersistWholeAthleteBlock({
+  const generated = await generateAndPersistWholeAthleteBlock({
     block: saved.block,
     goal,
     capacity: capacityFromGoal(goal),
@@ -94,6 +100,8 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     ptProfileActive: Boolean(ptProfile?.active),
     readiness,
   });
+  latestReconciledPlan = generated;
+  return generated;
 }
 
 function capacityFromGoal(goal: PerformanceGoal): WholeAthleteCapacityInput {
