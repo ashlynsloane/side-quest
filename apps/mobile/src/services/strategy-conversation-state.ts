@@ -15,6 +15,7 @@ export interface StrategyConversationState {
   version: 1;
   blockId: string;
   turns: StrategyConversationTurn[];
+  editingWindowId?: string;
   updatedAt: string;
 }
 
@@ -33,6 +34,7 @@ export function loadStrategyConversationState(blockId: string): StrategyConversa
       version: 1,
       blockId,
       turns: parsed.turns.filter(isTurn).slice(-MAX_TURNS),
+      editingWindowId: typeof parsed.editingWindowId === 'string' ? parsed.editingWindowId : undefined,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
   } catch {
@@ -60,6 +62,19 @@ export function appendStrategyConversationTurn(
       },
     ].slice(-MAX_TURNS),
     updatedAt: createdAt,
+  };
+  Storage.setItemSync(STRATEGY_CONVERSATION_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function setStrategyConversationEditingWindow(
+  state: StrategyConversationState,
+  editingWindowId: string | undefined,
+): StrategyConversationState {
+  const next: StrategyConversationState = {
+    ...state,
+    editingWindowId,
+    updatedAt: new Date().toISOString(),
   };
   Storage.setItemSync(STRATEGY_CONVERSATION_KEY, JSON.stringify(next));
   return next;
