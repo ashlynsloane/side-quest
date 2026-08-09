@@ -62,7 +62,7 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
     <View style={styles.header}>
       <View style={styles.icon}><V23Icon name="goal" color={tokens.accent} size={19} /></View>
       <View style={styles.headerCopy}>
-        <Text style={styles.eyebrow}>{presentation.sourceLabel}</Text>
+        <Text style={styles.eyebrow}>RACE PRIORITIES</Text>
         <Text style={styles.title}>{presentation.title}</Text>
         {presentation.summary ? <Text style={styles.summary} numberOfLines={2}>{presentation.summary}</Text> : null}
       </View>
@@ -71,15 +71,15 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
     <View style={styles.chips}>
       {weekly && weekState ? <V23Chip tone={weekly.expression.state === 'held' ? 'warm' : weekly.expression.state === 'expressed' ? 'info' : 'neutral'}>{weekState}</V23Chip> : null}
       {tradeoff ? <V23Chip tone="neutral">{tradeoff}</V23Chip> : null}
-      {activeOverride ? <V23Chip tone="warm">Strategy Coach override</V23Chip> : null}
-      {context.approvedStrategyWindowState === 'scheduled' ? <V23Chip tone="warm">Strategy scheduled</V23Chip> : null}
+      {activeOverride ? <V23Chip tone="warm">Focus active</V23Chip> : null}
+      {context.approvedStrategyWindowState === 'scheduled' ? <V23Chip tone="warm">Focus scheduled</V23Chip> : null}
       {presentation.target ? <V23Chip tone="neutral">{presentation.target}</V23Chip> : null}
     </View>
 
     {weekly ? <View style={styles.weekLine}>
       <View style={styles.weekAccent} />
       <View style={styles.weekCopy}>
-        <Text style={styles.weekLabel}>{weekly.isCurrentWeek ? 'THIS WEEK' : 'NEXT PLANNED WEEK'} · {formatWeekRange(weekly.week.weekStartDate, weekly.week.weekEndDate)}</Text>
+        <Text style={styles.weekLabel}>{weekly.isCurrentWeek ? 'THIS WEEK' : 'NEXT WEEK'} · {formatWeekRange(weekly.week.weekStartDate, weekly.week.weekEndDate)}</Text>
         <Text style={styles.weekTitle}>{weekly.expression.headline}</Text>
         <Text style={styles.weekDisciplines}>{weeklyDisciplineLine(weekly.expression)}</Text>
       </View>
@@ -87,19 +87,19 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
 
     <ProductDisclosure
       title="Why this week?"
-      summary={weekly?.expression.summary ?? 'See how race priorities are shaping the plan.'}
+      summary={weekly?.expression.summary ?? 'See how your race priorities affect this week.'}
       expanded={expanded}
       onPress={() => setExpanded((value) => !value)}
     >
       <View style={styles.whyBox}>
-        <Text style={styles.whyLabel}>WHY THIS AFFECTS THE PLAN</Text>
+        <Text style={styles.whyLabel}>WHY</Text>
         <Text style={styles.whyBody}>{presentation.rationale}</Text>
       </View>
 
       {weekly ? <>
         <Text style={styles.weekSummary}>{weekly.expression.summary}</Text>
         {targetSupport || weekly.targetEvidence.status !== 'none' ? <View style={styles.targetBox}>
-          <Text style={styles.targetLabel}>RACE TARGET CONNECTION</Text>
+          <Text style={styles.targetLabel}>RACE TARGET</Text>
           {targetSupport ? <Text style={styles.targetBody}>{targetSupport}</Text> : null}
           {weekly.targetEvidence.targetLabel ? <Text style={styles.targetTitle}>{weekly.targetEvidence.targetLabel}</Text> : null}
           {weekly.targetEvidence.evidenceLabel ? <Text style={styles.targetEvidence}>{weekly.targetEvidence.evidenceLabel}</Text> : null}
@@ -110,9 +110,9 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
         </View>
       </> : null}
 
-      {activeOverride ? <Text style={styles.overrideNote}>The approved Strategy Coach directive is active on top of Race Intent for this planning week. Outside its window, Race Intent resumes automatically.</Text> : null}
-      {context.approvedStrategyWindowState === 'scheduled' ? <Text style={styles.overrideNote}>A Strategy Coach override is saved for a future planning window. Race Intent is still driving the current week.</Text> : null}
-      {context.approvedStrategyWindowState === 'expired' ? <Text style={styles.overrideNote}>The prior Strategy Coach window has ended. Race Intent is already back in control.</Text> : null}
+      {activeOverride ? <Text style={styles.overrideNote}>A temporary training focus is active for this date range. Your normal race priorities resume afterward.</Text> : null}
+      {context.approvedStrategyWindowState === 'scheduled' ? <Text style={styles.overrideNote}>A temporary training focus is scheduled for a future date range.</Text> : null}
+      {context.approvedStrategyWindowState === 'expired' ? <Text style={styles.overrideNote}>The temporary focus has ended.</Text> : null}
     </ProductDisclosure>
 
     <View style={styles.actions}>
@@ -120,7 +120,7 @@ export function RaceStrategyContextCard({ surface }: { surface: 'plan' | 'coach'
         <Text style={styles.primaryActionText}>Edit race priorities</Text>
       </Pressable>
       {surface === 'plan' ? <Pressable onPress={() => router.push('/(tabs)/coach-strategy' as Href)} style={({ pressed }) => [styles.secondaryAction, pressed && styles.pressed]}>
-        <Text style={styles.secondaryActionText}>Talk strategy</Text>
+        <Text style={styles.secondaryActionText}>Season focus</Text>
       </Pressable> : null}
     </View>
   </View>;
