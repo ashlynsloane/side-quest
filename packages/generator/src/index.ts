@@ -4,27 +4,26 @@ import { generateWorkout as generateWorkoutCore } from './core';
 export * from './core';
 
 /**
- * Protect long AMRAP stations from becoming repetitive two-movement grinders.
+ * Protect long AMRAP stations from becoming repetitive grinders.
  *
- * - A 12-minute station is never paired with a two-exercise prescription.
- * - Explicit two-exercise workouts keep that structure by using 4/8-minute stations
- *   whenever those durations are available.
- * - Mixed/default workouts that allow 12-minute stations use three exercises for
- *   the longer station format (4-minute stations remain two exercises in core).
+ * Ordinary mixed/random workouts use 4- and 8-minute stations when those
+ * durations are available. A 12-minute AMRAP is reserved for an explicitly
+ * three-exercise structure. If 12 minutes is the only allowed duration, the
+ * request is automatically promoted to three exercises rather than permitting
+ * a two-movement 12-minute loop.
  */
 export function normalizeStationDensity(
   request: WorkoutGenerationRequest,
 ): WorkoutGenerationRequest {
   if (!request.allowedStationMinutes.includes(12)) return request;
+  if (request.exercisesPerStation === 3) return request;
 
-  if (request.exercisesPerStation === 2) {
-    const shorterDurations = request.allowedStationMinutes.filter((minutes) => minutes !== 12);
-    if (shorterDurations.length > 0) {
-      return {
-        ...request,
-        allowedStationMinutes: shorterDurations,
-      };
-    }
+  const shorterDurations = request.allowedStationMinutes.filter((minutes) => minutes !== 12);
+  if (shorterDurations.length > 0) {
+    return {
+      ...request,
+      allowedStationMinutes: shorterDurations,
+    };
   }
 
   return {
