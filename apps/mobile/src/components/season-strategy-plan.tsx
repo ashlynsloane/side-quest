@@ -38,10 +38,10 @@ export function SeasonStrategyPlan({
     setFeedback(null);
     try {
       await beginEditingApprovedCoachStrategyWindow(id);
-      setFeedback('That season block is loaded into the Strategy conversation. Refine it below, then approve the revised draft.');
+      setFeedback('Focus block opened below. Make changes, then approve the draft.');
       await onChanged();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not open that season block for editing.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not open that focus block.');
     } finally {
       setBusyId(null);
     }
@@ -53,10 +53,10 @@ export function SeasonStrategyPlan({
     setFeedback(null);
     try {
       await beginNewCoachStrategyWindow();
-      setFeedback('New season block started. Describe its focus and date window in Strategy Coach below.');
+      setFeedback('New focus block started. Describe the focus and dates below.');
       await onChanged();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not start a new season block.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not start a new focus block.');
     } finally {
       setBusyId(null);
     }
@@ -64,8 +64,8 @@ export function SeasonStrategyPlan({
 
   function confirmRemove(id: string, label: string) {
     Alert.alert(
-      'Remove season block?',
-      `${label} will be removed from the approved season strategy. Race Intent will control those weeks unless another approved block covers them.`,
+      'Remove focus block?',
+      `${label} will be removed. Your normal race priorities will guide those weeks.`,
       [
         { text: 'Keep block', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: () => void removeWindow(id) },
@@ -79,10 +79,10 @@ export function SeasonStrategyPlan({
     setFeedback(null);
     try {
       await stopApprovedCoachStrategy(id);
-      setFeedback('Season block removed. The remaining windows were preserved and the plan was reconciled.');
+      setFeedback('Focus block removed.');
       await onChanged();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not remove that season block safely.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not remove that focus block.');
     } finally {
       setBusyId(null);
     }
@@ -94,10 +94,10 @@ export function SeasonStrategyPlan({
     setFeedback(null);
     try {
       await undoLatestCoachStrategyScheduleChange();
-      setFeedback('The last season strategy change was undone and the block was reconciled.');
+      setFeedback('Last season change undone.');
       await onChanged();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not undo that season strategy change safely.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not undo that season change.');
     } finally {
       setBusyId(null);
     }
@@ -107,11 +107,11 @@ export function SeasonStrategyPlan({
     <View style={styles.header}>
       <View style={styles.icon}><V23Icon name="plan" color={tokens.accent} size={20} /></View>
       <View style={styles.headerCopy}>
-        <Text style={styles.eyebrow}>SEASON STRATEGY</Text>
-        <Text style={styles.title}>Plan focus blocks without rewriting the whole season.</Text>
+        <Text style={styles.eyebrow}>SEASON FOCUS</Text>
+        <Text style={styles.title}>Add a temporary training focus</Text>
       </View>
     </View>
-    <Text style={styles.body}>Each approved block controls only its own planning weeks. Race Intent automatically fills the gaps, and no two Strategy Coach blocks can own the same week.</Text>
+    <Text style={styles.body}>Use a focus block when one sport or goal needs extra emphasis for a set date range.</Text>
 
     {workspace.macrocycle.seasonWindows.length ? <View style={styles.windowList}>
       {workspace.macrocycle.seasonWindows.map((window, index) => {
@@ -120,21 +120,21 @@ export function SeasonStrategyPlan({
         return <View key={window.id} style={styles.windowCard}>
           <View style={styles.windowTop}>
             <View style={styles.windowTitleCopy}>
-              <Text style={styles.windowOrdinal}>BLOCK {index + 1}</Text>
+              <Text style={styles.windowOrdinal}>FOCUS {index + 1}</Text>
               <Text style={styles.windowTitle}>{window.label}</Text>
             </View>
             <V23Chip tone={window.state === 'active' ? 'info' : window.state === 'scheduled' ? 'warm' : 'neutral'}>{seasonWindowStateLabel(window)}</V23Chip>
           </View>
           <Text style={styles.windowDates}>{windowRange(window.startsAt, window.endsAt)}</Text>
           {approved ? <Text style={styles.windowObjectives}>{strategySummary(approved.strategy)}</Text> : null}
-          {isEditing ? <Text style={styles.editing}>Editing draft · changes are not applied until approval</Text> : null}
+          {isEditing ? <Text style={styles.editing}>Editing · not applied until you approve</Text> : null}
           <View style={styles.actions}>
             <Pressable
               onPress={() => void editWindow(window.id)}
               disabled={Boolean(busyId)}
               style={({ pressed }) => [styles.editAction, pressed && styles.pressed, busyId && styles.disabled]}
             >
-              <Text style={styles.editText}>{isEditing ? 'Continue editing' : 'Edit block'}</Text>
+              <Text style={styles.editText}>{isEditing ? 'Continue editing' : 'Edit focus'}</Text>
             </Pressable>
             <Pressable
               onPress={() => confirmRemove(window.id, window.label)}
@@ -147,12 +147,12 @@ export function SeasonStrategyPlan({
         </View>;
       })}
     </View> : <View style={styles.empty}>
-      <Text style={styles.emptyTitle}>No Strategy Coach blocks yet.</Text>
-      <Text style={styles.emptyBody}>Race Intent is controlling the whole season. Add a focus block when you want a temporary specialization window.</Text>
+      <Text style={styles.emptyTitle}>No focus blocks yet</Text>
+      <Text style={styles.emptyBody}>Your race priorities are guiding the season. Add a focus block for a temporary emphasis.</Text>
     </View>}
 
     {workspace.macrocycle.handoffs.length ? <View style={styles.handoffBox}>
-      <Text style={styles.handoffLabel}>PLANNED HANDOFFS</Text>
+      <Text style={styles.handoffLabel}>UPCOMING CHANGES</Text>
       {workspace.macrocycle.handoffs.map((handoff) => <Text key={`${handoff.weekStartDate}_${handoff.fromWindowId ?? 'race'}_${handoff.toWindowId ?? 'race'}`} style={styles.handoffText}>
         {formatStrategyWeek(handoff.weekStartDate)} · {handoffLabel(handoff.from, handoff.fromWindowId, windowsById)} → {handoffLabel(handoff.to, handoff.toWindowId, windowsById)}
       </Text>)}
@@ -173,7 +173,7 @@ export function SeasonStrategyPlan({
         disabled={Boolean(busyId)}
         style={({ pressed }) => [styles.undoAction, pressed && styles.pressed, busyId && styles.disabled]}
       >
-        <Text style={styles.undoText}>Undo last season change</Text>
+        <Text style={styles.undoText}>Undo last change</Text>
       </Pressable> : null}
     </View>
     {workspace.review.latestRevision ? <Text style={styles.revisionNote}>{revisionDescription(workspace.review.latestRevision.action)}</Text> : null}
@@ -189,7 +189,7 @@ function strategySummary(strategy: StrategyWorkspaceData['review']['schedule']['
   const objectives = Object.entries(strategy.disciplineObjectives)
     .filter(([, objective]) => Boolean(objective))
     .map(([discipline, objective]) => `${titleCase(discipline)} · ${String(objective).replaceAll('_', ' ')}`);
-  if (strategy.tradeoffTolerance) objectives.push(`Tradeoff · ${strategy.tradeoffTolerance.replaceAll('_', ' ')}`);
+  if (strategy.tradeoffTolerance) objectives.push(`Balance · ${strategy.tradeoffTolerance.replaceAll('_', ' ')}`);
   return objectives.join('  •  ');
 }
 
@@ -198,18 +198,18 @@ function handoffLabel(
   windowId: string | undefined,
   windows: Map<string, StrategyWorkspaceData['review']['schedule']['windows'][number]>,
 ): string {
-  if (source === 'race_intent') return 'Race Intent';
+  if (source === 'race_intent') return 'Race priorities';
   const window = windowId ? windows.get(windowId) : undefined;
-  if (!window) return 'Strategy Coach';
+  if (!window) return 'Focus block';
   const focus = window.strategy.primaryFocus;
-  return focus ? `${titleCase(focus)} block` : 'Strategy Coach';
+  return focus ? `${titleCase(focus)} focus` : 'Focus block';
 }
 
 function revisionDescription(action: 'add' | 'update' | 'remove' | 'undo'): string {
-  if (action === 'add') return 'Latest saved change: added a season block.';
-  if (action === 'update') return 'Latest saved change: revised a season block.';
-  if (action === 'remove') return 'Latest saved change: removed a season block.';
-  return 'Latest saved change: restored the previous season strategy.';
+  if (action === 'add') return 'Latest change: focus block added.';
+  if (action === 'update') return 'Latest change: focus block updated.';
+  if (action === 'remove') return 'Latest change: focus block removed.';
+  return 'Latest change: previous season setup restored.';
 }
 
 function titleCase(value: string): string {
@@ -218,13 +218,13 @@ function titleCase(value: string): string {
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
-    card: { gap: 13, padding: 17 },
+    card: { gap: 12, padding: 17 },
     header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     icon: { width: 40, height: 40, borderRadius: 13, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
     headerCopy: { flex: 1, minWidth: 0, gap: 2 },
-    eyebrow: { color: tokens.accent, fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 1.05 },
-    title: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900' },
-    body: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 20 },
+    eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
+    title: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+    body: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
     windowList: { gap: 9 },
     windowCard: { borderRadius: 15, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 13, gap: 6 },
     windowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
