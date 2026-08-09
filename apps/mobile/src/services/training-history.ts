@@ -9,9 +9,11 @@ import {
   getTrainingCalendarEvents,
   listEnduranceActivities,
   listPlannedCompletedMatches,
+  listWorkoutFeedbackSince,
   listWorkoutLedgerEntries,
   listWorkoutReflectionsSince,
   listWorkoutSensorLinks,
+  type WorkoutFeedbackSummary,
   type WorkoutLedgerEntry,
   type WorkoutReflection,
 } from './database';
@@ -24,6 +26,7 @@ export interface StrengthHistoryItem {
   occurredAt: string;
   workout: WorkoutLedgerEntry;
   reflection?: WorkoutReflection;
+  feedback?: WorkoutFeedbackSummary;
   sensorActivity?: EnduranceActivity;
   sensorLink?: WorkoutSensorLink;
   needsReview: boolean;
@@ -51,21 +54,25 @@ export async function loadTrainingHistory(limit = 500): Promise<TrainingHistoryI
   ]);
 
   const earliest = earliestHistoryInstant(workouts, activities);
-  const [reflections, calendar] = earliest
+  const [reflections, feedback, calendar] = earliest
     ? await Promise.all([
         listWorkoutReflectionsSince(earliest).catch(() => [] as WorkoutReflection[]),
+        listWorkoutFeedbackSince(earliest).catch(() => [] as WorkoutFeedbackSummary[]),
         getTrainingCalendarEvents({
           from: earliest,
           to: new Date(Date.now() + 86_400_000).toISOString(),
         }).catch(() => [] as TrainingCalendarEvent[]),
       ])
-    : [[], []] as [WorkoutReflection[], TrainingCalendarEvent[]];
+    : [[], [], []] as [WorkoutReflection[], WorkoutFeedbackSummary[], TrainingCalendarEvent[]];
 
   const activityById = new Map(activities.map((activity) => [activity.id, activity]));
   const matchByActivity = new Map(matches.map((match) => [match.activityId, match]));
   const linkByActivity = new Map(links.map((link) => [link.activityId, link]));
   const reflectionByWorkoutInstance = new Map(
     reflections.map((reflection) => [reflection.workoutInstanceId, reflection]),
+  );
+  const feedbackByWorkoutInstance = new Map(
+    feedback.map((item) => [item.workoutInstanceId, item]),
   );
   const eventById = new Map(calendar.map((event) => [event.id, event]));
   const linkedActivityIds = new Set<string>();
@@ -81,6 +88,7 @@ export async function loadTrainingHistory(limit = 500): Promise<TrainingHistoryI
       occurredAt: workout.completedAt,
       workout,
       reflection: reflectionByWorkoutInstance.get(workout.id),
+      feedback: feedbackByWorkoutInstance.get(workout.id),
       sensorActivity,
       sensorLink,
       needsReview: false,
