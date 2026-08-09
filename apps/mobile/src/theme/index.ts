@@ -62,17 +62,17 @@ export const themeDefinitions: ThemeDefinition[] = [
     label: 'Side Quest Classic',
     category: 'General',
     sport: 'Everyday multisport',
-    description: 'A clean white training workspace with navy identity and restrained mint accents.',
-    personality: 'Retro · athletic · straightforward',
+    description: 'Warm neutrals, deep navy, steel blue, and sport-specific color.',
+    personality: 'Athletic · calm · direct',
     light: {
       ...shared,
-      canvas: '#F7F1E6', surface: '#FFFCF6', surfaceMuted: '#E9F1EC', ink: '#102B48', inkMuted: '#66756F', border: '#D9D3C7',
-      forest: '#267C6B', forest2: '#102B48', mint: '#DCEDE7', moss: '#7B9A8D', lime: '#E8EECF', sand: '#F1E2C8', coral: '#D97755', tabBar: '#FFFCF6',
+      canvas: '#F7F5F0', surface: '#FFFFFF', surfaceMuted: '#EEF1F3', ink: '#142839', inkMuted: '#68747D', border: '#D8DEE3',
+      forest: '#2C668C', forest2: '#173A56', mint: '#E3EDF3', moss: '#7F8F9A', lime: '#F1E9C9', sand: '#F4E5D5', coral: '#D86A43', tabBar: '#FFFFFF',
     },
     dark: {
       ...shared,
-      canvas: '#0C1510', surface: '#18211B', surfaceMuted: '#263029', ink: '#F8F6F0', inkMuted: '#B2BDB5', border: '#3A4D42',
-      forest: '#72C99B', forest2: '#9CDEB8', mint: '#203B2D', moss: '#6D917A', lime: '#B9D970', sand: '#34312B', coral: '#DF9172', tabBar: '#111B15',
+      canvas: '#0C1218', surface: '#151D24', surfaceMuted: '#202B34', ink: '#F7F7F5', inkMuted: '#B2BDC5', border: '#364550',
+      forest: '#76B5DB', forest2: '#A7D2EA', mint: '#1E3A4B', moss: '#7D929E', lime: '#D5C978', sand: '#332D28', coral: '#E78A64', tabBar: '#111820',
     },
   },
   {
@@ -223,7 +223,7 @@ export const themeDefinitions: ThemeDefinition[] = [
 
 export const defaultTheme = themeDefinitions[0]!;
 export const palette = defaultTheme.light;
-export const brand = { navy: '#01234D', forest: '#153E2F', mint: '#A8E6CC', cream: '#FBF7EC' } as const;
+export const brand = { navy: '#173A56', forest: '#2C668C', mint: '#E3EDF3', cream: '#F7F5F0' } as const;
 export function getThemeDefinition(id: ThemeId): ThemeDefinition { return themeDefinitions.find((theme) => theme.id === id) ?? defaultTheme; }
 export function getThemePalette(id: ThemeId, dark: boolean): AppPalette { const theme = getThemeDefinition(id); return dark ? theme.dark : theme.light; }
 
@@ -249,7 +249,7 @@ export interface DesignTokens {
 }
 
 const headerByTheme: Record<ThemeId, { light: string; dark: string }> = {
-  forest: { light: '#102B48', dark: '#071B31' },
+  forest: { light: '#173A56', dark: '#0A1D2B' },
   trail: { light: '#183C33', dark: '#0B241C' },
   summit: { light: '#243B63', dark: '#161E32' },
   race_day: { light: '#082E56', dark: '#061A2E' },
@@ -306,5 +306,5 @@ export const typography = {
 } as const;
 
 export const cardShadow = {
-  shadowColor: '#01234D', shadowOpacity: 0.04, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 1,
+  shadowColor: '#173A56', shadowOpacity: 0.04, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 1,
 };
