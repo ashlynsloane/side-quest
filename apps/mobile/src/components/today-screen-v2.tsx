@@ -125,7 +125,7 @@ export default function TodayScreenV2() {
         <View style={styles.weekHeading}>
           <View>
             <Text style={styles.sectionEyebrow}>THIS WEEK</Text>
-            <Text style={styles.sectionTitle}>Stay oriented, not scored.</Text>
+            <Text style={styles.sectionTitle}>Week at a glance</Text>
           </View>
           <Pressable onPress={() => router.push('/plan' as Href)}><Text style={styles.sectionLink}>Open week</Text></Pressable>
         </View>
@@ -138,7 +138,7 @@ export default function TodayScreenV2() {
           </View>)}
         </View>
         <ProductDisclosure
-          title="What else is on today"
+          title="Also today"
           summary={secondarySessionSummary(strength, calendar)}
           expanded={weekExpanded}
           onPress={() => setWeekExpanded((value) => !value)}
@@ -172,17 +172,18 @@ function TodayCall({
   styles: ReturnType<typeof makeStyles>;
 }) {
   const primaryKind = strength ? 'strength' : calendar?.discipline ?? 'recovery';
+  const hasScheduledTraining = Boolean(strength || calendar);
   const title = strength
     ? strength.title
     : calendar
       ? conciseSessionLabel({ discipline: calendar.discipline, title: calendar.title }) ?? calendar.title ?? 'Scheduled training'
       : 'Your day is open';
   const meta = strength
-    ? `${Math.round(strength.workout.totalWorkSeconds / 60)} min · ${friendlyLoad(strength.intendedLoad)}`
+    ? `${Math.round(strength.workout.estimatedElapsedSeconds / 60)} min · ${friendlyLoad(strength.intendedLoad)}`
     : calendar
       ? calendarTime(calendar)
-      : 'No planned session is demanding your attention.';
-  const call = readinessCall(readiness, Boolean(strength || calendar));
+      : 'Nothing is scheduled today.';
+  const call = readinessCall(readiness, hasScheduledTraining);
 
   return <View style={styles.todayHero}>
     <View style={styles.heroScene}><V23ScenicBanner variant="morning" /></View>
@@ -190,7 +191,7 @@ function TodayCall({
       <View style={styles.heroTopRow}>
         <View style={styles.heroEyebrowWrap}>
           <SportIcon kind={normalizeSportKind(primaryKind)} color={tokens.accent} backgroundColor={tokens.accentSoft} size={20} />
-          <Text style={styles.heroEyebrow}>{strength || calendar ? 'TODAY’S CALL' : 'OPEN DAY'}</Text>
+          <Text style={styles.heroEyebrow}>{hasScheduledTraining ? 'TODAY' : 'OPEN DAY'}</Text>
         </View>
         {readiness ? <View style={styles.readinessPill}><Text style={styles.readinessPillText}>{friendlyReadiness(readiness)}</Text></View> : null}
       </View>
@@ -198,9 +199,9 @@ function TodayCall({
       <Text style={styles.heroMeta}>{meta}</Text>
       <Text style={styles.heroReason}>{call}</Text>
       <View style={styles.heroActions}>
-        <Pressable accessibilityRole="button" onPress={onPrimary} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-          <Text style={styles.primaryButtonText}>{strength ? 'Start workout' : calendar ? 'Open today’s plan' : 'Build a workout'}</Text>
-          <V23Icon name={strength ? 'play' : 'chevron'} color="#FFFFFF" size={17} />
+        <Pressable accessibilityRole="button" onPress={onPrimary} style={({ pressed }) => [hasScheduledTraining ? styles.primaryButton : styles.openDayButton, pressed && styles.pressed]}>
+          <Text style={hasScheduledTraining ? styles.primaryButtonText : styles.openDayButtonText}>{strength ? 'Start workout' : calendar ? 'Open today’s plan' : 'Add a workout'}</Text>
+          <V23Icon name={strength ? 'play' : 'chevron'} color={hasScheduledTraining ? '#FFFFFF' : tokens.accent} size={17} />
         </Pressable>
         <Pressable accessibilityRole="button" onPress={onCoach} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
           <Text style={styles.secondaryButtonText}>Something changed?</Text>
@@ -221,12 +222,12 @@ function SecondarySessions({
   tokens: DesignTokens;
   styles: ReturnType<typeof makeStyles>;
 }) {
-  if (!strength && !calendar) return <Text style={styles.emptyDetail}>Nothing else is scheduled. An open day does not need to be filled.</Text>;
+  if (!strength && !calendar) return <Text style={styles.emptyDetail}>Nothing else is scheduled.</Text>;
   return <View style={styles.secondaryList}>
     {strength ? <SessionRow
       kind="strength"
       title={strength.title}
-      body={`${Math.round(strength.workout.totalWorkSeconds / 60)} min · ${friendlyLoad(strength.intendedLoad)}`}
+      body={`${Math.round(strength.workout.estimatedElapsedSeconds / 60)} min · ${friendlyLoad(strength.intendedLoad)}`}
       tokens={tokens}
       styles={styles}
     /> : null}
@@ -254,7 +255,7 @@ function ColdStart({ router, tokens, styles }: { router: ReturnType<typeof useRo
       <View style={styles.heroContent}>
         <Text style={styles.heroEyebrow}>YOUR FIRST WEEK</Text>
         <Text style={styles.heroTitle}>Build around the week you actually have.</Text>
-        <Text style={styles.heroReason}>Set the goal, race outcome, weekly capacity, and realistic training setup. Side Quest will build the coordinated week from there.</Text>
+        <Text style={styles.heroReason}>Choose your goal, weekly availability, and training setup.</Text>
         <Pressable accessibilityRole="button" onPress={() => router.push('/onboarding' as Href)} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
           <Text style={styles.primaryButtonText}>Build my plan</Text><V23Icon name="chevron" color="#FFFFFF" size={17} />
         </Pressable>
@@ -263,18 +264,13 @@ function ColdStart({ router, tokens, styles }: { router: ReturnType<typeof useRo
         </Pressable>
       </View>
     </View>
-    <View style={styles.coldPromise}>
-      <Text style={styles.sectionEyebrow}>WHAT SIDE QUEST BUILDS</Text>
-      <Text style={styles.sectionTitle}>One plan, not disconnected workouts.</Text>
-      <Text style={styles.coldPromiseBody}>Race strategy, endurance commitments, strength, recovery, and later Coach changes all resolve through the same week.</Text>
-    </View>
   </>;
 }
 
 function readinessCall(readiness: DailyReadinessCheckIn | null, hasTraining: boolean): string {
   if (!readiness) return hasTraining
-    ? 'This is the plan’s current recommendation. Check in or tell Coach if today no longer matches the assumptions.'
-    : 'Leave the day open unless you deliberately want an additional session.';
+    ? 'This is what’s on the plan. Check in if today feels different.'
+    : 'Keep it open, or add something if you want to train.';
   return readinessHeadline(readiness);
 }
 
@@ -287,23 +283,23 @@ function friendlyReadiness(readiness: DailyReadinessCheckIn): string {
 }
 
 function coachPrompt(readiness: DailyReadinessCheckIn | null, activityCount: number, ambiguous: number): string {
-  if (ambiguous) return `${ambiguous} imported activit${ambiguous === 1 ? 'y needs' : 'ies need'} context.`;
-  if (readiness) return 'Today’s check-in is already part of the call.';
-  if (activityCount) return 'Recent training is informing today.';
-  return 'The plan is carrying today’s decision.';
+  if (ambiguous) return `${ambiguous} synced activit${ambiguous === 1 ? 'y needs' : 'ies need'} a quick check.`;
+  if (readiness) return 'Your check-in is saved.';
+  if (activityCount) return 'Today’s plan is up to date.';
+  return 'Need to change today?';
 }
 
 function coachBody(readiness: DailyReadinessCheckIn | null, ambiguous: number): string {
-  if (ambiguous) return 'Coach will not treat an uncertain match as settled training history.';
-  if (readiness) return 'If something changed after the check-in, say it naturally instead of editing the plan by hand.';
-  return 'Use Coach when soreness, time, symptoms, access, or the schedule no longer match the plan.';
+  if (ambiguous) return 'Review it before it affects your plan.';
+  if (readiness) return 'Tell Coach if anything changed after you checked in.';
+  return 'Tell Coach about soreness, time, access, or schedule changes.';
 }
 
 function secondarySessionSummary(strength?: PlannedStrengthSession, calendar?: TrainingCalendarEvent): string {
   const count = Number(Boolean(strength)) + Number(Boolean(calendar));
-  if (!count) return 'No additional planned work.';
-  if (count === 1) return '1 planned item on today’s schedule.';
-  return '2 planned items on today’s schedule.';
+  if (!count) return 'Nothing else scheduled.';
+  if (count === 1) return '1 other planned item.';
+  return '2 other planned items.';
 }
 
 function firstUpcomingEvent(events: TrainingCalendarEvent[]): TrainingCalendarEvent | undefined {
@@ -366,7 +362,7 @@ function makeStyles(tokens: DesignTokens) {
     page: { paddingTop: 16, paddingBottom: 34, gap: 18 },
     headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
     headerCopy: { flex: 1, minWidth: 0, gap: 2 },
-    greeting: { color: tokens.text, fontSize: 27, lineHeight: 32, fontWeight: '900', letterSpacing: -0.65 },
+    greeting: { color: tokens.text, fontSize: 26, lineHeight: 31, fontWeight: '900', letterSpacing: -0.55 },
     date: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 18 },
     checkInButton: { minHeight: 38, borderRadius: 19, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 6 },
     checkInText: { color: tokens.text, fontSize: 11.5, lineHeight: 15, fontWeight: '800' },
@@ -380,12 +376,14 @@ function makeStyles(tokens: DesignTokens) {
     heroEyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1.05 },
     readinessPill: { borderRadius: 999, backgroundColor: tokens.accentSoft, paddingHorizontal: 9, paddingVertical: 5 },
     readinessPillText: { color: tokens.accent, fontSize: 10.5, lineHeight: 13, fontWeight: '900' },
-    heroTitle: { color: tokens.text, fontSize: 28, lineHeight: 33, fontWeight: '900', letterSpacing: -0.65 },
+    heroTitle: { color: tokens.text, fontSize: 27, lineHeight: 32, fontWeight: '900', letterSpacing: -0.55 },
     heroMeta: { color: tokens.text, fontSize: 13.5, lineHeight: 18, fontWeight: '800' },
     heroReason: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 20 },
     heroActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 9, marginTop: 6 },
     primaryButton: { minHeight: 46, borderRadius: 14, backgroundColor: tokens.accent, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
     primaryButtonText: { color: '#FFFFFF', fontSize: 13.5, lineHeight: 18, fontWeight: '900' },
+    openDayButton: { minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    openDayButtonText: { color: tokens.accent, fontSize: 13, lineHeight: 17, fontWeight: '800' },
     secondaryButton: { minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
     secondaryButtonText: { color: tokens.accent, fontSize: 12.5, lineHeight: 17, fontWeight: '800' },
     textAction: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
@@ -403,7 +401,7 @@ function makeStyles(tokens: DesignTokens) {
     weekShell: { gap: 11 },
     weekHeading: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 },
     sectionEyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
-    sectionTitle: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: -0.2 },
+    sectionTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '800', letterSpacing: -0.15 },
     sectionLink: { color: tokens.accent, fontSize: 12, lineHeight: 16, fontWeight: '800' },
     weekStrip: { borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 10, paddingVertical: 13, flexDirection: 'row', justifyContent: 'space-between' },
     dayItem: { flex: 1, alignItems: 'center', gap: 6 },
@@ -421,9 +419,6 @@ function makeStyles(tokens: DesignTokens) {
     sessionBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
     emptyDetail: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
     toolRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-
-    coldPromise: { gap: 4, paddingHorizontal: 2 },
-    coldPromiseBody: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
     pressed: { opacity: 0.76 },
   });
 }
