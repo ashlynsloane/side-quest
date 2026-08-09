@@ -213,4 +213,91 @@ describe('whole-athlete progression governor integration', () => {
     expect(progression.disciplineAssignments?.bike?.decision.phase).toBe('rebuild');
     expect(progression.disciplineAssignments?.bike?.decision.volumeScale).toBe(0.72);
   });
+
+  it('uses repeated clean low-RPE strength responses to unlock reps-first progression', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T12:00:00.000Z',
+      disciplines: ['strength'],
+      exposures: [
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-05T12:00:00.000Z',
+          completedAsPlanned: true,
+          rpe: 6,
+          durationMinutes: 42,
+        },
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-08T12:00:00.000Z',
+          completedAsPlanned: true,
+          rpe: 6,
+          durationMinutes: 44,
+        },
+      ],
+    });
+    const assignment = progression.disciplineAssignments?.strength;
+
+    expect(assignment?.baseline.reps).toBe(10);
+    expect(assignment?.baseline.load).toBe(100);
+    expect(assignment?.decision.phase).toBe('build');
+    expect(assignment?.decision.direction).toBe('increase');
+    expect(assignment?.decision.target.reps).toBe(11);
+  });
+
+  it('steps strength down when recent response evidence says the dose was too costly', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T12:00:00.000Z',
+      disciplines: ['strength'],
+      exposures: [
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-05T12:00:00.000Z',
+          completedAsPlanned: true,
+          rpe: 9,
+        },
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-08T12:00:00.000Z',
+          completedAsPlanned: true,
+          rpe: 9,
+        },
+      ],
+    });
+    const assignment = progression.disciplineAssignments?.strength;
+
+    expect(assignment?.decision.phase).toBe('hold');
+    expect(assignment?.decision.direction).toBe('reduce');
+    expect(assignment?.decision.progressionAllowed).toBe(false);
+    expect(assignment?.decision.target.reps).toBeLessThan(assignment?.baseline.reps ?? 0);
+    expect(assignment?.decision.rationale.join(' ')).toMatch(/too costly/i);
+  });
+
+  it('treats a clearly under-completed planned session as a negative response signal', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T12:00:00.000Z',
+      disciplines: ['bike'],
+      exposures: [
+        {
+          discipline: 'bike',
+          completedAt: '2026-08-05T12:00:00.000Z',
+          completedAsPlanned: false,
+          durationMinutes: 35,
+        },
+        {
+          discipline: 'bike',
+          completedAt: '2026-08-08T12:00:00.000Z',
+          completedAsPlanned: true,
+          durationMinutes: 60,
+        },
+      ],
+    });
+    const assignment = progression.disciplineAssignments?.bike;
+
+    expect(assignment?.decision.phase).toBe('hold');
+    expect(assignment?.decision.direction).toBe('reduce');
+    expect(assignment?.decision.volumeScale).toBe(0.9);
+  });
 });
