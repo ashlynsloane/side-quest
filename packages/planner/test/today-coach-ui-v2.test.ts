@@ -10,13 +10,13 @@ function source(path: string): string {
 }
 
 describe('Today + Coach UI V2', () => {
-  it('routes Today through a single command-center screen', () => {
+  it('routes Today through a single command-center screen with a neutral open-day state', () => {
     const route = source('apps/mobile/src/app/(tabs)/index.tsx');
     const today = source('apps/mobile/src/components/today-screen-v2.tsx');
     expect(route).toContain("@/components/today-screen-v2");
-    expect(today).toContain('TODAY’S CALL');
+    expect(today).toContain("hasScheduledTraining ? 'TODAY' : 'OPEN DAY'");
     expect(today).toContain('Something changed?');
-    expect(today).toContain('Stay oriented, not scored.');
+    expect(today).toContain('Week at a glance');
     expect(today).toContain('ProductDisclosure');
   });
 
@@ -34,7 +34,7 @@ describe('Today + Coach UI V2', () => {
     expect(coach).toContain('Tell Side Quest what changed');
     expect(coach).toContain('COACH_QUICK_SIGNALS');
     expect(coach).toContain('Review with Coach');
-    expect(coach).toContain('Conversation interprets the situation. The deterministic planner still decides');
+    expect(coach).toContain('You’ll see any meaningful plan change before it is applied.');
   });
 
   it('renders proposed adaptations as current versus proposed before approval', () => {
@@ -50,8 +50,8 @@ describe('Today + Coach UI V2', () => {
 
   it('keeps follow-up history and detailed workout reasoning behind disclosures', () => {
     const coach = source('apps/mobile/src/components/coach-screen-v2.tsx');
-    expect(coach).toContain('Recent coach changes');
-    expect(coach).toContain('Coach follow-up needs your response');
+    expect(coach).toContain("followUpDue ? 'Coach follow-up' : 'Recent changes'");
+    expect(coach).toContain('How did the last adjustment go?');
     expect(coach).toContain('Why this session?');
     expect(coach).toContain('CoachInsights');
   });
