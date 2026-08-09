@@ -291,7 +291,7 @@ export default function MachineStrengthScreen() {
                 onChangeText={(value) => setLoads((current) => ({ ...current, [item.exerciseId]: value.replace(/[^0-9.]/g, '') }))}
                 keyboardType="decimal-pad"
                 placeholder="—"
-                placeholderTextColor={tokens.textSubtle}
+                placeholderTextColor={tokens.textMuted}
                 style={styles.loadInput}
               />
               <View style={styles.unitToggle}>
