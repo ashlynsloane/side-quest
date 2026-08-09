@@ -51,16 +51,16 @@ describe('Season Strategy mobile wiring', () => {
     expect(conversation).toContain('semantic.usedFallback');
   });
 
-  it('shows season blocks, handoffs, editing, removal, and safe undo in Strategy mode', () => {
+  it('shows season focus blocks, upcoming changes, editing, removal, and safe undo in Strategy mode', () => {
     const route = source('apps/mobile/src/app/(tabs)/coach-strategy.tsx');
     const panel = source('apps/mobile/src/components/season-strategy-plan.tsx');
     expect(route).toContain('SeasonStrategyPlanPanel');
-    expect(panel).toContain('SEASON STRATEGY');
-    expect(panel).toContain('PLANNED HANDOFFS');
-    expect(panel).toContain('Edit block');
+    expect(panel).toContain('SEASON FOCUS');
+    expect(panel).toContain('UPCOMING CHANGES');
+    expect(panel).toContain('Edit focus');
     expect(panel).toContain('Remove');
     expect(panel).toContain('+ Add focus block');
-    expect(panel).toContain('Undo last season change');
+    expect(panel).toContain('Undo last change');
   });
 
   it('versions successful season changes and includes schedule/history in privacy controls', () => {
