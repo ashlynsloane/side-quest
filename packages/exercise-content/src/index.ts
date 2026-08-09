@@ -2,10 +2,13 @@ import type { Exercise, EquipmentId } from '@circuit/domain';
 import equipmentJson from '../data/equipment.json';
 import exercisesJson from '../data/exercises.json';
 import substitutionGroupsJson from '../data/substitution-groups.json';
+import { machineExerciseSeed } from './machine-exercises';
 
-export const exerciseSeed = exercisesJson as Exercise[];
+export const exerciseSeed = [...(exercisesJson as Exercise[]), ...machineExerciseSeed];
 export const equipmentSeed = equipmentJson as Array<{ id: EquipmentId; label: string }>;
 export const substitutionGroupSeed = substitutionGroupsJson as Array<{
   id: string;
   label: string;
 }>;
+
+export { machineExerciseSeed } from './machine-exercises';
