@@ -83,7 +83,7 @@ export default function TrainScreenV3() {
     <View style={styles.builderSection}>
       <View style={styles.sectionHeading}>
         <Text style={styles.sectionEyebrow}>CHOOSE YOUR PATH</Text>
-        <Text style={styles.sectionTitle}>Train the plan, or build around the day.</Text>
+        <Text style={styles.sectionTitle}>Train the plan, or add the right kind of strength.</Text>
       </View>
       <View style={styles.actionStack}>
         <ActionRow
@@ -91,6 +91,14 @@ export default function TrainScreenV3() {
           title="Quick workout"
           body="Choose time, equipment, emphasis, and temporary limitations."
           onPress={() => router.push('/generate' as Href)}
+          tokens={tokens}
+          styles={styles}
+        />
+        <ActionRow
+          icon="equipment"
+          title="Machine strength"
+          body="Set-based supplemental strength: heavier loads, fewer reps, no timer. Usually one session per week."
+          onPress={() => router.push('/machine-strength' as Href)}
           tokens={tokens}
           styles={styles}
         />
