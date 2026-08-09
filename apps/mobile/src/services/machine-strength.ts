@@ -67,6 +67,7 @@ export function buildMachineStrengthWorkout({
 
   const protection = combinedProtection(ptProfile, checkIn);
   const candidates = exercises
+    .filter((exercise) => exercise.id.startsWith('ex_machine_'))
     .filter((exercise) => exercise.status === 'active' && exercise.defaultEnabled)
     .filter((exercise) => !exercise.suitableForAmrap)
     .filter((exercise) => exercise.prescriptions.some((prescription) => prescription.style === 'strength'))
@@ -116,7 +117,7 @@ export function buildMachineStrengthWorkout({
     createdAt,
     randomSeed: `machine-strength:${seed}`,
     request: {
-      workMinutes: Math.max(24, Math.min(48, Math.round(totalWorkSeconds / 60 / 4) * 4)) as 24 | 32 | 40 | 48,
+      workMinutes: Math.max(24, Math.min(48, Math.round(totalWorkSeconds / 60 / 4) * 4)),
       allowedStationMinutes: [4],
       restSeconds,
       exercisesPerStation: 2,
