@@ -154,16 +154,29 @@ export function progressionHistoryFromTrainingHistory(
   for (const item of items) {
     if (item.needsReview) continue;
     if (item.kind === 'strength') {
-      exposures.push({ discipline: 'strength', completedAt: item.occurredAt });
+      const durationMinutes = elapsedMinutes(item.workout.startedAt, item.workout.completedAt);
+      const completedAsPlanned = strengthCompletionSignal(item);
+      const rpe = validRpe(item.reflection?.rpe);
+      exposures.push({
+        discipline: 'strength',
+        completedAt: item.occurredAt,
+        ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+        ...(completedAsPlanned !== undefined ? { completedAsPlanned } : {}),
+        ...(rpe !== undefined ? { rpe } : {}),
+      });
       continue;
     }
     if (item.activity.deletedAt) continue;
     const discipline = progressionDiscipline(item.activity.discipline);
     if (!discipline) continue;
+    const completedAsPlanned = enduranceCompletionSignal(item);
     exposures.push({
       discipline,
       completedAt: item.occurredAt,
       durationMinutes: Math.max(1, Math.round(item.activity.movingTimeSeconds / 60)),
+      ...(completedAsPlanned !== undefined ? { completedAsPlanned } : {}),
+      ...(finitePositive(item.activity.averageWatts) ? { averageWatts: item.activity.averageWatts } : {}),
+      ...(finitePositive(item.activity.weightedAverageWatts) ? { weightedAverageWatts: item.activity.weightedAverageWatts } : {}),
     });
   }
   return exposures.sort((left, right) => left.completedAt.localeCompare(right.completedAt));
@@ -200,6 +213,46 @@ export function historyEnteringWeek(
 
 export function weekEntryInstant(weekStartDate: string): string {
   return `${weekStartDate}T12:00:00.000Z`;
+}
+
+function strengthCompletionSignal(
+  item: Extract<TrainingHistoryItem, { kind: 'strength' }>,
+): boolean | undefined {
+  if (item.workout.relationToPlan !== 'completed_planned') return undefined;
+  if (item.workout.completionFraction >= 0.9) return true;
+  if (item.workout.completionFraction < 0.75) return false;
+  return undefined;
+}
+
+function enduranceCompletionSignal(
+  item: Extract<TrainingHistoryItem, { kind: 'endurance' }>,
+): boolean | undefined {
+  if (item.plannedMatch?.status !== 'matched' || !item.plannedEvent) return undefined;
+  const plannedMinutes = item.plannedEvent.endAt
+    ? elapsedMinutes(item.plannedEvent.startAt, item.plannedEvent.endAt)
+    : undefined;
+  if (!plannedMinutes) return undefined;
+  const actualMinutes = Math.max(1, item.activity.movingTimeSeconds / 60);
+  const completionRatio = actualMinutes / plannedMinutes;
+  if (completionRatio >= 0.9) return true;
+  if (completionRatio < 0.75) return false;
+  return undefined;
+}
+
+function elapsedMinutes(startAt: string, endAt: string): number | undefined {
+  const start = Date.parse(startAt);
+  const end = Date.parse(endAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return undefined;
+  return Math.max(1, Math.round((end - start) / 60_000));
+}
+
+function validRpe(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 1 || value > 10) return undefined;
+  return value;
+}
+
+function finitePositive(value: number | undefined): value is number {
+  return value !== undefined && Number.isFinite(value) && value > 0;
 }
 
 function progressionDiscipline(
