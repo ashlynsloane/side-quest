@@ -47,10 +47,10 @@ export default function ProfileTab() {
         eventDate: block?.goal.eventDate,
         equipmentName: equipment?.name ?? 'No default location',
         safeguardLabel: checkIn?.active
-          ? 'Today’s check-in is shaping training'
+          ? 'Today’s check-in is active'
           : pt?.active
-            ? 'Saved training safeguards are active'
-            : 'No active restriction profile',
+            ? 'Training restrictions are active'
+            : 'No active training restrictions',
       });
     });
     return () => { live = false; };
@@ -61,8 +61,8 @@ export default function ProfileTab() {
 
     <View style={styles.header}>
       <Text style={styles.eyebrow}>YOU</Text>
-      <Text style={styles.title}>The context Side Quest coaches from.</Text>
-      <Text style={styles.subtitle}>Your goals, available equipment, safeguards, integrations, and sharing choices live here.</Text>
+      <Text style={styles.title}>Profile</Text>
+      <Text style={styles.subtitle}>Goals, equipment, connections, and preferences.</Text>
     </View>
 
     <Pressable accessibilityRole="button" onPress={() => router.push('/more' as Href)} style={({ pressed }) => [styles.account, pressed && styles.pressed]}>
@@ -75,30 +75,30 @@ export default function ProfileTab() {
     </Pressable>
 
     <View style={styles.contextCard}>
-      <Text style={styles.contextEyebrow}>CURRENT COACHING CONTEXT</Text>
-      <Text style={styles.contextTitle}>{context?.goalName ?? 'Loading active training context…'}</Text>
+      <Text style={styles.contextEyebrow}>CURRENT PLAN</Text>
+      <Text style={styles.contextTitle}>{context?.goalName ?? 'Loading plan…'}</Text>
       {context?.eventDate ? <Text style={styles.contextDate}>{formatDate(context.eventDate)}</Text> : null}
       <View style={styles.contextRows}>
         <ContextRow icon="equipment" label="Default location" value={context?.equipmentName ?? 'Loading…'} styles={styles} tokens={tokens} />
-        <ContextRow icon="insights" label="Safeguards" value={context?.safeguardLabel ?? 'Loading…'} styles={styles} tokens={tokens} />
+        <ContextRow icon="insights" label="Training status" value={context?.safeguardLabel ?? 'Loading…'} styles={styles} tokens={tokens} />
       </View>
     </View>
 
     <View style={styles.sectionHeading}>
-      <Text style={styles.sectionEyebrow}>COACHING INPUTS</Text>
-      <Text style={styles.sectionTitle}>Change what the planner is allowed to assume.</Text>
+      <Text style={styles.sectionEyebrow}>TRAINING SETUP</Text>
+      <Text style={styles.sectionTitle}>Training setup</Text>
     </View>
 
     <View style={styles.actionStack}>
-      <ActionRow icon="plan" title="Goals and capacity" body="Goal, availability, experience, sport profile, and race priorities." onPress={() => router.push('/goal-catalog' as Href)} styles={styles} tokens={tokens} />
-      <ActionRow icon="equipment" title="Equipment locations" body="Home, gym, work, hotel, and travel setups used during generation." onPress={() => router.push('/equipment-profiles' as Href)} styles={styles} tokens={tokens} />
-      <ActionRow icon="insights" title="Restrictions and symptoms" body="PT context and current safeguards that constrain training decisions." onPress={() => router.push('/pt-profile' as Href)} styles={styles} tokens={tokens} />
-      <ActionRow icon="log" title="Training intelligence" body="Control how recent endurance training may influence upcoming strength." onPress={() => router.push('/training-intelligence' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="plan" title="Goals and capacity" body="Goal, availability, experience, and race priorities." onPress={() => router.push('/goal-catalog' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="equipment" title="Equipment locations" body="Home, gym, work, hotel, and travel setups." onPress={() => router.push('/equipment-profiles' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="insights" title="Restrictions and symptoms" body="Pain, PT guidance, and training restrictions." onPress={() => router.push('/pt-profile' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="log" title="Training preferences" body="How recent endurance training affects upcoming strength." onPress={() => router.push('/training-intelligence' as Href)} styles={styles} tokens={tokens} />
     </View>
 
     <ProductDisclosure
       title="Connections"
-      summary="Calendar, Strava, human coach access, friends, and Workout Together."
+      summary="Calendar, Strava, coach access, friends, and Workout Together."
       expanded={connectionsOpen}
       onPress={() => setConnectionsOpen((value) => !value)}
     >
@@ -111,25 +111,25 @@ export default function ProfileTab() {
 
     <ProductDisclosure
       title="Privacy and display"
-      summary="Preview sharing, export or delete data, and change appearance."
+      summary="Sharing, data controls, and appearance."
       expanded={privacyOpen}
       onPress={() => setPrivacyOpen((value) => !value)}
     >
       <View style={styles.disclosureRows}>
         <CompactRow title="Sharing center" body="Preview exactly what leaves Side Quest." onPress={() => router.push('/share-center' as Href)} styles={styles} tokens={tokens} />
         <CompactRow title="Data and privacy" body="Export, sharing defaults, and deletion." onPress={() => router.push('/privacy-data' as Href)} styles={styles} tokens={tokens} />
-        <CompactRow title="Appearance" body="Training environment and display preferences." onPress={() => router.push('/appearance' as Href)} styles={styles} tokens={tokens} />
+        <CompactRow title="Appearance" body="Color theme and display preferences." onPress={() => router.push('/appearance' as Href)} styles={styles} tokens={tokens} />
       </View>
     </ProductDisclosure>
 
     <ProductDisclosure
       title="Support and beta tools"
-      summary="Setup guide, feedback, and development-only diagnostics."
+      summary="Setup, feedback, and diagnostics."
       expanded={supportOpen}
       onPress={() => setSupportOpen((value) => !value)}
     >
       <View style={styles.disclosureRows}>
-        <CompactRow title="Setup guide" body="Review goals, safeguards, and integrations." onPress={() => router.push('/onboarding' as Href)} styles={styles} tokens={tokens} />
+        <CompactRow title="Setup guide" body="Review goals, restrictions, and integrations." onPress={() => router.push('/onboarding' as Href)} styles={styles} tokens={tokens} />
         <CompactRow title="Send beta feedback" body="Report a bug or confusing recommendation." onPress={() => router.push('/beta-feedback' as Href)} styles={styles} tokens={tokens} />
         {__DEV__ ? <CompactRow title="Developer tools" body="Product scenarios, visual QA, and diagnostics." onPress={() => router.push('/developer-tools' as Href)} styles={styles} tokens={tokens} /> : null}
       </View>
@@ -188,25 +188,25 @@ function formatDate(value: string): string {
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
-    page: { gap: 18, paddingTop: 14, paddingBottom: 38 },
-    header: { gap: 5, paddingHorizontal: 2 },
+    page: { gap: 17, paddingTop: 14, paddingBottom: 38 },
+    header: { gap: 4, paddingHorizontal: 2 },
     eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1.05 },
-    title: { color: tokens.text, fontSize: 29, lineHeight: 34, fontWeight: '900', letterSpacing: -0.55 },
-    subtitle: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 20 },
+    title: { color: tokens.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: -0.4 },
+    subtitle: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
 
-    account: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, paddingHorizontal: 2 },
+    account: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 2 },
     avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: tokens.accent, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
     accountCopy: { flex: 1, minWidth: 0 },
     name: { color: tokens.text, fontSize: 17, lineHeight: 21, fontWeight: '900' },
     email: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, marginTop: 2 },
 
-    contextCard: { borderRadius: 24, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, padding: 18, gap: 7 },
+    contextCard: { borderRadius: 22, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, padding: 17, gap: 7 },
     contextEyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.95 },
-    contextTitle: { color: tokens.text, fontSize: 22, lineHeight: 27, fontWeight: '900', letterSpacing: -0.25 },
+    contextTitle: { color: tokens.text, fontSize: 21, lineHeight: 26, fontWeight: '900', letterSpacing: -0.2 },
     contextDate: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
     contextRows: { marginTop: 5, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border },
-    contextRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, paddingVertical: 9 },
+    contextRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, paddingVertical: 8 },
     contextIcon: { width: 35, height: 35, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
     contextCopy: { flex: 1, minWidth: 0, gap: 1 },
     contextLabel: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 13, fontWeight: '800' },
@@ -214,16 +214,16 @@ function makeStyles(tokens: DesignTokens) {
 
     sectionHeading: { gap: 2, paddingHorizontal: 2 },
     sectionEyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.95 },
-    sectionTitle: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: -0.2 },
+    sectionTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '800', letterSpacing: -0.15 },
     actionStack: { borderRadius: 20, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, overflow: 'hidden' },
-    actionRow: { minHeight: 72, paddingHorizontal: 13, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
+    actionRow: { minHeight: 68, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
     actionIcon: { width: 39, height: 39, borderRadius: 13, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
     actionCopy: { flex: 1, minWidth: 0, gap: 2 },
     actionTitle: { color: tokens.text, fontSize: 13.5, lineHeight: 18, fontWeight: '900' },
     actionBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
 
     disclosureRows: { gap: 0 },
-    compactRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, paddingVertical: 9 },
+    compactRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, paddingVertical: 8 },
     compactTitle: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '800' },
     compactBody: { color: tokens.textMuted, fontSize: 11, lineHeight: 15 },
     signOut: { minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
