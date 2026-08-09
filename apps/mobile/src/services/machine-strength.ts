@@ -195,9 +195,17 @@ function machineExerciseAllowed(exercise: Exercise, protection: Protection): boo
   if (exercise.movementPatterns.some((pattern) => protection.excludedMovementPatterns.has(pattern))) return false;
 
   for (const restriction of protection.regionRestrictions) {
-    if (restriction.mode === 'direct_only') continue;
-    if (exercise.bodyRegions.some((load) => load.region === restriction.region && load.load >= 2)) return false;
-    if (exercise.jointLoads.some((load) => load.region === restriction.region && load.load >= 2)) return false;
+    const bodyLoads = exercise.bodyRegions.filter((load) => load.region === restriction.region);
+    const jointLoads = exercise.jointLoads.filter((load) => load.region === restriction.region);
+    if (restriction.mode === 'avoid') {
+      if (bodyLoads.some((load) => load.load >= 2) || jointLoads.some((load) => load.load >= 2)) return false;
+      continue;
+    }
+    if (restriction.mode === 'direct_only') {
+      if (bodyLoads.some((load) => load.role === 'primary' && load.load >= 2) || jointLoads.some((load) => load.load >= 3)) return false;
+      continue;
+    }
+    if (bodyLoads.some((load) => load.load >= 4) || jointLoads.some((load) => load.load >= 4)) return false;
   }
   return true;
 }
