@@ -1,5 +1,8 @@
-import type { PerformanceGoal } from '@circuit/domain';
-import type { CompletedDisciplineExposure } from '@circuit/planner/whole-athlete-progression';
+import type { PerformanceGoal, TrainingBlockPlan } from '@circuit/domain';
+import {
+  buildWholeAthleteProgressionContextFromHistory,
+  type CompletedDisciplineExposure,
+} from '@circuit/planner/whole-athlete-progression';
 import {
   configureWholeAthleteCoachStrategy,
   configureWholeAthleteStrategyLayers,
@@ -11,9 +14,11 @@ import {
   getLatestPTProfile,
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
+  saveTrainingBlock,
 } from './database';
 import { loadApprovedCoachStrategySchedule } from './coach-strategy-state';
 import { loadRaceIntent } from './race-intent-state';
+import { applyCurrentWeekStrengthProgression } from './strength-progression-persistence';
 import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
 import {
   clearSideQuestGeneratedPlanEvents,
@@ -96,23 +101,49 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     getActiveTrainingCheckIn(),
     getLatestPTProfile(),
     getTodayReadinessCheckIn(),
-    loadTrainingHistory(PROGRESSION_HISTORY_LIMIT),
+    loadTrainingHistory(PROGRESSION_HISTORY_LIMIT).catch(() => [] as TrainingHistoryItem[]),
   ]);
-  const goal = saved.block.goal;
   const now = new Date();
+  const progressionDate = localDateKey(now);
+  const currentWeekStart = currentTrainingWeekStart(saved.block, progressionDate);
+  const allCompletedHistory = progressionHistoryFromTrainingHistory(trainingHistory);
+  const completedHistory = currentWeekStart
+    ? historyEnteringWeek(allCompletedHistory, currentWeekStart)
+    : allCompletedHistory;
+  const progressionAsOf = currentWeekStart
+    ? weekEntryInstant(currentWeekStart)
+    : now.toISOString();
+  const progressionContext = currentWeekStart
+    ? buildWholeAthleteProgressionContextFromHistory({
+        weekStartDate: currentWeekStart,
+        asOf: progressionAsOf,
+        exposures: completedHistory,
+      })
+    : {};
+  const strengthProgression = currentWeekStart
+    ? applyCurrentWeekStrengthProgression(
+        saved.block,
+        currentWeekStart,
+        progressionContext.disciplineAssignments?.strength,
+      )
+    : { block: saved.block, changed: false };
+  const workingBlock = strengthProgression.block;
+  if (strengthProgression.changed) await saveTrainingBlock(workingBlock);
+
+  const goal = workingBlock.goal;
   const generated = await generateAndPersistWholeAthleteBlock({
-    block: saved.block,
+    block: workingBlock,
     goal,
     capacity: capacityFromGoal(goal),
     healthPreferences: loadWholeAthleteHealthPreferences(),
     activeCheckIn,
     ptProfileActive: Boolean(ptProfile?.active),
     readiness,
-    completedHistory: progressionHistoryFromTrainingHistory(trainingHistory),
-    progressionDate: localDateKey(now),
-    progressionAsOf: now.toISOString(),
+    completedHistory,
+    progressionDate,
+    progressionAsOf,
   });
-  latestReconciledPlan = { blockId: saved.block.id, generated };
+  latestReconciledPlan = { blockId: workingBlock.id, generated };
   return generated;
 }
 
@@ -152,7 +183,28 @@ export function localDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function progressionDiscipline(value: string): CompletedDisciplineExposure['discipline'] | null {
+export function currentTrainingWeekStart(block: TrainingBlockPlan, dateKey: string): string | null {
+  const week = block.weeks.find((candidate) => {
+    const weekEnd = addDays(candidate.weekStartDate, 6);
+    return dateKey >= candidate.weekStartDate && dateKey <= weekEnd;
+  });
+  return week?.weekStartDate ?? null;
+}
+
+export function historyEnteringWeek(
+  exposures: CompletedDisciplineExposure[],
+  weekStartDate: string,
+): CompletedDisciplineExposure[] {
+  return exposures.filter((exposure) => exposure.completedAt.slice(0, 10) < weekStartDate);
+}
+
+export function weekEntryInstant(weekStartDate: string): string {
+  return `${weekStartDate}T12:00:00.000Z`;
+}
+
+function progressionDiscipline(
+  value: string | null | undefined,
+): CompletedDisciplineExposure['discipline'] | null {
   if (value === 'swim' || value === 'bike' || value === 'run') return value;
   if (value === 'strength' || value === 'hiit') return 'strength';
   return null;
@@ -174,6 +226,12 @@ function capacityFromGoal(goal: PerformanceGoal): WholeAthleteCapacityInput {
     runStatus: goal.disciplines.includes('run') ? 'normal' : 'not_running',
     boneStressInjuryHistory: 'none',
   };
+}
+
+function addDays(value: string, days: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function isEnergyAvailability(value: unknown): value is WholeAthleteHealthPreferences['energyAvailability'] {
