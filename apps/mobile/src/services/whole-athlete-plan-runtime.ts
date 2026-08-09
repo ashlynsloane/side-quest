@@ -1,4 +1,5 @@
 import type { PerformanceGoal } from '@circuit/domain';
+import type { CompletedDisciplineExposure } from '@circuit/planner/whole-athlete-progression';
 import {
   configureWholeAthleteCoachStrategy,
   configureWholeAthleteStrategyLayers,
@@ -13,6 +14,7 @@ import {
 } from './database';
 import { loadApprovedCoachStrategySchedule } from './coach-strategy-state';
 import { loadRaceIntent } from './race-intent-state';
+import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
 import {
   clearSideQuestGeneratedPlanEvents,
   generateAndPersistWholeAthleteBlock,
@@ -22,6 +24,7 @@ import {
 } from './whole-athlete-plan';
 
 const HEALTH_PREFERENCES_KEY = 'circuit.whole-athlete-health.v1';
+const PROGRESSION_HISTORY_LIMIT = 2_000;
 
 const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
   energyAvailability: 'adequate',
@@ -89,12 +92,14 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     approvedSchedule.windows.map((window) => window.strategy),
   );
 
-  const [activeCheckIn, ptProfile, readiness] = await Promise.all([
+  const [activeCheckIn, ptProfile, readiness, trainingHistory] = await Promise.all([
     getActiveTrainingCheckIn(),
     getLatestPTProfile(),
     getTodayReadinessCheckIn(),
+    loadTrainingHistory(PROGRESSION_HISTORY_LIMIT),
   ]);
   const goal = saved.block.goal;
+  const now = new Date();
   const generated = await generateAndPersistWholeAthleteBlock({
     block: saved.block,
     goal,
@@ -103,9 +108,54 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     activeCheckIn,
     ptProfileActive: Boolean(ptProfile?.active),
     readiness,
+    completedHistory: progressionHistoryFromTrainingHistory(trainingHistory),
+    progressionDate: localDateKey(now),
+    progressionAsOf: now.toISOString(),
   });
   latestReconciledPlan = { blockId: saved.block.id, generated };
   return generated;
+}
+
+export function progressionHistoryFromTrainingHistory(
+  items: TrainingHistoryItem[],
+): CompletedDisciplineExposure[] {
+  const exposures: CompletedDisciplineExposure[] = [];
+  for (const item of items) {
+    if (item.needsReview) continue;
+    if (item.kind === 'strength') {
+      exposures.push({ discipline: 'strength', completedAt: item.occurredAt });
+      continue;
+    }
+    if (item.activity.deletedAt) continue;
+    const discipline = progressionDiscipline(item.activity.discipline);
+    if (!discipline) continue;
+    exposures.push({
+      discipline,
+      completedAt: item.occurredAt,
+      durationMinutes: Math.max(1, Math.round(item.activity.movingTimeSeconds / 60)),
+    });
+  }
+  return exposures.sort((left, right) => left.completedAt.localeCompare(right.completedAt));
+}
+
+export function localDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const value = (part: 'year' | 'month' | 'day') => parts.find((candidate) => candidate.type === part)?.value;
+  const year = value('year');
+  const month = value('month');
+  const day = value('day');
+  if (!year || !month || !day) return date.toISOString().slice(0, 10);
+  return `${year}-${month}-${day}`;
+}
+
+function progressionDiscipline(value: string): CompletedDisciplineExposure['discipline'] | null {
+  if (value === 'swim' || value === 'bike' || value === 'run') return value;
+  if (value === 'strength' || value === 'hiit') return 'strength';
+  return null;
 }
 
 function capacityFromGoal(goal: PerformanceGoal): WholeAthleteCapacityInput {
