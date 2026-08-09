@@ -24,7 +24,7 @@ describe('Side Quest Classic theme migration', () => {
     const themeContext = source('apps/mobile/src/state/theme-context.tsx');
     expect(appearance).toContain('themeDefinitions.filter');
     expect(appearance).toContain('Apply environment');
-    expect(themeContext).toContain('applyTheme(nextTheme');
+    expect(themeContext).toContain('const applyTheme = useCallback(async (nextTheme');
     expect(themeContext).toContain('updateProfile({ themeId: nextTheme, appearance: nextAppearance })');
   });
 
