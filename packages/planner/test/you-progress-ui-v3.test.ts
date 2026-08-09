@@ -41,24 +41,27 @@ describe('You + Progress V3 workspace', () => {
     expect(runtime).toContain('getRegionalStrengthStatusSnapshot(now, windowDays)');
     expect(runtime).toContain('More volume is context, not automatically better.');
     expect(runtime).toContain('Lower volume is not treated as training debt.');
-    expect(progress).toContain('No readiness score, streak pressure, or universal muscle target.');
+    expect(progress).toContain('Training history');
+    expect(progress).toContain('Recent sessions, progression signals, and anything that needs attention.');
     expect(progress).not.toContain('completionFraction');
   });
 
-  it('gives regional status, recent evidence, progression, body map, history, and weekly review clear homes', () => {
+  it('gives body-area status, recent sessions, progression, body map, history, and weekly review clear homes', () => {
     const progress = source('apps/mobile/src/components/progress-screen-v3.tsx');
-    expect(progress).toContain('REGIONAL PICTURE');
-    expect(progress).toContain('RECENT EVIDENCE');
+    expect(progress).toContain('BODY AREAS');
+    expect(progress).toContain('Anything that needs attention');
+    expect(progress).toContain('RECENT');
+    expect(progress).toContain('Recent sessions');
     expect(progress).toContain('/progressions');
     expect(progress).toContain('/insights');
     expect(progress).toContain('/training-history');
     expect(progress).toContain('/weekly-review');
   });
 
-  it('makes Profile show active coaching context before secondary settings', () => {
+  it('makes Profile show the current plan and training setup before secondary settings', () => {
     const profile = source('apps/mobile/src/app/(tabs)/profile.tsx');
-    expect(profile).toContain('CURRENT COACHING CONTEXT');
-    expect(profile).toContain('COACHING INPUTS');
+    expect(profile).toContain('CURRENT PLAN');
+    expect(profile).toContain('TRAINING SETUP');
     expect(profile).toContain('getLatestTrainingBlock()');
     expect(profile).toContain('getDefaultEquipmentProfile()');
     expect(profile).toContain('getLatestPTProfile()');
