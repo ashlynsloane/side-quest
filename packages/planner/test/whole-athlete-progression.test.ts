@@ -300,4 +300,63 @@ describe('whole-athlete progression governor integration', () => {
     expect(assignment?.decision.direction).toBe('reduce');
     expect(assignment?.decision.volumeScale).toBe(0.9);
   });
+
+  it('lets explicit too-hard feedback override otherwise absorbed low-RPE strength evidence', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T12:00:00.000Z',
+      disciplines: ['strength'],
+      exposures: [
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-05T12:00:00.000Z',
+          completedAsPlanned: true,
+          rpe: 6,
+          difficulty: 'appropriate',
+        },
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-08T12:00:00.000Z',
+          completedAsPlanned: true,
+          rpe: 6,
+          difficulty: 'too_hard',
+        },
+      ],
+    });
+    const assignment = progression.disciplineAssignments?.strength;
+
+    expect(assignment?.decision.phase).toBe('hold');
+    expect(assignment?.decision.direction).toBe('reduce');
+    expect(assignment?.decision.progressionAllowed).toBe(false);
+    expect(assignment?.decision.volumeScale).toBe(0.9);
+    expect(assignment?.decision.target.reps).toBe(9);
+    expect(assignment?.decision.rationale.join(' ')).toMatch(/explicitly marked.*too hard/i);
+  });
+
+  it('does not manufacture a progression from too-easy feedback alone', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T12:00:00.000Z',
+      disciplines: ['strength'],
+      exposures: [
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-05T12:00:00.000Z',
+          completedAsPlanned: true,
+          difficulty: 'too_easy',
+        },
+        {
+          discipline: 'strength',
+          completedAt: '2026-08-08T12:00:00.000Z',
+          completedAsPlanned: true,
+          difficulty: 'too_easy',
+        },
+      ],
+    });
+    const assignment = progression.disciplineAssignments?.strength;
+
+    expect(assignment?.decision.phase).toBe('hold');
+    expect(assignment?.decision.direction).toBe('hold');
+    expect(assignment?.decision.progressionAllowed).toBe(false);
+  });
 });
