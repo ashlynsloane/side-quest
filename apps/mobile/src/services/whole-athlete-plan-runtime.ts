@@ -143,7 +143,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     progressionDate,
     progressionAsOf,
   });
-  latestReconciledPlan = { blockId: workingBlock.id, generated };
+  latestReconciledPlan = { blockId: saved.block.id, generated };
   return generated;
 }
 
