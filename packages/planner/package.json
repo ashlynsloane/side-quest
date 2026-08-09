@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./whole-athlete-week": "./src/whole-athlete-week-strategy.ts",
+    "./whole-athlete-progression": "./src/whole-athlete-progression.ts",
     "./multisport": "./src/multisport.ts",
     "./multisport-governance": "./src/multisport-governance.ts",
     "./endurance-prescription": "./src/endurance-prescription.ts",
