@@ -1,6 +1,8 @@
+import type { WorkoutDifficultyFeedback } from '@circuit/domain';
 import type { UnifiedIntensity } from './unified-training';
 import {
   decideAthleteProgression,
+  type AthleteProgressionDecision,
   type AthleteProgressionDose,
   type AthleteProgressionEvidence,
 } from './athlete-progression-engine';
@@ -20,6 +22,7 @@ export interface WholeAthleteProgressionContext {
 
 export interface CompletedDisciplineExposure extends AthleteProgressionEvidence {
   discipline: TrainableDiscipline;
+  difficulty?: WorkoutDifficultyFeedback;
 }
 
 export interface WholeAthleteHistoryProgressionInput {
@@ -138,6 +141,46 @@ function elapsedDays(from: string, toMs: number): number | null {
   return Math.max(0, Math.floor((toMs - fromMs) / DAY_MS));
 }
 
+function explicitTooHardInRecentHistory(exposures: CompletedDisciplineExposure[]): boolean {
+  return exposures
+    .slice(-3)
+    .some((exposure) => exposure.difficulty === 'too_hard');
+}
+
+function explicitTooHardGuard(
+  decision: AthleteProgressionDecision,
+  baseline: AthleteProgressionDose,
+): AthleteProgressionDecision {
+  if (decision.direction === 'reduce') return decision;
+  if (decision.phase !== 'build' && decision.phase !== 'hold') return decision;
+
+  const target: AthleteProgressionDose = {
+    ...decision.target,
+    ...(finitePositive(baseline.durationMinutes)
+      ? { durationMinutes: roundMinutes(baseline.durationMinutes * 0.9) }
+      : {}),
+    ...(finitePositive(baseline.reps)
+      ? { reps: Math.max(1, Math.round(baseline.reps * 0.9)) }
+      : {}),
+    ...(finitePositive(baseline.load) ? { load: baseline.load } : {}),
+  };
+
+  return {
+    ...decision,
+    phase: 'hold',
+    direction: 'reduce',
+    progressionAllowed: false,
+    target,
+    volumeScale: 0.9,
+    intensityScale: 0.95,
+    ...(finitePositive(baseline.load) ? { strengthLoadCeiling: baseline.load } : {}),
+    rationale: [
+      ...decision.rationale,
+      'The athlete explicitly marked a recent comparable session as too hard, so the next dose steps down before progression is reconsidered.',
+    ],
+  };
+}
+
 /**
  * Converts completed discipline exposures into conservative progression
  * assignments. The baseline is intentionally relative because the
@@ -145,6 +188,10 @@ function elapsedDays(from: string, toMs: number): number | null {
  * a 100-minute reference dose. Strength additionally uses relative 10-rep and
  * 100-load anchors so the existing strength adapter can express reps-first
  * progression and proportional load ceilings without inventing absolute loads.
+ *
+ * Structured quick feedback is kept distinct from RPE. An explicit "too hard"
+ * response is a conservative negative gate, while "too easy" remains supporting
+ * evidence rather than manufacturing a numeric RPE or forcing progression.
  *
  * A missing discipline is not interpreted as a lapse until the available
  * history itself spans at least 14 days. This prevents a new install or a
@@ -184,13 +231,16 @@ export function buildWholeAthleteProgressionContextFromHistory(
       weightedAverageWatts: exposure.weightedAverageWatts,
     }));
     const baseline = relativeProgressionBaseline(discipline);
-    const decision = decideAthleteProgression({
+    const baseDecision = decideAthleteProgression({
       weekStartDate: input.weekStartDate,
       discipline,
       baseline,
       recentEvidence,
       continuity: { daysSinceExposure },
     });
+    const decision = explicitTooHardInRecentHistory(matching)
+      ? explicitTooHardGuard(baseDecision, baseline)
+      : baseDecision;
     disciplineAssignments[discipline] = { baseline, decision };
   }
 
