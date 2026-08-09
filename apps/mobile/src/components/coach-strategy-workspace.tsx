@@ -53,10 +53,10 @@ export function CoachStrategyWorkspace() {
     try {
       const result = await sendStrategyCoachMessage(message);
       setMessage('');
-      setFeedback(result.needsClarification ? result.response : 'Strategy draft updated. Review the draft below before applying it.');
+      setFeedback(result.needsClarification ? result.response : 'Draft updated. Review it before applying.');
       await reload();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not update the strategy conversation.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not update the season focus.');
     } finally {
       setBusy(false);
     }
@@ -68,10 +68,10 @@ export function CoachStrategyWorkspace() {
     setFeedback(null);
     try {
       await approveCurrentCoachStrategyDraft();
-      setFeedback('Strategy approved. The block was reconciled with Race Intent remaining underneath it as the baseline.');
+      setFeedback('Season focus saved.');
       await reload();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not apply that strategy safely.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not apply that focus safely.');
     } finally {
       setBusy(false);
     }
@@ -83,10 +83,10 @@ export function CoachStrategyWorkspace() {
     setFeedback(null);
     try {
       await discardCurrentCoachStrategyDraft();
-      setFeedback('Draft discarded. The approved strategy and Race Intent were left unchanged.');
+      setFeedback('Draft discarded.');
       await reload();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not discard that strategy draft.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not discard that draft.');
     } finally {
       setBusy(false);
     }
@@ -98,17 +98,17 @@ export function CoachStrategyWorkspace() {
     setFeedback(null);
     try {
       await stopApprovedCoachStrategy();
-      setFeedback('Strategy Coach override removed. Race Intent is again the long-horizon planning baseline.');
+      setFeedback('Temporary focus removed.');
       await reload();
     } catch (caught) {
-      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not remove that strategy safely.');
+      setFeedback(caught instanceof Error ? caught.message : 'Side Quest could not remove that focus safely.');
     } finally {
       setBusy(false);
     }
   }
 
-  if (loading) return <View style={styles.loading}><ActivityIndicator color={tokens.accent} /><Text style={styles.loadingText}>Building strategy horizon…</Text></View>;
-  if (!workspace) return <V23Card elevated style={styles.card}><Text style={styles.title}>Build a race plan first.</Text><Text style={styles.body}>Strategy Coach needs an event goal and a generated whole-athlete block before it can reason across weeks.</Text></V23Card>;
+  if (loading) return <View style={styles.loading}><ActivityIndicator color={tokens.accent} /><Text style={styles.loadingText}>Loading season plan…</Text></View>;
+  if (!workspace) return <V23Card elevated style={styles.card}><Text style={styles.title}>Build a race plan first</Text><Text style={styles.body}>Add an event goal to plan across multiple weeks.</Text></V23Card>;
 
   const review = workspace.review;
   const draft = review.hasUnapprovedChanges ? review.draft : undefined;
@@ -118,32 +118,32 @@ export function CoachStrategyWorkspace() {
 
   return <View style={styles.stack}>
     <View style={styles.intro}>
-      <Text style={styles.eyebrow}>LONG-HORIZON COACHING</Text>
-      <Text style={styles.hero}>Shape the next training blocks.</Text>
-      <Text style={styles.body}>Use Strategy for priorities that span weeks or months. Daily workout changes, soreness, and immediate schedule problems still belong in Today.</Text>
+      <Text style={styles.eyebrow}>SEASON</Text>
+      <Text style={styles.hero}>Season strategy</Text>
+      <Text style={styles.body}>Set priorities that span several weeks.</Text>
     </View>
 
     <V23Card elevated style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.icon}><V23Icon name="goal" color={tokens.accent} size={20} /></View>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>STRATEGY HORIZON</Text>
+          <Text style={styles.eyebrow}>CURRENT GOAL</Text>
           <Text style={styles.title}>{workspace.goalName}</Text>
         </View>
-        <V23Chip tone={macro.approvedWindowState === 'active' ? 'info' : macro.approvedWindowState === 'scheduled' ? 'warm' : 'neutral'}>{strategyWindowLabel(workspace)}</V23Chip>
+        <V23Chip tone={macro.approvedWindowState === 'active' ? 'info' : macro.approvedWindowState === 'scheduled' ? 'warm' : 'neutral'}>{friendlyWindowLabel(strategyWindowLabel(workspace))}</V23Chip>
       </View>
       {workspace.eventDate ? <Text style={styles.meta}>Race · {formatStrategyWeek(workspace.eventDate)}</Text> : null}
-      <Text style={styles.body}>{strategyWindowSummary(workspace)}</Text>
-      {macro.strategyContinuesBeyondBlock ? <Text style={styles.note}>This strategy continues beyond the currently generated block. Side Quest will carry the approved intent forward when the next block is created, subject to its date window.</Text> : null}
+      <Text style={styles.body}>{friendlyWindowSummary(strategyWindowSummary(workspace))}</Text>
+      {macro.strategyContinuesBeyondBlock ? <Text style={styles.note}>This focus continues beyond the weeks currently shown.</Text> : null}
       {macro.nextPhaseTransition ? <View style={styles.callout}>
-        <Text style={styles.calloutLabel}>NEXT PHASE SHIFT</Text>
+        <Text style={styles.calloutLabel}>NEXT PHASE</Text>
         <Text style={styles.calloutText}>{phaseLabel(macro.nextPhaseTransition.from)} → {phaseLabel(macro.nextPhaseTransition.to)} · {formatStrategyWeek(macro.nextPhaseTransition.startsAt)}</Text>
       </View> : null}
     </V23Card>
 
     <V23Card elevated style={styles.card}>
-      <Text style={styles.eyebrow}>PHASE ROADMAP</Text>
-      <Text style={styles.title}>How the block changes over time</Text>
+      <Text style={styles.eyebrow}>PHASES</Text>
+      <Text style={styles.title}>Training phases</Text>
       <View style={styles.phaseGrid}>
         {macro.phases.map((phase) => <View key={`${phase.phase}_${phase.startDate}`} style={styles.phaseCard}>
           <Text style={styles.phaseName}>{phaseLabel(phase.phase)}</Text>
@@ -154,20 +154,20 @@ export function CoachStrategyWorkspace() {
     </V23Card>
 
     <V23Card elevated style={styles.card}>
-      <Text style={styles.eyebrow}>BLOCK TIMELINE</Text>
-      <Text style={styles.title}>What each week is trying to do</Text>
+      <Text style={styles.eyebrow}>WEEK BY WEEK</Text>
+      <Text style={styles.title}>Upcoming weeks</Text>
       <View style={styles.timeline}>
         {macro.weeks.map((week, index) => <View key={week.weekStartDate} style={[styles.weekRow, index === macro.weeks.length - 1 && styles.weekRowLast]}>
           <View style={styles.weekMarker}><Text style={styles.weekNumber}>{index + 1}</Text></View>
           <View style={styles.weekCopy}>
             <View style={styles.weekTop}>
               <Text style={styles.weekDate}>{formatStrategyWeek(week.weekStartDate)}</Text>
-              <V23Chip tone={week.source === 'strategy_coach' ? 'info' : 'neutral'}>{week.source === 'strategy_coach' ? 'Strategy Coach' : 'Race Intent'}</V23Chip>
+              <V23Chip tone={week.source === 'strategy_coach' ? 'info' : 'neutral'}>{week.source === 'strategy_coach' ? 'Focus block' : 'Race priorities'}</V23Chip>
             </View>
             <Text style={styles.weekTitle}>{phaseLabel(week.phase)} · {week.expression.headline}</Text>
-            <Text style={styles.weekMeta}>{week.plannedMinutes} min planned · {week.expression.state.replaceAll('_', ' ')}</Text>
-            {week.overrideWindowState === 'scheduled' ? <Text style={styles.weekNote}>Strategy Coach window has not started yet.</Text> : null}
-            {week.overrideWindowState === 'expired' ? <Text style={styles.weekNote}>Strategy Coach window has ended; Race Intent is back in control.</Text> : null}
+            <Text style={styles.weekMeta}>{week.plannedMinutes} min planned</Text>
+            {week.overrideWindowState === 'scheduled' ? <Text style={styles.weekNote}>Temporary focus starts later.</Text> : null}
+            {week.overrideWindowState === 'expired' ? <Text style={styles.weekNote}>Temporary focus has ended.</Text> : null}
           </View>
         </View>)}
       </View>
@@ -176,31 +176,31 @@ export function CoachStrategyWorkspace() {
     {(draft || approved) ? <V23Card elevated style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>{draft ? 'STRATEGY DRAFT' : 'APPROVED STRATEGY'}</Text>
+          <Text style={styles.eyebrow}>{draft ? 'DRAFT' : 'SAVED FOCUS'}</Text>
           <Text style={styles.title}>{strategyTitle(draft ?? approved!)}</Text>
         </View>
         {draft ? <V23Chip tone="warm">Approval required</V23Chip> : <V23Chip tone="info">Saved</V23Chip>}
       </View>
       <Text style={styles.strategyText}>{strategyDescription(draft ?? approved!)}</Text>
       {draft ? <>
-        <Text style={styles.note}>Nothing changes until you approve this draft. Applying it reconciles every generated week through the same race, safety, phase, and time-budget rules.</Text>
-        <V23PrimaryButton onPress={() => void applyDraft()} icon="check">{busy ? 'Applying…' : 'Apply strategy'}</V23PrimaryButton>
+        <Text style={styles.note}>Nothing changes until you approve this draft.</Text>
+        <V23PrimaryButton onPress={() => void applyDraft()} icon="check">{busy ? 'Applying…' : 'Apply focus'}</V23PrimaryButton>
         <V23OutlineButton onPress={() => void discardDraft()}>Discard draft</V23OutlineButton>
       </> : <>
-        <Text style={styles.note}>{macro.approvedWindowState === 'expired' ? 'This saved strategy is no longer affecting the plan because its window ended.' : 'Race Intent remains underneath this override and automatically resumes outside the strategy window.'}</Text>
-        <V23OutlineButton onPress={() => void stopStrategy()}>{macro.approvedWindowState === 'expired' ? 'Clear saved strategy' : 'Stop strategy now'}</V23OutlineButton>
+        <Text style={styles.note}>{macro.approvedWindowState === 'expired' ? 'This focus is no longer affecting the plan.' : 'This focus applies only inside its selected date range.'}</Text>
+        <V23OutlineButton onPress={() => void stopStrategy()}>{macro.approvedWindowState === 'expired' ? 'Clear saved focus' : 'Stop focus now'}</V23OutlineButton>
       </>}
     </V23Card> : null}
 
     <V23Card elevated style={styles.chatCard}>
       <View style={styles.cardHeader}>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>STRATEGY CONVERSATION</Text>
-          <Text style={styles.title}>Talk in weeks and months.</Text>
+          <Text style={styles.eyebrow}>SET A FOCUS</Text>
+          <Text style={styles.title}>Tell Side Quest what to prioritize</Text>
         </View>
         <View style={styles.icon}><V23Icon name="adjust" color={tokens.accent} size={20} /></View>
       </View>
-      <Text style={styles.body}>Examples: “For the next 8 weeks, bike is my main focus while I maintain swim and run,” “Actually I want to develop the run too,” or “Do that until November.”</Text>
+      <Text style={styles.body}>Example: “For the next 8 weeks, make bike my main focus while I maintain swim and run.”</Text>
       {turns.length ? <View style={styles.thread}>
         {turns.map((turn) => <View key={turn.id} style={[styles.turnRow, turn.role === 'athlete' && styles.turnRowAthlete]}>
           <View style={[styles.bubble, turn.role === 'athlete' ? styles.athleteBubble : styles.coachBubble]}>
@@ -217,32 +217,40 @@ export function CoachStrategyWorkspace() {
         placeholder="For the next 8 weeks, keep bike as my main focus but develop the run too…"
         placeholderTextColor={tokens.textMuted}
         style={styles.input}
-        accessibilityLabel="Talk to Strategy Coach"
+        accessibilityLabel="Set a season focus"
       />
       <Pressable
         onPress={() => void sendMessage()}
         disabled={busy || !message.trim()}
         style={({ pressed }) => [styles.send, (!message.trim() || busy) && styles.disabled, pressed && styles.pressed]}
       >
-        {busy ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.sendText}>Update strategy draft</Text><V23Icon name="chevron" color="#FFFFFF" size={18} /></>}
+        {busy ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.sendText}>Update draft</Text><V23Icon name="chevron" color="#FFFFFF" size={18} /></>}
       </Pressable>
       {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
-      <Text style={styles.note}>Strategy conversation only changes the semantic draft. The whole-athlete plan is not mutated until you approve the draft above.</Text>
+      <Text style={styles.note}>Nothing changes until you approve the draft above.</Text>
     </V23Card>
   </View>;
 }
 
+function friendlyWindowLabel(value: string): string {
+  return value.replace(/Race Intent/gi, 'Race priorities').replace(/Strategy Coach/gi, 'Focus block');
+}
+
+function friendlyWindowSummary(value: string): string {
+  return value.replace(/Race Intent/gi, 'Race priorities').replace(/Strategy Coach/gi, 'temporary focus');
+}
+
 function strategyTitle(strategy: CoachSemanticStrategyChange): string {
   if (strategy.primaryFocus) return `${titleCase(strategy.primaryFocus)} focus`;
-  return 'Long-horizon allocation';
+  return 'Season focus';
 }
 
 function strategyDescription(strategy: CoachSemanticStrategyChange): string {
   const lines = Object.entries(strategy.disciplineObjectives)
     .filter(([, objective]) => Boolean(objective))
     .map(([discipline, objective]) => `${titleCase(discipline)} · ${String(objective).replaceAll('_', ' ')}`);
-  if (strategy.tradeoffTolerance) lines.push(`Tradeoff · ${strategy.tradeoffTolerance.replaceAll('_', ' ')}`);
-  if (strategy.startsAt || strategy.endsAt) lines.push(`Window · ${strategy.startsAt ?? 'now'} → ${strategy.endsAt ?? 'open-ended'}`);
+  if (strategy.tradeoffTolerance) lines.push(`Balance · ${strategy.tradeoffTolerance.replaceAll('_', ' ')}`);
+  if (strategy.startsAt || strategy.endsAt) lines.push(`Dates · ${strategy.startsAt ?? 'now'} → ${strategy.endsAt ?? 'open-ended'}`);
   if (strategy.racePriority?.objective) lines.push(`Race priority · ${strategy.racePriority.discipline ? `${titleCase(strategy.racePriority.discipline)} · ` : ''}${strategy.racePriority.objective.replaceAll('_', ' ')}`);
   return lines.join('\n');
 }
@@ -253,14 +261,14 @@ function titleCase(value: string): string {
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
-    stack: { gap: 18 },
-    intro: { gap: 6 },
-    eyebrow: { color: tokens.accent, fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 1.05 },
-    hero: { color: tokens.text, fontSize: 30, lineHeight: 35, fontWeight: '900', letterSpacing: -0.6 },
-    title: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900' },
-    body: { color: tokens.textMuted, fontSize: 14.5, lineHeight: 21 },
-    card: { gap: 12, padding: 17 },
-    chatCard: { gap: 13, padding: 17 },
+    stack: { gap: 17 },
+    intro: { gap: 4 },
+    eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
+    hero: { color: tokens.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: -0.4 },
+    title: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+    body: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
+    card: { gap: 11, padding: 17 },
+    chatCard: { gap: 12, padding: 17 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     headerCopy: { flex: 1, minWidth: 0, gap: 2 },
     icon: { width: 40, height: 40, borderRadius: 13, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
