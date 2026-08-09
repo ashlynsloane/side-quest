@@ -31,6 +31,7 @@ export interface StrengthProgressionPersistenceResult {
  * If an athlete or another planner path edits a workout after progression was
  * applied, that changed workout becomes the new baseline for that session so
  * explicit edits are never silently overwritten by stale progression state.
+ * Completed and skipped sessions are historical facts and are never rewritten.
  */
 export function applyCurrentWeekStrengthProgression(
   block: TrainingBlockPlan,
@@ -53,10 +54,15 @@ export function applyCurrentWeekStrengthProgression(
     ...block,
     weeks: block.weeks.map((week, index) => index === weekIndex ? reconciledBaseline : week),
   };
-  const adjustedBlock = applyProgressionToStrengthBlock(baselineBlock, {
+  const progressedBlock = applyProgressionToStrengthBlock(baselineBlock, {
     weekAssignments: { [weekNumber]: assignment },
   });
-  const adjustedWeek = adjustedBlock.weeks[weekIndex]!;
+  const progressedWeek = progressedBlock.weeks[weekIndex]!;
+  const adjustedWeek = preserveHistoricalSessions(currentWeek, progressedWeek);
+  const adjustedBlock: TrainingBlockPlan = {
+    ...progressedBlock,
+    weeks: progressedBlock.weeks.map((week, index) => index === weekIndex ? adjustedWeek : week),
+  };
 
   writeState(storageKey, {
     blockId: block.id,
@@ -72,6 +78,24 @@ export function applyCurrentWeekStrengthProgression(
   return {
     block: adjustedBlock,
     changed: weekPrescriptionFingerprint(currentWeek) !== weekPrescriptionFingerprint(adjustedWeek),
+  };
+}
+
+function preserveHistoricalSessions(
+  currentWeek: WeeklyTrainingPlan,
+  progressedWeek: WeeklyTrainingPlan,
+): WeeklyTrainingPlan {
+  const currentById = new Map(currentWeek.sessions.map((session) => [session.id, session]));
+  return {
+    ...progressedWeek,
+    sessions: progressedWeek.sessions.map((session) => {
+      const current = currentById.get(session.id);
+      if (!current) return session;
+      if (current.completionStatus === 'completed' || current.completionStatus === 'skipped') {
+        return current;
+      }
+      return session;
+    }),
   };
 }
 
