@@ -62,7 +62,7 @@ export default function TrainScreenV3() {
         <View style={styles.heroTop}>
           <View style={styles.heroKickerRow}>
             <SportIcon kind="strength" color={tokens.accent} backgroundColor={tokens.accentSoft} size={19} />
-            <Text style={styles.kicker}>{next ? 'NEXT PLANNED STRENGTH' : 'BUILD A SESSION'}</Text>
+            <Text style={styles.kicker}>{next ? 'NEXT STRENGTH' : 'BUILD A SESSION'}</Text>
           </View>
           {next ? <View style={styles.loadPill}><Text style={styles.loadPillText}>{friendlyLoad(next.intendedLoad)}</Text></View> : null}
         </View>
@@ -71,8 +71,8 @@ export default function TrainScreenV3() {
           ? `${formatDate(next.date)} · ${Math.round(next.workout.estimatedElapsedSeconds / 60)} min · ${next.workout.stations.length} stations`
           : 'Set time, equipment, and any temporary limitations.'}</Text>
         <Text style={styles.heroReason}>{next
-          ? 'This is the strength session currently placed in the whole-athlete plan. Review it before you start, swap, or edit.'
-          : 'Side Quest will generate one session without changing the rest of your plan.'}</Text>
+          ? 'Review your next planned strength session before you start, swap, or edit.'
+          : 'Build one session without changing the rest of your week.'}</Text>
         <Pressable accessibilityRole="button" onPress={reviewRecommended} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
           <Text style={styles.primaryButtonText}>{next ? 'Review workout' : 'Build quick workout'}</Text>
           <V23Icon name="chevron" color="#FFFFFF" size={17} />
@@ -82,8 +82,8 @@ export default function TrainScreenV3() {
 
     <View style={styles.builderSection}>
       <View style={styles.sectionHeading}>
-        <Text style={styles.sectionEyebrow}>CHOOSE YOUR PATH</Text>
-        <Text style={styles.sectionTitle}>Train the plan, or add the right kind of strength.</Text>
+        <Text style={styles.sectionEyebrow}>MORE STRENGTH</Text>
+        <Text style={styles.sectionTitle}>Choose a strength session</Text>
       </View>
       <View style={styles.actionStack}>
         <ActionRow
@@ -97,7 +97,7 @@ export default function TrainScreenV3() {
         <ActionRow
           icon="equipment"
           title="Machine strength"
-          body="Set-based supplemental strength: heavier loads, fewer reps, no timer. Usually one session per week."
+          body="Set-based supplemental strength with heavier loads and fewer reps."
           onPress={() => router.push('/machine-strength' as Href)}
           tokens={tokens}
           styles={styles}
@@ -105,7 +105,7 @@ export default function TrainScreenV3() {
         <ActionRow
           icon="heart"
           title="Saved workouts"
-          body="Return to a favorite without digging through workout history."
+          body="Return to a favorite workout."
           onPress={() => router.push('/favorites' as Href)}
           tokens={tokens}
           styles={styles}
@@ -123,7 +123,7 @@ export default function TrainScreenV3() {
 
     <ProductDisclosure
       title="More training tools"
-      summary="Logging and rescue tools stay available without competing with the workout flow."
+      summary="Logging and session rescue."
       expanded={toolsOpen}
       onPress={() => setToolsOpen((value) => !value)}
     >
@@ -137,7 +137,7 @@ export default function TrainScreenV3() {
         />
         <CompactTool
           title="Shorten or rescue a session"
-          body="Keep the intent with less volume when the day changes."
+          body="Keep the intent with less volume."
           onPress={() => router.push('/session-rescue' as Href)}
           tokens={tokens}
           styles={styles}
