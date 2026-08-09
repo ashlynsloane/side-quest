@@ -25,9 +25,12 @@ describe('completed training history progression mobile wiring', () => {
     const history = source('apps/mobile/src/services/training-history.ts');
 
     expect(history).toContain('listWorkoutReflectionsSince(earliest)');
+    expect(history).toContain('listWorkoutFeedbackSince(earliest)');
     expect(history).toContain('getTrainingCalendarEvents({');
     expect(history).toContain('reflectionByWorkoutInstance');
+    expect(history).toContain('feedbackByWorkoutInstance');
     expect(history).toContain('reflection: reflectionByWorkoutInstance.get(workout.id)');
+    expect(history).toContain('feedback: feedbackByWorkoutInstance.get(workout.id)');
     expect(history).toContain('plannedEvent');
     expect(history).toContain('eventById.get(plannedMatch.calendarEventId)');
   });
@@ -45,6 +48,8 @@ describe('completed training history progression mobile wiring', () => {
 
     expect(runtime).toContain('const completedAsPlanned = strengthCompletionSignal(item)');
     expect(runtime).toContain('const rpe = validRpe(item.reflection?.rpe)');
+    expect(runtime).toContain('const difficulty = item.feedback?.difficulty');
+    expect(runtime).toContain('...(difficulty !== undefined ? { difficulty } : {})');
     expect(runtime).toContain("item.workout.relationToPlan !== 'completed_planned'");
     expect(runtime).toContain('item.workout.completionFraction >= 0.9');
     expect(runtime).toContain('item.workout.completionFraction < 0.75');
@@ -59,6 +64,17 @@ describe('completed training history progression mobile wiring', () => {
     expect(runtime).toContain('completionRatio < 0.75');
     expect(runtime).toContain('averageWatts: item.activity.averageWatts');
     expect(runtime).toContain('weightedAverageWatts: item.activity.weightedAverageWatts');
+  });
+
+  it('keeps explicit too-hard feedback separate from numeric RPE', () => {
+    const progression = source('packages/planner/src/whole-athlete-progression.ts');
+
+    expect(progression).toContain("exposure.difficulty === 'too_hard'");
+    expect(progression).toContain('explicitTooHardGuard(baseDecision, baseline)');
+    expect(progression).toContain('Structured quick feedback is kept distinct from RPE');
+    expect(progression).toContain('too easy');
+    expect(progression).not.toContain("difficulty === 'too_easy' ? 6");
+    expect(progression).not.toContain("difficulty === 'too_hard' ? 9");
   });
 
   it('uses athlete-local today but freezes continuity at entry into the current week', () => {
@@ -114,6 +130,7 @@ describe('completed training history progression mobile wiring', () => {
 
     expect(runtime).toContain('loadTrainingHistory(PROGRESSION_HISTORY_LIMIT).catch(() => [] as TrainingHistoryItem[])');
     expect(history).toContain('listWorkoutReflectionsSince(earliest).catch(() => [] as WorkoutReflection[])');
+    expect(history).toContain('listWorkoutFeedbackSince(earliest).catch(() => [] as WorkoutFeedbackSummary[])');
     expect(history).toContain('}).catch(() => [] as TrainingCalendarEvent[])');
   });
 });
