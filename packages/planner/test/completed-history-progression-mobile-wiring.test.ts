@@ -68,6 +68,14 @@ describe('completed training history progression mobile wiring', () => {
     expect(persistence).toContain('explicit edits are never silently overwritten');
   });
 
+  it('never retroactively rewrites completed or skipped strength sessions', () => {
+    const persistence = source('apps/mobile/src/services/strength-progression-persistence.ts');
+
+    expect(persistence).toContain('preserveHistoricalSessions(currentWeek, progressedWeek)');
+    expect(persistence).toContain("current.completionStatus === 'completed' || current.completionStatus === 'skipped'");
+    expect(persistence).toContain('return current;');
+  });
+
   it('keeps whole-athlete reconciliation alive if optional history retrieval fails', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
 
