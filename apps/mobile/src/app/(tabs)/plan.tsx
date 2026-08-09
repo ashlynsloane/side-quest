@@ -45,7 +45,7 @@ export default function PlanTab() {
         wholeAthlete = await refreshLatestWholeAthletePlan();
         if (live) setPlanningWarning(null);
       } catch (caught) {
-        if (live) setPlanningWarning(caught instanceof Error ? caught.message : 'Whole-athlete plan refresh needs review.');
+        if (live) setPlanningWarning(caught instanceof Error ? caught.message : 'This week needs a refresh.');
       }
 
       const saved = await getLatestTrainingBlock();
@@ -102,8 +102,8 @@ export default function PlanTab() {
     return <V23Screen contentStyle={styles.page}>
       <ProductHero
         eyebrow="WEEK"
-        title="Build your first coordinated week."
-        body="Choose a goal and Side Quest will organize swim, bike, run, and strength around your real capacity."
+        title="Build your first week"
+        body="Choose a goal and weekly availability to get started."
         actions={<Pressable onPress={() => router.push('/goal-catalog' as Href)} style={styles.heroButton}><Text style={styles.heroButtonText}>Choose a goal</Text><V23Icon name="chevron" color="#FFFFFF" size={16} /></Pressable>}
       />
     </V23Screen>;
@@ -130,11 +130,7 @@ export default function PlanTab() {
       </>}
     />
 
-    <ProductSection
-      eyebrow="THIS WEEK"
-      title={formatWeekRange(days)}
-      body="Tap a strength session to preview it. Endurance sessions open the full schedule."
-    >
+    <ProductSection eyebrow="THIS WEEK" title={formatWeekRange(days)}>
       <View style={styles.weekSurface}>
         <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
           <Text style={styles.dayInitial}>{day.weekday}</Text>
@@ -171,12 +167,12 @@ export default function PlanTab() {
 
     <RaceStrategyContextCard surface="plan" />
 
-    <ProductSection eyebrow="PLAN TOOLS" title="Change the plan without losing the plan.">
+    <ProductSection eyebrow="PLAN TOOLS" title="Plan tools">
       <View style={styles.toolGrid}>
         <ToolButton icon="adjust" title="Adjust week" body="Move, shorten, or replace a session." onPress={() => router.push('/session-adjustment' as Href)} styles={styles} tokens={tokens} />
-        <ToolButton icon="heart" title="Guardrails" body={`${planningStateLabel(planningState)} · review the current ceiling.`} onPress={() => router.push('/training-guardrails' as Href)} styles={styles} tokens={tokens} />
-        <ToolButton icon="insights" title="Season strategy" body="See focus blocks and upcoming handoffs." onPress={() => router.push('/(tabs)/coach-strategy' as Href)} styles={styles} tokens={tokens} />
-        <ToolButton icon="goal" title="Race priorities" body="Change what the race plan is optimizing for." onPress={() => router.push('/race-intent' as Href)} styles={styles} tokens={tokens} />
+        <ToolButton icon="heart" title="Training limits" body={planningStateToolBody(planningState)} onPress={() => router.push('/training-guardrails' as Href)} styles={styles} tokens={tokens} />
+        <ToolButton icon="insights" title="Season strategy" body="Set a focus for upcoming weeks." onPress={() => router.push('/(tabs)/coach-strategy' as Href)} styles={styles} tokens={tokens} />
+        <ToolButton icon="goal" title="Race priorities" body="Update what matters most on race day." onPress={() => router.push('/race-intent' as Href)} styles={styles} tokens={tokens} />
       </View>
     </ProductSection>
   </V23Screen>;
@@ -209,7 +205,7 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
     const iso = date.toISOString().slice(0, 10);
     const items: DayItem[] = [
       ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline })),
-      ...strength.filter((session) => session.date === iso).map((session) => ({ id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.totalWorkSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`, session })),
+      ...strength.filter((session) => session.date === iso).map((session) => ({ id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.estimatedElapsedSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`, session })),
     ];
     return { date: iso, label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase() + ` ${date.getDate()}`, weekday: new Intl.DateTimeFormat('en-US', { weekday: 'narrow' }).format(date), dayNumber: date.getDate(), items };
   });
@@ -234,18 +230,18 @@ function weeklyCounts(days: ReturnType<typeof weekDays>) {
 }
 
 function planningStateBody(state: 'build' | 'hold' | 'protect' | 'recover' | null, hasBlock: boolean): string {
-  if (!hasBlock) return 'Choose a goal and weekly capacity to build a coordinated training week.';
-  if (state === 'recover') return 'Recovery is the priority this week. Side Quest is preserving useful movement without adding discretionary load.';
-  if (state === 'protect') return 'Progression is held while an impact, injury, or recovery constraint is active; lower-risk work stays where appropriate.';
-  if (state === 'hold') return 'This is a consolidation week: keep the rhythm, absorb recent training, and avoid adding unnecessary load.';
-  return 'This is a build week. Side Quest is coordinating a small number of progression targets across the entire training load.';
+  if (!hasBlock) return 'Choose a goal and weekly availability to build a training week.';
+  if (state === 'recover') return 'Recovery week. Keep training light and leave room to recover.';
+  if (state === 'protect') return 'Training is capped this week. Lower-risk sessions stay in place.';
+  if (state === 'hold') return 'Hold week. Maintain the routine without adding more load.';
+  return 'Build week. Progress the sessions that are ready to move.';
 }
 
-function planningStateLabel(state: 'build' | 'hold' | 'protect' | 'recover' | null): string {
-  if (state === 'recover') return 'Recovery first';
-  if (state === 'protect') return 'Protection active';
-  if (state === 'hold') return 'Holding load';
-  return 'Build week';
+function planningStateToolBody(state: 'build' | 'hold' | 'protect' | 'recover' | null): string {
+  if (state === 'recover') return 'Recovery limits are active this week.';
+  if (state === 'protect') return 'This week has an active training cap.';
+  if (state === 'hold') return 'Progression is paused this week.';
+  return 'Review the current training limits.';
 }
 
 function phaseLabel(value: string | undefined): string {
@@ -309,7 +305,7 @@ function makeStyles(tokens: DesignTokens) {
     openText: { color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '700' },
 
     toolGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-    toolButton: { width: '48%', flexGrow: 1, minHeight: 112, borderRadius: 17, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 13, gap: 5 },
+    toolButton: { width: '48%', flexGrow: 1, minHeight: 106, borderRadius: 17, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 13, gap: 5 },
     toolIcon: { width: 34, height: 34, borderRadius: 11, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
     toolTitle: { color: tokens.text, fontSize: 14, lineHeight: 18, fontWeight: '900' },
     toolBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
