@@ -31,15 +31,16 @@ describe('Strategy Coach workspace wiring', () => {
     expect(strategyState).toContain("circuit.strategy-conversation.v1");
   });
 
-  it('renders phase roadmap, per-week strategy source, and season handoffs', () => {
+  it('renders athlete-facing phases, upcoming weeks, and season handoffs', () => {
     const workspace = source('apps/mobile/src/components/coach-strategy-workspace.tsx');
     const season = source('apps/mobile/src/components/season-strategy-plan.tsx');
     const service = source('apps/mobile/src/services/strategy-workspace.ts');
-    expect(workspace).toContain('PHASE ROADMAP');
-    expect(workspace).toContain('BLOCK TIMELINE');
+    expect(workspace).toContain('PHASES');
+    expect(workspace).toContain('WEEK BY WEEK');
     expect(workspace).toContain("week.source === 'strategy_coach'");
-    expect(season).toContain('SEASON STRATEGY');
-    expect(season).toContain('PLANNED HANDOFFS');
+    expect(workspace).toContain("'Focus block' : 'Race priorities'");
+    expect(season).toContain('SEASON FOCUS');
+    expect(season).toContain('UPCOMING CHANGES');
     expect(service).toContain('buildStrategyMacrocycle');
     expect(service).toContain('seasonWindows');
   });
