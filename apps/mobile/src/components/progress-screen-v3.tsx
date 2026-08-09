@@ -37,8 +37,8 @@ export default function ProgressScreenV3() {
 
     <View style={styles.header}>
       <Text style={styles.eyebrow}>PROGRESS</Text>
-      <Text style={styles.title}>Evidence from the work you actually did.</Text>
-      <Text style={styles.subtitle}>No readiness score, streak pressure, or universal muscle target. This view summarizes completed training and the context Side Quest uses for progression.</Text>
+      <Text style={styles.title}>Training history</Text>
+      <Text style={styles.subtitle}>Recent sessions, progression signals, and anything that needs attention.</Text>
     </View>
 
     <View style={styles.windowSwitch}>
@@ -53,27 +53,21 @@ export default function ProgressScreenV3() {
       </Pressable>)}
     </View>
 
-    <View style={styles.hero}>
-      <Text style={styles.heroEyebrow}>CURRENT TRAINING PICTURE</Text>
-      <Text style={styles.heroTitle}>{loading && !data ? 'Building your training picture…' : data?.primaryMessage}</Text>
-      <Text style={styles.heroBody}>{data?.secondaryMessage ?? 'Loading recent strength, endurance, and regional training evidence.'}</Text>
-      {data && data.sessions > 0 ? <Text style={styles.heroMeta}>{data.totalMinutes} min recorded across {data.sessions} session{data.sessions === 1 ? '' : 's'}.</Text> : null}
-    </View>
-
     <View style={styles.metrics}>
       <Metric value={data?.trainingDays ?? 0} label="training days" styles={styles} />
-      <Metric value={data?.strengthSessions ?? 0} label="strength sessions" styles={styles} />
-      <Metric value={data?.enduranceSessions ?? 0} label="endurance sessions" styles={styles} />
+      <Metric value={data?.strengthSessions ?? 0} label="strength" styles={styles} />
+      <Metric value={data?.enduranceSessions ?? 0} label="endurance" styles={styles} />
     </View>
 
-    {data ? <View style={styles.comparisonStrip}>
-      <Text style={styles.comparisonLabel}>WHAT CHANGED</Text>
-      <Text style={styles.comparisonText}>{data.comparisonMessage}</Text>
-    </View> : null}
+    <View style={styles.summaryCard}>
+      <Text style={styles.summaryLabel}>LAST {windowDays} DAYS</Text>
+      <Text style={styles.summaryTitle}>{loading && !data ? 'Loading training…' : `${data?.totalMinutes ?? 0} min across ${data?.sessions ?? 0} session${data?.sessions === 1 ? '' : 's'}`}</Text>
+      {data ? <Text style={styles.summaryBody}>{comparisonSummary(data.comparisonMessage)}</Text> : null}
+    </View>
 
     <View style={styles.sectionHeading}>
-      <Text style={styles.sectionEyebrow}>REGIONAL PICTURE</Text>
-      <Text style={styles.sectionTitle}>What needs attention—not a percentage target.</Text>
+      <Text style={styles.sectionEyebrow}>BODY AREAS</Text>
+      <Text style={styles.sectionTitle}>Anything that needs attention</Text>
     </View>
 
     <View style={styles.regionalCard}>
@@ -102,8 +96,8 @@ export default function ProgressScreenV3() {
       </Pressable>)}
 
       {data && data.regionalPriorities.length === 0 ? <View style={styles.noPriority}>
-        <Text style={styles.noPriorityTitle}>No regional review flags right now</Text>
-        <Text style={styles.noPriorityBody}>That does not mean every region is fully recovered. It means the current plan-relative evidence does not require special attention here.</Text>
+        <Text style={styles.noPriorityTitle}>Nothing needs special attention right now</Text>
+        <Text style={styles.noPriorityBody}>No body area has a current review flag.</Text>
       </View> : null}
 
       <Pressable accessibilityRole="button" onPress={() => router.push('/insights' as Href)} style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}>
@@ -113,8 +107,8 @@ export default function ProgressScreenV3() {
     </View>
 
     <View style={styles.sectionHeading}>
-      <Text style={styles.sectionEyebrow}>RECENT EVIDENCE</Text>
-      <Text style={styles.sectionTitle}>The sessions behind the picture.</Text>
+      <Text style={styles.sectionEyebrow}>RECENT</Text>
+      <Text style={styles.sectionTitle}>Recent sessions</Text>
     </View>
 
     <View style={styles.historyCard}>
@@ -123,8 +117,8 @@ export default function ProgressScreenV3() {
         else router.push({ pathname: '/activity-review', params: { id: item.routeId } } as never);
       }} styles={styles} tokens={tokens} />)}
       {data && data.recent.length === 0 ? <View style={styles.emptyHistory}>
-        <Text style={styles.noPriorityTitle}>No recent training evidence yet</Text>
-        <Text style={styles.noPriorityBody}>Complete a Side Quest workout or sync endurance training. This screen will become more specific as evidence accumulates.</Text>
+        <Text style={styles.noPriorityTitle}>No recent sessions yet</Text>
+        <Text style={styles.noPriorityBody}>Complete a workout or sync endurance training to see it here.</Text>
       </View> : null}
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}>
         <Text style={styles.inlineActionText}>View full training history</Text>
@@ -133,21 +127,21 @@ export default function ProgressScreenV3() {
     </View>
 
     <View style={styles.sectionHeading}>
-      <Text style={styles.sectionEyebrow}>GO DEEPER</Text>
-      <Text style={styles.sectionTitle}>Use the detail view only when you need it.</Text>
+      <Text style={styles.sectionEyebrow}>MORE</Text>
+      <Text style={styles.sectionTitle}>More detail</Text>
     </View>
 
     <View style={styles.actionStack}>
-      <ActionRow icon="plan" title="Strength progression" body="See exercise-specific increase, hold, and re-entry recommendations." onPress={() => router.push('/progressions' as Href)} styles={styles} tokens={tokens} />
-      <ActionRow icon="insights" title="Training body map" body="Inspect direct strength, sport-load context, and restrictions by region." onPress={() => router.push('/insights' as Href)} styles={styles} tokens={tokens} />
-      <ActionRow icon="clock" title="Weekly review" body="Review what changed across the week without treating missed work as debt." onPress={() => router.push('/weekly-review' as Href)} styles={styles} tokens={tokens} />
-    </View>
-
-    <View style={styles.methodNote}>
-      <Text style={styles.methodTitle}>How to read Progress</Text>
-      <Text style={styles.methodBody}>More sessions, more minutes, or more regional exposure are not automatically better. Side Quest uses those signals as context alongside the plan, recent endurance load, and active restrictions.</Text>
+      <ActionRow icon="plan" title="Strength progression" body="Exercise-specific increase, hold, and re-entry recommendations." onPress={() => router.push('/progressions' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="insights" title="Training body map" body="Strength, sport load, and restrictions by area." onPress={() => router.push('/insights' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="clock" title="Weekly review" body="See how this week changed." onPress={() => router.push('/weekly-review' as Href)} styles={styles} tokens={tokens} />
     </View>
   </V23Screen>;
+}
+
+function comparisonSummary(message: string): string {
+  const end = message.indexOf('.');
+  return end >= 0 ? message.slice(0, end + 1) : message;
 }
 
 function Metric({ value, label, styles }: { value: number; label: string; styles: ReturnType<typeof makeStyles> }) {
@@ -194,11 +188,11 @@ function ActionRow({ icon, title, body, onPress, styles, tokens }: {
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
-    page: { gap: 18, paddingTop: 14, paddingBottom: 38 },
-    header: { gap: 5, paddingHorizontal: 2 },
+    page: { gap: 17, paddingTop: 14, paddingBottom: 38 },
+    header: { gap: 4, paddingHorizontal: 2 },
     eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1.05 },
-    title: { color: tokens.text, fontSize: 29, lineHeight: 34, fontWeight: '900', letterSpacing: -0.55 },
-    subtitle: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 20 },
+    title: { color: tokens.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: -0.4 },
+    subtitle: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
 
     windowSwitch: { flexDirection: 'row', alignSelf: 'flex-start', borderRadius: 13, backgroundColor: tokens.surfaceMuted, padding: 3, gap: 3 },
     windowButton: { minHeight: 36, borderRadius: 10, paddingHorizontal: 15, alignItems: 'center', justifyContent: 'center' },
@@ -206,29 +200,24 @@ function makeStyles(tokens: DesignTokens) {
     windowText: { color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '800' },
     windowTextActive: { color: tokens.text },
 
-    hero: { borderRadius: 24, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, padding: 19, gap: 7 },
-    heroEyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.95 },
-    heroTitle: { color: tokens.text, fontSize: 22, lineHeight: 28, fontWeight: '900', letterSpacing: -0.25 },
-    heroBody: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 20 },
-    heroMeta: { color: tokens.text, fontSize: 11.5, lineHeight: 16, fontWeight: '800', marginTop: 2 },
-
     metrics: { flexDirection: 'row', gap: 8 },
-    metric: { flex: 1, minHeight: 84, borderRadius: 17, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 12, justifyContent: 'center' },
-    metricValue: { color: tokens.text, fontSize: 24, lineHeight: 28, fontWeight: '900' },
+    metric: { flex: 1, minHeight: 78, borderRadius: 17, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 12, justifyContent: 'center' },
+    metricValue: { color: tokens.text, fontSize: 23, lineHeight: 27, fontWeight: '900' },
     metricLabel: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14, marginTop: 3 },
 
-    comparisonStrip: { borderRadius: 17, backgroundColor: tokens.surfaceMuted, padding: 14, gap: 4 },
-    comparisonLabel: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
-    comparisonText: { color: tokens.text, fontSize: 12.5, lineHeight: 18, fontWeight: '700' },
+    summaryCard: { borderRadius: 18, backgroundColor: tokens.surfaceMuted, padding: 14, gap: 4 },
+    summaryLabel: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.9 },
+    summaryTitle: { color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '900' },
+    summaryBody: { color: tokens.textMuted, fontSize: 12, lineHeight: 17 },
 
     sectionHeading: { gap: 2, paddingHorizontal: 2 },
     sectionEyebrow: { color: tokens.accent, fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.95 },
-    sectionTitle: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: -0.2 },
+    sectionTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '800', letterSpacing: -0.15 },
 
     regionalCard: { borderRadius: 20, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, overflow: 'hidden' },
     regionalMetrics: { flexDirection: 'row', gap: 1, backgroundColor: tokens.border },
-    smallMetric: { flex: 1, minHeight: 67, backgroundColor: tokens.surface, paddingHorizontal: 10, paddingVertical: 11, justifyContent: 'center' },
-    smallMetricValue: { color: tokens.text, fontSize: 19, lineHeight: 23, fontWeight: '900' },
+    smallMetric: { flex: 1, minHeight: 64, backgroundColor: tokens.surface, paddingHorizontal: 10, paddingVertical: 11, justifyContent: 'center' },
+    smallMetricValue: { color: tokens.text, fontSize: 18, lineHeight: 22, fontWeight: '900' },
     smallMetricLabel: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 13, marginTop: 2 },
     regionRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 14, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border },
     regionDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: tokens.accent, marginTop: 5 },
@@ -256,15 +245,11 @@ function makeStyles(tokens: DesignTokens) {
     emptyHistory: { padding: 15, gap: 3 },
 
     actionStack: { borderRadius: 20, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, overflow: 'hidden' },
-    actionRow: { minHeight: 72, paddingHorizontal: 13, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
+    actionRow: { minHeight: 68, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
     actionIcon: { width: 39, height: 39, borderRadius: 13, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
     actionCopy: { flex: 1, minWidth: 0, gap: 2 },
     actionTitle: { color: tokens.text, fontSize: 13.5, lineHeight: 18, fontWeight: '900' },
     actionBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
-
-    methodNote: { borderRadius: 17, backgroundColor: tokens.surfaceMuted, padding: 14, gap: 4 },
-    methodTitle: { color: tokens.text, fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
-    methodBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 17 },
     pressed: { opacity: 0.72 },
   });
 }
