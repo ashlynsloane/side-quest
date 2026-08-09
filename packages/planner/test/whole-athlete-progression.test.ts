@@ -4,6 +4,7 @@ import { decideAthleteProgression } from '../src/athlete-progression-engine';
 import {
   applyProgressionToWholeAthleteWeek,
   buildAdaptiveWholeAthleteWeek,
+  buildWholeAthleteProgressionContextFromHistory,
 } from '../src/whole-athlete-progression';
 import { buildWholeAthleteWeek } from '../src/whole-athlete-week';
 import type { UnifiedTrainingSession } from '../src/unified-training';
@@ -164,5 +165,52 @@ describe('whole-athlete progression governor integration', () => {
     expect(adjusted.planningState).toBe('protect');
     expect(runs.every((session) => session.intensity === 'easy' && session.durationMinutes <= 30)).toBe(true);
     expect(adjusted.guardrails.join(' ')).toMatch(/return-to-run/i);
+  });
+
+  it('derives a bike rebuild from real history while leaving current swimming at its existing dose', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T18:00:00.000Z',
+      exposures: [
+        { discipline: 'bike', completedAt: '2026-07-25T18:00:00.000Z' },
+        { discipline: 'swim', completedAt: '2026-08-05T18:00:00.000Z' },
+        { discipline: 'swim', completedAt: '2026-08-07T18:00:00.000Z' },
+        { discipline: 'swim', completedAt: '2026-08-09T18:00:00.000Z' },
+      ],
+    });
+
+    expect(progression.disciplineAssignments?.bike?.decision.phase).toBe('rebuild');
+    expect(progression.disciplineAssignments?.bike?.decision.volumeScale).toBe(0.8);
+    expect(progression.disciplineAssignments?.swim?.decision.phase).toBe('hold');
+    expect(progression.disciplineAssignments?.swim?.decision.volumeScale).toBe(1);
+  });
+
+  it('does not manufacture an absent-discipline gap from a short history window', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T18:00:00.000Z',
+      disciplines: ['bike'],
+      exposures: [
+        { discipline: 'swim', completedAt: '2026-08-05T18:00:00.000Z' },
+        { discipline: 'swim', completedAt: '2026-08-09T18:00:00.000Z' },
+      ],
+    });
+
+    expect(progression.disciplineAssignments?.bike).toBeUndefined();
+  });
+
+  it('can identify a genuinely absent discipline once unified history has enough coverage', () => {
+    const progression = buildWholeAthleteProgressionContextFromHistory({
+      weekStartDate: '2026-08-10',
+      asOf: '2026-08-10T18:00:00.000Z',
+      disciplines: ['bike'],
+      exposures: [
+        { discipline: 'swim', completedAt: '2026-07-20T18:00:00.000Z' },
+        { discipline: 'swim', completedAt: '2026-08-09T18:00:00.000Z' },
+      ],
+    });
+
+    expect(progression.disciplineAssignments?.bike?.decision.phase).toBe('rebuild');
+    expect(progression.disciplineAssignments?.bike?.decision.volumeScale).toBe(0.72);
   });
 });
