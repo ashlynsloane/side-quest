@@ -46,7 +46,18 @@ export type ProgressionAdjustedWholeAthleteWeekPlan = Omit<WholeAthleteWeekPlan,
 
 const DAY_MS = 86_400_000;
 const DEFAULT_DISCIPLINES: TrainableDiscipline[] = ['swim', 'bike', 'run', 'strength'];
-const RELATIVE_PROGRESSION_BASELINE: AthleteProgressionDose = { durationMinutes: 100 };
+const RELATIVE_ENDURANCE_BASELINE: AthleteProgressionDose = { durationMinutes: 100 };
+const RELATIVE_STRENGTH_BASELINE: AthleteProgressionDose = {
+  durationMinutes: 100,
+  reps: 10,
+  load: 100,
+};
+
+function relativeProgressionBaseline(discipline: TrainableDiscipline): AthleteProgressionDose {
+  return discipline === 'strength'
+    ? { ...RELATIVE_STRENGTH_BASELINE }
+    : { ...RELATIVE_ENDURANCE_BASELINE };
+}
 
 function finitePositive(value: number | undefined): value is number {
   return value !== undefined && Number.isFinite(value) && value > 0;
@@ -129,9 +140,11 @@ function elapsedDays(from: string, toMs: number): number | null {
 
 /**
  * Converts completed discipline exposures into conservative progression
- * assignments. The baseline is intentionally relative (100 minutes) because
- * the whole-athlete renderer already owns the actual planned dose; here the
- * governor only needs to express a safe ratio such as 0.8 for re-entry.
+ * assignments. The baseline is intentionally relative because the
+ * whole-athlete renderer owns the athlete's actual prescription. Endurance uses
+ * a 100-minute reference dose. Strength additionally uses relative 10-rep and
+ * 100-load anchors so the existing strength adapter can express reps-first
+ * progression and proportional load ceilings without inventing absolute loads.
  *
  * A missing discipline is not interpreted as a lapse until the available
  * history itself spans at least 14 days. This prevents a new install or a
@@ -170,7 +183,7 @@ export function buildWholeAthleteProgressionContextFromHistory(
       averageWatts: exposure.averageWatts,
       weightedAverageWatts: exposure.weightedAverageWatts,
     }));
-    const baseline = { ...RELATIVE_PROGRESSION_BASELINE };
+    const baseline = relativeProgressionBaseline(discipline);
     const decision = decideAthleteProgression({
       weekStartDate: input.weekStartDate,
       discipline,
