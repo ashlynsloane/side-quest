@@ -35,19 +35,24 @@ const baseRequest: WorkoutGenerationRequest = {
 };
 
 describe('Long-station density + machine strength V1', () => {
-  it('never combines an available 12-minute station with a two-exercise request', () => {
+  it('removes 12-minute stations from ordinary two-exercise and mixed generation', () => {
     const explicitTwo = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 2 });
     expect(explicitTwo.exercisesPerStation).toBe(2);
     expect(explicitTwo.allowedStationMinutes).toEqual([4, 8]);
 
-    const onlyTwelve = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 2, allowedStationMinutes: [12] });
-    expect(onlyTwelve.allowedStationMinutes).toEqual([12]);
-    expect(onlyTwelve.exercisesPerStation).toBe(3);
+    const mixed = normalizeStationDensity(baseRequest);
+    expect(mixed.exercisesPerStation).toBe('mixed');
+    expect(mixed.allowedStationMinutes).toEqual([4, 8]);
   });
 
-  it('uses three exercises when mixed generation can retain 12-minute stations', () => {
-    const normalized = normalizeStationDensity(baseRequest);
-    expect(normalized.exercisesPerStation).toBe(3);
+  it('reserves 12-minute AMRAPs for three movements and promotes 12-only requests', () => {
+    const explicitThree = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 3 });
+    expect(explicitThree.allowedStationMinutes).toEqual([4, 8, 12]);
+    expect(explicitThree.exercisesPerStation).toBe(3);
+
+    const onlyTwelve = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 'mixed', allowedStationMinutes: [12] });
+    expect(onlyTwelve.allowedStationMinutes).toEqual([12]);
+    expect(onlyTwelve.exercisesPerStation).toBe(3);
 
     const result = generateWorkout(
       { ...baseRequest, workMinutes: 36, allowedStationMinutes: [12], randomSeed: 'three-long-stations' },
