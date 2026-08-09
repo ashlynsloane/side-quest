@@ -262,11 +262,11 @@ export default function CoachScreenV2() {
     <View style={styles.conversationSection}>
       <View style={styles.conversationHeading}>
         <View style={styles.conversationHeadingCopy}>
-          <Text style={styles.eyebrow}>{hasThread ? 'COACH THREAD' : 'TELL SIDE QUEST WHAT CHANGED'}</Text>
-          <Text style={styles.title}>{hasThread ? 'Keep talking naturally.' : 'Your plan can handle a change.'}</Text>
+          <Text style={styles.eyebrow}>{hasThread ? 'COACH THREAD' : 'WHAT CHANGED?'}</Text>
+          <Text style={styles.title}>{hasThread ? 'Keep talking.' : 'Your plan can handle a change.'}</Text>
           <Text style={styles.body}>{hasThread
-            ? 'Side Quest keeps the recent context, asks when something is ambiguous, and sends plan-changing decisions through approval.'
-            : 'Soreness, time, symptoms, access, schedule changes, or simply not feeling the planned workout are all valid inputs.'}</Text>
+            ? 'Add anything that changed since the last message.'
+            : 'Tell Coach about soreness, energy, time, access, or schedule changes.'}</Text>
         </View>
       </View>
 
@@ -315,7 +315,7 @@ export default function CoachScreenV2() {
           </>}
         </Pressable>
       </View>
-      <Text style={styles.composerFootnote}>Conversation interprets the situation. The deterministic planner still decides what is safe and feasible.</Text>
+      <Text style={styles.composerFootnote}>You’ll see any meaningful plan change before it is applied.</Text>
     </View>
 
     {proposal ? <ProposalReview
@@ -331,8 +331,8 @@ export default function CoachScreenV2() {
     /> : null}
 
     <ProductDisclosure
-      title={followUpDue ? 'Coach follow-up needs your response' : 'Recent coach changes'}
-      summary={followUpDue ? 'Close the loop on a prior adjustment.' : 'Outcomes, undo, and recent decisions stay available without crowding the conversation.'}
+      title={followUpDue ? 'Coach follow-up' : 'Recent changes'}
+      summary={followUpDue ? 'How did the last adjustment go?' : 'Recent adjustments and undo.'}
       expanded={followUpDue || historyExpanded}
       onPress={() => { if (!followUpDue) setHistoryExpanded((value) => !value); }}
     >
@@ -346,7 +346,7 @@ export default function CoachScreenV2() {
 
     {nextSession && explanation ? <ProductDisclosure
       title="Why this session?"
-      summary={explanation.conciseWhy[0] ?? 'Open the evidence and recovery logic behind the current recommendation.'}
+      summary={explanation.conciseWhy[0] ?? 'See why this workout is here.'}
       expanded={reasoningExpanded}
       onPress={() => setReasoningExpanded((value) => !value)}
     >
@@ -359,8 +359,8 @@ export default function CoachScreenV2() {
 
     {!block ? <View style={styles.noPlan}>
       <Text style={styles.eyebrow}>NO ACTIVE PLAN</Text>
-      <Text style={styles.noPlanTitle}>Coach needs a week to reason about.</Text>
-      <Text style={styles.noPlanBody}>Build the unified Goal Setup first; then daily conversations can adapt the real plan rather than inventing isolated workouts.</Text>
+      <Text style={styles.noPlanTitle}>Build a plan first</Text>
+      <Text style={styles.noPlanBody}>Coach works from your current training week.</Text>
       <ProductAction label="Build my plan" onPress={() => router.push('/goal-plan' as Href)} />
     </View> : null}
   </V23Screen>;
@@ -374,14 +374,14 @@ function CurrentCall({ session, onOpen, tokens, styles }: {
 }) {
   if (!session) return <View style={styles.currentCallEmpty}>
     <View style={styles.currentCallCopy}>
-      <Text style={styles.eyebrow}>CURRENT PLAN</Text>
-      <Text style={styles.currentCallTitle}>No upcoming strength session needs a coaching call.</Text>
+      <Text style={styles.eyebrow}>NEXT STRENGTH</Text>
+      <Text style={styles.currentCallTitle}>No upcoming strength session.</Text>
     </View>
   </View>;
   return <View style={styles.currentCall}>
     <SportIcon kind={normalizeSportKind('strength')} color={tokens.accent} backgroundColor={tokens.accentSoft} size={20} />
     <View style={styles.currentCallCopy}>
-      <Text style={styles.eyebrow}>NEXT PLANNED STRENGTH</Text>
+      <Text style={styles.eyebrow}>NEXT STRENGTH</Text>
       <Text style={styles.currentCallTitle}>{session.title}</Text>
       <Text style={styles.currentCallMeta}>{formatSessionDate(session.date)} · {Math.round(session.workout.estimatedElapsedSeconds / 60)} min · {friendlyLoad(session.intendedLoad)}</Text>
     </View>
@@ -432,7 +432,7 @@ function ProposalReview({
       <View style={[styles.beforeAfterCell, styles.afterCell]}>
         <Text style={styles.beforeAfterLabel}>PROPOSED</Text>
         <Text style={styles.beforeAfterTitle}>{selectedOption?.title ?? 'Choose an option'}</Text>
-        <Text style={styles.beforeAfterBody}>{selectedOption?.description ?? 'Side Quest will show the weekly consequence before anything changes.'}</Text>
+        <Text style={styles.beforeAfterBody}>{selectedOption?.description ?? 'Choose an option to see how it changes the week.'}</Text>
       </View>
     </View>
 
@@ -476,7 +476,7 @@ function ProposalReview({
       </Pressable>
     </View>
     <Text style={styles.approvalNote}>{selectedOption?.requiresApproval
-      ? 'This changes a meaningful part of the plan, so Side Quest will not apply it without approval.'
+      ? 'This change needs your approval.'
       : 'Nothing changes until you approve the selected option.'}</Text>
   </View>;
 }
@@ -529,8 +529,8 @@ function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
     page: { gap: 16, paddingTop: 16, paddingBottom: 36 },
     eyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
-    title: { color: tokens.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: -0.45 },
-    body: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 20 },
+    title: { color: tokens.text, fontSize: 24, lineHeight: 29, fontWeight: '900', letterSpacing: -0.4 },
+    body: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19 },
 
     currentCall: { borderRadius: 17, backgroundColor: tokens.surfaceMuted, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 9 },
     currentCallEmpty: { borderRadius: 17, backgroundColor: tokens.surfaceMuted, padding: 13 },
