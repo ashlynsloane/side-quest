@@ -195,9 +195,9 @@ function makeStyles(tokens: DesignTokens) {
     disclosureBody: { paddingBottom: 17, gap: 9 },
 
     choice: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface },
-    choiceSelected: { borderColor: tokens.accent, backgroundColor: tokens.surfaceMuted },
+    choiceSelected: { borderColor: tokens.accent, backgroundColor: tokens.surface },
     choiceIcon: { width: 34, height: 34, borderRadius: 11, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
-    choiceIconSelected: { backgroundColor: tokens.accentSoft },
+    choiceIconSelected: { backgroundColor: tokens.surfaceMuted },
     choiceCopy: { flex: 1, minWidth: 0, gap: 2 },
     choiceTitle: { color: tokens.text, fontSize: 14.5, lineHeight: 19, fontWeight: '800' },
     choiceTitleSelected: { color: tokens.accent },
@@ -214,7 +214,7 @@ function makeStyles(tokens: DesignTokens) {
     disabled: { opacity: 0.48 },
 
     metric: { minWidth: 64, minHeight: 52, borderRadius: 13, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 11, paddingVertical: 8, justifyContent: 'center' },
-    metricEmphasis: { backgroundColor: tokens.accentSoft },
+    metricEmphasis: { backgroundColor: tokens.surfaceMuted, borderWidth: 1, borderColor: tokens.border },
     metricValue: { color: tokens.text, fontSize: 15, lineHeight: 18, fontWeight: '900' },
     metricLabel: { color: tokens.textMuted, fontSize: 9.5, lineHeight: 12, fontWeight: '800', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.55 },
 
