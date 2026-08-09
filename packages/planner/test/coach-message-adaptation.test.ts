@@ -24,7 +24,7 @@ function strengthSession(overrides: Partial<PlannedStrengthSession> = {}): Plann
       randomSeed: 'coach-message-test',
       request: {
         workMinutes: 40,
-        allowedStationMinutes: [4, 8, 12],
+        allowedStationMinutes: [4, 6, 8, 12],
         restSeconds: 60,
         exercisesPerStation: 2,
         focusTargets: [{ region: 'quadriceps', emphasis: 'strong' }],

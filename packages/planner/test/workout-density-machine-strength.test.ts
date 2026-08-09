@@ -3,7 +3,12 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { WorkoutGenerationRequest } from '@circuit/domain';
 import { exerciseSeed, machineExerciseSeed } from '@circuit/exercise-content';
-import { generateWorkout, normalizeStationDensity } from '@circuit/generator';
+import {
+  buildStationPlan,
+  estimateStationRounds,
+  generateWorkout,
+  normalizeStationDensity,
+} from '@circuit/generator';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -14,7 +19,7 @@ function source(path: string): string {
 
 const baseRequest: WorkoutGenerationRequest = {
   workMinutes: 36,
-  allowedStationMinutes: [4, 8, 12],
+  allowedStationMinutes: [4, 6, 8, 12],
   restSeconds: 60,
   exercisesPerStation: 'mixed',
   focusTargets: [],
@@ -34,35 +39,117 @@ const baseRequest: WorkoutGenerationRequest = {
   randomSeed: 'density-contract',
 };
 
-describe('Long-station density + machine strength V1', () => {
-  it('removes 12-minute stations from ordinary two-exercise and mixed generation', () => {
-    const explicitTwo = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 2 });
+describe('Station Architecture V2 + machine strength', () => {
+  it('treats six minutes as a first-class station duration', () => {
+    expect(buildStationPlan(30, [6])).toEqual([6, 6, 6, 6, 6]);
+
+    const mixedPlan = buildStationPlan(40, [4, 6, 8, 12]);
+    expect(mixedPlan).not.toBeNull();
+    if (!mixedPlan) return;
+
+    expect(mixedPlan.reduce((sum, minutes) => sum + minutes, 0)).toBe(40);
+    expect(mixedPlan).toContain(6);
+    expect(mixedPlan.filter((minutes) => minutes === 12).length).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps 12-minute stations away from explicit two-exercise structures', () => {
+    const explicitTwo = normalizeStationDensity({
+      ...baseRequest,
+      exercisesPerStation: 2,
+    });
     expect(explicitTwo.exercisesPerStation).toBe(2);
-    expect(explicitTwo.allowedStationMinutes).toEqual([4, 8]);
+    expect(explicitTwo.allowedStationMinutes).toEqual([4, 6, 8]);
 
     const mixed = normalizeStationDensity(baseRequest);
     expect(mixed.exercisesPerStation).toBe('mixed');
-    expect(mixed.allowedStationMinutes).toEqual([4, 8]);
-  });
+    expect(mixed.allowedStationMinutes).toEqual([4, 6, 8, 12]);
 
-  it('reserves 12-minute AMRAPs for three movements and promotes 12-only requests', () => {
-    const explicitThree = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 3 });
-    expect(explicitThree.allowedStationMinutes).toEqual([4, 8, 12]);
-    expect(explicitThree.exercisesPerStation).toBe(3);
-
-    const onlyTwelve = normalizeStationDensity({ ...baseRequest, exercisesPerStation: 'mixed', allowedStationMinutes: [12] });
+    const onlyTwelve = normalizeStationDensity({
+      ...baseRequest,
+      exercisesPerStation: 2,
+      allowedStationMinutes: [12],
+    });
     expect(onlyTwelve.allowedStationMinutes).toEqual([12]);
     expect(onlyTwelve.exercisesPerStation).toBe(3);
+  });
 
+  it('allows mixed long stations only when they contain three movements', () => {
     const result = generateWorkout(
-      { ...baseRequest, workMinutes: 36, allowedStationMinutes: [12], randomSeed: 'three-long-stations' },
+      {
+        ...baseRequest,
+        workMinutes: 40,
+        allowedStationMinutes: [4, 6, 8, 12],
+        randomSeed: 'mixed-long-station-v2',
+      },
       { exercises: exerciseSeed },
     );
+
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+
+    const longStations = result.workout.stations.filter(
+      (station) => station.durationSeconds === 12 * 60,
+    );
+    expect(longStations.length).toBeGreaterThan(0);
+    expect(
+      longStations.every((station) => station.exercises.length === 3),
+    ).toBe(true);
+  });
+
+  it('uses round estimates to prevent fast two-movement six-minute loops', () => {
+    const result = generateWorkout(
+      {
+        ...baseRequest,
+        workMinutes: 30,
+        allowedStationMinutes: [6],
+        randomSeed: 'six-minute-round-density',
+      },
+      { exercises: exerciseSeed },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.workout.stations).toHaveLength(5);
+    expect(
+      result.workout.stations.every(
+        (station) => station.durationSeconds === 6 * 60,
+      ),
+    ).toBe(true);
+
+    for (const station of result.workout.stations) {
+      expect([2, 3]).toContain(station.exercises.length);
+      if (station.exercises.length === 2) {
+        expect(estimateStationRounds(station)).toBeLessThanOrEqual(5.25);
+      }
+    }
+  });
+
+  it('still promotes twelve-only mixed generation to three movements', () => {
+    const result = generateWorkout(
+      {
+        ...baseRequest,
+        workMinutes: 36,
+        allowedStationMinutes: [12],
+        randomSeed: 'three-long-stations',
+      },
+      { exercises: exerciseSeed },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
     expect(result.workout.stations).toHaveLength(3);
-    expect(result.workout.stations.every((station) => station.durationSeconds === 12 * 60)).toBe(true);
-    expect(result.workout.stations.every((station) => station.exercises.length === 3)).toBe(true);
+    expect(
+      result.workout.stations.every(
+        (station) => station.durationSeconds === 12 * 60,
+      ),
+    ).toBe(true);
+    expect(
+      result.workout.stations.every(
+        (station) => station.exercises.length === 3,
+      ),
+    ).toBe(true);
   });
 
   it('adds machine exercises as real strength-only catalog content', () => {
@@ -77,19 +164,35 @@ describe('Long-station density + machine strength V1', () => {
     ]));
     for (const exercise of machineExerciseSeed) {
       expect(exercise.suitableForAmrap).toBe(false);
-      expect(exercise.prescriptions.some((prescription) => prescription.style === 'strength')).toBe(true);
-      expect(exerciseSeed.some((catalogExercise) => catalogExercise.id === exercise.id)).toBe(true);
+      expect(
+        exercise.prescriptions.some(
+          (prescription) => prescription.style === 'strength',
+        ),
+      ).toBe(true);
+      expect(
+        exerciseSeed.some(
+          (catalogExercise) => catalogExercise.id === exercise.id,
+        ),
+      ).toBe(true);
     }
   });
 
   it('keeps machine exercises out of ordinary AMRAP generation', () => {
     const result = generateWorkout(
-      { ...baseRequest, workMinutes: 32, allowedStationMinutes: [8], randomSeed: 'no-machines-in-amrap' },
+      {
+        ...baseRequest,
+        workMinutes: 32,
+        allowedStationMinutes: [8],
+        randomSeed: 'no-machines-in-amrap',
+      },
       { exercises: exerciseSeed },
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const ids = result.workout.stations.flatMap((station) => station.exercises.map((item) => item.exerciseId));
+
+    const ids = result.workout.stations.flatMap((station) =>
+      station.exercises.map((item) => item.exerciseId),
+    );
     expect(ids.some((id) => id.startsWith('ex_machine_'))).toBe(false);
   });
 
@@ -116,8 +219,10 @@ describe('Long-station density + machine strength V1', () => {
   it('preserves the ordinary circuit architecture as a separate training stimulus', () => {
     const runtime = source('apps/mobile/src/services/machine-strength.ts');
     const machineContent = source('packages/exercise-content/src/machine-exercises.ts');
+
     expect(runtime).toContain("workoutStyle: 'strength_amrap'");
     expect(runtime).toContain('supplemental: true');
     expect(machineContent).toContain('suitableForAmrap: false');
   });
 });
+

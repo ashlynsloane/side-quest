@@ -48,7 +48,7 @@ function workout(): GeneratedWorkout {
   ];
   return {
     id: 'workout', name: 'Lower-body durability', createdAt: now, randomSeed: 'seed',
-    request: { workMinutes: 40, allowedStationMinutes: [4, 8, 12], restSeconds: 60, exercisesPerStation: 2, focusTargets: [], excludedRegions: [], excludedMovementTags: [], availableEquipment: ['bodyweight'], workoutStyle: 'strength_amrap', difficulty: 'intermediate', maximumImpact: 1, recoveryAware: true, avoidPreviousWorkoutExercises: false, favorFamiliarExercises: true, allowUnfamiliarExercises: true, minimizeEquipmentChanges: true },
+    request: { workMinutes: 40, allowedStationMinutes: [4, 6, 8, 12], restSeconds: 60, exercisesPerStation: 2, focusTargets: [], excludedRegions: [], excludedMovementTags: [], availableEquipment: ['bodyweight'], workoutStyle: 'strength_amrap', difficulty: 'intermediate', maximumImpact: 1, recoveryAware: true, avoidPreviousWorkoutExercises: false, favorFamiliarExercises: true, allowUnfamiliarExercises: true, minimizeEquipmentChanges: true },
     stations, totalWorkSeconds: 2400, totalRestSeconds: 180, estimatedElapsedSeconds: 2580, requiredEquipment: ['bodyweight'], targetRegions: ['quadriceps', 'hamstrings'], recentLoadAdjustments: [], source: 'generated',
   };
 }

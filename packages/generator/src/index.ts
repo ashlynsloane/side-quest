@@ -4,13 +4,17 @@ import { generateWorkout as generateWorkoutCore } from './core';
 export * from './core';
 
 /**
- * Protect long AMRAP stations from becoming repetitive grinders.
+ * Station Architecture V2.
  *
- * Ordinary mixed/random workouts use 4- and 8-minute stations when those
- * durations are available. A 12-minute AMRAP is reserved for an explicitly
- * three-exercise structure. If 12 minutes is the only allowed duration, the
- * request is automatically promoted to three exercises rather than permitting
- * a two-movement 12-minute loop.
+ * Station duration is a density tool, not a fixed workout taxonomy:
+ * - 4 minutes is compact.
+ * - 6 minutes supports two or three movements.
+ * - 8 minutes generally supports a fuller station.
+ * - 12 minutes is reserved for three-movement structures.
+ *
+ * Explicit two-exercise requests do not receive a 12-minute station when
+ * shorter durations are available. Mixed workouts may still use 12 minutes;
+ * core generation guarantees that every 12-minute station has three movements.
  */
 export function normalizeStationDensity(
   request: WorkoutGenerationRequest,
@@ -18,18 +22,32 @@ export function normalizeStationDensity(
   if (!request.allowedStationMinutes.includes(12)) return request;
   if (request.exercisesPerStation === 3) return request;
 
-  const shorterDurations = request.allowedStationMinutes.filter((minutes) => minutes !== 12);
-  if (shorterDurations.length > 0) {
+  const shorterDurations = request.allowedStationMinutes.filter(
+    (minutes) => minutes !== 12,
+  );
+
+  if (request.exercisesPerStation === 2) {
+    if (shorterDurations.length > 0) {
+      return {
+        ...request,
+        allowedStationMinutes: shorterDurations,
+      };
+    }
+
     return {
       ...request,
-      allowedStationMinutes: shorterDurations,
+      exercisesPerStation: 3,
     };
   }
 
-  return {
-    ...request,
-    exercisesPerStation: 3,
-  };
+  if (shorterDurations.length === 0) {
+    return {
+      ...request,
+      exercisesPerStation: 3,
+    };
+  }
+
+  return request;
 }
 
 export function generateWorkout(

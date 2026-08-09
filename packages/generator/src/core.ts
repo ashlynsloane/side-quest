@@ -337,6 +337,37 @@ function generateWorkoutAttempt(
     const stationTags = new Set<AvoidanceTag>();
 
     for (let exerciseIndex = 0; exerciseIndex < desiredCount; exerciseIndex += 1) {
+      // A third movement in a 6- or 8-minute mixed station is optional.
+      // Before spending that extra exercise, make sure enough globally legal
+      // candidates remain to give every later station at least two movements.
+      //
+      // Twelve-minute stations are deliberately exempt: three movements are
+      // structural there, not optional density.
+      if (
+        exerciseIndex === 2
+        && request.exercisesPerStation === 'mixed'
+        && plan[stationIndex] !== 12
+      ) {
+        const remainingStations = plan.length - stationIndex - 1;
+        const minimumFutureSlots = remainingStations * 2;
+
+        const futureCandidateReserve = candidates
+          .filter((exercise) => !used.has(exercise.id))
+          .filter((exercise) => canAddToWorkout({
+            exercise,
+            selectedInStation: [],
+            priorStations: stations,
+            globalFamilyCounts,
+            globalGroupCounts,
+            request,
+          }))
+          .length;
+
+        // Keep a small buffer because simple candidate count cannot perfectly
+        // predict future station-pairing compatibility.
+        if (futureCandidateReserve <= minimumFutureSlots + 2) break;
+      }
+
       const slot = template.slots[Math.min(exerciseIndex, template.slots.length - 1)];
       const eligibleForSlot = candidates
         .filter((exercise) => !used.has(exercise.id))
@@ -959,12 +990,12 @@ function intersectionSize<T>(left: T[], right: T[]): number {
 
 export function buildStationPlan(
   workMinutes: number,
-  allowedDurations: Array<4 | 8 | 12>,
-): Array<4 | 8 | 12> | null {
-  const durations = [...new Set(allowedDurations)].sort((a, b) => b - a) as Array<4 | 8 | 12>;
-  const plans: Array<Array<4 | 8 | 12>> = [];
+  allowedDurations: Array<4 | 6 | 8 | 12>,
+): Array<4 | 6 | 8 | 12> | null {
+  const durations = [...new Set(allowedDurations)].sort((a, b) => b - a) as Array<4 | 6 | 8 | 12>;
+  const plans: Array<Array<4 | 6 | 8 | 12>> = [];
 
-  function search(remaining: number, current: Array<4 | 8 | 12>) {
+  function search(remaining: number, current: Array<4 | 6 | 8 | 12>) {
     if (remaining === 0) {
       if (current.length >= 3 && current.length <= 6) plans.push([...current]);
       return;
@@ -1245,8 +1276,23 @@ function selectEquipmentOption(exercise: Exercise, available: Set<EquipmentId>) 
 function selectPrescription(exercise: Exercise, stationMinutes: number, exerciseCount: number) {
   const prescriptions = exercise.prescriptions.filter((item) => item.style === 'amrap');
   if (prescriptions.length === 0) return exercise.prescriptions[0];
-  const targetRoundSeconds = Math.max(55, Math.min(130, stationMinutes * 12));
-  const targetPerExercise = targetRoundSeconds / exerciseCount;
+
+  // Target roughly 3-4 deliberate rounds rather than maximizing turnover.
+  // Eight seconds per movement approximates setup/transition time that is not
+  // represented in the exercise prescription itself.
+  const targetRoundSeconds = stationMinutes <= 4
+    ? 72
+    : stationMinutes <= 6
+      ? 100
+      : stationMinutes <= 8
+        ? 135
+        : 180;
+  const transitionBudget = exerciseCount * 8;
+  const targetPerExercise = Math.max(
+    20,
+    (targetRoundSeconds - transitionBudget) / exerciseCount,
+  );
+
   return [...prescriptions].sort(
     (a, b) => Math.abs(a.estimatedSeconds - targetPerExercise) - Math.abs(b.estimatedSeconds - targetPerExercise),
   )[0];
@@ -1255,12 +1301,28 @@ function selectPrescription(exercise: Exercise, stationMinutes: number, exercise
 function resolveExerciseCount(
   setting: 2 | 3 | 'mixed',
   stationIndex: number,
-  stationMinutes: 4 | 8 | 12,
+  stationMinutes: 4 | 6 | 8 | 12,
   random: () => number,
 ): 2 | 3 {
+  // Duration establishes a density envelope; it does not rigidly determine
+  // the station format.
   if (stationMinutes === 4) return 2;
+  if (stationMinutes === 12) return 3;
   if (setting === 2 || setting === 3) return setting;
-  return (stationIndex % 2 === 0 ? random() > 0.4 : random() > 0.65) ? 3 : 2;
+
+  // Eight minutes can support either two deliberate movements or a fuller
+  // three-movement station. Later stations lean toward two movements so the
+  // workout preserves enough exercise variety to satisfy global constraints.
+  if (stationMinutes === 8) {
+    const threeMovementProbability = stationIndex < 2 ? 0.55 : 0.35;
+    return random() < threeMovementProbability ? 3 : 2;
+  }
+
+  // Six minutes is deliberately the flexible middle ground. Alternating the
+  // probability by station prevents an entire workout from drifting toward
+  // one repeated structure while remaining seed-deterministic.
+  const threeMovementProbability = stationIndex % 2 === 0 ? 0.48 : 0.58;
+  return random() < threeMovementProbability ? 3 : 2;
 }
 
 function weightedChoice<T extends { score: number }>(items: T[], random: () => number): T | undefined {
@@ -1276,11 +1338,38 @@ function weightedChoice<T extends { score: number }>(items: T[], random: () => n
   return items.at(-1);
 }
 
-function planScore(plan: Array<4 | 8 | 12>): number {
-  const targetStationCount = 5;
+function planScore(plan: Array<4 | 6 | 8 | 12>): number {
+  const totalMinutes = plan.reduce((sum, minutes) => sum + minutes, 0);
+  const targetStationCount = totalMinutes <= 24 ? 4 : 5;
   const variety = new Set(plan).size;
   const shortStations = plan.filter((minutes) => minutes === 4).length;
-  return 20 - Math.abs(plan.length - targetStationCount) * 3 + variety * 2 - shortStations;
+  const sixMinuteStations = plan.filter((minutes) => minutes === 6).length;
+  const longStations = plan.filter((minutes) => minutes === 12).length;
+
+  // Station count is the primary structural constraint. Variety should never
+  // create an extra station that forces the generator to burn through the
+  // legal exercise pool.
+  const stationCountPenalty = Math.abs(plan.length - targetStationCount) * 7;
+
+  // Reward useful variation modestly. Six minutes is a legitimate middle
+  // duration, but it is not mandatory in every workout.
+  const varietyBonus = Math.min(2, Math.max(0, variety - 1)) * 1.25;
+  const sixMinuteBonus = sixMinuteStations > 0 ? 0.75 : 0;
+
+  // Four-minute blocks are fine, but a workout made mostly of them becomes
+  // unnecessarily fragmented.
+  const shortStationPenalty = shortStations * 0.5;
+
+  // One or two 12-minute stations are legitimate when they contain three
+  // movements. Only repeated long blocks beyond that are discouraged.
+  const repeatedLongPenalty = Math.max(0, longStations - 2) * 2;
+
+  return 30
+    - stationCountPenalty
+    + varietyBonus
+    + sixMinuteBonus
+    - shortStationPenalty
+    - repeatedLongPenalty;
 }
 
 function collectRequiredEquipment(stations: WorkoutStation[]): EquipmentId[] {
@@ -1327,6 +1416,24 @@ function buildRecentLoadMessages(recentLoad: Map<BodyRegion, number>): string[] 
     .map(([region]) => `${titleCase(region.replaceAll('_', ' '))} loading was adjusted based on the previous 24–48 hours.`);
 }
 
+export function estimateStationRoundSeconds(station: WorkoutStation): number {
+  const movementSeconds = station.exercises.reduce((sum, item) => {
+    const prescription = item.exerciseSnapshot.prescriptions.find(
+      (candidate) => candidate.id === item.prescriptionId,
+    );
+    return sum + (prescription?.estimatedSeconds ?? 30);
+  }, 0);
+
+  // Moving between positions, picking up equipment, and resetting for the next
+  // movement all consume real time even though they are not exercise reps.
+  const transitionSeconds = station.exercises.length * 8;
+  return Math.max(1, movementSeconds + transitionSeconds);
+}
+
+export function estimateStationRounds(station: WorkoutStation): number {
+  return station.durationSeconds / estimateStationRoundSeconds(station);
+}
+
 function validateGeneratedWorkout(workout: GeneratedWorkout): string[] {
   const issues: string[] = [];
   if (workout.totalWorkSeconds !== workout.request.workMinutes * 60) {
@@ -1343,6 +1450,16 @@ function validateGeneratedWorkout(workout: GeneratedWorkout): string[] {
   if (workout.stations.some((station) => station.exercises.length < 2 || station.exercises.length > 3)) {
     issues.push('Every station must contain two or three exercises.');
   }
+
+  for (const station of workout.stations) {
+    const stationMinutes = station.durationSeconds / 60;
+
+    if (stationMinutes === 12 && station.exercises.length !== 3) {
+      issues.push(`Station ${station.order} uses 12 minutes without three movements.`);
+    }
+
+  }
+
   const balanced = workout.request.focusTargets.length === 0;
   if (balanced) {
     const counts = new Map<string, number>();

@@ -12,7 +12,7 @@ export const DEFAULT_EQUIPMENT: EquipmentId[] = [
 
 export const DEFAULT_REQUEST: WorkoutGenerationRequest = {
   workMinutes: 40,
-  allowedStationMinutes: [4, 8, 12],
+  allowedStationMinutes: [4, 6, 8, 12],
   restSeconds: 60,
   exercisesPerStation: 'mixed',
   focusTargets: [],
