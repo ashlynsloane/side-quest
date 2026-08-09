@@ -1,5 +1,10 @@
 import type { UnifiedIntensity } from './unified-training';
 import {
+  decideAthleteProgression,
+  type AthleteProgressionDose,
+  type AthleteProgressionEvidence,
+} from './athlete-progression-engine';
+import {
   buildWholeAthleteWeek,
   type DisciplinePlanSummary,
   type TrainableDiscipline,
@@ -11,6 +16,17 @@ import type { ProgressionDoseAssignment } from './adaptive-prescription';
 
 export interface WholeAthleteProgressionContext {
   disciplineAssignments?: Partial<Record<TrainableDiscipline, ProgressionDoseAssignment>>;
+}
+
+export interface CompletedDisciplineExposure extends AthleteProgressionEvidence {
+  discipline: TrainableDiscipline;
+}
+
+export interface WholeAthleteHistoryProgressionInput {
+  weekStartDate: string;
+  asOf: string;
+  exposures: CompletedDisciplineExposure[];
+  disciplines?: TrainableDiscipline[];
 }
 
 export type ProgressionAdjustedWholeAthleteSession = WholeAthletePlannedSession & {
@@ -27,6 +43,10 @@ export type ProgressionAdjustedWholeAthleteSession = WholeAthletePlannedSession 
 export type ProgressionAdjustedWholeAthleteWeekPlan = Omit<WholeAthleteWeekPlan, 'sessions'> & {
   sessions: ProgressionAdjustedWholeAthleteSession[];
 };
+
+const DAY_MS = 86_400_000;
+const DEFAULT_DISCIPLINES: TrainableDiscipline[] = ['swim', 'bike', 'run', 'strength'];
+const RELATIVE_PROGRESSION_BASELINE: AthleteProgressionDose = { durationMinutes: 100 };
 
 function finitePositive(value: number | undefined): value is number {
   return value !== undefined && Number.isFinite(value) && value > 0;
@@ -99,6 +119,69 @@ function adjustmentLabel(assignment: ProgressionDoseAssignment): string {
   if (decision.phase === 'restricted') return 'Restricted week: lower compatible training stress; safety constraints outrank progression.';
   if (decision.phase === 'hold') return 'Hold week: confirm the current dose before progressing again.';
   return 'Build week: progression is limited to the governor-approved dose.';
+}
+
+function elapsedDays(from: string, toMs: number): number | null {
+  const fromMs = Date.parse(from);
+  if (!Number.isFinite(fromMs) || fromMs > toMs) return null;
+  return Math.max(0, Math.floor((toMs - fromMs) / DAY_MS));
+}
+
+/**
+ * Converts completed discipline exposures into conservative progression
+ * assignments. The baseline is intentionally relative (100 minutes) because
+ * the whole-athlete renderer already owns the actual planned dose; here the
+ * governor only needs to express a safe ratio such as 0.8 for re-entry.
+ *
+ * A missing discipline is not interpreted as a lapse until the available
+ * history itself spans at least 14 days. This prevents a new install or a
+ * partially imported history window from manufacturing a false interruption.
+ */
+export function buildWholeAthleteProgressionContextFromHistory(
+  input: WholeAthleteHistoryProgressionInput,
+): WholeAthleteProgressionContext {
+  const asOfMs = Date.parse(input.asOf);
+  if (!Number.isFinite(asOfMs)) return {};
+
+  const validExposures = input.exposures
+    .filter((exposure) => {
+      const completedAtMs = Date.parse(exposure.completedAt);
+      return Number.isFinite(completedAtMs) && completedAtMs <= asOfMs;
+    })
+    .sort((left, right) => Date.parse(left.completedAt) - Date.parse(right.completedAt));
+  if (!validExposures.length) return {};
+
+  const firstExposureMs = Date.parse(validExposures[0]!.completedAt);
+  const historyCoverageDays = Math.max(0, Math.floor((asOfMs - firstExposureMs) / DAY_MS));
+  const disciplineAssignments: Partial<Record<TrainableDiscipline, ProgressionDoseAssignment>> = {};
+
+  for (const discipline of input.disciplines ?? DEFAULT_DISCIPLINES) {
+    const matching = validExposures.filter((exposure) => exposure.discipline === discipline);
+    const latest = matching.at(-1);
+    const observedGap = latest ? elapsedDays(latest.completedAt, asOfMs) : null;
+    const daysSinceExposure = observedGap ?? (historyCoverageDays >= 14 ? historyCoverageDays : null);
+    if (daysSinceExposure === null) continue;
+
+    const recentEvidence: AthleteProgressionEvidence[] = matching.slice(-3).map((exposure) => ({
+      completedAt: exposure.completedAt,
+      completedAsPlanned: exposure.completedAsPlanned,
+      rpe: exposure.rpe,
+      durationMinutes: exposure.durationMinutes,
+      averageWatts: exposure.averageWatts,
+      weightedAverageWatts: exposure.weightedAverageWatts,
+    }));
+    const baseline = { ...RELATIVE_PROGRESSION_BASELINE };
+    const decision = decideAthleteProgression({
+      weekStartDate: input.weekStartDate,
+      discipline,
+      baseline,
+      recentEvidence,
+      continuity: { daysSinceExposure },
+    });
+    disciplineAssignments[discipline] = { baseline, decision };
+  }
+
+  return Object.keys(disciplineAssignments).length ? { disciplineAssignments } : {};
 }
 
 /**
