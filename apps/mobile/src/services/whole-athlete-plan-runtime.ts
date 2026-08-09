@@ -157,12 +157,14 @@ export function progressionHistoryFromTrainingHistory(
       const durationMinutes = elapsedMinutes(item.workout.startedAt, item.workout.completedAt);
       const completedAsPlanned = strengthCompletionSignal(item);
       const rpe = validRpe(item.reflection?.rpe);
+      const difficulty = item.feedback?.difficulty;
       exposures.push({
         discipline: 'strength',
         completedAt: item.occurredAt,
         ...(durationMinutes !== undefined ? { durationMinutes } : {}),
         ...(completedAsPlanned !== undefined ? { completedAsPlanned } : {}),
         ...(rpe !== undefined ? { rpe } : {}),
+        ...(difficulty !== undefined ? { difficulty } : {}),
       });
       continue;
     }
