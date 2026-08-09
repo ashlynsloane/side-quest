@@ -28,10 +28,10 @@ describe('race strategy visibility', () => {
     expect(context).toContain('first claim on discretionary progression');
   });
 
-  it('gives Plan a direct handoff between race priorities and the Strategy workspace', () => {
+  it('gives Plan a direct handoff between race priorities and the season-focus workspace', () => {
     const card = source('apps/mobile/src/components/race-strategy-context-card.tsx');
     expect(card).toContain('Edit race priorities');
-    expect(card).toContain('Talk strategy');
+    expect(card).toContain('Season focus');
     expect(card).toContain("router.push('/race-intent'");
     expect(card).toContain("router.push('/(tabs)/coach-strategy'");
   });
@@ -41,7 +41,7 @@ describe('race strategy visibility', () => {
     const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
     expect(card).toContain('loadCurrentWeeklyStrategyContext');
     expect(card).toContain('weeklyStrategyStateLabel');
-    expect(card).toContain('RACE TARGET CONNECTION');
+    expect(card).toContain('RACE TARGET');
     expect(card).toContain('weeklyDisciplineLine');
     expect(weekly).toContain('buildWeeklyStrategyExpression');
   });
