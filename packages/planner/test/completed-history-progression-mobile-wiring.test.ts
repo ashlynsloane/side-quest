@@ -29,12 +29,14 @@ describe('completed training history progression mobile wiring', () => {
     expect(runtime).toContain("value === 'strength' || value === 'hiit'");
   });
 
-  it('passes an athlete-local date and a precise as-of instant into the production plan', () => {
+  it('uses athlete-local today but freezes continuity at entry into the current week', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
 
-    expect(runtime).toContain('progressionDate: localDateKey(now)');
-    expect(runtime).toContain('progressionAsOf: now.toISOString()');
+    expect(runtime).toContain('const progressionDate = localDateKey(now)');
+    expect(runtime).toContain('historyEnteringWeek(allCompletedHistory, currentWeekStart)');
+    expect(runtime).toContain('weekEntryInstant(currentWeekStart)');
     expect(runtime).toContain("new Intl.DateTimeFormat('en-US'");
+    expect(runtime).toContain("exposure.completedAt.slice(0, 10) < weekStartDate");
   });
 
   it('applies history progression only to the current reconciliation week before event persistence', () => {
@@ -45,5 +47,30 @@ describe('completed training history progression mobile wiring', () => {
     expect(plan).toContain('buildWholeAthleteProgressionContextFromHistory');
     expect(plan).toContain('applyProgressionToWholeAthleteWeek');
     expect(plan.indexOf('applyProgressionToWholeAthleteWeek')).toBeLessThan(plan.indexOf('plannedSessionToCalendarEvent(session, input.block.id)'));
+  });
+
+  it('persists current-week strength progression before Week and Today are regenerated', () => {
+    const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+
+    expect(runtime).toContain('applyCurrentWeekStrengthProgression(');
+    expect(runtime).toContain('progressionContext.disciplineAssignments?.strength');
+    expect(runtime).toContain('if (strengthProgression.changed) await saveTrainingBlock(workingBlock)');
+    expect(runtime.indexOf('saveTrainingBlock(workingBlock)')).toBeLessThan(runtime.indexOf('generateAndPersistWholeAthleteBlock({'));
+  });
+
+  it('re-derives strength changes from a canonical baseline instead of compounding reductions', () => {
+    const persistence = source('apps/mobile/src/services/strength-progression-persistence.ts');
+
+    expect(persistence).toContain('baselineWorkouts');
+    expect(persistence).toContain('lastAppliedWorkouts');
+    expect(persistence).toContain('currentMatchesLastApplied');
+    expect(persistence).toContain('applyProgressionToStrengthBlock(baselineBlock');
+    expect(persistence).toContain('explicit edits are never silently overwritten');
+  });
+
+  it('keeps whole-athlete reconciliation alive if optional history retrieval fails', () => {
+    const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+
+    expect(runtime).toContain('loadTrainingHistory(PROGRESSION_HISTORY_LIMIT).catch(() => [] as TrainingHistoryItem[])');
   });
 });
