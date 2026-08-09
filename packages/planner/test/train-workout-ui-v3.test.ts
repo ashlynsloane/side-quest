@@ -14,7 +14,7 @@ describe('Train + workout flow UI V3', () => {
     const route = source('apps/mobile/src/app/(tabs)/train.tsx');
     const train = source('apps/mobile/src/components/train-screen-v3.tsx');
     expect(route).toContain("@/components/train-screen-v3");
-    expect(train).toContain('NEXT PLANNED STRENGTH');
+    expect(train).toContain('NEXT STRENGTH');
     expect(train).toContain('Review workout');
     expect(train).toContain('Quick workout');
     expect(train).toContain('Saved workouts');
