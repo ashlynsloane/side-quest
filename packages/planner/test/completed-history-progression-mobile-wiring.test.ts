@@ -21,12 +21,44 @@ describe('completed training history progression mobile wiring', () => {
     expect(history).toContain("kind: 'endurance'");
   });
 
+  it('enriches deduplicated history with structured response and prescription evidence', () => {
+    const history = source('apps/mobile/src/services/training-history.ts');
+
+    expect(history).toContain('listWorkoutReflectionsSince(earliest)');
+    expect(history).toContain('getTrainingCalendarEvents({');
+    expect(history).toContain('reflectionByWorkoutInstance');
+    expect(history).toContain('reflection: reflectionByWorkoutInstance.get(workout.id)');
+    expect(history).toContain('plannedEvent');
+    expect(history).toContain('eventById.get(plannedMatch.calendarEventId)');
+  });
+
   it('does not use unresolved or deleted activity records as progression evidence', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
 
     expect(runtime).toContain('if (item.needsReview) continue');
     expect(runtime).toContain('if (item.activity.deletedAt) continue');
     expect(runtime).toContain("value === 'strength' || value === 'hiit'");
+  });
+
+  it('translates structured strength response into conservative progression evidence', () => {
+    const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+
+    expect(runtime).toContain('const completedAsPlanned = strengthCompletionSignal(item)');
+    expect(runtime).toContain('const rpe = validRpe(item.reflection?.rpe)');
+    expect(runtime).toContain("item.workout.relationToPlan !== 'completed_planned'");
+    expect(runtime).toContain('item.workout.completionFraction >= 0.9');
+    expect(runtime).toContain('item.workout.completionFraction < 0.75');
+  });
+
+  it('requires real execution evidence before calling endurance completed as planned', () => {
+    const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+
+    expect(runtime).toContain("item.plannedMatch?.status !== 'matched' || !item.plannedEvent");
+    expect(runtime).toContain('const completionRatio = actualMinutes / plannedMinutes');
+    expect(runtime).toContain('completionRatio >= 0.9');
+    expect(runtime).toContain('completionRatio < 0.75');
+    expect(runtime).toContain('averageWatts: item.activity.averageWatts');
+    expect(runtime).toContain('weightedAverageWatts: item.activity.weightedAverageWatts');
   });
 
   it('uses athlete-local today but freezes continuity at entry into the current week', () => {
@@ -78,7 +110,10 @@ describe('completed training history progression mobile wiring', () => {
 
   it('keeps whole-athlete reconciliation alive if optional history retrieval fails', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
+    const history = source('apps/mobile/src/services/training-history.ts');
 
     expect(runtime).toContain('loadTrainingHistory(PROGRESSION_HISTORY_LIMIT).catch(() => [] as TrainingHistoryItem[])');
+    expect(history).toContain('listWorkoutReflectionsSince(earliest).catch(() => [] as WorkoutReflection[])');
+    expect(history).toContain('}).catch(() => [] as TrainingCalendarEvent[])');
   });
 });
