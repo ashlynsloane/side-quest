@@ -9,6 +9,11 @@ import type {
 import { normalizeCalendarEvent, normalizeStrengthSession } from '@circuit/planner';
 import { applyApprovedFrequencySuppression, type DisciplineCountMap } from '@circuit/planner/frequency-suppression';
 import {
+  applyProgressionToWholeAthleteWeek,
+  buildWholeAthleteProgressionContextFromHistory,
+  type CompletedDisciplineExposure,
+} from '@circuit/planner/whole-athlete-progression';
+import {
   buildWholeAthleteWeek,
   type DisciplineBaseline,
   type MentalEnergySignal,
@@ -60,6 +65,9 @@ export interface GenerateWholeAthleteBlockInput {
   activeCheckIn?: TrainingCheckIn | null;
   ptProfileActive?: boolean;
   readiness?: DailyReadinessCheckIn | null;
+  completedHistory?: CompletedDisciplineExposure[];
+  progressionDate?: string;
+  progressionAsOf?: string;
 }
 
 export interface GeneratedWholeAthleteBlock {
@@ -151,7 +159,7 @@ export async function generateAndPersistWholeAthleteBlock(
       suppressed,
     );
 
-    const plan = buildWholeAthleteWeek({
+    const basePlan = buildWholeAthleteWeek({
       weekStartDate: week.weekStartDate,
       availableMinutes: Math.max(0, Math.round(input.capacity.totalWeeklyHours * 60)),
       goalType: input.goal.type,
@@ -164,6 +172,22 @@ export async function generateAndPersistWholeAthleteBlock(
       recentBoneStress: input.capacity.boneStressInjuryHistory === 'recent_or_current',
       returnToRun: input.capacity.runStatus === 'return_to_run',
     });
+    const progressionApplies = Boolean(
+      input.progressionDate
+      && input.progressionAsOf
+      && input.completedHistory?.length
+      && inCurrentWeek(input.progressionDate),
+    );
+    const plan = progressionApplies
+      ? applyProgressionToWholeAthleteWeek(
+          basePlan,
+          buildWholeAthleteProgressionContextFromHistory({
+            weekStartDate: week.weekStartDate,
+            asOf: input.progressionAsOf!,
+            exposures: input.completedHistory!,
+          }),
+        )
+      : basePlan;
 
     weeks.push(plan);
     previousWeek = plan.sessions;
