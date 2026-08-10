@@ -10,9 +10,13 @@ function source(path: string): string {
 }
 
 describe('Strategy Coach wiring', () => {
-  it('routes the public whole-athlete planner through the bounded strategy overlay', () => {
+  it('routes the public whole-athlete planner through strategy before block rhythm', () => {
     const plannerPackage = source('packages/planner/package.json');
-    expect(plannerPackage).toContain('"./whole-athlete-week": "./src/whole-athlete-week-strategy.ts"');
+    const composedPlanner = source('packages/planner/src/whole-athlete-week-block.ts');
+    expect(plannerPackage).toContain('"./whole-athlete-week": "./src/whole-athlete-week-block.ts"');
+    expect(composedPlanner).toContain("from './whole-athlete-week-strategy'");
+    expect(composedPlanner).toContain('const strategicPlan = buildStrategyWholeAthleteWeek(input)');
+    expect(composedPlanner).toContain('return applyTrainingBlockRhythm(strategicPlan, input)');
   });
 
   it('configures Race Intent and the full approved season schedule as separate weekly layers', () => {
