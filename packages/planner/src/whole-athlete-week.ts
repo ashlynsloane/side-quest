@@ -1,5 +1,6 @@
 import type { PerformanceGoalType, TrainingPhase } from '@circuit/domain';
 
+import { canonicalEnduranceMinutes } from './endurance-prescription';
 import {
   chooseProgressionBudget,
   validateUnifiedWeek,
@@ -559,9 +560,13 @@ function fitPreferredSessions(
       continue;
     }
     if (isTrainableDiscipline(session.discipline) && remaining >= MIN_DURATION[session.discipline] && session.priority !== 'optional') {
+      const rawTrimmedMinutes = Math.floor(remaining);
+      const trimmedMinutes = session.discipline === 'strength'
+        ? rawTrimmedMinutes
+        : Math.max(MIN_DURATION[session.discipline], Math.floor(rawTrimmedMinutes / 5) * 5);
       const trimmed = {
         ...session,
-        durationMinutes: Math.floor(remaining),
+        durationMinutes: trimmedMinutes,
         healthAdjusted: true,
         rationale: [...session.rationale, 'Duration trimmed so preferred work does not crowd out the weekly time and recovery budget.'],
       };
@@ -621,8 +626,9 @@ function buildTemplate({
     : DEFAULT_DURATION[discipline];
   const progressionTarget = progressionTargetFor(discipline, progressionBudget);
   const progresses = planningState === 'build' && progressionTarget !== undefined;
+  const rawDuration = averageBaseline * (progresses ? 1.05 : planningState === 'protect' ? 0.85 : 1);
   const duration = clamp(
-    Math.round(averageBaseline * (progresses ? 1.05 : planningState === 'protect' ? 0.85 : 1)),
+    discipline === 'strength' ? Math.round(rawDuration) : canonicalEnduranceMinutes(rawDuration),
     MIN_DURATION[discipline],
     MAX_DURATION[discipline],
   );
@@ -643,9 +649,9 @@ function buildTemplate({
     };
   }
   if (discipline === 'bike') {
-    const proposedLong = Math.min(MAX_DURATION.bike, Math.max(duration, Math.round(duration * 1.25)));
+    const proposedLong = Math.min(MAX_DURATION.bike, Math.max(duration, canonicalEnduranceMinutes(duration * 1.25)));
     const longDuration = baseline?.longestSessionMinutes
-      ? Math.min(proposedLong, Math.round(baseline.longestSessionMinutes * (progresses ? 1.05 : 1)))
+      ? Math.min(proposedLong, canonicalEnduranceMinutes(baseline.longestSessionMinutes * (progresses ? 1.05 : 1)))
       : proposedLong;
     return {
       title: makeHard ? 'Bike quality' : existingDisciplineCount >= 2 ? 'Long endurance ride' : 'Aerobic ride',
@@ -657,9 +663,9 @@ function buildTemplate({
   }
   if (discipline === 'run') {
     const protectedRun = input.returnToRun || input.recentBoneStress || input.health.boneStress === 'recent';
-    const proposedLong = Math.min(MAX_DURATION.run, Math.max(duration, Math.round(duration * 1.2)));
+    const proposedLong = Math.min(MAX_DURATION.run, Math.max(duration, canonicalEnduranceMinutes(duration * 1.2)));
     const longDuration = baseline?.longestSessionMinutes
-      ? Math.min(proposedLong, Math.round(baseline.longestSessionMinutes * (progresses ? 1.05 : 1)))
+      ? Math.min(proposedLong, canonicalEnduranceMinutes(baseline.longestSessionMinutes * (progresses ? 1.05 : 1)))
       : proposedLong;
     return {
       title: protectedRun ? 'Easy return-to-run' : makeHard ? 'Run quality' : existingDisciplineCount >= 3 ? 'Long aerobic run' : 'Easy aerobic run',
@@ -979,7 +985,9 @@ function capSessionIntensity(session: UnifiedTrainingSession, intensity: 'easy' 
 
 function fitDuration(requested: number, discipline: TrainableDiscipline, remainingBudget: number): number | null {
   if (remainingBudget < MIN_DURATION[discipline]) return null;
-  return Math.max(MIN_DURATION[discipline], Math.min(requested, Math.floor(remainingBudget)));
+  const fitted = Math.min(requested, Math.floor(remainingBudget));
+  if (discipline === 'strength') return Math.max(MIN_DURATION[discipline], fitted);
+  return Math.max(MIN_DURATION[discipline], Math.floor(fitted / 5) * 5);
 }
 
 function frequencyPlan(
