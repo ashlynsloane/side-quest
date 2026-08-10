@@ -16,6 +16,7 @@ import {
   listCompletedWorkoutSummaries,
   listTrainingCalendarSources,
 } from '@/services/database';
+import { loadTrainingAvailabilityProfile, type AvailabilityScheduledSession } from '@/services/training-availability';
 import { conciseSessionLabel } from '@/services/training-synthesis';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
@@ -32,6 +33,8 @@ export default function PlanTab() {
   const { openPlannedWorkoutPreview, activeWorkout, activePlanLink } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [events, setEvents] = useState<TrainingCalendarEvent[]>([]);
+  const [scheduledSessions, setScheduledSessions] = useState<AvailabilityScheduledSession[]>([]);
+  const [availabilityEnabled, setAvailabilityEnabled] = useState(false);
   const [anchorDate, setAnchorDate] = useState(() => localDate());
   const [hasTrainingHistory, setHasTrainingHistory] = useState(false);
   const [hasReadinessData, setHasReadinessData] = useState(false);
@@ -73,6 +76,8 @@ export default function PlanTab() {
       setBlock(nextBlock);
       setAnchorDate(nextAnchor);
       setEvents(calendar);
+      setScheduledSessions(wholeWeek?.sessions ?? []);
+      setAvailabilityEnabled(loadTrainingAvailabilityProfile().enabled);
       setPlanningState(wholeWeek?.planningState ?? null);
       setWeekDecision(wholeWeek?.weekDecision ?? null);
       setWeekDecisionReason(wholeWeek?.weekDecisionReason ?? null);
@@ -84,7 +89,7 @@ export default function PlanTab() {
   }, []));
 
   const strength = block?.weeks.flatMap((week) => week.sessions) ?? [];
-  const days = weekDays(events, strength, anchorDate);
+  const days = weekDays(events, strength, anchorDate, scheduledSessions, availabilityEnabled);
   const today = localDate();
   const selectedIndex = days.findIndex((day) => day.date === today);
   const counts = weeklyCounts(days);
@@ -211,21 +216,51 @@ function ToolButton({ icon, title, body, onPress, styles, tokens }: {
 }
 
 type DayItem =
-  | { id: string; kind: 'event'; title: string; meta: string; discipline?: string; event: TrainingCalendarEvent }
-  | { id: string; kind: 'strength'; title: string; meta: string; session: PlannedStrengthSession };
+  | { id: string; kind: 'event'; title: string; meta: string; discipline?: string; event: TrainingCalendarEvent; sortAt: string }
+  | { id: string; kind: 'strength'; title: string; meta: string; session: PlannedStrengthSession; sortAt: string };
 
-function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSession[], anchorDate: string) {
+function weekDays(
+  events: TrainingCalendarEvent[],
+  strength: PlannedStrengthSession[],
+  anchorDate: string,
+  scheduled: AvailabilityScheduledSession[],
+  availabilityEnabled: boolean,
+) {
   const start = new Date(`${anchorDate}T12:00:00`);
   start.setHours(12, 0, 0, 0);
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const scheduledStrength = new Map(scheduled.filter((session) => session.discipline === 'strength').map((session) => [session.id, session]));
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
     const iso = date.toISOString().slice(0, 10);
-    const items: DayItem[] = [
-      ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline, event })),
-      ...strength.filter((session) => session.date === iso).map((session) => ({ id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.estimatedElapsedSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`, session })),
-    ];
+    const eventItems: DayItem[] = events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({
+      id: event.id,
+      kind: 'event' as const,
+      title: conciseSessionLabel({ discipline: event.discipline, title: event.title }),
+      meta: eventMeta(event),
+      discipline: event.discipline,
+      event,
+      sortAt: event.allDay ? `${iso}T23:59:00` : event.startAt,
+    }));
+    const strengthItems: DayItem[] = strength.flatMap((session) => {
+      const planned = scheduledStrength.get(session.id);
+      if (availabilityEnabled && !planned) return [];
+      const displayDate = planned?.date ?? session.date;
+      if (displayDate !== iso) return [];
+      const displaySession = displayDate === session.date ? session : { ...session, date: displayDate };
+      const time = formatScheduledTime(planned?.scheduledStartAt);
+      const duration = Math.round(session.workout.estimatedElapsedSeconds / 60);
+      return [{
+        id: session.id,
+        kind: 'strength' as const,
+        title: session.title,
+        meta: `${time ? `${time} · ` : ''}${duration} min · ${strengthStatusLabel(session.completionStatus)}`,
+        session: displaySession,
+        sortAt: planned?.scheduledStartAt ?? `${iso}T23:58:00`,
+      }];
+    });
+    const items = [...eventItems, ...strengthItems].sort((left, right) => left.sortAt.localeCompare(right.sortAt) || left.id.localeCompare(right.id));
     return { date: iso, label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase() + ` ${date.getDate()}`, weekday: new Intl.DateTimeFormat('en-US', { weekday: 'narrow' }).format(date), dayNumber: date.getDate(), items };
   });
 }
@@ -233,10 +268,18 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
 function eventMeta(event: TrainingCalendarEvent): string {
   if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID) {
     const match = event.description?.match(/Side Quest generated · (\d+) min · ([a-z_]+)/i);
-    if (match) return `${match[1]} min · ${match[2]!.replaceAll('_', ' ')}`;
-    if (event.endAt) return `${Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000))} min · Side Quest`;
+    const time = event.allDay ? null : formatScheduledTime(event.startAt);
+    if (match) return `${time ? `${time} · ` : ''}${match[1]} min · ${match[2]!.replaceAll('_', ' ')}`;
+    if (event.endAt) return `${time ? `${time} · ` : ''}${Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000))} min · Side Quest`;
   }
-  return event.allDay ? 'Flexible' : new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(event.startAt));
+  return event.allDay ? 'Flexible' : formatScheduledTime(event.startAt) ?? 'Scheduled';
+}
+
+function formatScheduledTime(value: string | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date);
 }
 
 function weeklyCounts(days: ReturnType<typeof weekDays>) {
