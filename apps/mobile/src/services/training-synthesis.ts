@@ -6,6 +6,12 @@ import type {
 } from '@circuit/domain';
 import type { SportIconKind } from '@/components/sport-icon';
 import type { WorkoutNameIntent, WorkoutNamePhase } from './workout-name-catalog';
+import {
+  effectiveWorkoutNamePhase,
+  parseGeneratedWorkoutNamingMetadata,
+  weeksUntilRace,
+  type GeneratedWorkoutNamingMetadata,
+} from './workout-name-context';
 import { selectHumanWorkoutName } from './workout-name-personality';
 import type { TrainingHistoryItem } from './training-history';
 
@@ -27,27 +33,32 @@ export interface EnduranceNamingHints {
 }
 
 export interface StrengthNamingHints {
+  phase?: WorkoutNamePhase;
+  triathlon?: boolean;
+  weeksToRace?: number;
+  raceName?: string;
+  raceLocation?: string;
   recentNames?: string[];
 }
 
 const WORKOUT_NAME_COOLDOWN_DAYS = 30;
 
 type CooldownDiscipline = 'swim' | 'bike' | 'run' | 'strength';
-type NameHistoryItem = { discipline: CooldownDiscipline; date: string; name: string };
+type NameHistoryItem = { discipline: CooldownDiscipline; date: string; name: string; fingerprint?: string };
 type NameAssignmentItem =
   | { kind: 'endurance'; id: string; date: string; discipline: 'swim' | 'bike' | 'run'; event: TrainingCalendarEvent }
   | { kind: 'strength'; id: string; date: string; discipline: 'strength'; session: PlannedStrengthSession };
 
 const runtimeNameAssignments = new Map<string, NameHistoryItem>();
+let runtimePlanNamingMetadata: GeneratedWorkoutNamingMetadata | undefined;
 
 export function workoutNameAssignmentKey(kind: 'endurance' | 'strength', id: string): string {
   return `${kind}:${id}`;
 }
 
 /**
- * Assigns the visible names for the whole generated block in chronological order.
- * Names stay stable for a specific session, while a name used by the same sport is
- * quarantined for 30 days whenever the catalog has another eligible option.
+ * Assigns visible names chronologically so each sport gets a 30-day cooldown.
+ * The underlying prescription remains untouched.
  */
 export function buildWorkoutNameAssignments(
   events: TrainingCalendarEvent[],
@@ -55,6 +66,11 @@ export function buildWorkoutNameAssignments(
 ): Map<string, string> {
   const assignments = new Map<string, string>();
   const history: NameHistoryItem[] = [];
+  const firstMetadata = events
+    .map((event) => parseGeneratedWorkoutNamingMetadata(event.description))
+    .find((metadata) => metadata.phase || metadata.raceDate || metadata.raceName || metadata.goalType);
+  if (firstMetadata) runtimePlanNamingMetadata = firstMetadata;
+
   const items: NameAssignmentItem[] = [
     ...events
       .filter((event): event is TrainingCalendarEvent & { discipline: 'swim' | 'bike' | 'run' } => event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run')
@@ -78,11 +94,13 @@ export function buildWorkoutNameAssignments(
     const recentNames = cooldownNames(history, item.discipline, item.date);
     const name = item.kind === 'endurance'
       ? generatedEnduranceDisplayName(item.event, { recentNames })
-      : plannedStrengthDisplayName(item.session, { recentNames });
+      : plannedStrengthDisplayName(item.session, {
+          recentNames,
+          ...strengthHintsFromMetadata(metadataNearDate(events, item.date), item.date),
+        });
     const key = workoutNameAssignmentKey(item.kind, item.id);
     assignments.set(key, name);
     history.push({ discipline: item.discipline, date: item.date, name });
-    runtimeNameAssignments.set(key, { discipline: item.discipline, date: item.date, name });
   }
   return assignments;
 }
@@ -122,10 +140,9 @@ export function conciseSessionLabel(input: { discipline?: string; name?: string;
 }
 
 /**
- * Athlete-facing identity for a generated endurance session. Internal planner
- * titles remain semantic so prescription inference stays stable; athlete copy
- * comes from a larger curated catalog. A specific calendar event keeps a stable
- * title, while the same workout shape on a later date can rotate to a new name.
+ * Athlete-facing identity for a generated endurance session. The specific
+ * event/date stays stable; season, phase, and race proximity can change the
+ * eligible voice without altering planner semantics.
  */
 export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hints: EnduranceNamingHints = {}): string {
   if (event.discipline !== 'swim' && event.discipline !== 'bike' && event.discipline !== 'run') {
@@ -133,10 +150,17 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
   }
 
   const date = event.startAt.slice(0, 10);
+  const metadata = parseGeneratedWorkoutNamingMetadata(event.description);
+  if (metadata.phase || metadata.raceDate || metadata.raceName || metadata.goalType) runtimePlanNamingMetadata = metadata;
+  const weeksToRace = hints.weeksToRace ?? weeksUntilRace(date, metadata.raceDate);
+  const phase = effectiveWorkoutNamePhase(hints.phase ?? metadata.phase, weeksToRace);
+  const triathlon = hints.triathlon ?? metadata.triathlon;
+  const raceName = hints.raceName ?? metadata.raceName;
+  const contextFingerprint = [phase ?? '', triathlon ? 'tri' : '', weeksToRace?.toFixed(3) ?? '', raceName ?? '', hints.raceLocation ?? ''].join('|');
   const assignmentKey = workoutNameAssignmentKey('endurance', event.id);
   if (hints.recentNames === undefined) {
     const cached = runtimeNameAssignments.get(assignmentKey);
-    if (cached) return cached.name;
+    if (cached?.fingerprint === contextFingerprint) return cached.name;
   }
 
   const raw = cleanGeneratedTitle(event.title);
@@ -144,38 +168,33 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
   const intensity = generatedIntensity(event);
   const text = `${raw} ${event.description ?? ''}`.toLowerCase();
   const intents = generatedNameIntents(event.discipline, text, intensity, durationMinutes);
-  const recentNames = hints.recentNames ?? cooldownNames([...runtimeNameAssignments.values()], event.discipline, date);
+  const recentNames = hints.recentNames ?? cooldownNames(
+    [...runtimeNameAssignments.entries()].filter(([key]) => key !== assignmentKey).map(([, value]) => value),
+    event.discipline,
+    date,
+  );
 
   const name = selectHumanWorkoutName({
     discipline: event.discipline,
     intents,
     intensity,
     durationMinutes,
-    phase: hints.phase,
-    triathlon: hints.triathlon,
-    weeksToRace: hints.weeksToRace,
-    raceName: hints.raceName,
+    phase,
+    triathlon,
+    weeksToRace,
+    raceName,
     raceLocation: hints.raceLocation,
+    workoutDate: date,
     environment: generatedEnvironment(event.discipline, text),
-    seedKey: `${event.id}|${date}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
+    seedKey: `${event.id}|${date}|${event.discipline}|${raw}|${durationMinutes}|${intensity}|${contextFingerprint}`,
     recentNames,
   });
-  runtimeNameAssignments.set(assignmentKey, { discipline: event.discipline, date, name });
+  runtimeNameAssignments.set(assignmentKey, { discipline: event.discipline, date, name, fingerprint: contextFingerprint });
   return name;
 }
 
-/**
- * Strength names are tied to the specific planned session plus composition.
- * That keeps a rendered session stable without naming every recurring circuit
- * exactly the same thing for an entire block.
- */
+/** Strength identity uses composition plus date, with the same seasonal/race voice. */
 export function plannedStrengthDisplayName(session: PlannedStrengthSession, hints: StrengthNamingHints = {}): string {
-  const assignmentKey = workoutNameAssignmentKey('strength', session.id);
-  if (hints.recentNames === undefined) {
-    const cached = runtimeNameAssignments.get(assignmentKey);
-    if (cached) return cached.name;
-  }
-
   const intent: WorkoutNameIntent = session.purpose === 'swim_support'
     ? 'swim_support'
     : session.purpose === 'posterior_durability'
@@ -189,17 +208,61 @@ export function plannedStrengthDisplayName(session: PlannedStrengthSession, hint
   const fingerprint = session.workout.stations
     .flatMap((station) => [station.purpose, ...station.exercises.map((exercise) => exercise.exerciseSnapshot.name)])
     .join('|');
-  const recentNames = hints.recentNames ?? cooldownNames([...runtimeNameAssignments.values()], 'strength', session.date);
+  const metadata = runtimePlanNamingMetadata;
+  const weeksToRace = hints.weeksToRace ?? weeksUntilRace(session.date, metadata?.raceDate);
+  const phase = effectiveWorkoutNamePhase(hints.phase ?? metadata?.phase, weeksToRace);
+  const triathlon = hints.triathlon ?? metadata?.triathlon;
+  const raceName = hints.raceName ?? metadata?.raceName;
+  const contextFingerprint = [phase ?? '', triathlon ? 'tri' : '', weeksToRace?.toFixed(3) ?? '', raceName ?? '', hints.raceLocation ?? '', fingerprint].join('|');
+  const assignmentKey = workoutNameAssignmentKey('strength', session.id);
+  if (hints.recentNames === undefined) {
+    const cached = runtimeNameAssignments.get(assignmentKey);
+    if (cached?.fingerprint === contextFingerprint) return cached.name;
+  }
 
+  const recentNames = hints.recentNames ?? cooldownNames(
+    [...runtimeNameAssignments.entries()].filter(([key]) => key !== assignmentKey).map(([, value]) => value),
+    'strength',
+    session.date,
+  );
   const name = selectHumanWorkoutName({
     discipline: 'strength',
     intents: [intent],
     durationMinutes: Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60)),
-    seedKey: `${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`,
+    phase,
+    triathlon,
+    weeksToRace,
+    raceName,
+    raceLocation: hints.raceLocation,
+    workoutDate: session.date,
+    seedKey: `${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}|${contextFingerprint}`,
     recentNames,
   });
-  runtimeNameAssignments.set(assignmentKey, { discipline: 'strength', date: session.date, name });
+  runtimeNameAssignments.set(assignmentKey, { discipline: 'strength', date: session.date, name, fingerprint: contextFingerprint });
   return name;
+}
+
+function strengthHintsFromMetadata(metadata: GeneratedWorkoutNamingMetadata | undefined, date: string): StrengthNamingHints {
+  if (!metadata) return {};
+  const weeksToRace = weeksUntilRace(date, metadata.raceDate);
+  return {
+    phase: effectiveWorkoutNamePhase(metadata.phase, weeksToRace),
+    triathlon: metadata.triathlon,
+    weeksToRace,
+    raceName: metadata.raceName,
+  };
+}
+
+function metadataNearDate(events: TrainingCalendarEvent[], date: string): GeneratedWorkoutNamingMetadata | undefined {
+  const target = Date.parse(`${date}T12:00:00Z`);
+  const candidates = events
+    .map((event) => ({
+      distance: Math.abs(Date.parse(`${event.startAt.slice(0, 10)}T12:00:00Z`) - target),
+      metadata: parseGeneratedWorkoutNamingMetadata(event.description),
+    }))
+    .filter((item) => item.metadata.phase || item.metadata.raceDate || item.metadata.raceName || item.metadata.goalType)
+    .sort((left, right) => left.distance - right.distance);
+  return candidates[0]?.metadata;
 }
 
 function cooldownNames(history: NameHistoryItem[], discipline: CooldownDiscipline, date: string): string[] {
@@ -235,15 +298,12 @@ function generatedNameIntents(
   if (/long|endurance|time on feet|long aerobic/.test(text)) add('long');
   if (/race|brick|aero bar|transition/.test(text)) add('race_specific');
   if (/brick|t1|t2/.test(text)) add('brick');
-
   if (discipline === 'run' && /return.?to.?run|run.?walk|rebuild/.test(text)) add('return_to_run');
   if (/aerobic|steady|easy/.test(text) || intensity !== 'hard') add('aerobic');
   if (intensity === 'easy') add('easy');
-
   if (discipline === 'bike' && durationMinutes >= 150) add('long');
   if (discipline === 'swim' && durationMinutes >= 60 && !intents.includes('technique')) add('long');
   if (discipline === 'run' && durationMinutes >= 75 && !intents.includes('return_to_run')) add('long');
-
   if (!intents.length) add(intensity === 'hard' ? 'intervals' : 'aerobic');
   return intents;
 }
