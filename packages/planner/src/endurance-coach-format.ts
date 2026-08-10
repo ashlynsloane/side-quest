@@ -22,6 +22,9 @@ export function enduranceCoachLines(
   if (prescription.discipline === 'swim' && block.distanceUnit) {
     return swimCoachLines(prescription, block);
   }
+  if (prescription.discipline === 'bike') {
+    return bikeCoachLines(block);
+  }
   if (prescription.discipline === 'run') {
     return runCoachLines(prescription, block);
   }
@@ -116,6 +119,25 @@ function swimRepeatLines(
   const recovery = restLabel(block.restSeconds);
   const type = prescription.workoutType;
 
+  if (block.shapeId === 'swim-fartlek-50-25-25') {
+    return [{
+      text: `${repeats} × [50 ${unit} steady + 25 ${unit} fast + 25 ${unit} easy]`,
+      secondary: 'Continuous · no wall rest',
+    }];
+  }
+  if (block.shapeId === 'swim-descending-ladder') {
+    return [{ text: `${repeats} × ${distance} ${unit} descending 1–${repeats}`, secondary: recovery }];
+  }
+  if (block.shapeId === 'swim-fast-smooth') {
+    return [{ text: `${repeats} × ${distance} ${unit} fast and smooth`, secondary: joinSecondary(recovery, 'Keep stroke length intact.') }];
+  }
+  if (block.shapeId === 'swim-broken-tempo') {
+    return [{ text: `${repeats} × ${distance} ${unit} at controlled threshold`, secondary: joinSecondary(recovery, 'Same pace from first repeat to last.') }];
+  }
+  if (block.shapeId === 'swim-threshold-ladder') {
+    return [{ text: `${repeats} × ${distance} ${unit} strong, descend the set`, secondary: recovery }];
+  }
+
   if (block.id === 'secondary') {
     if (block.target.high <= 3) {
       return [{ text: `${repeats} × ${distance} ${unit} easy reset`, secondary: recovery }];
@@ -172,6 +194,41 @@ function swimRepeatLines(
   return [{ text: `${repeats} × ${distance} ${unit} relaxed and smooth`, secondary: recovery }];
 }
 
+function bikeCoachLines(block: EndurancePrescriptionBlock): EnduranceCoachLine[] {
+  if (block.id === 'warmup') return [{ text: `${block.totalMinutes} min easy spin`, secondary: 'Build cadence gradually' }];
+  if (block.id === 'cooldown') return [{ text: `${block.totalMinutes} min easy spin` }];
+  if (block.id !== 'main') return [];
+
+  if (block.shapeId === 'bike-fartlek-4-1' && block.repeats) {
+    return [{ text: `${block.repeats} × [4 min steady + 1 min brisk cadence]`, secondary: 'Continuous · keep the whole set aerobic' }];
+  }
+  if (block.shapeId === 'bike-progressive-thirds') {
+    const third = Math.max(1, Math.floor(block.totalMinutes / 3));
+    return [
+      { text: `${third} min easy aerobic` },
+      { text: `${third} min steady` },
+      { text: `${Math.max(1, block.totalMinutes - third * 2)} min upper aerobic`, secondary: 'Finish controlled, not hard' },
+    ];
+  }
+  if (block.shapeId === 'bike-rolling-endurance') {
+    return [{ text: `${block.totalMinutes} min continuous`, secondary: 'Easy on climbs · steady on flats · recover on descents' }];
+  }
+  if (block.shapeId === 'bike-strong-finish') {
+    const finish = Math.min(20, Math.max(10, Math.round(block.totalMinutes / 4)));
+    return [
+      { text: `${block.totalMinutes - finish} min easy-to-steady aerobic` },
+      { text: `${finish} min strong aerobic finish`, secondary: 'No threshold surge' },
+    ];
+  }
+  if (block.shapeId === 'bike-over-under' && block.repeats && block.workMinutes) {
+    return [{ text: `${block.repeats} × ${block.workMinutes} min alternating controlled over / under effort`, secondary: block.recoveryMinutes ? `${block.recoveryMinutes} min easy between` : undefined }];
+  }
+  if (block.kind === 'intervals' && block.repeats && block.workMinutes) {
+    return [{ text: `${block.repeats} × ${block.workMinutes} min controlled quality`, secondary: block.recoveryMinutes ? `${block.recoveryMinutes} min easy between` : undefined }];
+  }
+  return [{ text: `${block.totalMinutes} min continuous`, secondary: block.target.cue }];
+}
+
 function runCoachLines(
   prescription: EnduranceSessionPrescription,
   block: EndurancePrescriptionBlock,
@@ -195,6 +252,27 @@ function runCoachLines(
       ];
     }
     return [{ text: `${block.totalMinutes} min easy running` }];
+  }
+
+  if (block.id === 'main' && block.shapeId === 'run-fartlek-3-1-2' && block.repeats) {
+    return [{ text: `${block.repeats} × [3 min steady + 1 min quick + 2 min easy]`, secondary: 'Continuous fartlek · quick is controlled, not all-out' }];
+  }
+  if (block.id === 'main' && block.shapeId === 'run-negative-split') {
+    const first = Math.floor(block.totalMinutes / 2);
+    return [
+      { text: `${first} min easy / conversational` },
+      { text: `${block.totalMinutes - first} min steady`, secondary: 'Second half quicker without forcing pace' },
+    ];
+  }
+  if (block.id === 'main' && block.shapeId === 'run-rolling-rhythm') {
+    return [{ text: `${block.totalMinutes} min continuous`, secondary: 'Easy uphill · relaxed downhill · steady on runnable terrain' }];
+  }
+  if (block.id === 'main' && block.shapeId === 'run-fast-finish') {
+    const finish = Math.min(15, Math.max(5, Math.round(block.totalMinutes / 4)));
+    return [
+      { text: `${block.totalMinutes - finish} min easy aerobic` },
+      { text: `${finish} min steady finish`, secondary: 'Finish with control and good mechanics' },
+    ];
   }
 
   if (block.id === 'main' && block.kind === 'intervals' && block.repeats && block.workMinutes) {
