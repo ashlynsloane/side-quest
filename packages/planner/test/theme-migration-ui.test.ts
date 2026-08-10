@@ -34,4 +34,22 @@ describe('Side Quest Classic theme migration', () => {
     expect(ui).toContain('choiceIconSelected: { backgroundColor: tokens.surfaceMuted }');
     expect(ui).toContain('metricEmphasis: { backgroundColor: tokens.surfaceMuted');
   });
+
+  it('keeps activity environments visually distinct instead of collapsing them into one hue family', () => {
+    const theme = source('apps/mobile/src/theme/index.ts');
+    expect(theme).toContain("trail: { light: '#173C31'");
+    expect(theme).toContain("summit: { light: '#344F68'");
+    expect(theme).toContain("race_day: { light: '#0D2F4F'");
+    expect(theme).toContain("ocean: { light: '#05495D'");
+    expect(theme).toContain("alpine: { light: '#356F77'");
+    expect(theme).toContain("ember: { light: '#7A2E31'");
+    expect(theme).toContain("indigo: { light: '#071E2F'");
+    expect(theme).toContain("slate: { light: '#51382D'");
+    expect(theme).toContain("forest: '#E4572E', forest2: '#B83E1E'");
+    expect(theme).toContain("forest: '#087D9A', forest2: '#05536A'");
+    expect(theme).toContain("forest: '#3A8C89', forest2: '#286462'");
+    expect(theme).toContain("forest: '#B4463C', forest2: '#7A2E31'");
+    expect(theme).toContain("forest: '#007E9D', forest2: '#07506C'");
+    expect(theme).toContain("forest: '#8D4A30', forest2: '#58392D'");
+  });
 });
