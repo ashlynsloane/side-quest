@@ -1,5 +1,40 @@
 import type { PlannedMultisportSession } from './multisport';
 
+export type EnduranceWorkoutType =
+  | 'swim_technique'
+  | 'swim_aerobic'
+  | 'swim_endurance'
+  | 'swim_quality'
+  | 'bike_recovery'
+  | 'bike_aerobic'
+  | 'bike_long_aerobic'
+  | 'bike_quality_intervals'
+  | 'run_recovery'
+  | 'run_easy_aerobic'
+  | 'run_long_aerobic'
+  | 'run_quality_intervals'
+  | 'run_return_to_run';
+
+export type EnduranceBlockKind = 'continuous' | 'intervals' | 'drill' | 'walk_run';
+
+export interface EnduranceRpeTarget {
+  low: number;
+  high: number;
+  cue: string;
+}
+
+export interface EndurancePrescriptionBlock {
+  id: string;
+  label: string;
+  kind: EnduranceBlockKind;
+  totalMinutes: number;
+  target: EnduranceRpeTarget;
+  instruction: string;
+  repeats?: number;
+  workMinutes?: number;
+  recoveryMinutes?: number;
+}
+
 export interface EndurancePrescriptionStep {
   label: string;
   minutes: number;
@@ -8,50 +43,104 @@ export interface EndurancePrescriptionStep {
 }
 
 export interface EnduranceSessionPrescription {
+  prescriptionVersion: 1;
   sessionId: string;
   discipline: 'swim' | 'bike' | 'run';
+  workoutType: EnduranceWorkoutType;
   title: string;
   date: string;
   totalMinutes: number;
   objective: string;
   effortGuide: string;
+  blocks: EndurancePrescriptionBlock[];
+  /** Backward-compatible simplified representation used by current mobile surfaces. */
   steps: EndurancePrescriptionStep[];
   whyThisSession: string[];
   guardrails: string[];
 }
 
+interface SessionSplit {
+  warmup: number;
+  main: number;
+  cooldown: number;
+}
+
+interface RepeatPlan {
+  repeats: number;
+  workMinutes: number;
+  recoveryMinutes: number;
+  usedMinutes: number;
+}
+
 export function buildEndurancePrescription(session: PlannedMultisportSession): EnduranceSessionPrescription | null {
   if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') return null;
 
-  const total = Math.max(10, session.durationMinutes);
-  const warmup = Math.min(session.discipline === 'swim' ? 10 : 12, Math.max(5, Math.round(total * 0.18)));
-  const cooldown = Math.min(10, Math.max(5, Math.round(total * 0.12)));
-  const main = Math.max(1, total - warmup - cooldown);
-  const objective = inferObjective(session);
-  const effortGuide = effortGuideFor(session);
-  const steps = buildSteps(session, warmup, main, cooldown);
+  const total = Math.max(10, Math.round(session.durationMinutes));
+  const split = splitSession(total, session.discipline);
+  const workoutType = inferWorkoutType(session);
+  const blocks = buildBlocks(session, workoutType, split);
+  const steps = blocks.map(blockToStep);
 
   return {
+    prescriptionVersion: 1,
     sessionId: session.id,
     discipline: session.discipline,
+    workoutType,
     title: session.title,
     date: session.date,
     totalMinutes: total,
-    objective,
-    effortGuide,
+    objective: objectiveFor(workoutType),
+    effortGuide: effortGuideFor(session),
+    blocks,
     steps,
     whyThisSession: session.rationale,
     guardrails: guardrailsFor(session),
   };
 }
 
-function inferObjective(session: PlannedMultisportSession): string {
+function splitSession(total: number, discipline: 'swim' | 'bike' | 'run'): SessionSplit {
+  const warmupCap = discipline === 'swim' ? 10 : 12;
+  const warmupTarget = Math.min(warmupCap, Math.max(4, Math.round(total * 0.18)));
+  const cooldownTarget = Math.min(10, Math.max(4, Math.round(total * 0.12)));
+
+  const warmup = Math.min(warmupTarget, Math.max(2, total - 4));
+  const cooldown = Math.min(cooldownTarget, Math.max(2, total - warmup - 1));
+  const main = Math.max(1, total - warmup - cooldown);
+  return { warmup, main, cooldown };
+}
+
+function inferWorkoutType(session: PlannedMultisportSession): EnduranceWorkoutType {
   const title = session.title.toLowerCase();
-  if (title.includes('technique')) return 'Technique and economical movement';
-  if (title.includes('long') || title.includes('endurance')) return 'Aerobic durability';
-  if (title.includes('interval') || title.includes('quality')) return 'Controlled quality work';
-  if (title.includes('return-to-run')) return 'Return-to-run exposure';
-  return session.intensity === 'easy' ? 'Aerobic support and recovery' : 'Aerobic development';
+  if (session.discipline === 'swim') {
+    if (title.includes('technique')) return 'swim_technique';
+    if (title.includes('quality') || title.includes('interval') || title.includes('threshold') || session.intensity === 'hard') return 'swim_quality';
+    if (title.includes('endurance')) return 'swim_endurance';
+    return 'swim_aerobic';
+  }
+  if (session.discipline === 'bike') {
+    if (title.includes('recovery')) return 'bike_recovery';
+    if (title.includes('quality') || title.includes('interval') || title.includes('tempo') || title.includes('threshold') || session.intensity === 'hard') {
+      return 'bike_quality_intervals';
+    }
+    if (title.includes('long')) return 'bike_long_aerobic';
+    return 'bike_aerobic';
+  }
+  if (title.includes('return-to-run')) return 'run_return_to_run';
+  if (title.includes('recovery')) return 'run_recovery';
+  if (title.includes('quality') || title.includes('interval') || title.includes('tempo') || title.includes('threshold') || session.intensity === 'hard') {
+    return 'run_quality_intervals';
+  }
+  if (title.includes('long')) return 'run_long_aerobic';
+  return 'run_easy_aerobic';
+}
+
+function objectiveFor(type: EnduranceWorkoutType): string {
+  if (type === 'swim_technique') return 'Technique and economical movement';
+  if (type === 'swim_endurance' || type === 'bike_long_aerobic' || type === 'run_long_aerobic') return 'Aerobic durability';
+  if (type === 'swim_quality' || type === 'bike_quality_intervals' || type === 'run_quality_intervals') return 'Controlled quality work';
+  if (type === 'run_return_to_run') return 'Return-to-run exposure';
+  if (type === 'bike_recovery' || type === 'run_recovery') return 'Recovery and circulation';
+  return 'Aerobic development';
 }
 
 function effortGuideFor(session: PlannedMultisportSession): string {
@@ -60,59 +149,212 @@ function effortGuideFor(session: PlannedMultisportSession): string {
   return 'Purposeful hard work with recovery between efforts; roughly RPE 7–8/10, not all-out.';
 }
 
-function buildSteps(
+function rpe(low: number, high: number, cue: string): EnduranceRpeTarget {
+  return { low, high, cue };
+}
+
+function block(
+  id: string,
+  label: string,
+  kind: EnduranceBlockKind,
+  totalMinutes: number,
+  target: EnduranceRpeTarget,
+  instruction: string,
+  intervals: Pick<EndurancePrescriptionBlock, 'repeats' | 'workMinutes' | 'recoveryMinutes'> = {},
+): EndurancePrescriptionBlock {
+  return { id, label, kind, totalMinutes, target, instruction, ...intervals };
+}
+
+function warmupBlock(discipline: 'swim' | 'bike' | 'run', minutes: number): EndurancePrescriptionBlock {
+  if (discipline === 'swim') {
+    return block('warmup', 'Warm-up', 'continuous', minutes, rpe(2, 3, 'Relaxed'), 'Easy swimming. Settle into relaxed breathing and clean mechanics.');
+  }
+  if (discipline === 'bike') {
+    return block('warmup', 'Warm-up', 'continuous', minutes, rpe(2, 3, 'Easy spin'), 'Easy spinning. Gradually bring cadence and effort up without surging.');
+  }
+  return block('warmup', 'Warm-up', 'continuous', minutes, rpe(1, 3, 'Easy'), 'Easy walking or jogging. Let mechanics and breathing settle before the main work.');
+}
+
+function cooldownBlock(discipline: 'swim' | 'bike' | 'run', minutes: number): EndurancePrescriptionBlock {
+  if (discipline === 'swim') {
+    return block('cooldown', 'Cool-down', 'continuous', minutes, rpe(1, 2, 'Very easy'), 'Very easy swimming. Finish feeling smoother than you started.');
+  }
+  if (discipline === 'bike') {
+    return block('cooldown', 'Cool-down', 'continuous', minutes, rpe(1, 2, 'Easy spin'), 'Easy spin until breathing and leg tension settle.');
+  }
+  return block('cooldown', 'Cool-down', 'continuous', minutes, rpe(1, 2, 'Very easy'), 'Easy walk or jog to finish without adding extra volume.');
+}
+
+function repeatPlan(mainMinutes: number, preferredRepeats: number, preferredWork: number, recoveryMinutes: number): RepeatPlan | null {
+  for (let work = preferredWork; work >= 2; work -= 1) {
+    for (let repeats = preferredRepeats; repeats >= 2; repeats -= 1) {
+      const usedMinutes = repeats * work + (repeats - 1) * recoveryMinutes;
+      if (usedMinutes <= mainMinutes) return { repeats, workMinutes: work, recoveryMinutes, usedMinutes };
+    }
+  }
+  return null;
+}
+
+function appendRemainder(
+  blocks: EndurancePrescriptionBlock[],
+  minutes: number,
+  discipline: 'swim' | 'bike' | 'run',
+): void {
+  if (minutes <= 0) return;
+  const instruction = discipline === 'swim'
+    ? 'Settle into smooth aerobic swimming and preserve stroke quality.'
+    : discipline === 'bike'
+      ? 'Ride steadily at an easy aerobic effort with smooth cadence.'
+      : 'Run easily and keep this deliberately low-cost.';
+  blocks.push(block('aerobic-finish', 'Aerobic finish', 'continuous', minutes, rpe(2, 4, 'Aerobic'), instruction));
+}
+
+function buildBlocks(
   session: PlannedMultisportSession,
-  warmup: number,
-  main: number,
-  cooldown: number,
-): EndurancePrescriptionStep[] {
-  if (session.discipline === 'swim') return swimSteps(session, warmup, main, cooldown);
-  if (session.discipline === 'bike') return bikeSteps(session, warmup, main, cooldown);
-  return runSteps(session, warmup, main, cooldown);
+  workoutType: EnduranceWorkoutType,
+  split: SessionSplit,
+): EndurancePrescriptionBlock[] {
+  if (session.discipline === 'swim') return swimBlocks(workoutType, split);
+  if (session.discipline === 'bike') return bikeBlocks(workoutType, split);
+  return runBlocks(workoutType, split);
 }
 
-function swimSteps(session: PlannedMultisportSession, warmup: number, main: number, cooldown: number): EndurancePrescriptionStep[] {
-  const title = session.title.toLowerCase();
-  const mainInstruction = title.includes('technique')
-    ? 'Alternate relaxed aerobic swimming with short technique-focused repeats. Keep form clean enough that speed never comes at the expense of mechanics.'
-    : title.includes('endurance')
-      ? 'Swim continuously or in long repeats at a sustainable aerobic effort. Use short rests only as needed to preserve technique.'
-      : 'Use steady aerobic repeats with enough recovery to keep stroke quality consistent.';
-  return [
-    { label: 'Warm-up', minutes: warmup, effort: 'RPE 2–3', instruction: 'Easy swimming. Build range of motion and settle into relaxed breathing.' },
-    { label: 'Main set', minutes: main, effort: session.intensity === 'hard' ? 'RPE 6–8' : 'RPE 3–6', instruction: mainInstruction },
-    { label: 'Cool-down', minutes: cooldown, effort: 'RPE 1–2', instruction: 'Very easy swimming. Finish feeling smoother than you started.' },
-  ];
+function swimBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
+  const blocks = [warmupBlock('swim', split.warmup)];
+
+  if (type === 'swim_technique') {
+    const drillMinutes = Math.min(split.main, Math.max(6, Math.round(split.main * 0.4)));
+    const aerobicMinutes = split.main - drillMinutes;
+    blocks.push(block(
+      'technique',
+      'Technique',
+      'drill',
+      drillMinutes,
+      rpe(2, 4, 'Smooth, not fast'),
+      'Alternate short drill segments with relaxed swimming. Prioritize balance, line, breathing, and a clean catch over speed.',
+    ));
+    appendRemainder(blocks, aerobicMinutes, 'swim');
+  } else if (type === 'swim_quality') {
+    const plan = repeatPlan(split.main, 6, 3, 1);
+    if (plan) {
+      blocks.push(block(
+        'main',
+        'Main set',
+        'intervals',
+        plan.usedMinutes,
+        rpe(6, 8, 'Strong and repeatable'),
+        `Complete ${plan.repeats} × ${plan.workMinutes} min strong with ${plan.recoveryMinutes} min very easy between efforts. Keep stroke quality intact and make the final repeat look like the first.`,
+        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
+      ));
+      appendRemainder(blocks, split.main - plan.usedMinutes, 'swim');
+    } else {
+      appendRemainder(blocks, split.main, 'swim');
+    }
+  } else if (type === 'swim_endurance') {
+    const plan = repeatPlan(split.main, 3, 8, 1);
+    if (plan) {
+      blocks.push(block(
+        'main',
+        'Main set',
+        'intervals',
+        plan.usedMinutes,
+        rpe(3, 5, 'Sustainable'),
+        `Complete ${plan.repeats} × ${plan.workMinutes} min aerobic with ${plan.recoveryMinutes} min easy between. Keep the rest short and preserve mechanics.`,
+        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
+      ));
+      appendRemainder(blocks, split.main - plan.usedMinutes, 'swim');
+    } else {
+      appendRemainder(blocks, split.main, 'swim');
+    }
+  } else {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(3, 5, 'Steady aerobic'), 'Swim steadily at an aerobic effort. Keep breathing controlled and stroke quality consistent.'));
+  }
+
+  blocks.push(cooldownBlock('swim', split.cooldown));
+  return blocks;
 }
 
-function bikeSteps(session: PlannedMultisportSession, warmup: number, main: number, cooldown: number): EndurancePrescriptionStep[] {
-  const title = session.title.toLowerCase();
-  const mainInstruction = title.includes('interval') || title.includes('quality')
-    ? 'Complete controlled work intervals separated by easy spinning. The final interval should look like the first; stop short of failure.'
-    : title.includes('long')
-      ? 'Ride steadily at sustainable aerobic intensity. Keep output controlled enough that this does not become an unplanned threshold session.'
-      : 'Ride at an easy-to-steady aerobic effort with smooth cadence and minimal surging.';
-  return [
-    { label: 'Warm-up', minutes: warmup, effort: 'RPE 2–3', instruction: 'Easy spinning, gradually bringing cadence and effort up.' },
-    { label: 'Main set', minutes: main, effort: session.intensity === 'hard' ? 'RPE 6–8' : 'RPE 3–6', instruction: mainInstruction },
-    { label: 'Cool-down', minutes: cooldown, effort: 'RPE 1–2', instruction: 'Easy spin until breathing and leg tension settle.' },
-  ];
+function bikeBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
+  const blocks = [warmupBlock('bike', split.warmup)];
+
+  if (type === 'bike_quality_intervals') {
+    const plan = repeatPlan(split.main, 4, split.main >= 40 ? 6 : 5, 3);
+    if (plan) {
+      blocks.push(block(
+        'main',
+        'Main set',
+        'intervals',
+        plan.usedMinutes,
+        rpe(6, 8, 'Controlled quality'),
+        `Complete ${plan.repeats} × ${plan.workMinutes} min at a controlled hard effort with ${plan.recoveryMinutes} min easy spinning between. The last interval should be as controlled as the first.`,
+        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
+      ));
+      appendRemainder(blocks, split.main - plan.usedMinutes, 'bike');
+    } else {
+      appendRemainder(blocks, split.main, 'bike');
+    }
+  } else if (type === 'bike_long_aerobic') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(3, 5, 'Durable aerobic'), 'Ride steadily at sustainable aerobic intensity. Avoid turning the long ride into an unplanned threshold session.'));
+  } else if (type === 'bike_recovery') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(1, 2, 'Recovery'), 'Spin very easily with relaxed cadence. This session should reduce stiffness, not create additional training stress.'));
+  } else {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Easy aerobic'), 'Ride at an easy-to-steady aerobic effort with smooth cadence and minimal surging.'));
+  }
+
+  blocks.push(cooldownBlock('bike', split.cooldown));
+  return blocks;
 }
 
-function runSteps(session: PlannedMultisportSession, warmup: number, main: number, cooldown: number): EndurancePrescriptionStep[] {
-  const title = session.title.toLowerCase();
-  const mainInstruction = title.includes('return-to-run')
-    ? 'Follow the explicit return-to-run protocol attached to the athlete plan. Do not convert this placeholder into continuous running or extend the prescribed exposure.'
-    : title.includes('interval') || title.includes('quality')
-      ? 'Use controlled work intervals with easy recovery. Maintain mechanics and finish with reserve.'
-      : title.includes('long')
-        ? 'Run at a sustainable aerobic effort. Duration should reflect established run capacity rather than goal-distance ambition.'
-        : 'Run easily at conversational effort and keep the session deliberately low-cost.';
-  return [
-    { label: 'Warm-up', minutes: warmup, effort: 'RPE 1–3', instruction: 'Easy walking/jogging or the warm-up specified by the active run protocol.' },
-    { label: 'Main set', minutes: main, effort: session.intensity === 'hard' ? 'RPE 6–8' : 'RPE 2–5', instruction: mainInstruction },
-    { label: 'Cool-down', minutes: cooldown, effort: 'RPE 1–2', instruction: 'Easy walk/jog to finish without adding extra volume.' },
-  ];
+function runBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
+  const blocks = [warmupBlock('run', split.warmup)];
+
+  if (type === 'run_return_to_run') {
+    blocks.push(block(
+      'main',
+      'Main set',
+      'walk_run',
+      split.main,
+      rpe(2, 4, 'Comfortable'),
+      'Follow the explicit return-to-run protocol attached to the athlete plan. This block is the allotted exposure; do not convert it into continuous running or extend it.',
+    ));
+  } else if (type === 'run_quality_intervals') {
+    const plan = repeatPlan(split.main, 4, split.main >= 28 ? 5 : 4, 2);
+    if (plan) {
+      blocks.push(block(
+        'main',
+        'Main set',
+        'intervals',
+        plan.usedMinutes,
+        rpe(6, 8, 'Fast but controlled'),
+        `Complete ${plan.repeats} × ${plan.workMinutes} min controlled with ${plan.recoveryMinutes} min easy running or walking between. Maintain mechanics and finish with reserve.`,
+        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
+      ));
+      appendRemainder(blocks, split.main - plan.usedMinutes, 'run');
+    } else {
+      appendRemainder(blocks, split.main, 'run');
+    }
+  } else if (type === 'run_long_aerobic') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Conversational'), 'Run at a sustainable aerobic effort. Duration should reflect established run capacity rather than goal-distance ambition.'));
+  } else if (type === 'run_recovery') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(1, 3, 'Very easy'), 'Keep the run deliberately short and easy. Finish with less tension than you started.'));
+  } else {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Conversational'), 'Run easily at conversational effort and keep the session deliberately low-cost.'));
+  }
+
+  blocks.push(cooldownBlock('run', split.cooldown));
+  return blocks;
+}
+
+function blockToStep(item: EndurancePrescriptionBlock): EndurancePrescriptionStep {
+  const effort = item.target.low === item.target.high
+    ? `RPE ${item.target.low}`
+    : `RPE ${item.target.low}–${item.target.high}`;
+  return {
+    label: item.label,
+    minutes: item.totalMinutes,
+    effort,
+    instruction: item.instruction,
+  };
 }
 
 function guardrailsFor(session: PlannedMultisportSession): string[] {
