@@ -56,8 +56,9 @@ describe('athlete-facing workout naming catalog', () => {
 
   it('keeps each calendar event stable while rotating recurring workout shapes across dates', () => {
     expect(synthesis).toContain('selectHumanWorkoutName({');
-    expect(synthesis).toContain('`${event.id}|${event.startAt.slice(0, 10)}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`');
-    expect(synthesis).toContain('`${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`');
+    expect(synthesis).toContain('`${event.id}|${date}|${event.discipline}|${raw}|${durationMinutes}|${intensity}|${contextFingerprint}`');
+    expect(synthesis).toContain('`${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}|${contextFingerprint}`');
     expect(synthesis).toContain('generatedNameIntents');
+    expect(synthesis).toContain('cached?.fingerprint === contextFingerprint');
   });
 });
