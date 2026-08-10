@@ -67,7 +67,7 @@ function optimizeWeek(
           if (!placement) continue;
           const location = facilityLocations[0]!;
           const outingId = `outing:${date}:${safeId(swim.id)}:${safeId(strength.id)}`;
-          const note = `Bundled into one visit at ${location.name}: swim and support strength fit inside the same availability window.`;
+          const note = `Combined into one training outing at ${location.name}: swim and support strength fit inside the same availability window.`;
           const swimTime = formatAvailabilityTime(placement.swimStart) ?? 'the selected time';
           const strengthTime = formatAvailabilityTime(placement.strengthStart) ?? 'the selected time';
           sessions = sessions.map((session) => {
@@ -273,7 +273,12 @@ function isTrainable(value: string): value is 'swim' | 'bike' | 'run' | 'strengt
 }
 
 function withoutOutingRationale(values: string[]): string[] {
-  return values.filter((line) => !line.startsWith('Bundled into one visit at ') && !line.startsWith('Scheduled for '));
+  return values.filter((line) =>
+    !line.startsWith('Bundled into one visit at ')
+    && !line.startsWith('Combined into one training outing at ')
+    && !line.startsWith('Scheduled for ')
+    && !line.startsWith('Intentional double day:')
+    && !line.startsWith('Intentional double day preserved'));
 }
 
 function addDays(value: string, days: number): string {
