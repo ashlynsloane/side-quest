@@ -1,7 +1,5 @@
 import type {
-  BikeEnvironment,
   ReturnToRunProtocol,
-  RunEnvironment,
   SwimDistanceUnit,
   SwimEnvironment,
 } from '@circuit/planner/endurance-prescription';
@@ -14,8 +12,6 @@ export interface EndurancePrescriptionProfile {
   poolLength: 25 | 50;
   swimDistanceUnit: SwimDistanceUnit;
   cssSecondsPer100?: number;
-  bikeEnvironment: BikeEnvironment;
-  runEnvironment: RunEnvironment;
   returnToRunProtocol?: ReturnToRunProtocol;
   updatedAt: string;
 }
@@ -64,8 +60,6 @@ const DEFAULT_PROFILE: EndurancePrescriptionProfile = {
   swimEnvironment: 'pool',
   poolLength: 25,
   swimDistanceUnit: 'yd',
-  bikeEnvironment: 'outdoor',
-  runEnvironment: 'outdoor',
   updatedAt: new Date(0).toISOString(),
 };
 
@@ -83,8 +77,6 @@ export function loadEndurancePrescriptionProfile(): EndurancePrescriptionProfile
       poolLength: parsed.poolLength === 50 ? 50 : 25,
       swimDistanceUnit: parsed.swimDistanceUnit === 'm' ? 'm' : 'yd',
       ...(validCss(parsed.cssSecondsPer100) ? { cssSecondsPer100: parsed.cssSecondsPer100 } : {}),
-      bikeEnvironment: parsed.bikeEnvironment === 'indoor_trainer' || parsed.bikeEnvironment === 'mountain_bike' ? parsed.bikeEnvironment : 'outdoor',
-      runEnvironment: parsed.runEnvironment === 'treadmill' || parsed.runEnvironment === 'track' || parsed.runEnvironment === 'trail' ? parsed.runEnvironment : 'outdoor',
       ...(validProtocol(parsed.returnToRunProtocol) ? { returnToRunProtocol: parsed.returnToRunProtocol } : {}),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString(),
     };
