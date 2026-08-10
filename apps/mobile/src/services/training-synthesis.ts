@@ -5,6 +5,11 @@ import type {
   TrainingCalendarEvent,
 } from '@circuit/domain';
 import type { SportIconKind } from '@/components/sport-icon';
+import {
+  selectWorkoutName,
+  type WorkoutNameIntent,
+  type WorkoutNamePhase,
+} from './workout-name-catalog';
 import type { TrainingHistoryItem } from './training-history';
 
 export interface TrainingSignal {
@@ -13,6 +18,14 @@ export interface TrainingSignal {
   detail: string;
   tone: 'neutral' | 'good' | 'attention';
   route: '/training-history' | '/weekly-review' | '/insights' | '/adaptive-plan';
+}
+
+export interface EnduranceNamingHints {
+  phase?: WorkoutNamePhase;
+  triathlon?: boolean;
+  weeksToRace?: number;
+  raceName?: string;
+  raceLocation?: string;
 }
 
 export function conciseSessionLabel(input: { discipline?: string; name?: string; title?: string; trainer?: boolean }): string {
@@ -51,50 +64,33 @@ export function conciseSessionLabel(input: { discipline?: string; name?: string;
 
 /**
  * Athlete-facing identity for a generated endurance session. Internal planner
- * titles remain semantic so prescription inference stays stable; the product
- * can still sound like a coach instead of exposing planner taxonomy.
+ * titles remain semantic so prescription inference stays stable; athlete copy
+ * comes from a larger curated catalog with stable workout identities.
  */
-export function generatedEnduranceDisplayName(event: TrainingCalendarEvent): string {
+export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hints: EnduranceNamingHints = {}): string {
   if (event.discipline !== 'swim' && event.discipline !== 'bike' && event.discipline !== 'run') {
     return conciseSessionLabel({ discipline: event.discipline, title: event.title });
   }
 
   const raw = cleanGeneratedTitle(event.title);
-  if (isExpressiveWorkoutTitle(raw, event.discipline)) return raw;
-
   const durationMinutes = eventDurationMinutes(event);
   const intensity = generatedIntensity(event);
   const text = `${raw} ${event.description ?? ''}`.toLowerCase();
+  const intents = generatedNameIntents(event.discipline, text, intensity, durationMinutes);
 
-  if (event.discipline === 'bike') {
-    if (/recovery|flush/.test(text)) return 'Leg Flush';
-    if (intensity === 'hard' || /quality|interval|threshold|tempo|vo2/.test(text)) {
-      if (/threshold/.test(text)) return 'Threshold Business';
-      if (/tempo/.test(text)) return 'Tempo Engine';
-      return 'Cruise Control';
-    }
-    if (/long/.test(text) || durationMinutes >= 150) return 'Long Haul';
-    if (durationMinutes <= 65) return 'Coffee Ride';
-    if (durationMinutes <= 110) return 'T-Shirt Ride';
-    return 'Easy Does It';
-  }
-
-  if (event.discipline === 'swim') {
-    if (/technique|drill/.test(text)) return 'Feel for the Water';
-    if (intensity === 'hard' || /quality|threshold|fast|sprint/.test(text)) return 'Fast & Smooth';
-    if (/long|endurance/.test(text) || durationMinutes >= 60) return 'Long Water';
-    if (intensity === 'moderate') return 'Steady Blue';
-    return 'Smooth Operator';
-  }
-
-  if (/return-to-run|return to run|run.?walk/.test(text)) return 'Run / Walk Rebuild';
-  if (/recovery|shakeout/.test(text)) return 'Shakeout';
-  if (intensity === 'hard' || /quality|interval|threshold|tempo|10k|5k/.test(text)) {
-    if (/tempo|threshold|10k/.test(text)) return 'Tempo Control';
-    return 'Fast Feet';
-  }
-  if (/long/.test(text) || durationMinutes >= 75) return 'Long Miles';
-  return 'Easy Miles';
+  return selectWorkoutName({
+    discipline: event.discipline,
+    intents,
+    intensity,
+    durationMinutes,
+    phase: hints.phase,
+    triathlon: hints.triathlon,
+    weeksToRace: hints.weeksToRace,
+    raceName: hints.raceName,
+    raceLocation: hints.raceLocation,
+    environment: generatedEnvironment(event.discipline, text),
+    seedKey: `${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
+  });
 }
 
 /**
@@ -102,20 +98,69 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent): str
  * generated workout returns later, it receives the same athlete-facing name.
  */
 export function plannedStrengthDisplayName(session: PlannedStrengthSession): string {
-  const names = session.purpose === 'swim_support'
-    ? ['Catch & Core', 'Poolside Pull', 'Swim Strong', 'Lats & Lines']
+  const intent: WorkoutNameIntent = session.purpose === 'swim_support'
+    ? 'swim_support'
     : session.purpose === 'posterior_durability'
-      ? ['Chain Reaction', 'Hinge & Hold', 'Backside Business', 'Posterior Power']
+      ? 'posterior_durability'
       : session.purpose === 'single_leg_durability'
-        ? ['Single-Leg Armor', 'One-Leg Engine', 'Stability + Drive', 'Strong on One']
+        ? 'single_leg_durability'
         : session.purpose === 'maintenance'
-          ? ['Hold the Line', 'Strength Tune-Up', 'Keep It Sharp', 'Durability Circuit']
-          : ['Engine Room', 'All Systems Go', 'Base Camp Strength', 'Built to Last'];
+          ? 'maintenance'
+          : 'general_strength';
 
   const fingerprint = session.workout.stations
     .flatMap((station) => [station.purpose, ...station.exercises.map((exercise) => exercise.exerciseSnapshot.name)])
     .join('|');
-  return names[stableIndex(fingerprint || session.workout.name || session.title, names.length)]!;
+
+  return selectWorkoutName({
+    discipline: 'strength',
+    intents: [intent],
+    durationMinutes: Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60)),
+    seedKey: fingerprint || session.workout.name || session.title,
+  });
+}
+
+function generatedNameIntents(
+  discipline: 'swim' | 'bike' | 'run',
+  text: string,
+  intensity: 'easy' | 'moderate' | 'hard',
+  durationMinutes: number,
+): WorkoutNameIntent[] {
+  const intents: WorkoutNameIntent[] = [];
+  const add = (intent: WorkoutNameIntent) => { if (!intents.includes(intent)) intents.push(intent); };
+
+  if (/recovery|flush|shakeout|very easy/.test(text)) add('recovery');
+  if (/fartlek|change of pace|change-up|cadence change/.test(text)) add('fartlek');
+  if (/technique|drill|form|catch/.test(text)) add('technique');
+  if (/progressive|negative split|descending|strong finish|build within/.test(text)) add('progressive');
+  if (/threshold|10k|cruise control/.test(text)) add('threshold');
+  if (/tempo|steady state|sweet spot/.test(text)) add('tempo');
+  if (/interval|repeats|vo2|sprint|quality/.test(text)) add('intervals');
+  if (/long|endurance|time on feet|long aerobic/.test(text)) add('long');
+  if (/race|brick|aero bar|transition/.test(text)) add('race_specific');
+  if (/brick|t1|t2/.test(text)) add('brick');
+
+  if (discipline === 'run' && /return.?to.?run|run.?walk|rebuild/.test(text)) add('return_to_run');
+  if (/aerobic|steady|easy/.test(text) || intensity !== 'hard') add('aerobic');
+  if (intensity === 'easy') add('easy');
+
+  if (discipline === 'bike' && durationMinutes >= 150) add('long');
+  if (discipline === 'swim' && durationMinutes >= 60 && !intents.includes('technique')) add('long');
+  if (discipline === 'run' && durationMinutes >= 75 && !intents.includes('return_to_run')) add('long');
+
+  if (!intents.length) add(intensity === 'hard' ? 'intervals' : 'aerobic');
+  return intents;
+}
+
+function generatedEnvironment(
+  discipline: 'swim' | 'bike' | 'run',
+  text: string,
+): 'pool' | 'open_water' | 'trainer' | 'outdoor' | 'track' | 'trail' | undefined {
+  if (discipline === 'swim') return /open water|ocean|lake/.test(text) ? 'open_water' : 'pool';
+  if (discipline === 'bike') return /trainer|virtual|zwift/.test(text) ? 'trainer' : 'outdoor';
+  if (/track|400m|800m|1600m/.test(text)) return 'track';
+  if (/trail|dirt|gravel/.test(text)) return 'trail';
+  return 'outdoor';
 }
 
 function cleanGeneratedTitle(value: string): string {
@@ -155,15 +200,6 @@ function generatedIntensity(event: TrainingCalendarEvent): 'easy' | 'moderate' |
   if (/quality|interval|threshold|tempo|vo2|race|max/.test(text)) return 'hard';
   if (/moderate|steady/.test(text)) return 'moderate';
   return 'easy';
-}
-
-function stableIndex(value: string, length: number): number {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return Math.abs(hash >>> 0) % Math.max(1, length);
 }
 
 export function sportKind(discipline?: string): SportIconKind {
