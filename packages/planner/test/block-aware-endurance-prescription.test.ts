@@ -33,6 +33,47 @@ describe('block-aware endurance prescription', () => {
     expect(main && prescription ? enduranceCoachLines(prescription, main)[0]?.secondary : '').toMatch(/Continuous/);
   });
 
+  it('breaks a 3000 yd long-water swim into two different main-set structures', () => {
+    const prescription = buildEndurancePrescription(session({
+      title: 'Endurance · Long Water',
+      durationMinutes: 65,
+      intensity: 'moderate',
+    }), {
+      swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'strong' },
+    });
+    const main = prescription?.blocks.find((block) => block.id === 'main');
+    const secondary = prescription?.blocks.find((block) => block.id === 'secondary');
+    const mainText = main && prescription ? enduranceCoachLines(prescription, main)[0]?.text ?? '' : '';
+    const secondaryText = secondary && prescription ? enduranceCoachLines(prescription, secondary)[0]?.text ?? '' : '';
+
+    expect(prescription?.totalDistance).toBe(3000);
+    expect(main?.repeatDistance).toBe(300);
+    expect(main?.repeats).toBe(4);
+    expect(secondary?.repeatDistance).toBe(200);
+    expect(secondary?.repeats).toBe(6);
+    expect(mainText).not.toContain('600');
+    expect(`${mainText} ${secondaryText}`).toContain('300 yd');
+    expect(`${mainText} ${secondaryText}`).toContain('200 yd');
+  });
+
+  it('keeps a 3000 yd swim fartlek varied instead of repeating the same 100 yd pattern for the whole main set', () => {
+    const prescription = buildEndurancePrescription(session({
+      title: 'Fartlek · Change of Pace',
+      durationMinutes: 65,
+      intensity: 'moderate',
+    }), {
+      swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'strong' },
+    });
+    const main = prescription?.blocks.find((block) => block.id === 'main');
+    const secondary = prescription?.blocks.find((block) => block.id === 'secondary');
+
+    expect(prescription?.totalDistance).toBe(3000);
+    expect(main?.shapeId).toBe('swim-fartlek-50-25-25');
+    expect(main?.repeats).toBe(12);
+    expect(secondary?.totalDistance).toBe(1200);
+    expect(secondary?.repeatDistance).toBe(200);
+  });
+
   it('turns an aerobic bike into a cadence fartlek without increasing the approved 90-minute dose', () => {
     const prescription = buildEndurancePrescription(session({
       discipline: 'bike',
