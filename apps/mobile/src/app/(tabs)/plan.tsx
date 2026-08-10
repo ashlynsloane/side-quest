@@ -18,7 +18,7 @@ import {
 } from '@/services/database';
 import { loadTrainingAvailabilityProfile } from '@/services/training-availability';
 import type { TrainingOutingScheduledSession } from '@/services/training-outings';
-import { conciseSessionLabel } from '@/services/training-synthesis';
+import { conciseSessionLabel, plannedStrengthDisplayName } from '@/services/training-synthesis';
 import { SIDE_QUEST_PLAN_SOURCE_ID, type GeneratedWholeAthleteBlock } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
@@ -355,7 +355,7 @@ function weekDays(
       return [{
         id: session.id,
         kind: 'strength' as const,
-        title: strengthDisplayTitle(session),
+        title: plannedStrengthDisplayName(session),
         meta: [time, formatTrainingDuration(duration), status].filter(Boolean).join(' · '),
         session: displaySession,
         sortAt: planned?.scheduledStartAt ?? `${iso}T23:58:00`,
@@ -440,35 +440,6 @@ function formatTrainingDuration(minutes: number): string {
   const hourLabel = `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
   if (!remainder) return hourLabel;
   return `${hourLabel}, ${remainder} ${remainder === 1 ? 'min' : 'mins'}`;
-}
-
-function strengthDisplayTitle(session: PlannedStrengthSession): string {
-  const role = session.purpose === 'posterior_durability'
-    ? 'Posterior Chain'
-    : session.purpose === 'swim_support'
-      ? 'Swim Support'
-      : session.purpose === 'single_leg_durability'
-        ? 'Single-Leg Strength'
-        : session.purpose === 'maintenance'
-          ? 'Strength Maintenance'
-          : session.title;
-  const anchors = uniqueStrings(session.workout.stations.flatMap((station) =>
-    station.exercises.slice(0, 1).map((exercise) => compactExerciseName(exercise.exerciseSnapshot.name))));
-  return anchors.length ? `${role} · ${anchors.slice(0, 2).join(' + ')}` : session.title;
-}
-
-function compactExerciseName(value: string): string {
-  return value
-    .replace(/^Dumbbell\s+/i, 'DB ')
-    .replace(/^Kettlebell\s+/i, 'KB ')
-    .replace(/^Barbell\s+/i, 'BB ')
-    .replace(/^Cable\s+/i, 'Cable ')
-    .replace(/Romanian Deadlift/gi, 'RDL')
-    .trim();
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
 }
 
 function stripLeadingTiming(value: string): string {
