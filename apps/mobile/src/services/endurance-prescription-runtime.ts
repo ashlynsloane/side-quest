@@ -1,11 +1,13 @@
-import type { TrainingCalendarEvent } from '@circuit/domain';
+import type { PerformanceGoal, TrainingCalendarEvent } from '@circuit/domain';
 import {
   buildEndurancePrescription,
+  type EndurancePrescriptionContext,
   type EnduranceSessionPrescription,
 } from '@circuit/planner/endurance-prescription';
 import type { PlannedMultisportSession, SessionIntensity } from '@circuit/planner/multisport';
 
-import { getTrainingCalendarEvents } from './database';
+import { getLatestTrainingBlock, getTrainingCalendarEvents } from './database';
+import { loadEndurancePrescriptionProfile } from './endurance-profile';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from './whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
 
@@ -20,29 +22,52 @@ export async function loadEndurancePrescriptionPreview(
   date: string,
 ): Promise<EndurancePrescriptionPreview | null> {
   if (!eventId || !date) return null;
-  const events = await getTrainingCalendarEvents({
-    from: `${addDays(date, -1)}T00:00:00.000Z`,
-    to: `${addDays(date, 2)}T23:59:59.999Z`,
-  });
+  const [events, savedBlock] = await Promise.all([
+    getTrainingCalendarEvents({
+      from: `${addDays(date, -1)}T00:00:00.000Z`,
+      to: `${addDays(date, 2)}T23:59:59.999Z`,
+    }),
+    getLatestTrainingBlock(),
+  ]);
   const event = events.find((candidate) => candidate.id === eventId);
   if (!event || !isEnduranceEvent(event)) return null;
+  const context = prescriptionContext(savedBlock?.block.goal);
 
   if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID) {
     const generated = await refreshLatestWholeAthletePlan().catch(() => null);
     const planned = generated ? resolveWholeAthleteSession(event, generated) : null;
     if (planned) {
-      const prescription = buildEndurancePrescription(toPrescriptionSession(planned));
+      const prescription = buildEndurancePrescription(toPrescriptionSession(planned), context);
       if (prescription) return { event, prescription, source: 'whole_athlete_plan' };
     }
   }
 
   const fallback = calendarEventToPrescriptionSession(event);
-  const prescription = fallback ? buildEndurancePrescription(fallback) : null;
+  const prescription = fallback ? buildEndurancePrescription(fallback, context) : null;
   return prescription ? { event, prescription, source: 'calendar_fallback' } : null;
 }
 
 type GeneratedWholeAthletePlan = NonNullable<Awaited<ReturnType<typeof refreshLatestWholeAthletePlan>>>;
 type WholeAthleteSession = GeneratedWholeAthletePlan['weeks'][number]['sessions'][number];
+
+function prescriptionContext(goal: PerformanceGoal | undefined): EndurancePrescriptionContext {
+  const profile = loadEndurancePrescriptionProfile();
+  return {
+    goalTerrain: goal?.terrain,
+    swim: {
+      environment: profile.swimEnvironment,
+      poolLength: profile.poolLength,
+      distanceUnit: profile.swimDistanceUnit,
+      cssSecondsPer100: profile.cssSecondsPer100,
+      proficiency: goal?.capacityProfile?.swimProficiency,
+    },
+    bike: { environment: profile.bikeEnvironment },
+    run: {
+      environment: profile.runEnvironment,
+      returnToRunProtocol: profile.returnToRunProtocol,
+    },
+  };
+}
 
 function resolveWholeAthleteSession(
   event: TrainingCalendarEvent,
