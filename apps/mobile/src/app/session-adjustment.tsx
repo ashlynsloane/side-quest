@@ -95,7 +95,7 @@ export default function SessionAdjustmentScreen() {
     <View>
       <V23SectionHeader>PLANNED</V23SectionHeader>
       {sessionTitle ? <V23Card style={styles.sessionCard}>
-        <View style={styles.sessionIcon}><V23Icon name="strength" color={tokens.accent} size={19} /></View>
+        <View style={styles.sessionIcon}><V23Icon name="plan" color={tokens.accent} size={19} /></View>
         <View style={styles.sessionCopy}>
           <Text style={styles.sessionEyebrow}>TODAY’S STRENGTH</Text>
           <Text style={styles.sessionTitle}>{sessionTitle}</Text>
