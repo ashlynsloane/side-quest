@@ -419,7 +419,13 @@ function dayDifference(left: string, right: string): number {
 }
 
 function schedulePriority(left: WholeAthletePlannedSession, right: WholeAthletePlannedSession): number {
-  const rank = (session: WholeAthletePlannedSession) => session.keySession || isHard(session) ? 0 : /long/i.test(session.title) ? 1 : session.discipline === 'strength' ? 2 : 3;
+  const rank = (session: WholeAthletePlannedSession) => {
+    if (session.discipline === 'run' && /return-to-run/i.test(session.title)) return 0;
+    if (session.keySession || isHard(session)) return 1;
+    if (/long/i.test(session.title)) return 2;
+    if (session.discipline === 'strength') return 3;
+    return 4;
+  };
   return rank(left) - rank(right) || left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
 }
 
