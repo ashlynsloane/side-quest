@@ -106,12 +106,34 @@ const SERIOUS_OR_STALE_NAMES = new Set([
 ]);
 
 const PLAYFUL_NAMES = new Set(PLAYFUL_WORKOUT_NAMES.map((entry) => entry.name));
+const HARD_QUALITY_INTENTS = new Set<WorkoutNameIntent>(['fartlek', 'tempo', 'threshold', 'intervals', 'progressive', 'brick', 'race_specific']);
+const HARD_DURATION_GATES = new Map<string, { min?: number; max?: number }>([
+  ['Coffee Ride', { max: 75 }],
+  ['T-Shirt Ride', { min: 45, max: 75 }],
+  ['Helmet Hair Hour', { min: 45, max: 75 }],
+  ['Absolutely No KOMs', { max: 90 }],
+  ['Pocket Full of Snacks', { min: 120 }],
+  ['Snack Acquisition Ride', { min: 120 }],
+  ['The Snack Pocket Tour', { min: 120 }],
+  ['The Snack Loop', { min: 120 }],
+  ['Bib Shorts Business Casual', { min: 150 }],
+  ['Two Bottles Minimum', { min: 150 }],
+  ['The Long Way Home', { min: 150 }],
+  ['Ride Bikes, Eat Snacks', { min: 150 }],
+  ['Long Haul', { min: 150 }],
+  ['Bottle, Gel, Repeat', { min: 150 }],
+  ['All-Day Legs', { min: 180 }],
+  ['Three Hours of Snacks', { min: 180 }],
+  ['Tiny Run Club', { max: 30 }],
+  ['A Very Small Run', { max: 30 }],
+  ['Twenty Minutes of Character Development', { min: 18, max: 25 }],
+]);
 
 /**
- * Selects an athlete-facing name with two rules the base catalog intentionally
- * does not enforce:
+ * Selects an athlete-facing name with three product rules:
  * 1) specific session identity beats generic easy/aerobic language;
- * 2) playful copy gets a meaningful preference over coaching-poster copy.
+ * 2) playful copy gets a meaningful preference over coaching-poster copy;
+ * 3) names that imply a dose or effort are ineligible when the workout does not match it.
  */
 export function selectHumanWorkoutName(context: WorkoutNamingContext): string {
   const recent = new Set((context.recentNames ?? []).map((value) => value.toLowerCase()));
@@ -122,14 +144,18 @@ export function selectHumanWorkoutName(context: WorkoutNamingContext): string {
     .filter((entry) => !entry.triathlonOnly || context.triathlon)
     .filter((entry) => !entry.minMinutes || (context.durationMinutes ?? 0) >= entry.minMinutes)
     .filter((entry) => !entry.maxMinutes || (context.durationMinutes ?? Number.POSITIVE_INFINITY) <= entry.maxMinutes)
+    .filter((entry) => passesHardDurationGate(entry, context))
+    .filter((entry) => passesIntensitySemantics(entry, context))
     .filter((entry) => !entry.environments?.length || !context.environment || entry.environments.includes(context.environment));
 
   const dominantPool = dominant
     ? eligible.filter((entry) => entry.intents?.includes(dominant))
     : [];
   const candidates = dominantPool.length >= 3 ? dominantPool : eligible;
+  const freshCandidates = candidates.filter((entry) => !recent.has(entry.name.toLowerCase()));
+  const selectionPool = freshCandidates.length ? freshCandidates : candidates;
 
-  const scored = candidates
+  const scored = selectionPool
     .map((entry) => ({ entry, score: humanScore(entry, context, recent, dominant) }))
     .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
 
@@ -157,12 +183,40 @@ function dominantIntent(context: WorkoutNamingContext): WorkoutNameIntent | unde
   if (has('progressive')) return 'progressive';
 
   const duration = context.durationMinutes ?? 0;
-  if (has('long') || (context.discipline === 'bike' && duration >= 150) || (context.discipline === 'run' && duration >= 75)) return 'long';
+  if ((has('long') && duration >= minimumLongMinutes(context.discipline))
+    || (context.discipline === 'bike' && duration >= 150)
+    || (context.discipline === 'run' && duration >= 75)) return 'long';
   if (has('tempo')) return 'tempo';
   if (has('intervals')) return 'intervals';
   if (has('easy')) return 'easy';
   if (has('aerobic')) return 'aerobic';
   return context.intents[0];
+}
+
+function passesHardDurationGate(entry: WorkoutNameEntry, context: WorkoutNamingContext): boolean {
+  const duration = context.durationMinutes ?? 0;
+  const explicit = HARD_DURATION_GATES.get(entry.name);
+  if (explicit?.min != null && duration < explicit.min) return false;
+  if (explicit?.max != null && duration > explicit.max) return false;
+  if (entry.intents?.includes('long') && duration < minimumLongMinutes(context.discipline)) return false;
+  return true;
+}
+
+function passesIntensitySemantics(entry: WorkoutNameEntry, context: WorkoutNamingContext): boolean {
+  const intents = entry.intents ?? [];
+  if (context.intensity === 'hard') {
+    if (entry.intensities?.length && !entry.intensities.includes('hard')) return false;
+    if (intents.length && !intents.some((intent) => HARD_QUALITY_INTENTS.has(intent))) return false;
+  }
+  if (context.intensity === 'moderate' && intents.length && intents.every((intent) => intent === 'easy' || intent === 'recovery')) return false;
+  return true;
+}
+
+function minimumLongMinutes(discipline: WorkoutNameDiscipline): number {
+  if (discipline === 'bike') return 120;
+  if (discipline === 'run') return 75;
+  if (discipline === 'swim') return 50;
+  return 0;
 }
 
 function humanScore(
