@@ -116,7 +116,7 @@ function calendarEventToPrescriptionSession(event: TrainingCalendarEvent): Plann
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
-  const rationale = lines.filter((line) => !line.startsWith('Side Quest generated ·'));
+  const rationale = lines.filter((line) => !line.startsWith('Side Quest generated ·') && !line.startsWith('Side Quest naming ·'));
   return {
     id: event.id,
     date: event.startAt.slice(0, 10),
