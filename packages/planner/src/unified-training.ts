@@ -99,7 +99,9 @@ export interface WeeklyTrainingBudgetInput {
 }
 
 export function normalizeStrengthSession(session: PlannedStrengthSession): UnifiedTrainingSession {
-  const durationMinutes = session.workout?.request?.workMinutes ?? 40;
+  const durationMinutes = session.workout?.estimatedElapsedSeconds
+    ? Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60))
+    : session.workout?.request?.workMinutes ?? 40;
   const intensity: UnifiedIntensity = session.intendedLoad === 'high' ? 'hard' : session.intendedLoad === 'light' ? 'easy' : 'moderate';
   const upperBody = session.purpose === 'swim_support';
   return {
