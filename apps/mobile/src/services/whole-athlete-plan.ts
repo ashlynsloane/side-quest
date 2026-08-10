@@ -38,6 +38,12 @@ import {
   resolveSideQuestPlanOverrideEvent,
   type SideQuestPlanSessionOverride,
 } from './side-quest-plan-overrides';
+import {
+  applyAvailabilityToWholeAthleteWeeks,
+  loadTrainingAvailabilityProfile,
+  type AvailabilityScheduledSession,
+  type AvailabilityScheduledWeekPlan,
+} from './training-availability';
 
 export const SIDE_QUEST_PLAN_SOURCE_ID = 'side_quest_generated_plan';
 const PLAN_EVENT_PREFIX = 'sq_plan_';
@@ -71,7 +77,7 @@ export interface GenerateWholeAthleteBlockInput {
 }
 
 export interface GeneratedWholeAthleteBlock {
-  weeks: WholeAthleteWeekPlan[];
+  weeks: AvailabilityScheduledWeekPlan[];
   generatedEvents: TrainingCalendarEvent[];
 }
 
@@ -92,6 +98,7 @@ export async function generateAndPersistWholeAthleteBlock(
     listEnduranceActivities({ from: lookbackStart, to: new Date().toISOString(), limit: 5_000 }),
   ]);
 
+  const availabilityProfile = loadTrainingAvailabilityProfile();
   const athleteCalendarEvents = calendarEvents.filter((event) => !isSideQuestGeneratedPlanEvent(event));
   const blockEventPrefix = `${PLAN_EVENT_PREFIX}${safeId(input.block.id)}_`;
   const overrides = listSideQuestPlanSessionOverrides()
@@ -108,7 +115,7 @@ export async function generateAndPersistWholeAthleteBlock(
   const frequencyTargets = Object.fromEntries(absentGoalDisciplines.map((discipline) => [discipline, { min: 0, preferred: 0, max: 0 }])) as Partial<Record<TrainableDiscipline, { min: number; preferred: number; max: number }>>;
   if (input.capacity.runStatus === 'not_running') frequencyTargets.run = { min: 0, preferred: 0, max: 0 };
 
-  const weeks: WholeAthleteWeekPlan[] = [];
+  const weeks: AvailabilityScheduledWeekPlan[] = [];
   const generatedEvents: TrainingCalendarEvent[] = [];
   let previousWeek: NonNullable<Parameters<typeof buildWholeAthleteWeek>[0]['previousWeek']> =
     previousWeekFromActivities(recentActivities, firstWeek.weekStartDate);
@@ -178,7 +185,7 @@ export async function generateAndPersistWholeAthleteBlock(
       && input.completedHistory?.length
       && inCurrentWeek(input.progressionDate),
     );
-    const plan = progressionApplies
+    const progressedPlan: WholeAthleteWeekPlan = progressionApplies
       ? applyProgressionToWholeAthleteWeek(
           basePlan,
           buildWholeAthleteProgressionContextFromHistory({
@@ -188,10 +195,11 @@ export async function generateAndPersistWholeAthleteBlock(
           }),
         )
       : basePlan;
+    const scheduledPlan = applyAvailabilityToWholeAthleteWeeks([progressedPlan], availabilityProfile)[0]!;
 
-    weeks.push(plan);
-    previousWeek = plan.sessions;
-    for (const session of plan.sessions) {
+    weeks.push(scheduledPlan);
+    previousWeek = scheduledPlan.sessions;
+    for (const session of scheduledPlan.sessions) {
       if (session.planningCommitment !== 'generated') continue;
       if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') continue;
       generatedEvents.push(plannedSessionToCalendarEvent(session, input.block.id));
@@ -309,7 +317,7 @@ function completedActivityToUnified(activity: EnduranceActivity) {
     durationMinutes,
     intensity,
     cardiovascularDemand: hard ? 'high' as const : intensity === 'moderate' ? 'moderate' as const : 'low' as const,
-    musculoskeletalDemand: discipline === 'run' ? (hard ? 'high' as const : 'moderate' as const) : discipline === 'bike' ? (hard ? 'moderate' as const : 'low' as const) : 'low' as const,
+    musculoskeletalDemand: discipline === 'run' ? (hard ? 'high' as const : 'moderate' as const) : discipline === 'bike' ? (hard ? 'moderate' as const : 'low') : 'low' as const,
     lowerBodyDemand: discipline === 'run' || discipline === 'bike' ? (hard ? 'high' as const : 'moderate' as const) : 'none' as const,
     upperBodyDemand: discipline === 'swim' ? (hard ? 'high' as const : 'moderate' as const) : 'none' as const,
     impact: discipline === 'run' ? (hard ? 'high' as const : 'moderate' as const) : 'none' as const,
@@ -342,18 +350,18 @@ function isTrainingCalendarCommitment(event: TrainingCalendarEvent): boolean {
 }
 
 function plannedSessionToCalendarEvent(
-  session: WholeAthleteWeekPlan['sessions'][number],
+  session: AvailabilityScheduledSession,
   blockId: string,
 ): TrainingCalendarEvent {
-  const startAt = `${session.date}T12:00:00.000Z`;
-  const endAt = new Date(new Date(startAt).getTime() + session.durationMinutes * 60_000).toISOString();
+  const startAt = session.scheduledStartAt ?? `${session.date}T12:00:00.000Z`;
+  const endAt = session.scheduledEndAt ?? new Date(new Date(startAt).getTime() + session.durationMinutes * 60_000).toISOString();
   return {
     id: `${PLAN_EVENT_PREFIX}${safeId(blockId)}_${safeId(session.id)}`,
     sourceId: SIDE_QUEST_PLAN_SOURCE_ID,
     title: session.title,
     startAt,
     endAt,
-    allDay: true,
+    allDay: !session.scheduledStartAt,
     discipline: session.discipline as 'swim' | 'bike' | 'run',
     description: [
       `Side Quest generated · ${session.durationMinutes} min · ${session.intensity}`,
