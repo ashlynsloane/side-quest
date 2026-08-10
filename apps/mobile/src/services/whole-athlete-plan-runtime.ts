@@ -14,15 +14,20 @@ import {
   getLatestPTProfile,
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
+  listEquipmentProfiles,
+  replaceTrainingCalendarEvents,
   saveTrainingBlock,
 } from './database';
 import { loadApprovedCoachStrategySchedule } from './coach-strategy-state';
 import { loadRaceIntent } from './race-intent-state';
 import { applyCurrentWeekStrengthProgression } from './strength-progression-persistence';
+import { loadTrainingAvailabilityProfile } from './training-availability';
+import { applyTrainingOutingsToGeneratedBlock, type TrainingLocationProfile } from './training-outings';
 import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
 import {
   clearSideQuestGeneratedPlanEvents,
   generateAndPersistWholeAthleteBlock,
+  SIDE_QUEST_PLAN_SOURCE_ID,
   type GeneratedWholeAthleteBlock,
   type WholeAthleteCapacityInput,
   type WholeAthleteHealthPreferences,
@@ -131,10 +136,11 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
   if (strengthProgression.changed) await saveTrainingBlock(workingBlock);
 
   const goal = workingBlock.goal;
+  const capacity = capacityFromGoal(goal);
   const generated = await generateAndPersistWholeAthleteBlock({
     block: workingBlock,
     goal,
-    capacity: capacityFromGoal(goal),
+    capacity,
     healthPreferences: loadWholeAthleteHealthPreferences(),
     activeCheckIn,
     ptProfileActive: Boolean(ptProfile?.active),
@@ -143,8 +149,21 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     progressionDate,
     progressionAsOf,
   });
-  latestReconciledPlan = { blockId: saved.block.id, generated };
-  return generated;
+
+  const [availabilityProfile, locationProfiles] = await Promise.all([
+    Promise.resolve(loadTrainingAvailabilityProfile()),
+    listEquipmentProfiles(),
+  ]);
+  const shaped = applyTrainingOutingsToGeneratedBlock(
+    generated,
+    availabilityProfile,
+    locationProfiles as TrainingLocationProfile[],
+    capacity.runStatus,
+  );
+  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, shaped.generatedEvents);
+
+  latestReconciledPlan = { blockId: saved.block.id, generated: shaped };
+  return shaped;
 }
 
 export function progressionHistoryFromTrainingHistory(
