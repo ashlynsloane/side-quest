@@ -29,28 +29,44 @@ type PreviousRhythmedSession = UnifiedTrainingSession & {
 };
 
 const TRAINABLE = new Set<TrainableDiscipline>(['swim', 'bike', 'run', 'strength']);
-const ENDURANCE = new Set<TrainableDiscipline>(['swim', 'bike', 'run']);
 const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
 
-/**
- * Block-aware wrapper around the governed weekly planner.
- *
- * The base planner still owns safety, volume, health caps, and required frequency.
- * This layer adds longitudinal coaching behavior: stable weekly anchors, a protected
- * lower-load day, and deterministic workout-family rotation across a four-week
- * microcycle. It never increases intensity or duration beyond the base plan.
- */
+/** Standalone rhythm-aware planner retained for isolated block-rhythm tests. */
 export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): WholeAthleteWeekPlan {
-  const base = buildBaseWholeAthleteWeek(input);
+  return applyTrainingBlockRhythm(buildBaseWholeAthleteWeek(input), input);
+}
+
+/**
+ * Apply longitudinal block behavior to an already-governed week plan.
+ *
+ * This deliberately runs after safety / race strategy has decided what work is
+ * allowed. Rhythm may move generated work to an established weekday and may
+ * change the internal workout family, but it never increases duration or
+ * intensity beyond the supplied plan.
+ */
+export function applyTrainingBlockRhythm(
+  base: WholeAthleteWeekPlan,
+  input: WholeAthleteWeeklyPlannerInput,
+): WholeAthleteWeekPlan {
   const previous = (input.previousWeek ?? []) as PreviousRhythmedSession[];
+  const hasPreviousRhythm = previous.some(isTrainable);
   const stage = nextBlockStage(previous);
 
   let sessions = base.sessions.map((session) => ({ ...session })) as RhythmedSession[];
   const recoveryWeekday = chooseRecoveryWeekday(previous, sessions);
 
-  sessions = preserveWeeklyAnchors(sessions, previous, input.weekStartDate, recoveryWeekday);
-  sessions = protectLowerLoadDay(sessions, input.weekStartDate, recoveryWeekday);
+  // Week one establishes the athlete's actual rhythm. We do not reshuffle an
+  // otherwise valid first week simply to manufacture our preferred template.
+  if (hasPreviousRhythm) {
+    sessions = preserveWeeklyAnchors(sessions, previous, input.weekStartDate, recoveryWeekday);
+    sessions = protectLowerLoadDay(sessions, input.weekStartDate, recoveryWeekday);
+  }
   sessions = decorateWorkoutFamilies(sessions, stage);
+
+  const datesChanged = sessions.some((session) => {
+    const original = base.sessions.find((item) => item.id === session.id);
+    return Boolean(original && original.date !== session.date);
+  });
 
   const quality = validateUnifiedWeek(sessions, {
     availableMinutes: input.availableMinutes,
@@ -70,11 +86,18 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   return {
     ...base,
     sessions,
-    doubleDays: summarizeDoubleDays(sessions),
-    guardrails: unique([...base.guardrails, rhythmGuardrail, 'Generated sessions keep a repeatable weekly rhythm unless recovery, availability, or athlete commitments require a move.']),
+    doubleDays: datesChanged ? summarizeDoubleDays(sessions) : base.doubleDays,
+    guardrails: unique([
+      ...base.guardrails,
+      rhythmGuardrail,
+      'Generated sessions keep a repeatable weekly rhythm unless recovery, availability, or athlete commitments require a move.',
+    ]),
     warnings: lowerLoadPreserved
       ? base.warnings
-      : unique([...base.warnings, `Could not fully preserve the ${WEEKDAY_NAMES[recoveryWeekday]} lower-load anchor because fixed training already occupies that day.`]),
+      : unique([
+          ...base.warnings,
+          `Could not fully preserve the ${WEEKDAY_NAMES[recoveryWeekday]} lower-load anchor because fixed training already occupies that day.`,
+        ]),
     quality,
   };
 }
@@ -90,7 +113,7 @@ function nextBlockStage(previous: PreviousRhythmedSession[]): BlockWorkoutStage 
 function chooseRecoveryWeekday(previous: PreviousRhythmedSession[], current: RhythmedSession[]): number {
   const source = previous.some(isTrainable) ? previous : current;
   const fixedCurrent = current.filter((session) => session.planningCommitment !== 'generated' && session.source !== 'side_quest');
-  const candidates = [2, 1, 4, 0, 3, 6, 5]; // favor a mid-week recovery anchor before the weekend.
+  const candidates = [2, 1, 4, 0, 3, 6, 5];
 
   for (const weekday of candidates) {
     if (fixedCurrent.some((session) => weekdayIndex(session.date) === weekday && !isActiveRecovery(session))) continue;
@@ -107,7 +130,6 @@ function preserveWeeklyAnchors(
   weekStartDate: string,
   recoveryWeekday: number,
 ): RhythmedSession[] {
-  if (!previous.some(isTrainable)) return sessions;
   const next = sessions.map((session) => ({ ...session }));
   const disciplines: TrainableDiscipline[] = ['swim', 'bike', 'run', 'strength'];
 
@@ -123,8 +145,7 @@ function preserveWeeklyAnchors(
     for (let ordinal = 0; ordinal < currentSlots.length; ordinal += 1) {
       const target = currentSlots[ordinal];
       const anchor = previousSlots[ordinal];
-      if (!target || !anchor) continue;
-      if (!isRhythmMovable(target.session)) continue;
+      if (!target || !anchor || !isRhythmMovable(target.session)) continue;
       const targetWeekday = weekdayIndex(anchor.date);
       if (targetWeekday === recoveryWeekday && !isActiveRecovery(target.session)) continue;
       const targetDate = addDays(weekStartDate, targetWeekday);
@@ -208,9 +229,9 @@ function compatiblePair(left: RhythmedSession, right: RhythmedSession): boolean 
 function isRhythmMovable(session: RhythmedSession): boolean {
   if (!isTrainable(session)) return false;
   if (session.planningCommitment === 'generated') return true;
-  // Detailed strength is generated by Side Quest upstream but enters the whole-athlete
-  // planner as a fixed session so its actual workout is preserved. Its day may still
-  // follow the stable block rhythm; athlete/calendar commitments remain immovable.
+  // Detailed strength is generated upstream by Side Quest but enters the
+  // whole-athlete planner as fixed so its exact workout remains intact. Its day
+  // may follow the block rhythm; true athlete/calendar commitments may not.
   return session.discipline === 'strength' && session.source === 'side_quest';
 }
 
@@ -362,13 +383,17 @@ function summarizeDoubleDays(sessions: RhythmedSession[]): WholeAthleteWeekPlan[
   }
   return [...byDate.entries()]
     .filter(([, items]) => items.length >= 2)
-    .map(([date, items]) => ({
-      date,
-      sessionIds: items.map((item) => item.id),
-      disciplines: items.map((item) => item.discipline).filter(isTrainableDiscipline),
-      rationale: 'Intentional same-day training: compatible sessions are consolidated while the rest of the weekly rhythm stays stable.',
-      athleteSpecified: items.every((item) => item.planningCommitment !== 'generated'),
-    }));
+    .map(([date, items]) => {
+      const ordered = [...items].sort(compareSessionDate);
+      const explicit = ordered.flatMap((session) => session.rationale).find((line) => line.startsWith('Intentional double day:'));
+      return {
+        date,
+        sessionIds: ordered.map((item) => item.id),
+        disciplines: ordered.map((item) => item.discipline).filter(isTrainableDiscipline),
+        rationale: explicit ?? 'Intentional same-day training: compatible sessions are consolidated while the rest of the weekly rhythm stays stable.',
+        athleteSpecified: ordered.every((item) => item.planningCommitment !== 'generated'),
+      };
+    });
 }
 
 function dayLoad(sessions: Array<UnifiedTrainingSession | RhythmedSession>, weekday: number): number {
