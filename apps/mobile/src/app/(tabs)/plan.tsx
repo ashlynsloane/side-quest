@@ -98,6 +98,14 @@ export default function PlanTab() {
     router.push('/workout-preview' as Href);
   };
 
+  const openEndurance = (event: TrainingCalendarEvent) => {
+    if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(event)) {
+      router.push({ pathname: '/endurance-preview', params: { id: event.id, date: event.startAt.slice(0, 10) } } as Href);
+      return;
+    }
+    router.push('/schedule' as Href);
+  };
+
   if (!block) {
     return <V23Screen contentStyle={styles.page}>
       <ProductHero
@@ -152,10 +160,12 @@ export default function PlanTab() {
                 <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
                 {item.session.completionStatus === 'completed' ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View> : <V23Icon name="chevron" color={tokens.textMuted} size={15} />}
               </Pressable>;
-            })() : <Pressable key={item.id} onPress={() => router.push('/schedule' as Href)} style={styles.sessionRow}>
+            })() : <Pressable key={item.id} onPress={() => openEndurance(item.event)} style={styles.sessionRow}>
               <V23SportPill kind={normalizeSportKind(item.discipline)} />
               <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{item.title}</Text><Text style={styles.sessionMeta}>{item.meta}</Text></View>
-              <View style={[styles.statusDot, { backgroundColor: disciplineColor(item.discipline, tokens.accent) }]} />
+              {item.event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(item.event)
+                ? <V23Icon name="chevron" color={tokens.textMuted} size={15} />
+                : <View style={[styles.statusDot, { backgroundColor: disciplineColor(item.discipline, tokens.accent) }]} />}
             </Pressable>) : <View style={styles.openRow}>
               <SportIcon kind="recovery" color={tokens.textMuted} backgroundColor={tokens.surfaceMuted} size={17} />
               <Text style={styles.openText}>Open / recovery</Text>
@@ -193,7 +203,9 @@ function ToolButton({ icon, title, body, onPress, styles, tokens }: {
   </Pressable>;
 }
 
-type DayItem = { id: string; kind: 'event'; title: string; meta: string; discipline?: string } | { id: string; kind: 'strength'; title: string; meta: string; session: PlannedStrengthSession };
+type DayItem =
+  | { id: string; kind: 'event'; title: string; meta: string; discipline?: string; event: TrainingCalendarEvent }
+  | { id: string; kind: 'strength'; title: string; meta: string; session: PlannedStrengthSession };
 
 function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSession[], anchorDate: string) {
   const start = new Date(`${anchorDate}T12:00:00`);
@@ -204,7 +216,7 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
     date.setDate(start.getDate() + index);
     const iso = date.toISOString().slice(0, 10);
     const items: DayItem[] = [
-      ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline })),
+      ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline, event })),
       ...strength.filter((session) => session.date === iso).map((session) => ({ id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.estimatedElapsedSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`, session })),
     ];
     return { date: iso, label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase() + ` ${date.getDate()}`, weekday: new Intl.DateTimeFormat('en-US', { weekday: 'narrow' }).format(date), dayNumber: date.getDate(), items };
@@ -263,6 +275,7 @@ function weekRange(anchorDate: string) { const start = new Date(`${anchorDate}T1
 function formatWeekRange(days: ReturnType<typeof weekDays>) { if (!days.length) return ''; const first = new Date(`${days[0]!.date}T12:00:00`); const last = new Date(`${days[days.length - 1]!.date}T12:00:00`); const firstLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(first); const lastLabel = new Intl.DateTimeFormat('en-US', { month: first.getMonth() === last.getMonth() ? undefined : 'short', day: 'numeric' }).format(last); return `${firstLabel} – ${lastLabel}`; }
 function previousStrengthDate(session: PlannedStrengthSession, sessions: PlannedStrengthSession[]): string | undefined { return sessions.filter((candidate) => candidate.id !== session.id && candidate.date < session.date).sort((left, right) => right.date.localeCompare(left.date))[0]?.date; }
 function nextEnduranceDate(session: PlannedStrengthSession, events: TrainingCalendarEvent[]): string | undefined { return events.filter((event) => event.startAt.slice(0, 10) >= session.date && event.discipline !== 'strength' && event.discipline !== 'rest').sort((left, right) => left.startAt.localeCompare(right.startAt))[0]?.startAt.slice(0, 10); }
+function isEnduranceEvent(event: TrainingCalendarEvent) { return event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run'; }
 function disciplineColor(discipline: string | undefined, accent: string) { if (discipline === 'swim') return '#267BA6'; if (discipline === 'bike') return '#C58322'; if (discipline === 'run') return '#526E9A'; if (discipline === 'strength') return accent; return '#6E7C76'; }
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function addDays(value: string, days: number) { const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10); }
