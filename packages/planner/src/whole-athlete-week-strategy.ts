@@ -18,10 +18,10 @@ import {
   type TrainableDiscipline,
   type WholeAthleteWeeklyPlannerInput,
   type WholeAthleteWeekPlan,
-} from './whole-athlete-week-rhythm';
+} from './whole-athlete-week';
 import { validateUnifiedWeek } from './unified-training';
 
-export * from './whole-athlete-week-rhythm';
+export * from './whole-athlete-week';
 
 let configuredStrategy: CoachSemanticStrategyChange | undefined;
 let configuredRaceIntent: RaceIntentV2 | undefined;
