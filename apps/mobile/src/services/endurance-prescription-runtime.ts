@@ -53,7 +53,6 @@ type WholeAthleteSession = GeneratedWholeAthletePlan['weeks'][number]['sessions'
 function prescriptionContext(goal: PerformanceGoal | undefined): EndurancePrescriptionContext {
   const profile = loadEndurancePrescriptionProfile();
   return {
-    goalTerrain: goal?.terrain,
     swim: {
       environment: profile.swimEnvironment,
       poolLength: profile.poolLength,
@@ -61,9 +60,7 @@ function prescriptionContext(goal: PerformanceGoal | undefined): EndurancePrescr
       cssSecondsPer100: profile.cssSecondsPer100,
       proficiency: goal?.capacityProfile?.swimProficiency,
     },
-    bike: { environment: profile.bikeEnvironment },
     run: {
-      environment: profile.runEnvironment,
       returnToRunProtocol: profile.returnToRunProtocol,
     },
   };
