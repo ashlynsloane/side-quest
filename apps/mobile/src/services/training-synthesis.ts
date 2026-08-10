@@ -38,6 +38,8 @@ type NameAssignmentItem =
   | { kind: 'endurance'; id: string; date: string; discipline: 'swim' | 'bike' | 'run'; event: TrainingCalendarEvent }
   | { kind: 'strength'; id: string; date: string; discipline: 'strength'; session: PlannedStrengthSession };
 
+const runtimeNameAssignments = new Map<string, NameHistoryItem>();
+
 export function workoutNameAssignmentKey(kind: 'endurance' | 'strength', id: string): string {
   return `${kind}:${id}`;
 }
@@ -77,8 +79,10 @@ export function buildWorkoutNameAssignments(
     const name = item.kind === 'endurance'
       ? generatedEnduranceDisplayName(item.event, { recentNames })
       : plannedStrengthDisplayName(item.session, { recentNames });
-    assignments.set(workoutNameAssignmentKey(item.kind, item.id), name);
+    const key = workoutNameAssignmentKey(item.kind, item.id);
+    assignments.set(key, name);
     history.push({ discipline: item.discipline, date: item.date, name });
+    runtimeNameAssignments.set(key, { discipline: item.discipline, date: item.date, name });
   }
   return assignments;
 }
@@ -128,13 +132,21 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
     return conciseSessionLabel({ discipline: event.discipline, title: event.title });
   }
 
+  const date = event.startAt.slice(0, 10);
+  const assignmentKey = workoutNameAssignmentKey('endurance', event.id);
+  if (hints.recentNames === undefined) {
+    const cached = runtimeNameAssignments.get(assignmentKey);
+    if (cached) return cached.name;
+  }
+
   const raw = cleanGeneratedTitle(event.title);
   const durationMinutes = eventDurationMinutes(event);
   const intensity = generatedIntensity(event);
   const text = `${raw} ${event.description ?? ''}`.toLowerCase();
   const intents = generatedNameIntents(event.discipline, text, intensity, durationMinutes);
+  const recentNames = hints.recentNames ?? cooldownNames([...runtimeNameAssignments.values()], event.discipline, date);
 
-  return selectHumanWorkoutName({
+  const name = selectHumanWorkoutName({
     discipline: event.discipline,
     intents,
     intensity,
@@ -145,9 +157,11 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
     raceName: hints.raceName,
     raceLocation: hints.raceLocation,
     environment: generatedEnvironment(event.discipline, text),
-    seedKey: `${event.id}|${event.startAt.slice(0, 10)}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
-    recentNames: hints.recentNames,
+    seedKey: `${event.id}|${date}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
+    recentNames,
   });
+  runtimeNameAssignments.set(assignmentKey, { discipline: event.discipline, date, name });
+  return name;
 }
 
 /**
@@ -156,6 +170,12 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
  * exactly the same thing for an entire block.
  */
 export function plannedStrengthDisplayName(session: PlannedStrengthSession, hints: StrengthNamingHints = {}): string {
+  const assignmentKey = workoutNameAssignmentKey('strength', session.id);
+  if (hints.recentNames === undefined) {
+    const cached = runtimeNameAssignments.get(assignmentKey);
+    if (cached) return cached.name;
+  }
+
   const intent: WorkoutNameIntent = session.purpose === 'swim_support'
     ? 'swim_support'
     : session.purpose === 'posterior_durability'
@@ -169,14 +189,17 @@ export function plannedStrengthDisplayName(session: PlannedStrengthSession, hint
   const fingerprint = session.workout.stations
     .flatMap((station) => [station.purpose, ...station.exercises.map((exercise) => exercise.exerciseSnapshot.name)])
     .join('|');
+  const recentNames = hints.recentNames ?? cooldownNames([...runtimeNameAssignments.values()], 'strength', session.date);
 
-  return selectHumanWorkoutName({
+  const name = selectHumanWorkoutName({
     discipline: 'strength',
     intents: [intent],
     durationMinutes: Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60)),
     seedKey: `${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`,
-    recentNames: hints.recentNames,
+    recentNames,
   });
+  runtimeNameAssignments.set(assignmentKey, { discipline: 'strength', date: session.date, name });
+  return name;
 }
 
 function cooldownNames(history: NameHistoryItem[], discipline: CooldownDiscipline, date: string): string[] {
