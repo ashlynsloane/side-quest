@@ -50,7 +50,11 @@ export function defaultRaceIntent(
     : legacyPriority === 'race'
       ? 'best_overall'
       : 'strong_finish';
-  const defaultPriority: CoachStrategyObjective = legacyPriority === 'finish' ? 'maintain' : 'develop';
+  // A balanced race plan should not silently request extra development in every
+  // discipline. "Develop" is reserved for an explicit athlete/Coach emphasis;
+  // maintain here means preserve the base goal-specific dose and let phase,
+  // history, and progression policy decide what actually moves this week.
+  const defaultPriority: CoachStrategyObjective = legacyPriority === 'race' ? 'develop' : 'maintain';
   const disciplinePriorities = Object.fromEntries(
     disciplines.map((discipline) => [discipline, defaultPriority]),
   ) as RaceIntentV2['disciplinePriorities'];
@@ -269,12 +273,12 @@ function isTradeoff(value: unknown): value is CoachStrategyTradeoff {
   return value === 'preserve_balance' || value === 'moderate_tradeoff' || value === 'aggressive_specialization';
 }
 
-function isEnduranceDiscipline(value: unknown): value is EnduranceDiscipline {
-  return value === 'swim' || value === 'bike' || value === 'run';
-}
-
 function isStrategyObjective(value: unknown): value is CoachStrategyObjective {
   return value === 'minimum_viable' || value === 'maintain' || value === 'develop' || value === 'primary_focus' || value === 'maximize';
+}
+
+function isEnduranceDiscipline(value: unknown): value is EnduranceDiscipline {
+  return value === 'swim' || value === 'bike' || value === 'run';
 }
 
 function isTargetKind(value: unknown): value is RaceTargetKind {
