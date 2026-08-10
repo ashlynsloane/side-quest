@@ -6,8 +6,8 @@ import type {
 } from '@circuit/domain';
 import { explainPlannedStrengthSession } from '@circuit/planner';
 import { COACH_QUICK_SIGNALS, type CoachQuickSignal } from '@circuit/planner/coach-message-adaptation';
-import { useFocusEffect, useRouter, type Href } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
@@ -25,6 +25,8 @@ import {
   undoLatestCoachIntervention,
 } from '@/services/coach-closed-loop-runtime';
 import type { CoachClosedLoopSummary, CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
+import { answerEnduranceEnvironmentQuestion } from '@/services/endurance-environment-coach';
+import { loadEndurancePrescriptionPreview } from '@/services/endurance-prescription-runtime';
 import { refreshCoachObservedOutcomes } from '@/services/coach-observed-outcomes';
 import { buildCoachOperatingInbox, type CoachOperatingInboxItem } from '@/services/coach-operating-inbox';
 import {
@@ -47,6 +49,10 @@ import type { DesignTokens } from '@/theme';
 
 export default function CoachScreenV2() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ draft?: string; enduranceId?: string; enduranceDate?: string }>();
+  const incomingDraft = typeof params.draft === 'string' ? params.draft : '';
+  const enduranceId = typeof params.enduranceId === 'string' ? params.enduranceId : '';
+  const enduranceDate = typeof params.enduranceDate === 'string' ? params.enduranceDate : '';
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const { openPlannedWorkoutPreview, activeWorkout, activePlanLink } = useWorkoutContext();
@@ -69,6 +75,11 @@ export default function CoachScreenV2() {
   const [closedLoopBusy, setClosedLoopBusy] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!incomingDraft) return;
+    setMessage((current) => current.trim() ? current : incomingDraft);
+  }, [incomingDraft]);
 
   const loadCoachData = useCallback(async (isLive: () => boolean = () => true) => {
     const saved = await getLatestTrainingBlock();
@@ -147,6 +158,20 @@ export default function CoachScreenV2() {
     setCoachError(null);
     setCoachResult(null);
     try {
+      if (enduranceId && enduranceDate && message.trim() && !quickSignal) {
+        const endurancePreview = await loadEndurancePrescriptionPreview(enduranceId, enduranceDate).catch(() => null);
+        const environmentAnswer = endurancePreview
+          ? answerEnduranceEnvironmentQuestion(endurancePreview.prescription, message)
+          : null;
+        if (environmentAnswer) {
+          setProposal(null);
+          setSelectedOptionId(null);
+          setCoachResult(environmentAnswer);
+          setMessage('');
+          return;
+        }
+      }
+
       const result = await buildCoachMessageProposalClosedLoop(message, quickSignal);
       if (!result.ok) {
         setConversation(result.conversation ?? conversation);
@@ -264,9 +289,11 @@ export default function CoachScreenV2() {
         <View style={styles.conversationHeadingCopy}>
           <Text style={styles.eyebrow}>{hasThread ? 'COACH THREAD' : 'WHAT CHANGED?'}</Text>
           <Text style={styles.title}>{hasThread ? 'Keep talking.' : 'Your plan can handle a change.'}</Text>
-          <Text style={styles.body}>{hasThread
-            ? 'Add anything that changed since the last message.'
-            : 'Tell Coach about soreness, energy, time, access, or schedule changes.'}</Text>
+          <Text style={styles.body}>{enduranceId && enduranceDate
+            ? 'Ask about terrain, surface, treadmill, trail, hills, or another way to do this endurance workout.'
+            : hasThread
+              ? 'Add anything that changed since the last message.'
+              : 'Tell Coach about soreness, energy, time, access, or schedule changes.'}</Text>
         </View>
       </View>
 
@@ -286,7 +313,7 @@ export default function CoachScreenV2() {
         <TextInput
           value={message}
           onChangeText={(value) => { setMessage(value); setCoachError(null); }}
-          placeholder={hasThread ? 'Tell Side Quest what changed next…' : 'My legs are sore after yesterday’s ride…'}
+          placeholder={enduranceId && enduranceDate ? 'I want to do this uphill…' : hasThread ? 'Tell Side Quest what changed next…' : 'My legs are sore after yesterday’s ride…'}
           placeholderTextColor={tokens.textMuted}
           multiline
           maxLength={500}
@@ -310,12 +337,14 @@ export default function CoachScreenV2() {
           style={({ pressed }) => [styles.sendButton, (busy || (!message.trim() && !quickSignal)) && styles.disabled, pressed && styles.pressed]}
         >
           {buildingProposal ? <ActivityIndicator color="#FFFFFF" /> : <>
-            <Text style={styles.sendButtonText}>{hasThread ? 'Send' : 'Review with Coach'}</Text>
+            <Text style={styles.sendButtonText}>{enduranceId && enduranceDate ? 'Ask Coach' : hasThread ? 'Send' : 'Review with Coach'}</Text>
             <V23Icon name="chevron" color="#FFFFFF" size={17} />
           </>}
         </Pressable>
       </View>
-      <Text style={styles.composerFootnote}>You’ll see any meaningful plan change before it is applied.</Text>
+      <Text style={styles.composerFootnote}>{enduranceId && enduranceDate
+        ? 'Coach keeps the workout’s purpose fixed unless a real prescription change is needed.'
+        : 'You’ll see any meaningful plan change before it is applied.'}</Text>
     </View>
 
     {proposal ? <ProposalReview
