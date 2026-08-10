@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildEndurancePrescription,
+  canonicalEnduranceMinutes,
   returnToRunProtocolMinutes,
   type ReturnToRunProtocol,
 } from '../src/endurance-prescription';
@@ -39,6 +40,15 @@ describe('endurance prescription', () => {
     expect(result?.blocks.reduce((sum, block) => sum + block.totalMinutes, 0)).toBe(120);
     expect(result?.objective).toBe('Aerobic durability');
     expect(result?.whyThisSession).toContain('Placed on Saturday because it is the protected long-session slot.');
+  });
+
+  it('uses coach-like five-minute duration boundaries instead of exposing planner arithmetic', () => {
+    expect(canonicalEnduranceMinutes(83)).toBe(85);
+    const result = buildEndurancePrescription(session({
+      id: 'bike-aerobic-odd', title: 'Aerobic ride', durationMinutes: 83, intensity: 'easy', priority: 'support',
+    }));
+    expect(result?.totalMinutes).toBe(85);
+    expect(result?.blocks.map((item) => item.totalMinutes)).toEqual([15, 60, 10]);
   });
 
   it('uses effort ranges instead of inventing athlete-specific power or running pace thresholds', () => {
@@ -86,6 +96,18 @@ describe('endurance prescription', () => {
     expect(drill?.repeatDistance).toBe(50);
     expect(drill?.repeats).toBeGreaterThanOrEqual(4);
     expect(drill?.restSeconds).toBe(15);
+  });
+
+  it('rounds short technique swims into clean even drill structures', () => {
+    const result = buildEndurancePrescription(session({
+      id: 'swim-technique-odd', discipline: 'swim', title: 'Aerobic + technique swim', durationMinutes: 31, intensity: 'easy', priority: 'support',
+    }), { swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'average' } });
+    const drill = result?.blocks.find((item) => item.kind === 'drill');
+    expect(result?.totalMinutes).toBe(30);
+    expect(drill?.repeats).toBeGreaterThanOrEqual(4);
+    expect((drill?.repeats ?? 1) % 2).toBe(0);
+    expect(drill?.repeats).not.toBe(7);
+    expect(result?.totalDistance).toBe(1400);
   });
 
   it('uses CSS to create real swim pace targets when CSS is explicitly known', () => {
