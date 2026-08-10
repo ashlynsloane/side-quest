@@ -5,11 +5,8 @@ import type {
   TrainingCalendarEvent,
 } from '@circuit/domain';
 import type { SportIconKind } from '@/components/sport-icon';
-import {
-  selectWorkoutName,
-  type WorkoutNameIntent,
-  type WorkoutNamePhase,
-} from './workout-name-catalog';
+import type { WorkoutNameIntent, WorkoutNamePhase } from './workout-name-catalog';
+import { selectHumanWorkoutName } from './workout-name-personality';
 import type { TrainingHistoryItem } from './training-history';
 
 export interface TrainingSignal {
@@ -65,7 +62,8 @@ export function conciseSessionLabel(input: { discipline?: string; name?: string;
 /**
  * Athlete-facing identity for a generated endurance session. Internal planner
  * titles remain semantic so prescription inference stays stable; athlete copy
- * comes from a larger curated catalog with stable workout identities.
+ * comes from a larger curated catalog. A specific calendar event keeps a stable
+ * title, while the same workout shape on a later date can rotate to a new name.
  */
 export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hints: EnduranceNamingHints = {}): string {
   if (event.discipline !== 'swim' && event.discipline !== 'bike' && event.discipline !== 'run') {
@@ -78,7 +76,7 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
   const text = `${raw} ${event.description ?? ''}`.toLowerCase();
   const intents = generatedNameIntents(event.discipline, text, intensity, durationMinutes);
 
-  return selectWorkoutName({
+  return selectHumanWorkoutName({
     discipline: event.discipline,
     intents,
     intensity,
@@ -89,13 +87,14 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
     raceName: hints.raceName,
     raceLocation: hints.raceLocation,
     environment: generatedEnvironment(event.discipline, text),
-    seedKey: `${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
+    seedKey: `${event.id}|${event.startAt.slice(0, 10)}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
   });
 }
 
 /**
- * Stable strength identity derived from workout composition. If the same
- * generated workout returns later, it receives the same athlete-facing name.
+ * Strength names are tied to the specific planned session plus composition.
+ * That keeps a rendered session stable without naming every recurring circuit
+ * exactly the same thing for an entire block.
  */
 export function plannedStrengthDisplayName(session: PlannedStrengthSession): string {
   const intent: WorkoutNameIntent = session.purpose === 'swim_support'
@@ -112,11 +111,11 @@ export function plannedStrengthDisplayName(session: PlannedStrengthSession): str
     .flatMap((station) => [station.purpose, ...station.exercises.map((exercise) => exercise.exerciseSnapshot.name)])
     .join('|');
 
-  return selectWorkoutName({
+  return selectHumanWorkoutName({
     discipline: 'strength',
     intents: [intent],
     durationMinutes: Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60)),
-    seedKey: fingerprint || session.workout.name || session.title,
+    seedKey: `${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`,
   });
 }
 
