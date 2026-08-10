@@ -18,9 +18,32 @@ export interface TrainingSignal {
 export function conciseSessionLabel(input: { discipline?: string; name?: string; title?: string; trainer?: boolean }): string {
   const raw = (input.name ?? input.title ?? '').trim();
   const discipline = input.discipline;
-  if (discipline === 'swim') return /open water/i.test(raw) ? 'Open-water swim' : 'Swim';
-  if (discipline === 'bike') return input.trainer || /virtual|trainer/i.test(raw) ? 'Trainer ride' : 'Ride';
-  if (discipline === 'run') return /trail/i.test(raw) ? 'Trail run' : 'Run';
+  if (discipline === 'swim' || discipline === 'bike' || discipline === 'run') {
+    const cleaned = cleanGeneratedTitle(raw);
+    if (cleaned && isExpressiveWorkoutTitle(cleaned, discipline)) return cleaned;
+    const text = cleaned.toLowerCase();
+    if (discipline === 'swim') {
+      if (/open water/.test(text)) return 'Open-water swim';
+      if (/quality|threshold|interval|fast/.test(text)) return 'Fast & Smooth';
+      if (/technique|drill/.test(text)) return 'Feel for the Water';
+      if (/endurance|long/.test(text)) return 'Long Water';
+      return 'Smooth Operator';
+    }
+    if (discipline === 'bike') {
+      if (input.trainer || /virtual|trainer/.test(text)) return 'Trainer Time';
+      if (/recovery|flush/.test(text)) return 'Leg Flush';
+      if (/quality|threshold|interval/.test(text)) return 'Cruise Control';
+      if (/tempo/.test(text)) return 'Tempo Engine';
+      if (/long/.test(text)) return 'Long Haul';
+      return 'Coffee Ride';
+    }
+    if (/return.?to.?run|run.?walk/.test(text)) return 'Run / Walk Rebuild';
+    if (/recovery|shakeout/.test(text)) return 'Shakeout';
+    if (/quality|interval/.test(text)) return 'Fast Feet';
+    if (/tempo|threshold|10k/.test(text)) return 'Tempo Control';
+    if (/long/.test(text)) return 'Long Miles';
+    return 'Easy Miles';
+  }
   if (discipline === 'strength') return 'Strength';
   if (discipline === 'hiit') return 'HIIT';
   return raw.replace(/^(swim|bike|run|other|x-train)\s*:\s*/i, '') || 'Training';
