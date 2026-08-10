@@ -29,6 +29,7 @@ import {
   upsertManualCalendarEvent,
   updatePlannedSessionStatus,
 } from '@/services/database';
+import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
 import { useWorkoutContext } from '@/state/workout-context';
 
 const DISCIPLINES: Array<{ value: EnduranceDiscipline | 'strength' | 'rest' | 'other'; label: string }> = [
@@ -127,6 +128,10 @@ export default function ScheduleScreen() {
     router.push('/workout-preview' as Href);
   }
 
+  function previewEndurance(event: TrainingCalendarEvent) {
+    router.push({ pathname: '/endurance-preview', params: { id: event.id, date: event.startAt.slice(0, 10) } } as Href);
+  }
+
   async function toggleSkipped(session: PlannedStrengthSession) {
     const status = session.completionStatus === 'skipped' ? 'planned' : 'skipped';
     const updated = await updatePlannedSessionStatus(session.id, status);
@@ -202,20 +207,24 @@ export default function ScheduleScreen() {
                 <Text style={styles.emptyDay}>No scheduled training.</Text>
               ) : null}
 
-              {visibleEvents.map((event) => (
-                <View key={event.id} style={[styles.eventCard, disciplineStyle(event.discipline)]}>
+              {visibleEvents.map((event) => {
+                const prescribed = event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(event);
+                const content = <>
                   <View style={styles.eventCopy}>
                     <Text style={styles.eventLabel}>{(event.discipline ?? 'other').toUpperCase()}</Text>
                     <Text style={styles.eventTitle}>{event.title}</Text>
-                    <Text style={styles.helper}>{event.allDay ? 'All day' : formatTime(event.startAt)}</Text>
+                    <Text style={styles.helper}>{prescribed ? plannedEnduranceMeta(event) : event.allDay ? 'All day' : formatTime(event.startAt)}</Text>
                   </View>
-                  {event.sourceId === 'manual' ? (
+                  {prescribed ? <View style={styles.sessionActions}><View style={styles.smallButton}><Text style={styles.smallButtonText}>Open</Text></View></View> : event.sourceId === 'manual' ? (
                     <Pressable onPress={() => void deleteEvent(event)} style={styles.deleteButton}>
                       <Text style={styles.deleteText}>Remove</Text>
                     </Pressable>
                   ) : null}
-                </View>
-              ))}
+                </>;
+                return prescribed
+                  ? <Pressable accessibilityRole="button" key={event.id} onPress={() => previewEndurance(event)} style={[styles.eventCard, disciplineStyle(event.discipline)]}>{content}</Pressable>
+                  : <View key={event.id} style={[styles.eventCard, disciplineStyle(event.discipline)]}>{content}</View>;
+              })}
 
               {dayActivities.map((activity) => {
                 const match = matches.find((candidate) => candidate.activityId === activity.id);
@@ -405,7 +414,6 @@ function ManualEventModal({
   );
 }
 
-
 function matchLabel(match?: PlannedCompletedMatch) {
   if (!match || match.status === 'unmatched') return 'No planned session matched automatically.';
   if (match.status === 'ambiguous') return `Possible planned match · ${Math.round(match.confidence * 100)}% confidence`;
@@ -435,6 +443,13 @@ function formatActivityTime(activity: EnduranceActivity) {
 }
 function eventsForDate(events: TrainingCalendarEvent[], date: string) {
   return events.filter((event) => localIsoDate(new Date(event.startAt)) === date);
+}
+function isEnduranceEvent(event: TrainingCalendarEvent) { return event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run'; }
+function plannedEnduranceMeta(event: TrainingCalendarEvent) {
+  const match = event.description?.match(/Side Quest generated · (\d+) min · ([a-z_]+)/i);
+  if (match) return `${match[1]} min · ${titleCase(match[2] ?? 'planned')}`;
+  if (event.endAt) return `${Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000))} min · Planned`;
+  return 'Planned workout';
 }
 function disciplineStyle(discipline: TrainingCalendarEvent['discipline'] | EnduranceActivity['discipline']) {
   switch (discipline) {
