@@ -131,6 +131,14 @@ export function returnToRunProtocolMinutes(protocol: ReturnToRunProtocol): numbe
       + protocol.cooldownWalkMinutes);
 }
 
+/**
+ * Generated endurance work should read like a coach wrote it, not like a
+ * floating-point budget calculation. Athlete-fixed return-to-run stages remain exact.
+ */
+export function canonicalEnduranceMinutes(minutes: number): number {
+  return Math.max(10, Math.round(minutes / 5) * 5);
+}
+
 export function buildEndurancePrescription(
   session: PlannedMultisportSession,
   context: EndurancePrescriptionContext = {},
@@ -139,9 +147,10 @@ export function buildEndurancePrescription(
 
   const workoutType = inferWorkoutType(session);
   const protocol = workoutType === 'run_return_to_run' ? validReturnToRunProtocol(context.run?.returnToRunProtocol) : undefined;
-  const total = protocol ? returnToRunProtocolMinutes(protocol) : Math.max(10, Math.round(session.durationMinutes));
+  const total = protocol ? returnToRunProtocolMinutes(protocol) : canonicalEnduranceMinutes(session.durationMinutes);
+  const normalizedSession = total === session.durationMinutes ? session : { ...session, durationMinutes: total };
   const split = splitSession(total, session.discipline);
-  const blocks = buildBlocks(session, workoutType, split, context, protocol);
+  const blocks = buildBlocks(normalizedSession, workoutType, split, context, protocol);
   const steps = blocks.map(blockToStep);
   const distanceBlocks = blocks.filter((item) => item.distanceUnit && item.totalDistance);
   const distanceUnit = distanceBlocks[0]?.distanceUnit;
@@ -171,12 +180,26 @@ export function buildEndurancePrescription(
 }
 
 function splitSession(total: number, discipline: 'swim' | 'bike' | 'run'): SessionSplit {
-  const warmupCap = discipline === 'swim' ? 10 : 12;
-  const warmupTarget = Math.min(warmupCap, Math.max(4, Math.round(total * 0.18)));
-  const cooldownTarget = Math.min(10, Math.max(4, Math.round(total * 0.12)));
-  const warmup = Math.min(warmupTarget, Math.max(2, total - 4));
-  const cooldown = Math.min(cooldownTarget, Math.max(2, total - warmup - 1));
-  return { warmup, main: Math.max(1, total - warmup - cooldown), cooldown };
+  if (total <= 20) return { warmup: 5, main: Math.max(10, total - 10), cooldown: 5 };
+
+  let warmup: number;
+  let cooldown: number;
+  if (discipline === 'bike') {
+    warmup = total >= 75 ? 15 : total >= 45 ? 10 : 5;
+    cooldown = total >= 90 ? 15 : total >= 45 ? 10 : 5;
+  } else if (discipline === 'run') {
+    warmup = total >= 40 ? 10 : 5;
+    cooldown = total >= 40 ? 10 : 5;
+  } else {
+    warmup = total >= 45 ? 10 : 5;
+    cooldown = total >= 45 ? 10 : 5;
+  }
+
+  if (warmup + cooldown >= total) {
+    warmup = 5;
+    cooldown = 5;
+  }
+  return { warmup, main: Math.max(5, total - warmup - cooldown), cooldown };
 }
 
 function inferWorkoutType(session: PlannedMultisportSession): EnduranceWorkoutType {
@@ -284,8 +307,10 @@ function swimPoolBlocks(
   ));
 
   if (type === 'swim_technique') {
-    const drillDistance = Math.min(mainDistance, roundToMultiple(Math.max(200, Math.min(400, mainDistance * 0.35)), 50));
-    const drillRepeats = Math.max(4, Math.floor(drillDistance / 50));
+    // Technique sets should look intentional: 4, 6, or 8 x 50 rather than a remainder-driven odd count.
+    const desiredDrillDistance = Math.max(200, Math.min(400, mainDistance * 0.35));
+    const drillDistance = Math.min(mainDistance, roundToMultiple(desiredDrillDistance, 100));
+    const drillRepeats = Math.max(4, Math.min(8, Math.floor(drillDistance / 50)));
     const usedDrill = drillRepeats * 50;
     blocks.push(swimDistanceBlock(
       'technique', 'Drill set', 'drill', usedDrill, unit, rpe(2, 4, 'Form first'),
@@ -335,7 +360,7 @@ function swimPoolBlocks(
     'Swim very easy and finish with relaxed mechanics.', undefined,
   ));
 
-  return assignMinutesByDistance(blocks, Math.max(10, Math.round(totalMinutes)));
+  return assignMinutesByDistance(blocks, canonicalEnduranceMinutes(totalMinutes));
 }
 
 function swimDistanceBlock(
