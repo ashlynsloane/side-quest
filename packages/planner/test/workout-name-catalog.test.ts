@@ -16,6 +16,7 @@ function sectionCount(text: string, start: string, end: string, token: string): 
 
 describe('athlete-facing workout naming catalog', () => {
   const catalog = source('apps/mobile/src/services/workout-name-catalog.ts');
+  const personality = source('apps/mobile/src/services/workout-name-personality.ts');
   const synthesis = source('apps/mobile/src/services/training-synthesis.ts');
 
   it('has a substantial human-curated vocabulary for every Side Quest discipline', () => {
@@ -42,10 +43,21 @@ describe('athlete-facing workout naming catalog', () => {
     expect(catalog).toContain('extraEntries: WorkoutNameEntry[] = []');
   });
 
-  it('selects generated endurance and strength names from stable workout identity', () => {
-    expect(synthesis).toContain('selectWorkoutName({');
-    expect(synthesis).toContain("seedKey: `${event.discipline}|${raw}|${durationMinutes}|${intensity}`");
-    expect(synthesis).toContain("seedKey: fingerprint || session.workout.name || session.title");
+  it('prefers playful human copy and protects specific workout identity from generic easy labels', () => {
+    expect(personality).toContain("p('Chlorine & Delusion'");
+    expect(personality).toContain("p('Three Hours of Snacks'");
+    expect(personality).toContain("p('The Silly Little Run'");
+    expect(personality).toContain("p('Tiny Run Club'");
+    expect(personality).toContain("tri('Brick Happens'");
+    expect(personality).toContain("if (has('return_to_run')) return 'return_to_run'");
+    expect(personality).toContain("context.discipline === 'bike' && duration >= 150");
+    expect(personality).toContain("'Swim. Bike. Side Quest.'");
+  });
+
+  it('keeps each calendar event stable while rotating recurring workout shapes across dates', () => {
+    expect(synthesis).toContain('selectHumanWorkoutName({');
+    expect(synthesis).toContain('`${event.id}|${event.startAt.slice(0, 10)}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`');
+    expect(synthesis).toContain('`${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`');
     expect(synthesis).toContain('generatedNameIntents');
   });
 });
