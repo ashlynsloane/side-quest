@@ -155,7 +155,7 @@ export default function PlanTab() {
   };
 
   const renderSessionItem = (item: DayItem, inOuting = false) => {
-    const meta = inOuting ? stripLeadingTime(item.meta) : item.meta;
+    const meta = inOuting ? stripLeadingTiming(item.meta) : item.meta;
     if (item.kind === 'strength') {
       const closed = item.session.completionStatus === 'completed' || item.session.completionStatus === 'skipped';
       return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session)} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
@@ -245,7 +245,7 @@ export default function PlanTab() {
               <View style={styles.outingHeader}>
                 <View style={styles.outingHeaderCopy}>
                   <Text style={styles.outingEyebrow}>{group.locationName ? group.locationName.toUpperCase() : 'TRAINING OUTING'}</Text>
-                  <Text style={styles.outingTime}>{formatTimeRange(group.startAt, group.endAt)}</Text>
+                  <Text style={styles.outingTime}>{formatFlexibleTimeRange(group.startAt, group.endAt)}</Text>
                 </View>
                 <View style={styles.outingBadge}><Text style={styles.outingBadgeText}>ONE TRIP</Text></View>
               </View>
@@ -347,7 +347,9 @@ function weekDays(
       const displayDate = planned?.date ?? session.date;
       if (displayDate !== iso) return [];
       const displaySession = displayDate === session.date ? session : { ...session, date: displayDate };
-      const time = formatScheduledTime(planned?.scheduledStartAt);
+      const time = planned?.scheduledStartAt
+        ? availabilityEnabled ? generatedDaypart(planned.scheduledStartAt) : formatScheduledTime(planned.scheduledStartAt)
+        : null;
       const duration = Math.round(session.workout.estimatedElapsedSeconds / 60);
       const status = strengthStatusLabel(session.completionStatus);
       return [{
@@ -402,7 +404,7 @@ function groupDayItems(items: DayItem[]): DayGroup[] {
 function eventMeta(event: TrainingCalendarEvent): string {
   if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID) {
     const match = event.description?.match(/Side Quest generated · (\d+) min · ([a-z_]+)/i);
-    const time = event.allDay ? null : formatScheduledTime(event.startAt);
+    const time = event.allDay ? 'Flexible' : generatedDaypart(event.startAt);
     if (match) return `${time ? `${time} · ` : ''}${formatTrainingDuration(Number(match[1]))} · ${match[2]!.replaceAll('_', ' ')}`;
     if (event.endAt) {
       const minutes = Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000));
@@ -469,8 +471,15 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-function stripLeadingTime(value: string): string {
-  return value.replace(/^\d{1,2}:\d{2}\s(?:AM|PM)\s·\s/i, '');
+function stripLeadingTiming(value: string): string {
+  return value.replace(/^(?:(?:AM|PM|Flexible)|\d{1,2}:\d{2}\s(?:AM|PM))\s·\s/i, '');
+}
+
+function generatedDaypart(value: string | undefined): 'AM' | 'PM' | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.getHours() < 12 ? 'AM' : 'PM';
 }
 
 function formatScheduledTime(value: string | undefined): string | null {
@@ -480,11 +489,12 @@ function formatScheduledTime(value: string | undefined): string | null {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date);
 }
 
-function formatTimeRange(startAt: string | undefined, endAt: string | undefined): string {
-  const start = formatScheduledTime(startAt);
-  const end = formatScheduledTime(endAt);
-  if (start && end) return `${start}–${end}`;
-  return start ?? end ?? 'Scheduled together';
+function formatFlexibleTimeRange(startAt: string | undefined, endAt: string | undefined): string {
+  const start = generatedDaypart(startAt);
+  const end = generatedDaypart(endAt);
+  if (start && end && start !== end) return `${start}–${end} window`;
+  if (start || end) return `${start ?? end} window`;
+  return 'Flexible window';
 }
 
 function weeklyCounts(days: ReturnType<typeof weekDays>) {
