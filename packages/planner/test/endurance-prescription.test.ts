@@ -108,10 +108,21 @@ describe('endurance prescription', () => {
     expect(result?.blocks.every((item) => item.paceTarget === undefined)).toBe(true);
   });
 
+  it('keeps a normal run terrain-neutral unless a one-off environment context is supplied', () => {
+    const result = buildEndurancePrescription(session({
+      id: 'run-neutral', discipline: 'run', title: 'Run quality', durationMinutes: 50, intensity: 'hard', priority: 'key',
+    }));
+    const text = result?.blocks.map((item) => `${item.label} ${item.instruction}`).join(' ').toLowerCase() ?? '';
+    expect(result?.blocks.find((item) => item.id === 'main')?.label).toBe('Main set');
+    expect(text).not.toContain('uphill');
+    expect(text).not.toContain('treadmill');
+    expect(text).not.toContain('technical trail');
+  });
+
   it('materializes an explicit return-to-run stage as walk-only warmup, run/walk repeats, and walk-only cooldown', () => {
     const result = buildEndurancePrescription(session({
       id: 'run-return', discipline: 'run', title: 'Easy return-to-run', durationMinutes: 20, intensity: 'easy', priority: 'support',
-    }), { run: { environment: 'outdoor', returnToRunProtocol: runWalkStage } });
+    }), { run: { returnToRunProtocol: runWalkStage } });
     expect(returnToRunProtocolMinutes(runWalkStage)).toBe(20);
     expect(result?.workoutType).toBe('run_return_to_run');
     expect(result?.totalMinutes).toBe(20);
@@ -138,7 +149,7 @@ describe('endurance prescription', () => {
     expect(result?.blocks[0]?.instruction).toContain('will not invent impact progression');
   });
 
-  it('makes hilly run quality terrain-specific instead of prescribing flat-road pace', () => {
+  it('can translate a hilly run when terrain is supplied as one-off context', () => {
     const result = buildEndurancePrescription(session({
       id: 'run-hills', discipline: 'run', title: 'Run quality', durationMinutes: 50, intensity: 'hard', priority: 'key',
     }), { goalTerrain: 'hilly', run: { environment: 'outdoor' } });
@@ -149,7 +160,7 @@ describe('endurance prescription', () => {
     expect(result?.environmentLabel).toBe('Hilly');
   });
 
-  it('distinguishes treadmill and trail environments in the prescription', () => {
+  it('can distinguish treadmill and trail when explicitly supplied for a one-off adaptation', () => {
     const treadmill = buildEndurancePrescription(session({ discipline: 'run', title: 'Easy aerobic run', durationMinutes: 40, intensity: 'easy' }), { run: { environment: 'treadmill' } });
     const trail = buildEndurancePrescription(session({ discipline: 'run', title: 'Easy aerobic run', durationMinutes: 40, intensity: 'easy' }), { goalTerrain: 'technical_trail', run: { environment: 'trail' } });
     expect(treadmill?.environmentLabel).toBe('Treadmill');
