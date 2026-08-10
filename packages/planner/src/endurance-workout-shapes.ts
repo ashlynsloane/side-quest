@@ -64,26 +64,26 @@ const SWIM_POOL_SHAPES: SwimPoolWorkoutShape[] = [
   technique('swim-technique-1400', 300, 6, set(3, 200, 15, 'aerobic'), 200),
   technique('swim-technique-1800', 300, 8, set(3, 300, 15, 'aerobic'), 200),
   technique('swim-technique-2200', 400, 8, set(6, 200, 15, 'aerobic'), 200),
-  technique('swim-technique-2600', 400, 8, set(4, 400, 20, 'aerobic'), 200),
-  technique('swim-technique-3000', 400, 8, set(5, 400, 20, 'aerobic'), 200),
+  technique('swim-technique-2600', 400, 8, set(4, 300, 20, 'aerobic'), 200, set(2, 200, 15, 'easy')),
+  technique('swim-technique-3000', 400, 8, set(4, 300, 20, 'aerobic'), 200, set(4, 200, 15, 'aerobic')),
 
   pool('swim-aerobic-800', 'swim_aerobic', 200, set(2, 200, 15, 'aerobic'), 200),
   pool('swim-aerobic-1000', 'swim_aerobic', 200, set(3, 200, 15, 'aerobic'), 200),
   pool('swim-aerobic-1400', 'swim_aerobic', 300, set(3, 300, 15, 'aerobic'), 200),
   pool('swim-aerobic-1800', 'swim_aerobic', 300, set(3, 400, 20, 'aerobic'), 300),
-  pool('swim-aerobic-2200', 'swim_aerobic', 400, set(4, 400, 20, 'aerobic'), 200),
-  pool('swim-aerobic-2600', 'swim_aerobic', 400, set(5, 400, 20, 'aerobic'), 200),
-  pool('swim-aerobic-3000', 'swim_aerobic', 400, set(6, 400, 20, 'aerobic'), 200),
-  pool('swim-aerobic-3800', 'swim_aerobic', 400, set(6, 500, 20, 'aerobic'), 400),
+  pool('swim-aerobic-2200', 'swim_aerobic', 400, set(4, 300, 20, 'aerobic'), 200, set(2, 200, 15, 'easy')),
+  pool('swim-aerobic-2600', 'swim_aerobic', 400, set(4, 300, 20, 'aerobic'), 200, set(4, 200, 15, 'aerobic')),
+  pool('swim-aerobic-3000', 'swim_aerobic', 400, set(4, 300, 20, 'aerobic'), 200, set(6, 200, 15, 'aerobic')),
+  pool('swim-aerobic-3800', 'swim_aerobic', 400, set(4, 400, 20, 'aerobic'), 400, set(7, 200, 15, 'aerobic')),
 
   pool('swim-endurance-800', 'swim_endurance', 200, set(2, 200, 20, 'endurance'), 200),
   pool('swim-endurance-1200', 'swim_endurance', 200, set(2, 400, 20, 'endurance'), 200),
   pool('swim-endurance-1400', 'swim_endurance', 300, set(3, 300, 20, 'endurance'), 200),
   pool('swim-endurance-1800', 'swim_endurance', 300, set(3, 400, 20, 'endurance'), 300),
-  pool('swim-endurance-2200', 'swim_endurance', 400, set(4, 400, 20, 'endurance'), 200),
-  pool('swim-endurance-2600', 'swim_endurance', 400, set(5, 400, 20, 'endurance'), 200),
-  pool('swim-endurance-3000', 'swim_endurance', 400, set(4, 600, 25, 'endurance'), 200),
-  pool('swim-endurance-3600', 'swim_endurance', 400, set(5, 600, 25, 'endurance'), 200),
+  pool('swim-endurance-2200', 'swim_endurance', 400, set(4, 300, 20, 'endurance'), 200, set(2, 200, 15, 'easy')),
+  pool('swim-endurance-2600', 'swim_endurance', 400, set(4, 300, 20, 'endurance'), 200, set(4, 200, 15, 'aerobic')),
+  pool('swim-endurance-3000', 'swim_endurance', 400, set(4, 300, 20, 'endurance'), 200, set(6, 200, 15, 'aerobic')),
+  pool('swim-endurance-3600', 'swim_endurance', 400, set(4, 400, 25, 'endurance'), 200, set(7, 200, 15, 'aerobic')),
 
   pool('swim-quality-800', 'swim_quality', 200, set(4, 100, 20, 'quality'), 200),
   pool('swim-quality-1200', 'swim_quality', 300, set(6, 100, 20, 'quality'), 300),
@@ -171,6 +171,7 @@ function technique(
   drillRepeats: 4 | 6 | 8,
   main: SwimRepeatSetShape,
   cooldownDistance: number,
+  secondary?: SwimRepeatSetShape,
 ): SwimPoolWorkoutShape {
   return {
     id,
@@ -179,6 +180,7 @@ function technique(
     drill: { repeats: drillRepeats, repeatDistance: 50, restSeconds: 15 },
     main,
     cooldownDistance,
+    ...(secondary ? { secondary } : {}),
   };
 }
 
