@@ -100,7 +100,7 @@ export default function PlanTab() {
 
   const openEndurance = (event: TrainingCalendarEvent) => {
     if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(event)) {
-      router.push({ pathname: '/endurance-preview', params: { id: event.id, date: event.startAt.slice(0, 10) } } as Href);
+      router.push(`/endurance-preview?id=${encodeURIComponent(event.id)}&date=${event.startAt.slice(0, 10)}` as Href);
       return;
     }
     router.push('/schedule' as Href);
