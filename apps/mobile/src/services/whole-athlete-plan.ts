@@ -44,6 +44,7 @@ import {
   type AvailabilityScheduledSession,
   type AvailabilityScheduledWeekPlan,
 } from './training-availability';
+import { generatedWorkoutNamingMetadata } from './workout-name-context';
 
 export const SIDE_QUEST_PLAN_SOURCE_ID = 'side_quest_generated_plan';
 const PLAN_EVENT_PREFIX = 'sq_plan_';
@@ -202,7 +203,17 @@ export async function generateAndPersistWholeAthleteBlock(
     for (const session of scheduledPlan.sessions) {
       if (session.planningCommitment !== 'generated') continue;
       if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') continue;
-      generatedEvents.push(plannedSessionToCalendarEvent(session, input.block.id));
+      const event = plannedSessionToCalendarEvent(session, input.block.id);
+      event.description = [
+        event.description,
+        generatedWorkoutNamingMetadata({
+          phase: week.phase,
+          goalType: input.goal.type,
+          raceDate: input.goal.eventDate,
+          raceName: input.goal.name,
+        }),
+      ].filter((value): value is string => Boolean(value)).join('\n');
+      generatedEvents.push(event);
     }
   }
 
