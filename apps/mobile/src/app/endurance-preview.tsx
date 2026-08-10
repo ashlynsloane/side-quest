@@ -1,3 +1,4 @@
+import { enduranceCoachLines } from '@circuit/planner/endurance-coach-format';
 import type {
   EndurancePaceTarget,
   EndurancePrescriptionBlock,
@@ -115,7 +116,15 @@ export default function EndurancePreviewScreen() {
       <V23SectionHeader detail={workoutDoseDetail(prescription)}>WORKOUT</V23SectionHeader>
       <V23Card style={styles.workoutCard}>
         {prescription.blocks.map((block, index) => (
-          <WorkoutBlock key={block.id} block={block} index={index + 1} last={index === prescription.blocks.length - 1} styles={styles} tokens={tokens} />
+          <WorkoutBlock
+            key={block.id}
+            prescription={prescription}
+            block={block}
+            index={index + 1}
+            last={index === prescription.blocks.length - 1}
+            styles={styles}
+            tokens={tokens}
+          />
         ))}
       </V23Card>
     </View>
@@ -175,13 +184,15 @@ export default function EndurancePreviewScreen() {
   </V23Screen>;
 }
 
-function WorkoutBlock({ block, index, last, styles, tokens }: {
+function WorkoutBlock({ prescription, block, index, last, styles, tokens }: {
+  prescription: EnduranceSessionPrescription;
   block: EndurancePrescriptionBlock;
   index: number;
   last: boolean;
   styles: ReturnType<typeof makeStyles>;
   tokens: DesignTokens;
 }) {
+  const coachLines = enduranceCoachLines(prescription, block);
   const headline = blockHeadline(block);
   const recovery = recoveryText(block);
   return <View style={[styles.block, !last && styles.blockBorder]}>
@@ -191,11 +202,20 @@ function WorkoutBlock({ block, index, last, styles, tokens }: {
         <Text style={styles.blockTitle}>{block.label}</Text>
         <Text style={styles.blockMinutes}>{blockDose(block)}</Text>
       </View>
-      <Text style={styles.blockHeadline}>{headline}</Text>
-      {recovery ? <Text style={styles.blockRecovery}>{recovery}</Text> : null}
+
+      {coachLines.length ? <View style={styles.coachLines}>
+        {coachLines.map((line, lineIndex) => <View key={`${block.id}-${lineIndex}`} style={styles.coachLine}>
+          <Text style={styles.coachLineText}>{line.text}</Text>
+          {line.secondary ? <Text style={styles.coachLineSecondary}>{line.secondary}</Text> : null}
+        </View>)}
+      </View> : <>
+        <Text style={styles.blockHeadline}>{headline}</Text>
+        {recovery ? <Text style={styles.blockRecovery}>{recovery}</Text> : null}
+      </>}
+
       {block.paceTarget ? <Text style={styles.paceTarget}>PACE {formatPaceTarget(block.paceTarget)}</Text> : null}
       <View style={styles.rpeRow}><Text style={styles.rpeBadge}>RPE {block.target.low}–{block.target.high}</Text><Text style={styles.rpeCue}>{block.target.cue}</Text></View>
-      <Text style={styles.blockInstruction}>{block.instruction}</Text>
+      {!coachLines.length ? <Text style={styles.blockInstruction}>{block.instruction}</Text> : null}
     </View>
   </View>;
 }
@@ -321,6 +341,10 @@ function makeStyles(tokens: DesignTokens) {
     blockMinutes: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
     blockHeadline: { color: tokens.text, fontSize: 21, lineHeight: 26, fontWeight: '900', marginTop: 5 },
     blockRecovery: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18, fontWeight: '700', marginTop: 2 },
+    coachLines: { gap: 9, marginTop: 10 },
+    coachLine: { gap: 2 },
+    coachLineText: { color: tokens.text, fontSize: 16.5, lineHeight: 22, fontWeight: '850' },
+    coachLineSecondary: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '650' },
     paceTarget: { alignSelf: 'flex-start', color: '#267BA6', backgroundColor: '#E4F2F8', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, overflow: 'hidden', fontSize: 10.5, lineHeight: 13, fontWeight: '900', marginTop: 8 },
     rpeRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 8 },
     rpeBadge: { color: tokens.accent, backgroundColor: tokens.accentSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, overflow: 'hidden', fontSize: 10.5, fontWeight: '900' },
