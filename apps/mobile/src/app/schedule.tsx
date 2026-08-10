@@ -129,7 +129,7 @@ export default function ScheduleScreen() {
   }
 
   function previewEndurance(event: TrainingCalendarEvent) {
-    router.push({ pathname: '/endurance-preview', params: { id: event.id, date: event.startAt.slice(0, 10) } } as Href);
+    router.push(`/endurance-preview?id=${encodeURIComponent(event.id)}&date=${event.startAt.slice(0, 10)}` as Href);
   }
 
   async function toggleSkipped(session: PlannedStrengthSession) {
@@ -369,7 +369,6 @@ function ManualEventModal({
       setMessage('Use YYYY-MM-DD for the date.');
       return;
     }
-    const now = new Date().toISOString();
     await upsertManualCalendarEvent({
       id: `manual_${Date.now()}`,
       sourceId: 'manual',
