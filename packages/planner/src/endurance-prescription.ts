@@ -1,3 +1,4 @@
+import type { GoalTerrain } from '@circuit/domain';
 import type { PlannedMultisportSession } from './multisport';
 
 export type EnduranceWorkoutType =
@@ -15,7 +16,11 @@ export type EnduranceWorkoutType =
   | 'run_quality_intervals'
   | 'run_return_to_run';
 
-export type EnduranceBlockKind = 'continuous' | 'intervals' | 'drill' | 'walk_run';
+export type EnduranceBlockKind = 'continuous' | 'intervals' | 'drill' | 'walk_run' | 'swim_set';
+export type SwimDistanceUnit = 'yd' | 'm';
+export type SwimEnvironment = 'pool' | 'open_water';
+export type RunEnvironment = 'outdoor' | 'treadmill' | 'track' | 'trail';
+export type BikeEnvironment = 'outdoor' | 'indoor_trainer' | 'mountain_bike';
 
 export interface EnduranceRpeTarget {
   low: number;
@@ -23,16 +28,57 @@ export interface EnduranceRpeTarget {
   cue: string;
 }
 
+export interface EndurancePaceTarget {
+  unit: SwimDistanceUnit;
+  fastSecondsPer100: number;
+  slowSecondsPer100: number;
+  basis: 'css';
+}
+
+export interface ReturnToRunProtocol {
+  warmupWalkMinutes: number;
+  repeats: number;
+  runMinutes: number;
+  walkMinutes: number;
+  cooldownWalkMinutes: number;
+}
+
+export interface EndurancePrescriptionContext {
+  goalTerrain?: GoalTerrain;
+  swim?: {
+    environment?: SwimEnvironment;
+    poolLength?: 25 | 50;
+    distanceUnit?: SwimDistanceUnit;
+    cssSecondsPer100?: number;
+    proficiency?: 'developing' | 'average' | 'strong';
+  };
+  bike?: {
+    environment?: BikeEnvironment;
+  };
+  run?: {
+    environment?: RunEnvironment;
+    returnToRunProtocol?: ReturnToRunProtocol;
+  };
+}
+
 export interface EndurancePrescriptionBlock {
   id: string;
   label: string;
   kind: EnduranceBlockKind;
+  /** Estimated time retained for weekly-budget compatibility. */
   totalMinutes: number;
   target: EnduranceRpeTarget;
   instruction: string;
   repeats?: number;
   workMinutes?: number;
   recoveryMinutes?: number;
+  workLabel?: string;
+  recoveryLabel?: string;
+  totalDistance?: number;
+  repeatDistance?: number;
+  distanceUnit?: SwimDistanceUnit;
+  restSeconds?: number;
+  paceTarget?: EndurancePaceTarget;
 }
 
 export interface EndurancePrescriptionStep {
@@ -43,20 +89,24 @@ export interface EndurancePrescriptionStep {
 }
 
 export interface EnduranceSessionPrescription {
-  prescriptionVersion: 1;
+  prescriptionVersion: 2;
   sessionId: string;
   discipline: 'swim' | 'bike' | 'run';
   workoutType: EnduranceWorkoutType;
   title: string;
   date: string;
   totalMinutes: number;
+  totalDistance?: number;
+  distanceUnit?: SwimDistanceUnit;
+  environmentLabel?: string;
   objective: string;
   effortGuide: string;
   blocks: EndurancePrescriptionBlock[];
-  /** Backward-compatible simplified representation used by current mobile surfaces. */
+  /** Backward-compatible simplified representation used by existing surfaces. */
   steps: EndurancePrescriptionStep[];
   whyThisSession: string[];
   guardrails: string[];
+  setupRequired?: 'return_to_run_protocol';
 }
 
 interface SessionSplit {
@@ -72,29 +122,51 @@ interface RepeatPlan {
   usedMinutes: number;
 }
 
-export function buildEndurancePrescription(session: PlannedMultisportSession): EnduranceSessionPrescription | null {
+export function returnToRunProtocolMinutes(protocol: ReturnToRunProtocol): number {
+  const recoveryCount = Math.max(0, protocol.repeats - 1);
+  return Math.max(1,
+    protocol.warmupWalkMinutes
+      + protocol.repeats * protocol.runMinutes
+      + recoveryCount * protocol.walkMinutes
+      + protocol.cooldownWalkMinutes);
+}
+
+export function buildEndurancePrescription(
+  session: PlannedMultisportSession,
+  context: EndurancePrescriptionContext = {},
+): EnduranceSessionPrescription | null {
   if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') return null;
 
-  const total = Math.max(10, Math.round(session.durationMinutes));
-  const split = splitSession(total, session.discipline);
   const workoutType = inferWorkoutType(session);
-  const blocks = buildBlocks(session, workoutType, split);
+  const protocol = workoutType === 'run_return_to_run' ? validReturnToRunProtocol(context.run?.returnToRunProtocol) : undefined;
+  const total = protocol ? returnToRunProtocolMinutes(protocol) : Math.max(10, Math.round(session.durationMinutes));
+  const split = splitSession(total, session.discipline);
+  const blocks = buildBlocks(session, workoutType, split, context, protocol);
   const steps = blocks.map(blockToStep);
+  const distanceBlocks = blocks.filter((item) => item.distanceUnit && item.totalDistance);
+  const distanceUnit = distanceBlocks[0]?.distanceUnit;
+  const totalDistance = distanceUnit
+    ? distanceBlocks.filter((item) => item.distanceUnit === distanceUnit).reduce((sum, item) => sum + (item.totalDistance ?? 0), 0)
+    : undefined;
+  const setupRequired = workoutType === 'run_return_to_run' && !protocol ? 'return_to_run_protocol' as const : undefined;
 
   return {
-    prescriptionVersion: 1,
+    prescriptionVersion: 2,
     sessionId: session.id,
     discipline: session.discipline,
     workoutType,
     title: session.title,
     date: session.date,
     totalMinutes: total,
+    ...(totalDistance ? { totalDistance, distanceUnit } : {}),
+    environmentLabel: environmentLabel(session.discipline, context),
     objective: objectiveFor(workoutType),
-    effortGuide: effortGuideFor(session),
+    effortGuide: effortGuideFor(session, workoutType, context, Boolean(protocol)),
     blocks,
     steps,
     whyThisSession: session.rationale,
-    guardrails: guardrailsFor(session),
+    guardrails: guardrailsFor(session, workoutType, context, Boolean(protocol)),
+    ...(setupRequired ? { setupRequired } : {}),
   };
 }
 
@@ -102,11 +174,9 @@ function splitSession(total: number, discipline: 'swim' | 'bike' | 'run'): Sessi
   const warmupCap = discipline === 'swim' ? 10 : 12;
   const warmupTarget = Math.min(warmupCap, Math.max(4, Math.round(total * 0.18)));
   const cooldownTarget = Math.min(10, Math.max(4, Math.round(total * 0.12)));
-
   const warmup = Math.min(warmupTarget, Math.max(2, total - 4));
   const cooldown = Math.min(cooldownTarget, Math.max(2, total - warmup - 1));
-  const main = Math.max(1, total - warmup - cooldown);
-  return { warmup, main, cooldown };
+  return { warmup, main: Math.max(1, total - warmup - cooldown), cooldown };
 }
 
 function inferWorkoutType(session: PlannedMultisportSession): EnduranceWorkoutType {
@@ -119,17 +189,13 @@ function inferWorkoutType(session: PlannedMultisportSession): EnduranceWorkoutTy
   }
   if (session.discipline === 'bike') {
     if (title.includes('recovery')) return 'bike_recovery';
-    if (title.includes('quality') || title.includes('interval') || title.includes('tempo') || title.includes('threshold') || session.intensity === 'hard') {
-      return 'bike_quality_intervals';
-    }
+    if (title.includes('quality') || title.includes('interval') || title.includes('tempo') || title.includes('threshold') || session.intensity === 'hard') return 'bike_quality_intervals';
     if (title.includes('long')) return 'bike_long_aerobic';
     return 'bike_aerobic';
   }
   if (title.includes('return-to-run')) return 'run_return_to_run';
   if (title.includes('recovery')) return 'run_recovery';
-  if (title.includes('quality') || title.includes('interval') || title.includes('tempo') || title.includes('threshold') || session.intensity === 'hard') {
-    return 'run_quality_intervals';
-  }
+  if (title.includes('quality') || title.includes('interval') || title.includes('tempo') || title.includes('threshold') || session.intensity === 'hard') return 'run_quality_intervals';
   if (title.includes('long')) return 'run_long_aerobic';
   return 'run_easy_aerobic';
 }
@@ -143,7 +209,20 @@ function objectiveFor(type: EnduranceWorkoutType): string {
   return 'Aerobic development';
 }
 
-function effortGuideFor(session: PlannedMultisportSession): string {
+function effortGuideFor(
+  session: PlannedMultisportSession,
+  type: EnduranceWorkoutType,
+  context: EndurancePrescriptionContext,
+  hasReturnProtocol: boolean,
+): string {
+  if (type === 'run_return_to_run') {
+    return hasReturnProtocol
+      ? 'Keep every run segment comfortable. The prescribed run/walk stage controls the impact dose.'
+      : 'Side Quest needs an explicit run/walk stage before it will prescribe running during return-to-run.';
+  }
+  if (session.discipline === 'swim' && validCss(context.swim?.cssSecondsPer100)) {
+    return 'Use the CSS-based pace ranges shown for the main sets; keep drills technique-led rather than pace-led.';
+  }
   if (session.intensity === 'easy') return 'Easy conversational effort; roughly RPE 2–4/10.';
   if (session.intensity === 'moderate') return 'Controlled steady effort; roughly RPE 4–6/10.';
   return 'Purposeful hard work with recovery between efforts; roughly RPE 7–8/10, not all-out.';
@@ -160,29 +239,254 @@ function block(
   totalMinutes: number,
   target: EnduranceRpeTarget,
   instruction: string,
-  intervals: Pick<EndurancePrescriptionBlock, 'repeats' | 'workMinutes' | 'recoveryMinutes'> = {},
+  extra: Partial<Omit<EndurancePrescriptionBlock, 'id' | 'label' | 'kind' | 'totalMinutes' | 'target' | 'instruction'>> = {},
 ): EndurancePrescriptionBlock {
-  return { id, label, kind, totalMinutes, target, instruction, ...intervals };
+  return { id, label, kind, totalMinutes, target, instruction, ...extra };
 }
 
-function warmupBlock(discipline: 'swim' | 'bike' | 'run', minutes: number): EndurancePrescriptionBlock {
-  if (discipline === 'swim') {
-    return block('warmup', 'Warm-up', 'continuous', minutes, rpe(2, 3, 'Relaxed'), 'Easy swimming. Settle into relaxed breathing and clean mechanics.');
+function buildBlocks(
+  session: PlannedMultisportSession,
+  workoutType: EnduranceWorkoutType,
+  split: SessionSplit,
+  context: EndurancePrescriptionContext,
+  protocol?: ReturnToRunProtocol,
+): EndurancePrescriptionBlock[] {
+  if (session.discipline === 'swim') {
+    if ((context.swim?.environment ?? 'pool') === 'pool') return swimPoolBlocks(workoutType, session.durationMinutes, context);
+    return swimOpenWaterBlocks(workoutType, split);
   }
-  if (discipline === 'bike') {
-    return block('warmup', 'Warm-up', 'continuous', minutes, rpe(2, 3, 'Easy spin'), 'Easy spinning. Gradually bring cadence and effort up without surging.');
-  }
-  return block('warmup', 'Warm-up', 'continuous', minutes, rpe(1, 3, 'Easy'), 'Easy walking or jogging. Let mechanics and breathing settle before the main work.');
+  if (session.discipline === 'bike') return bikeBlocks(workoutType, split, context);
+  return runBlocks(workoutType, split, context, protocol);
 }
 
-function cooldownBlock(discipline: 'swim' | 'bike' | 'run', minutes: number): EndurancePrescriptionBlock {
-  if (discipline === 'swim') {
-    return block('cooldown', 'Cool-down', 'continuous', minutes, rpe(1, 2, 'Very easy'), 'Very easy swimming. Finish feeling smoother than you started.');
+function swimPoolBlocks(
+  type: EnduranceWorkoutType,
+  totalMinutes: number,
+  context: EndurancePrescriptionContext,
+): EndurancePrescriptionBlock[] {
+  const unit = context.swim?.distanceUnit ?? 'yd';
+  const poolLength = context.swim?.poolLength ?? 25;
+  const css = validCss(context.swim?.cssSecondsPer100) ? context.swim!.cssSecondsPer100 : undefined;
+  const proficiency = context.swim?.proficiency ?? 'average';
+  const estimatePer100 = css ?? (proficiency === 'strong' ? 90 : proficiency === 'developing' ? 125 : 105);
+  const movingFraction = type === 'swim_quality' || type === 'swim_technique' ? 0.8 : 0.84;
+  const rawDistance = (Math.max(20, totalMinutes) * 60 * movingFraction / estimatePer100) * 100;
+  const targetDistance = Math.max(poolLength * 24, roundToMultiple(rawDistance, Math.max(100, poolLength)));
+  const warmDistance = clampDistance(roundToMultiple(targetDistance * 0.18, 100), 200, 500, poolLength);
+  const coolDistance = clampDistance(roundToMultiple(targetDistance * 0.1, 100), 100, 300, poolLength);
+  const mainDistance = Math.max(poolLength * 8, targetDistance - warmDistance - coolDistance);
+  const blocks: EndurancePrescriptionBlock[] = [];
+
+  blocks.push(swimDistanceBlock(
+    'warmup', 'Warm-up', 'swim_set', warmDistance, unit, rpe(2, 3, 'Relaxed'),
+    'Swim easy. Include a few relaxed build lengths near the end, but keep the focus on line, breathing, and a clean catch.',
+    cssPace(css, unit, 18, 28),
+  ));
+
+  if (type === 'swim_technique') {
+    const drillDistance = Math.min(mainDistance, roundToMultiple(Math.max(200, Math.min(400, mainDistance * 0.35)), 50));
+    const drillRepeats = Math.max(4, Math.floor(drillDistance / 50));
+    const usedDrill = drillRepeats * 50;
+    blocks.push(swimDistanceBlock(
+      'technique', 'Drill set', 'drill', usedDrill, unit, rpe(2, 4, 'Form first'),
+      'Alternate a focused drill length with relaxed swimming. Prioritize body line, breathing timing, and catch quality over speed.',
+      undefined,
+      { repeats: drillRepeats, repeatDistance: 50, restSeconds: 15 },
+    ));
+    appendSwimMain(blocks, mainDistance - usedDrill, unit, css, 'aerobic');
+  } else if (type === 'swim_quality') {
+    const repeatDistance = mainDistance >= 1000 ? 200 : 100;
+    const maxRepeats = repeatDistance === 200 ? 6 : 10;
+    const repeats = Math.max(4, Math.min(maxRepeats, Math.floor(mainDistance / repeatDistance)));
+    const used = repeats * repeatDistance;
+    blocks.push(swimDistanceBlock(
+      'main', 'Main set', 'swim_set', used, unit, rpe(6, 8, 'Strong and repeatable'),
+      'Hold the target pace without sacrificing stroke length or catch quality. The final repeat should still be controlled.',
+      cssPace(css, unit, 0, 6),
+      { repeats, repeatDistance, restSeconds: repeatDistance >= 200 ? 25 : 20 },
+    ));
+    appendSwimMain(blocks, mainDistance - used, unit, css, 'easy');
+  } else if (type === 'swim_endurance') {
+    const repeatDistance = mainDistance >= 1200 ? 400 : mainDistance >= 800 ? 300 : 200;
+    const repeats = Math.max(2, Math.min(5, Math.floor(mainDistance / repeatDistance)));
+    const used = repeats * repeatDistance;
+    blocks.push(swimDistanceBlock(
+      'main', 'Main set', 'swim_set', used, unit, rpe(3, 5, 'Sustainable'),
+      'Swim each repeat at a steady aerobic effort with short rest. Preserve mechanics as fatigue accumulates.',
+      cssPace(css, unit, 8, 15),
+      { repeats, repeatDistance, restSeconds: 20 },
+    ));
+    appendSwimMain(blocks, mainDistance - used, unit, css, 'easy');
+  } else {
+    const repeatDistance = mainDistance >= 1200 ? 400 : mainDistance >= 900 ? 300 : 200;
+    const repeats = Math.max(2, Math.min(6, Math.floor(mainDistance / repeatDistance)));
+    const used = repeats * repeatDistance;
+    blocks.push(swimDistanceBlock(
+      'main', 'Main set', 'swim_set', used, unit, rpe(3, 5, 'Aerobic'),
+      'Swim steadily with controlled breathing and consistent mechanics. Keep the rest short enough to preserve aerobic continuity.',
+      cssPace(css, unit, 10, 18),
+      { repeats, repeatDistance, restSeconds: 15 },
+    ));
+    appendSwimMain(blocks, mainDistance - used, unit, css, 'easy');
   }
-  if (discipline === 'bike') {
-    return block('cooldown', 'Cool-down', 'continuous', minutes, rpe(1, 2, 'Easy spin'), 'Easy spin until breathing and leg tension settle.');
+
+  blocks.push(swimDistanceBlock(
+    'cooldown', 'Cool-down', 'swim_set', coolDistance, unit, rpe(1, 2, 'Very easy'),
+    'Swim very easy and finish with relaxed mechanics.', undefined,
+  ));
+
+  return assignMinutesByDistance(blocks, Math.max(10, Math.round(totalMinutes)));
+}
+
+function swimDistanceBlock(
+  id: string,
+  label: string,
+  kind: EnduranceBlockKind,
+  totalDistance: number,
+  distanceUnit: SwimDistanceUnit,
+  target: EnduranceRpeTarget,
+  instruction: string,
+  paceTarget?: EndurancePaceTarget,
+  extra: Partial<EndurancePrescriptionBlock> = {},
+): EndurancePrescriptionBlock {
+  return block(id, label, kind, 0, target, instruction, {
+    totalDistance,
+    distanceUnit,
+    ...(paceTarget ? { paceTarget } : {}),
+    ...extra,
+  });
+}
+
+function appendSwimMain(
+  blocks: EndurancePrescriptionBlock[],
+  distance: number,
+  unit: SwimDistanceUnit,
+  css: number | undefined,
+  effort: 'aerobic' | 'easy',
+): void {
+  if (distance < 50) return;
+  const rounded = roundToMultiple(distance, 50);
+  if (rounded <= 0) return;
+  const repeatDistance = rounded >= 400 ? 200 : rounded >= 200 ? 100 : rounded;
+  const repeats = Math.max(1, Math.floor(rounded / repeatDistance));
+  const used = repeats * repeatDistance;
+  blocks.push(swimDistanceBlock(
+    `finish-${blocks.length}`, effort === 'aerobic' ? 'Aerobic finish' : 'Easy reset', 'swim_set', used, unit,
+    effort === 'aerobic' ? rpe(3, 5, 'Aerobic') : rpe(2, 3, 'Easy'),
+    effort === 'aerobic' ? 'Settle into smooth aerobic swimming and preserve stroke quality.' : 'Swim easy to absorb the main set without adding more intensity.',
+    effort === 'aerobic' ? cssPace(css, unit, 10, 18) : cssPace(css, unit, 18, 28),
+    repeats > 1 ? { repeats, repeatDistance, restSeconds: 15 } : {},
+  ));
+}
+
+function swimOpenWaterBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
+  const blocks = [block('warmup', 'Warm-up', 'continuous', split.warmup, rpe(2, 3, 'Relaxed'), 'Swim easy while settling breathing, sighting, and body position.')];
+  if (type === 'swim_quality') {
+    const plan = repeatPlan(split.main, 6, 3, 1);
+    if (plan) blocks.push(block('main', 'Main set', 'intervals', plan.usedMinutes, rpe(6, 8, 'Strong and controlled'), `Complete ${plan.repeats} × ${plan.workMinutes} min strong with ${plan.recoveryMinutes} min easy swimming between. Use effort rather than pool pace in open water.`, { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes }));
+    if (plan && split.main > plan.usedMinutes) blocks.push(block('aerobic-finish', 'Aerobic finish', 'continuous', split.main - plan.usedMinutes, rpe(2, 4, 'Aerobic'), 'Swim smoothly with regular sighting and relaxed mechanics.'));
+    if (!plan) blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(3, 5, 'Aerobic'), 'Swim steadily with regular sighting and relaxed mechanics.'));
+  } else {
+    blocks.push(block('main', type === 'swim_technique' ? 'Skills + aerobic' : 'Main set', 'continuous', split.main, rpe(3, 5, 'Controlled'), type === 'swim_technique' ? 'Practice sighting, breathing rhythm, and a relaxed stroke while keeping the effort aerobic.' : 'Swim steadily at an aerobic effort and keep navigation clean.'));
   }
-  return block('cooldown', 'Cool-down', 'continuous', minutes, rpe(1, 2, 'Very easy'), 'Easy walk or jog to finish without adding extra volume.');
+  blocks.push(block('cooldown', 'Cool-down', 'continuous', split.cooldown, rpe(1, 2, 'Very easy'), 'Swim very easy and finish relaxed.'));
+  return blocks;
+}
+
+function bikeBlocks(type: EnduranceWorkoutType, split: SessionSplit, context: EndurancePrescriptionContext): EndurancePrescriptionBlock[] {
+  const indoor = context.bike?.environment === 'indoor_trainer';
+  const terrain = context.goalTerrain;
+  const blocks = [block('warmup', 'Warm-up', 'continuous', split.warmup, rpe(2, 3, 'Easy spin'), indoor ? 'Spin easily and gradually bring cadence up before the main work.' : 'Ride easily and gradually bring cadence and effort up without surging.')];
+  if (type === 'bike_quality_intervals') {
+    const plan = repeatPlan(split.main, 4, split.main >= 40 ? 6 : 5, 3);
+    if (plan) {
+      const terrainCue = !indoor && (terrain === 'hilly' || terrain === 'mountainous')
+        ? ' Use sustained climbs for the work intervals and recover easily on flatter/downhill terrain.'
+        : indoor
+          ? ' Keep resistance controlled and cadence repeatable on the trainer.'
+          : '';
+      blocks.push(block('main', 'Main set', 'intervals', plan.usedMinutes, rpe(6, 8, 'Controlled quality'), `Complete ${plan.repeats} × ${plan.workMinutes} min controlled hard with ${plan.recoveryMinutes} min easy between.${terrainCue}`, { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes }));
+      appendTimedRemainder(blocks, split.main - plan.usedMinutes, 'bike');
+    } else appendTimedRemainder(blocks, split.main, 'bike');
+  } else if (type === 'bike_long_aerobic') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(3, 5, 'Durable aerobic'), terrain === 'hilly' || terrain === 'mountainous' ? 'Ride steadily across the terrain. Let speed fall on climbs rather than turning them into threshold efforts.' : 'Ride steadily at sustainable aerobic intensity. Avoid turning the long ride into an unplanned threshold session.'));
+  } else if (type === 'bike_recovery') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(1, 2, 'Recovery'), 'Spin very easily. This session should reduce stiffness, not create additional training stress.'));
+  } else {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Easy aerobic'), 'Ride at an easy-to-steady aerobic effort with smooth cadence and minimal surging.'));
+  }
+  blocks.push(block('cooldown', 'Cool-down', 'continuous', split.cooldown, rpe(1, 2, 'Easy spin'), 'Spin easily until breathing and leg tension settle.'));
+  return blocks;
+}
+
+function runBlocks(
+  type: EnduranceWorkoutType,
+  split: SessionSplit,
+  context: EndurancePrescriptionContext,
+  protocol?: ReturnToRunProtocol,
+): EndurancePrescriptionBlock[] {
+  if (type === 'run_return_to_run') return returnToRunBlocks(split, protocol);
+
+  const environment = context.run?.environment ?? (context.goalTerrain === 'technical_trail' ? 'trail' : 'outdoor');
+  const terrain = context.goalTerrain;
+  const warmCue = environment === 'treadmill' ? 'Start with easy walking/jogging on the treadmill and let mechanics settle.' : 'Start very easily and let mechanics and breathing settle.';
+  const blocks = [block('warmup', 'Warm-up', 'continuous', split.warmup, rpe(1, 3, 'Easy'), warmCue)];
+
+  if (type === 'run_quality_intervals') {
+    const plan = repeatPlan(split.main, 4, split.main >= 28 ? 5 : 4, 2);
+    if (plan) {
+      const hilly = terrain === 'hilly' || terrain === 'mountainous';
+      const technical = terrain === 'technical_trail' || environment === 'trail';
+      const instruction = hilly
+        ? `Complete ${plan.repeats} × ${plan.workMinutes} min uphill at controlled hard effort with ${plan.recoveryMinutes} min easy recovery. Run the climb by RPE, not pace.`
+        : technical
+          ? `Complete ${plan.repeats} × ${plan.workMinutes} min controlled on runnable trail with ${plan.recoveryMinutes} min easy between. Use RPE rather than pace when footing or grade changes.`
+          : environment === 'treadmill'
+            ? `Complete ${plan.repeats} × ${plan.workMinutes} min controlled with ${plan.recoveryMinutes} min easy. Keep speed/grade repeatable rather than chasing a faster final rep.`
+            : `Complete ${plan.repeats} × ${plan.workMinutes} min controlled with ${plan.recoveryMinutes} min easy running between. Maintain mechanics and finish with reserve.`;
+      blocks.push(block('main', hilly ? 'Hill set' : 'Main set', 'intervals', plan.usedMinutes, rpe(6, 8, 'Fast but controlled'), instruction, { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes }));
+      appendTimedRemainder(blocks, split.main - plan.usedMinutes, 'run');
+    } else appendTimedRemainder(blocks, split.main, 'run');
+  } else if (type === 'run_long_aerobic') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Conversational'), runTerrainInstruction(terrain, environment, true)));
+  } else if (type === 'run_recovery') {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(1, 3, 'Very easy'), 'Keep the run deliberately short and easy. Finish with less tension than you started.'));
+  } else {
+    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Conversational'), runTerrainInstruction(terrain, environment, false)));
+  }
+  blocks.push(block('cooldown', 'Cool-down', 'continuous', split.cooldown, rpe(1, 2, 'Very easy'), 'Walk or jog very easily to finish without adding extra volume.'));
+  return blocks;
+}
+
+function returnToRunBlocks(split: SessionSplit, protocol?: ReturnToRunProtocol): EndurancePrescriptionBlock[] {
+  if (!protocol) {
+    return [block(
+      'protocol-required', 'Run/walk stage needed', 'walk_run', split.warmup + split.main + split.cooldown,
+      rpe(1, 2, 'Do not guess'),
+      'No run/walk stage is configured. Set the return-to-run stage you have been cleared to perform; Side Quest will not invent impact progression.',
+    )];
+  }
+  const mainMinutes = protocol.repeats * protocol.runMinutes + Math.max(0, protocol.repeats - 1) * protocol.walkMinutes;
+  return [
+    block('warmup', 'Walk warm-up', 'continuous', protocol.warmupWalkMinutes, rpe(1, 2, 'Brisk walk'), 'Walk only. Use this time to settle into normal, comfortable mechanics.', { workLabel: 'walk' }),
+    block('main', 'Run / walk set', 'walk_run', mainMinutes, rpe(2, 4, 'Comfortable'), `Complete ${protocol.repeats} × ${protocol.runMinutes} min easy run with ${protocol.walkMinutes} min walk between run segments. Do not extend the run intervals even if they feel easy.`, {
+      repeats: protocol.repeats,
+      workMinutes: protocol.runMinutes,
+      recoveryMinutes: protocol.walkMinutes,
+      workLabel: 'run',
+      recoveryLabel: 'walk',
+    }),
+    block('cooldown', 'Walk cool-down', 'continuous', protocol.cooldownWalkMinutes, rpe(1, 2, 'Easy walk'), 'Walk only to finish. Do not add extra running.', { workLabel: 'walk' }),
+  ];
+}
+
+function runTerrainInstruction(terrain: GoalTerrain | undefined, environment: RunEnvironment, long: boolean): string {
+  if (environment === 'treadmill') return long ? 'Run at conversational effort on the treadmill. Keep grade changes modest enough that the session stays aerobic.' : 'Run easily on the treadmill at conversational effort; keep speed and grade controlled.';
+  if (terrain === 'technical_trail' || environment === 'trail') return 'Run by effort rather than pace. Shorten stride on technical terrain and let pace change with footing and grade.';
+  if (terrain === 'mountainous' || terrain === 'hilly') return long ? 'Keep the entire route aerobic. Let pace slow substantially on climbs and avoid pressing the descents.' : 'Keep the effort conversational across hills; let pace change with grade instead of forcing flat-ground pace uphill.';
+  if (terrain === 'rolling') return 'Run easily across rolling terrain and keep effort steady as pace changes with grade.';
+  if (environment === 'track') return 'Keep the run easy on the track; the surface is controlled, but this is not a pace test.';
+  return long ? 'Run at a sustainable conversational effort. Duration should reflect established run capacity rather than goal-distance ambition.' : 'Run easily at conversational effort and keep the session deliberately low-cost.';
 }
 
 function repeatPlan(mainMinutes: number, preferredRepeats: number, preferredWork: number, recoveryMinutes: number): RepeatPlan | null {
@@ -195,176 +499,104 @@ function repeatPlan(mainMinutes: number, preferredRepeats: number, preferredWork
   return null;
 }
 
-function appendRemainder(
-  blocks: EndurancePrescriptionBlock[],
-  minutes: number,
-  discipline: 'swim' | 'bike' | 'run',
-): void {
+function appendTimedRemainder(blocks: EndurancePrescriptionBlock[], minutes: number, discipline: 'bike' | 'run'): void {
   if (minutes <= 0) return;
-  const instruction = discipline === 'swim'
-    ? 'Settle into smooth aerobic swimming and preserve stroke quality.'
-    : discipline === 'bike'
-      ? 'Ride steadily at an easy aerobic effort with smooth cadence.'
-      : 'Run easily and keep this deliberately low-cost.';
-  blocks.push(block('aerobic-finish', 'Aerobic finish', 'continuous', minutes, rpe(2, 4, 'Aerobic'), instruction));
-}
-
-function buildBlocks(
-  session: PlannedMultisportSession,
-  workoutType: EnduranceWorkoutType,
-  split: SessionSplit,
-): EndurancePrescriptionBlock[] {
-  if (session.discipline === 'swim') return swimBlocks(workoutType, split);
-  if (session.discipline === 'bike') return bikeBlocks(workoutType, split);
-  return runBlocks(workoutType, split);
-}
-
-function swimBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
-  const blocks = [warmupBlock('swim', split.warmup)];
-
-  if (type === 'swim_technique') {
-    const drillMinutes = Math.min(split.main, Math.max(6, Math.round(split.main * 0.4)));
-    const aerobicMinutes = split.main - drillMinutes;
-    blocks.push(block(
-      'technique',
-      'Technique',
-      'drill',
-      drillMinutes,
-      rpe(2, 4, 'Smooth, not fast'),
-      'Alternate short drill segments with relaxed swimming. Prioritize balance, line, breathing, and a clean catch over speed.',
-    ));
-    appendRemainder(blocks, aerobicMinutes, 'swim');
-  } else if (type === 'swim_quality') {
-    const plan = repeatPlan(split.main, 6, 3, 1);
-    if (plan) {
-      blocks.push(block(
-        'main',
-        'Main set',
-        'intervals',
-        plan.usedMinutes,
-        rpe(6, 8, 'Strong and repeatable'),
-        `Complete ${plan.repeats} × ${plan.workMinutes} min strong with ${plan.recoveryMinutes} min very easy between efforts. Keep stroke quality intact and make the final repeat look like the first.`,
-        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
-      ));
-      appendRemainder(blocks, split.main - plan.usedMinutes, 'swim');
-    } else {
-      appendRemainder(blocks, split.main, 'swim');
-    }
-  } else if (type === 'swim_endurance') {
-    const plan = repeatPlan(split.main, 3, 8, 1);
-    if (plan) {
-      blocks.push(block(
-        'main',
-        'Main set',
-        'intervals',
-        plan.usedMinutes,
-        rpe(3, 5, 'Sustainable'),
-        `Complete ${plan.repeats} × ${plan.workMinutes} min aerobic with ${plan.recoveryMinutes} min easy between. Keep the rest short and preserve mechanics.`,
-        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
-      ));
-      appendRemainder(blocks, split.main - plan.usedMinutes, 'swim');
-    } else {
-      appendRemainder(blocks, split.main, 'swim');
-    }
-  } else {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(3, 5, 'Steady aerobic'), 'Swim steadily at an aerobic effort. Keep breathing controlled and stroke quality consistent.'));
-  }
-
-  blocks.push(cooldownBlock('swim', split.cooldown));
-  return blocks;
-}
-
-function bikeBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
-  const blocks = [warmupBlock('bike', split.warmup)];
-
-  if (type === 'bike_quality_intervals') {
-    const plan = repeatPlan(split.main, 4, split.main >= 40 ? 6 : 5, 3);
-    if (plan) {
-      blocks.push(block(
-        'main',
-        'Main set',
-        'intervals',
-        plan.usedMinutes,
-        rpe(6, 8, 'Controlled quality'),
-        `Complete ${plan.repeats} × ${plan.workMinutes} min at a controlled hard effort with ${plan.recoveryMinutes} min easy spinning between. The last interval should be as controlled as the first.`,
-        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
-      ));
-      appendRemainder(blocks, split.main - plan.usedMinutes, 'bike');
-    } else {
-      appendRemainder(blocks, split.main, 'bike');
-    }
-  } else if (type === 'bike_long_aerobic') {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(3, 5, 'Durable aerobic'), 'Ride steadily at sustainable aerobic intensity. Avoid turning the long ride into an unplanned threshold session.'));
-  } else if (type === 'bike_recovery') {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(1, 2, 'Recovery'), 'Spin very easily with relaxed cadence. This session should reduce stiffness, not create additional training stress.'));
-  } else {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Easy aerobic'), 'Ride at an easy-to-steady aerobic effort with smooth cadence and minimal surging.'));
-  }
-
-  blocks.push(cooldownBlock('bike', split.cooldown));
-  return blocks;
-}
-
-function runBlocks(type: EnduranceWorkoutType, split: SessionSplit): EndurancePrescriptionBlock[] {
-  const blocks = [warmupBlock('run', split.warmup)];
-
-  if (type === 'run_return_to_run') {
-    blocks.push(block(
-      'main',
-      'Main set',
-      'walk_run',
-      split.main,
-      rpe(2, 4, 'Comfortable'),
-      'Follow the explicit return-to-run protocol attached to the athlete plan. This block is the allotted exposure; do not convert it into continuous running or extend it.',
-    ));
-  } else if (type === 'run_quality_intervals') {
-    const plan = repeatPlan(split.main, 4, split.main >= 28 ? 5 : 4, 2);
-    if (plan) {
-      blocks.push(block(
-        'main',
-        'Main set',
-        'intervals',
-        plan.usedMinutes,
-        rpe(6, 8, 'Fast but controlled'),
-        `Complete ${plan.repeats} × ${plan.workMinutes} min controlled with ${plan.recoveryMinutes} min easy running or walking between. Maintain mechanics and finish with reserve.`,
-        { repeats: plan.repeats, workMinutes: plan.workMinutes, recoveryMinutes: plan.recoveryMinutes },
-      ));
-      appendRemainder(blocks, split.main - plan.usedMinutes, 'run');
-    } else {
-      appendRemainder(blocks, split.main, 'run');
-    }
-  } else if (type === 'run_long_aerobic') {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Conversational'), 'Run at a sustainable aerobic effort. Duration should reflect established run capacity rather than goal-distance ambition.'));
-  } else if (type === 'run_recovery') {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(1, 3, 'Very easy'), 'Keep the run deliberately short and easy. Finish with less tension than you started.'));
-  } else {
-    blocks.push(block('main', 'Main set', 'continuous', split.main, rpe(2, 4, 'Conversational'), 'Run easily at conversational effort and keep the session deliberately low-cost.'));
-  }
-
-  blocks.push(cooldownBlock('run', split.cooldown));
-  return blocks;
+  blocks.push(block('aerobic-finish', 'Aerobic finish', 'continuous', minutes, rpe(2, 4, 'Aerobic'), discipline === 'bike' ? 'Ride steadily at an easy aerobic effort with smooth cadence.' : 'Run easily and keep this deliberately low-cost.'));
 }
 
 function blockToStep(item: EndurancePrescriptionBlock): EndurancePrescriptionStep {
-  const effort = item.target.low === item.target.high
-    ? `RPE ${item.target.low}`
-    : `RPE ${item.target.low}–${item.target.high}`;
-  return {
-    label: item.label,
-    minutes: item.totalMinutes,
-    effort,
-    instruction: item.instruction,
-  };
+  const effort = item.target.low === item.target.high ? `RPE ${item.target.low}` : `RPE ${item.target.low}–${item.target.high}`;
+  return { label: item.label, minutes: item.totalMinutes, effort, instruction: item.instruction };
 }
 
-function guardrailsFor(session: PlannedMultisportSession): string[] {
+function guardrailsFor(
+  session: PlannedMultisportSession,
+  type: EnduranceWorkoutType,
+  context: EndurancePrescriptionContext,
+  hasReturnProtocol: boolean,
+): string[] {
   const common = [
     'Do not add time or intensity simply because the session feels easy.',
     'Pain, illness, unusual fatigue, or an active restriction overrides the written workout.',
     'A missed or shortened session does not create training debt that must be repaid later in the week.',
   ];
-  if (session.discipline === 'run') {
-    common.unshift('Run volume must stay within the active running/return-to-run policy and established impact tolerance.');
-  }
+  if (session.discipline === 'swim' && validCss(context.swim?.cssSecondsPer100)) common.unshift('CSS pace is a training target, not a requirement to force pace when mechanics deteriorate.');
+  if (session.discipline === 'run') common.unshift('Run volume must stay within the active running/return-to-run policy and established impact tolerance.');
+  if (type === 'run_return_to_run') common.unshift(hasReturnProtocol ? 'Follow the configured run/walk stage exactly; progression to another stage is a separate decision.' : 'No running is prescribed until an explicit return-to-run stage is configured.');
   return common;
+}
+
+function environmentLabel(discipline: 'swim' | 'bike' | 'run', context: EndurancePrescriptionContext): string | undefined {
+  if (discipline === 'swim') {
+    if ((context.swim?.environment ?? 'pool') === 'open_water') return 'Open water';
+    const length = context.swim?.poolLength ?? 25;
+    const unit = context.swim?.distanceUnit ?? 'yd';
+    return `${length} ${unit} pool`;
+  }
+  if (discipline === 'bike') {
+    if (context.bike?.environment === 'indoor_trainer') return 'Indoor trainer';
+    if (context.bike?.environment === 'mountain_bike') return 'Mountain bike';
+    return terrainLabel(context.goalTerrain, 'Outdoor ride');
+  }
+  if (context.run?.environment === 'treadmill') return 'Treadmill';
+  if (context.run?.environment === 'track') return 'Track';
+  if (context.run?.environment === 'trail') return terrainLabel(context.goalTerrain, 'Trail');
+  return terrainLabel(context.goalTerrain, 'Outdoor run');
+}
+
+function terrainLabel(terrain: GoalTerrain | undefined, fallback: string): string {
+  if (terrain === 'technical_trail') return 'Technical trail';
+  if (terrain === 'mountainous') return 'Mountainous';
+  if (terrain === 'hilly') return 'Hilly';
+  if (terrain === 'rolling') return 'Rolling';
+  if (terrain === 'flat') return 'Flat';
+  return fallback;
+}
+
+function validReturnToRunProtocol(protocol: ReturnToRunProtocol | undefined): ReturnToRunProtocol | undefined {
+  if (!protocol) return undefined;
+  if (![protocol.warmupWalkMinutes, protocol.repeats, protocol.runMinutes, protocol.walkMinutes, protocol.cooldownWalkMinutes].every(Number.isFinite)) return undefined;
+  if (protocol.warmupWalkMinutes < 1 || protocol.cooldownWalkMinutes < 1 || protocol.repeats < 1 || protocol.runMinutes < 1 || protocol.walkMinutes < 1) return undefined;
+  return {
+    warmupWalkMinutes: Math.round(protocol.warmupWalkMinutes),
+    repeats: Math.round(protocol.repeats),
+    runMinutes: Math.round(protocol.runMinutes),
+    walkMinutes: Math.round(protocol.walkMinutes),
+    cooldownWalkMinutes: Math.round(protocol.cooldownWalkMinutes),
+  };
+}
+
+function validCss(value: number | undefined): value is number {
+  return value !== undefined && Number.isFinite(value) && value >= 45 && value <= 240;
+}
+
+function cssPace(css: number | undefined, unit: SwimDistanceUnit, fastOffset: number, slowOffset: number): EndurancePaceTarget | undefined {
+  if (!validCss(css)) return undefined;
+  return {
+    unit,
+    fastSecondsPer100: Math.round(css + fastOffset),
+    slowSecondsPer100: Math.round(css + slowOffset),
+    basis: 'css',
+  };
+}
+
+function assignMinutesByDistance(blocks: EndurancePrescriptionBlock[], totalMinutes: number): EndurancePrescriptionBlock[] {
+  const totalDistance = blocks.reduce((sum, item) => sum + (item.totalDistance ?? 0), 0);
+  if (totalDistance <= 0) return blocks;
+  let remaining = totalMinutes;
+  return blocks.map((item, index) => {
+    if (index === blocks.length - 1) return { ...item, totalMinutes: Math.max(1, remaining) };
+    const estimate = Math.max(1, Math.round(totalMinutes * (item.totalDistance ?? 0) / totalDistance));
+    const minutes = Math.min(estimate, Math.max(1, remaining - (blocks.length - index - 1)));
+    remaining -= minutes;
+    return { ...item, totalMinutes: minutes };
+  });
+}
+
+function clampDistance(value: number, minimum: number, maximum: number, poolLength: number): number {
+  return roundToMultiple(Math.max(minimum, Math.min(maximum, value)), poolLength);
+}
+
+function roundToMultiple(value: number, multiple: number): number {
+  return Math.max(multiple, Math.round(value / multiple) * multiple);
 }
