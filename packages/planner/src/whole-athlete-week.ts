@@ -15,6 +15,7 @@ import {
 export type TrainableDiscipline = 'swim' | 'bike' | 'run' | 'strength';
 export type PlanningCommitment = 'fixed' | 'preferred' | 'generated';
 export type WholeAthletePlanningState = 'build' | 'hold' | 'protect' | 'recover';
+export type WholeAthleteWeekDecision = 'progress' | 'maintain' | 'reduce' | 'recover';
 export type EnergyAvailabilitySignal = 'adequate' | 'uncertain' | 'concerning';
 export type MenstrualRecoverySignal = 'stable' | 'unknown' | 'disrupted';
 export type BoneStressSignal = 'none' | 'remote' | 'recent' | 'active';
@@ -84,10 +85,20 @@ export interface DisciplinePlanSummary {
   baselineMinutes?: number;
 }
 
+export interface DoubleDayPlanSummary {
+  date: string;
+  sessionIds: string[];
+  disciplines: TrainableDiscipline[];
+  rationale: string;
+  athleteSpecified: boolean;
+}
+
 export interface WholeAthleteWeekPlan {
   weekStartDate: string;
   weekEndDate: string;
   planningState: WholeAthletePlanningState;
+  weekDecision: WholeAthleteWeekDecision;
+  weekDecisionReason: string;
   sessions: WholeAthletePlannedSession[];
   progressionBudget: ProgressionBudget;
   progressionAllowed: boolean;
@@ -95,6 +106,7 @@ export interface WholeAthleteWeekPlan {
   plannedMinutes: number;
   generatedMinutes: number;
   disciplineSummary: DisciplinePlanSummary[];
+  doubleDays: DoubleDayPlanSummary[];
   guardrails: string[];
   warnings: string[];
   quality: PlanQualityReport;
@@ -114,6 +126,11 @@ interface SessionTemplate {
   durationMinutes: number;
   keySession: boolean;
   progressionTarget?: ProgressionDomain;
+}
+
+interface DoubleDayAssessment {
+  score: number;
+  rationale: string;
 }
 
 const TRAINABLE_DISCIPLINES: TrainableDiscipline[] = ['swim', 'bike', 'run', 'strength'];
@@ -156,6 +173,8 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   const frequency = resolveFrequencyPlan(input, planningState);
   const baselines = resolveBaselines(input);
   const targetMinutes = resolveTargetMinutes(input, planningState, previousWeek);
+  const weekDecision = deriveWeekDecision(input, planningState, progressionAllowed, targetMinutes, previousWeek);
+  const weekDecisionReason = explainWeekDecision(input, planningState, weekDecision, progressionBudget, targetMinutes, previousWeek);
   const maxSessionsPerDay = input.maxSessionsPerDay ?? (
     planningState === 'recover'
       || input.health.mentalEnergy === 'limited'
@@ -231,12 +250,15 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
           continue;
         }
 
+        const sameDay = sessions.filter((session) => session.date === date);
+        const pairAssessment = sameDay.length ? assessDoubleDay(discipline, template, sameDay) : null;
         const generated = createGeneratedSession({
           date,
           discipline,
           template: { ...template, durationMinutes },
           index: countDiscipline(sessions, discipline),
           planningState,
+          doubleDayRationale: pairAssessment?.rationale,
         });
         sessions = [...sessions, generated].sort(sortSessions);
         if (generated.intensity === 'hard' || generated.intensity === 'max') generatedHardSessions += 1;
@@ -271,6 +293,8 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
     weekStartDate: input.weekStartDate,
     weekEndDate,
     planningState,
+    weekDecision,
+    weekDecisionReason,
     sessions,
     progressionBudget,
     progressionAllowed,
@@ -285,6 +309,7 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
       targetPreferred: frequency[discipline].preferred,
       baselineMinutes: baselines[discipline]?.minutesPerWeek,
     })),
+    doubleDays: summarizeDoubleDays(sessions),
     guardrails,
     warnings: unique(warnings),
     quality,
@@ -306,6 +331,56 @@ function derivePlanningState(input: WholeAthleteWeeklyPlannerInput): WholeAthlet
   ) return 'protect';
   if (health.energyAvailability === 'uncertain' || health.mentalEnergy === 'limited' || health.lifeStress === 'high' || health.injuryConstraint === 'monitor') return 'hold';
   return 'build';
+}
+
+function deriveWeekDecision(
+  input: WholeAthleteWeeklyPlannerInput,
+  state: WholeAthletePlanningState,
+  progressionAllowed: boolean,
+  targetMinutes: number,
+  previousWeek: UnifiedTrainingSession[],
+): WholeAthleteWeekDecision {
+  if (state === 'recover') return 'recover';
+  if (state === 'protect') return 'reduce';
+  if (state === 'hold') return 'maintain';
+  const previousMinutes = totalMinutes(previousWeek);
+  if (previousMinutes > 0 && targetMinutes < previousMinutes * 0.97) return 'reduce';
+  return progressionAllowed ? 'progress' : 'maintain';
+}
+
+function explainWeekDecision(
+  input: WholeAthleteWeeklyPlannerInput,
+  state: WholeAthletePlanningState,
+  decision: WholeAthleteWeekDecision,
+  budget: ProgressionBudget,
+  targetMinutes: number,
+  previousWeek: UnifiedTrainingSession[],
+): string {
+  const phase = input.phase.replaceAll('_', ' ');
+  const previousMinutes = totalMinutes(previousWeek);
+  if (state === 'recover') return `This is a ${phase} phase, but recovery is the priority this week because current recovery or life-capacity signals override training progression.`;
+  if (state === 'protect') return `This is a ${phase} phase, but training load is reduced this week because an active health or injury-protection constraint takes priority.`;
+  if (state === 'hold') return `This is a ${phase} phase, but this week maintains training rather than adding load because recovery capacity is uncertain.`;
+  if (decision === 'reduce' && previousMinutes > 0 && input.availableMinutes < previousMinutes) {
+    return `This remains a ${phase} phase, but total training is lower because available training time is below last week. The reduction reflects availability, not a change in the season plan.`;
+  }
+  if (decision === 'progress' && budget.primary) {
+    return `This is a ${phase} phase. ${friendlyProgressionDomain(budget.primary)} is the primary progression this week while other training stays controlled.`;
+  }
+  const budgetReason = budget.rationale.find((line) => Boolean(line.trim()));
+  return budgetReason
+    ? `This is a ${phase} phase. ${budgetReason}`
+    : `This is a ${phase} phase, but no training domain is being pushed higher this week; useful work is maintained instead.`;
+}
+
+function friendlyProgressionDomain(domain: ProgressionDomain): string {
+  if (domain === 'swim_volume') return 'Swim volume';
+  if (domain === 'bike_volume') return 'Bike volume';
+  if (domain === 'run_volume') return 'Run volume';
+  if (domain === 'strength_volume') return 'Strength volume';
+  if (domain === 'strength_intensity') return 'Strength intensity';
+  if (domain === 'impact') return 'Impact exposure';
+  return domain.replaceAll('_', ' ');
 }
 
 function buildGuardrails(input: WholeAthleteWeeklyPlannerInput, state: WholeAthletePlanningState): string[] {
@@ -638,17 +713,15 @@ function placementScore(
 ): number {
   const sameDay = sessions.filter((session) => session.date === date);
   if (sameDay.length >= maxSessionsPerDay) return Number.NEGATIVE_INFINITY;
-  if (sameDay.some((session) => session.discipline === discipline) && discipline !== 'swim') return Number.NEGATIVE_INFINITY;
+  if (sameDay.some((session) => session.discipline === discipline)) return Number.NEGATIVE_INFINITY;
+  const doubleDay = sameDay.length ? assessDoubleDay(discipline, template, sameDay) : null;
+  if (sameDay.length && !doubleDay) return Number.NEGATIVE_INFINITY;
   if ((input.returnToRun || input.recentBoneStress || input.health.boneStress === 'recent') && discipline === 'run') {
     const runDates = sessions.filter((session) => session.discipline === 'run').map((session) => session.date);
     if (runDates.some((runDate) => Math.abs(dayDifference(runDate, date)) < 2)) return Number.NEGATIVE_INFINITY;
   }
 
-  let score = 0;
-  if (sameDay.length === 0) score += 16;
-  else if (discipline === 'swim') score += 4;
-  else score -= 8;
-
+  let score = sameDay.length === 0 ? 18 : doubleDay!.score;
   if ((template.intensity === 'hard' || template.intensity === 'max') && sessions.some((session) => isHard(session) && Math.abs(dayDifference(session.date, date)) <= 1)) score -= 100;
   if (discipline === 'bike' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 28 : 0;
   if (discipline === 'run' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 22 : 0;
@@ -668,18 +741,68 @@ function placementScore(
   return score;
 }
 
+function assessDoubleDay(
+  discipline: TrainableDiscipline,
+  template: SessionTemplate,
+  sameDay: WholeAthletePlannedSession[],
+): DoubleDayAssessment | null {
+  if (sameDay.length !== 1) return null;
+  const existing = sameDay[0]!;
+  if (!isTrainableDiscipline(existing.discipline) || existing.discipline === discipline) return null;
+  const candidateHard = template.intensity === 'hard' || template.intensity === 'max';
+  if (candidateHard && isHard(existing)) return null;
+  if (existing.discipline === 'rest' || existing.discipline === 'mobility') return null;
+
+  const pair = new Set<TrainableDiscipline>([discipline, existing.discipline]);
+  const athleteCommitted = existing.planningCommitment === 'fixed' || existing.planningCommitment === 'preferred';
+  const label = friendlyDiscipline(existing.discipline);
+
+  if (pair.has('swim')) {
+    return {
+      score: athleteCommitted ? 7 : -2,
+      rationale: athleteCommitted
+        ? `Intentional double day: paired with the athlete's ${label.toLowerCase()} commitment because swimming adds little impact and this preserves another lower-load day.`
+        : `Intentional double day: paired with ${label.toLowerCase()} to consolidate training while preserving another lower-load day.`,
+    };
+  }
+
+  if (pair.has('bike') && pair.has('run')) {
+    if (candidateHard || isHard(existing) || existing.recoveryCost >= 4) return null;
+    return {
+      score: athleteCommitted ? 2 : -8,
+      rationale: athleteCommitted
+        ? `Intentional double day: paired with the athlete's ${label.toLowerCase()} commitment while keeping both endurance sessions controlled.`
+        : 'Intentional double day: bike and run are paired to consolidate aerobic work; neither session should become harder because they share a day.',
+    };
+  }
+
+  if (pair.has('strength') && (pair.has('bike') || pair.has('run'))) {
+    if (candidateHard || isHard(existing) || existing.lowerBodyDemand === 'high' || template.intensity !== 'easy') return null;
+    return {
+      score: athleteCommitted ? -2 : -12,
+      rationale: athleteCommitted
+        ? `Intentional double day: low-load strength is paired with the athlete's ${label.toLowerCase()} commitment so the commitment stays intact without adding another training day.`
+        : 'Intentional double day: low-load strength is paired with easy endurance work to preserve a separate recovery day.',
+    };
+  }
+
+  return null;
+}
+
 function createGeneratedSession({
   date,
   discipline,
   template,
   index,
   planningState,
+  doubleDayRationale,
 }: {
   date: string;
   discipline: TrainableDiscipline;
   template: SessionTemplate;
   index: number;
   planningState: WholeAthletePlanningState;
+  doubleDayRationale?: string;
 }): WholeAthletePlannedSession {
   const intensity = template.intensity;
   const hard = intensity === 'hard' || intensity === 'max';
@@ -695,7 +818,7 @@ function createGeneratedSession({
     source: 'side_quest' as const,
     keySession: template.keySession,
     planningCommitment: 'generated' as const,
-    rationale: generatedRationale(discipline, template, planningState),
+    rationale: generatedRationale(discipline, template, planningState, doubleDayRationale),
     healthAdjusted: planningState !== 'build',
     progressionTarget: template.progressionTarget,
   };
@@ -746,13 +869,40 @@ function generatedRationale(
   discipline: TrainableDiscipline,
   template: SessionTemplate,
   planningState: WholeAthletePlanningState,
+  doubleDayRationale?: string,
 ): string[] {
   const rationale = [`Generated to satisfy the ${discipline} frequency target without exceeding the weekly time budget.`];
   if (template.progressionTarget) rationale.push(`This session carries the week's controlled ${template.progressionTarget.replaceAll('_', ' ')} progression.`);
   if (template.keySession) rationale.push('This is one of the small number of key sessions allowed this week.');
+  if (doubleDayRationale) rationale.push(doubleDayRationale);
   if (planningState === 'hold') rationale.push('The dose is held near recent training rather than progressed.');
   if (planningState === 'protect') rationale.push('The dose is reduced or simplified to respect current health and injury-protection signals.');
   return rationale;
+}
+
+function summarizeDoubleDays(sessions: WholeAthletePlannedSession[]): DoubleDayPlanSummary[] {
+  const byDate = new Map<string, WholeAthletePlannedSession[]>();
+  for (const session of sessions) {
+    if (!isTrainableDiscipline(session.discipline)) continue;
+    const group = byDate.get(session.date) ?? [];
+    group.push(session);
+    byDate.set(session.date, group);
+  }
+  return [...byDate.entries()]
+    .filter(([, day]) => day.length >= 2)
+    .map(([date, day]) => {
+      const explicit = day.flatMap((session) => session.rationale).find((line) => line.startsWith('Intentional double day:'));
+      const athleteSpecified = day.every((session) => session.planningCommitment !== 'generated');
+      return {
+        date,
+        sessionIds: day.map((session) => session.id),
+        disciplines: day.map((session) => session.discipline).filter(isTrainableDiscipline),
+        rationale: explicit ?? (athleteSpecified
+          ? 'Athlete-specified double day preserved as entered.'
+          : 'Double day preserved because one or more sessions are athlete commitments.'),
+        athleteSpecified,
+      };
+    });
 }
 
 function fixedConflictWarnings(sessions: WholeAthletePlannedSession[], input: WholeAthleteWeeklyPlannerInput): string[] {
@@ -865,6 +1015,13 @@ function isHard(session: Pick<UnifiedTrainingSession, 'intensity'>): boolean {
 
 function isTrainableDiscipline(discipline: UnifiedDiscipline): discipline is TrainableDiscipline {
   return discipline === 'swim' || discipline === 'bike' || discipline === 'run' || discipline === 'strength';
+}
+
+function friendlyDiscipline(discipline: TrainableDiscipline): string {
+  if (discipline === 'swim') return 'Swim';
+  if (discipline === 'bike') return 'Bike';
+  if (discipline === 'run') return 'Run';
+  return 'Strength';
 }
 
 function sortSessions(left: WholeAthletePlannedSession, right: WholeAthletePlannedSession): number {
