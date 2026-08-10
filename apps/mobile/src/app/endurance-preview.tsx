@@ -68,6 +68,14 @@ export default function EndurancePreviewScreen() {
 
   const { prescription } = preview;
   const sport = sportPresentation(prescription.discipline);
+  const compatible = compatibleEnvironments(prescription);
+  const isSwim = prescription.discipline === 'swim';
+  const showSetup = isSwim || prescription.workoutType === 'run_return_to_run';
+
+  function askCoachAboutEnvironment() {
+    const draft = `I want to adapt ${cleanTitle(prescription.title)} for a different surface, terrain, or setup. Can I do that without changing the purpose of the workout?`;
+    router.push(`/coach?draft=${encodeURIComponent(draft)}&enduranceId=${encodeURIComponent(id)}&enduranceDate=${encodeURIComponent(date)}` as Href);
+  }
 
   return <V23Screen contentStyle={styles.page}>
     <View style={styles.hero}>
@@ -84,7 +92,10 @@ export default function EndurancePreviewScreen() {
       <View style={styles.heroMeta}>
         <View style={styles.metaItem}><Text style={styles.metaLabel}>TYPE</Text><Text style={styles.metaValue}>{workoutTypeLabel(prescription)}</Text></View>
         <View style={styles.metaDivider} />
-        <View style={styles.metaItem}><Text style={styles.metaLabel}>WHERE</Text><Text style={styles.metaValue}>{prescription.environmentLabel ?? 'Flexible'}</Text></View>
+        <View style={styles.metaItem}>
+          <Text style={styles.metaLabel}>{isSwim ? 'SETUP' : 'EFFORT'}</Text>
+          <Text style={styles.metaValue}>{isSwim ? (prescription.environmentLabel ?? 'Flexible') : overallEffort(prescription)}</Text>
+        </View>
       </View>
     </View>
 
@@ -94,7 +105,7 @@ export default function EndurancePreviewScreen() {
         <View style={styles.setupIcon}><V23Icon name="adjust" color={tokens.accent} size={18} /></View>
         <View style={styles.setupCopy}>
           <Text style={styles.infoTitle}>Choose your current run / walk stage</Text>
-          <Text style={styles.infoBody}>Side Quest will not guess impact progression. Add the stage you are currently using, then the schedule and workout can use its exact duration.</Text>
+          <Text style={styles.infoBody}>Side Quest will not guess impact progression. Add the stage you are currently using, then the workout can use its exact run/walk dose.</Text>
         </View>
         <Pressable accessibilityRole="button" onPress={() => router.push('/endurance-settings' as Href)} style={styles.setupButton}><Text style={styles.setupButtonText}>Set stage</Text></Pressable>
       </V23Card>
@@ -119,6 +130,21 @@ export default function EndurancePreviewScreen() {
       </V23Card>
     </View>
 
+    {compatible.length ? <View>
+      <V23SectionHeader>FLEXIBLE SETUP</V23SectionHeader>
+      <V23Card style={styles.flexCard}>
+        <Text style={styles.infoTitle}>Works well on</Text>
+        <View style={styles.environmentChips}>
+          {compatible.map((item) => <View key={item} style={styles.environmentChip}><Text style={styles.environmentChipText}>{item}</Text></View>)}
+        </View>
+        <Text style={styles.infoBody}>These are examples, not requirements. The training stimulus matters more than the venue.</Text>
+        <Pressable accessibilityRole="button" onPress={askCoachAboutEnvironment} style={styles.coachLink}>
+          <Text style={styles.coachLinkText}>Want hills, trail, treadmill, or something else? Ask Coach</Text>
+          <V23Icon name="chevron" color={tokens.accent} size={14} />
+        </Pressable>
+      </V23Card>
+    </View> : null}
+
     {prescription.whyThisSession.length ? <View>
       <V23SectionHeader>WHY TODAY</V23SectionHeader>
       <V23Card style={styles.infoCard}>
@@ -138,9 +164,12 @@ export default function EndurancePreviewScreen() {
         <V23Icon name="adjust" color="#FFFFFF" size={17} />
         <Text style={styles.primaryButtonText}>Adjust session</Text>
       </Pressable>
-      <Pressable accessibilityRole="button" onPress={() => router.push('/endurance-settings' as Href)} style={styles.settingsButton}>
+      {!isSwim && compatible.length ? <Pressable accessibilityRole="button" onPress={askCoachAboutEnvironment} style={styles.settingsButton}>
+        <Text style={styles.settingsButtonText}>Ask Coach about terrain or setup</Text>
+      </Pressable> : null}
+      {showSetup ? <Pressable accessibilityRole="button" onPress={() => router.push('/endurance-settings' as Href)} style={styles.settingsButton}>
         <Text style={styles.settingsButtonText}>Endurance setup</Text>
-      </Pressable>
+      </Pressable> : null}
       <V23OutlineButton onPress={() => router.back()}>Back to plan</V23OutlineButton>
     </View>
   </V23Screen>;
@@ -216,6 +245,26 @@ function workoutDoseDetail(prescription: EnduranceSessionPrescription): string {
   return `${prescription.totalMinutes} min total`;
 }
 
+function overallEffort(prescription: EnduranceSessionPrescription): string {
+  const lows = prescription.blocks.map((block) => block.target.low);
+  const highs = prescription.blocks.map((block) => block.target.high);
+  return `RPE ${Math.min(...lows)}–${Math.max(...highs)}`;
+}
+
+function compatibleEnvironments(prescription: EnduranceSessionPrescription): string[] {
+  if (prescription.discipline === 'swim') return [];
+  if (prescription.workoutType === 'run_return_to_run') return ['Flat predictable surface', 'Treadmill'];
+  if (prescription.workoutType === 'run_quality_intervals') return ['Track', 'Treadmill', 'Flat road', 'Smooth dirt path'];
+  if (prescription.workoutType === 'run_long_aerobic') return ['Road or path', 'Nontechnical trail', 'Treadmill'];
+  if (prescription.workoutType === 'run_recovery') return ['Flat road or path', 'Treadmill'];
+  if (prescription.workoutType === 'run_easy_aerobic') return ['Road or path', 'Treadmill', 'Smooth trail'];
+  if (prescription.workoutType === 'bike_quality_intervals') return ['Indoor trainer', 'Flat or rolling road'];
+  if (prescription.workoutType === 'bike_long_aerobic') return ['Outdoor road', 'Indoor trainer'];
+  if (prescription.workoutType === 'bike_recovery') return ['Indoor trainer', 'Easy flat route'];
+  if (prescription.discipline === 'bike') return ['Outdoor road or path', 'Indoor trainer'];
+  return [];
+}
+
 function sportPresentation(discipline: EnduranceSessionPrescription['discipline']) {
   if (discipline === 'swim') return { label: 'SWIM', color: '#267BA6', background: '#E4F2F8' };
   if (discipline === 'bike') return { label: 'BIKE', color: '#C58322', background: '#FBF0DB' };
@@ -280,6 +329,12 @@ function makeStyles(tokens: DesignTokens) {
     infoCard: { padding: 16, gap: 9 },
     infoTitle: { color: tokens.text, fontSize: 15, lineHeight: 21, fontWeight: '800' },
     infoBody: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
+    flexCard: { padding: 16, gap: 11 },
+    environmentChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    environmentChip: { borderRadius: 999, backgroundColor: tokens.surfaceMuted, borderWidth: 1, borderColor: tokens.border, paddingHorizontal: 10, paddingVertical: 6 },
+    environmentChipText: { color: tokens.text, fontSize: 11.5, lineHeight: 15, fontWeight: '800' },
+    coachLink: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border, paddingTop: 10, marginTop: 1 },
+    coachLinkText: { flex: 1, color: tokens.accent, fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
     setupCard: { padding: 15, flexDirection: 'row', alignItems: 'center', gap: 10 },
     setupIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
     setupCopy: { flex: 1, minWidth: 0, gap: 2 },
