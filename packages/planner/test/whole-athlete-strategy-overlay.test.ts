@@ -79,7 +79,45 @@ describe('whole-athlete strategy overlay', () => {
     expect(plan.disciplineSummary.find((item) => item.discipline === 'bike')?.targetMin).toBe(2);
   });
 
-  it('does not let strategy turn a protected return-to-run week into specialization', () => {
+  it('protects return-to-run impact while allowing a bike-focused 70.3 week to use non-impact capacity', () => {
+    configureWholeAthleteCoachStrategy({
+      primaryFocus: 'bike',
+      disciplineObjectives: { bike: 'primary_focus', swim: 'maintain', run: 'maintain' },
+      tradeoffTolerance: 'moderate_tradeoff',
+    });
+    const request = input({
+      availableMinutes: 840,
+      returnToRun: true,
+      recentBoneStress: true,
+      health: {
+        energyAvailability: 'adequate',
+        menstrualRecovery: 'stable',
+        boneStress: 'recent',
+        injuryConstraint: 'monitor',
+        mentalEnergy: 'good',
+        lifeStress: 'low',
+      },
+    });
+    const adjusted = buildWholeAthleteWeek(request);
+    const bike = adjusted.sessions.filter((session) => session.discipline === 'bike');
+    const swim = adjusted.sessions.filter((session) => session.discipline === 'swim');
+    const run = adjusted.sessions.filter((session) => session.discipline === 'run');
+    const bikeMinutes = bike.reduce((sum, session) => sum + session.durationMinutes, 0);
+    const swimMinutes = swim.reduce((sum, session) => sum + session.durationMinutes, 0);
+
+    expect(adjusted.planningState).toBe('build');
+    expect(adjusted.progressionBudget.primary).toBe('bike_volume');
+    expect(bike.length).toBeGreaterThanOrEqual(4);
+    expect(bikeMinutes).toBeGreaterThanOrEqual(420);
+    expect(swim.length).toBeGreaterThanOrEqual(3);
+    expect(swimMinutes).toBeGreaterThanOrEqual(120);
+    expect(run.length).toBeLessThanOrEqual(2);
+    expect(run.every((session) => session.intensity === 'easy' && session.durationMinutes <= 30)).toBe(true);
+    expect(adjusted.plannedMinutes).toBeLessThanOrEqual(840);
+    expect(adjusted.guardrails.join(' ')).toContain('discipline-local');
+  });
+
+  it('still blocks specialization when return-to-run coexists with a broader recovery constraint', () => {
     configureWholeAthleteCoachStrategy({
       primaryFocus: 'bike',
       disciplineObjectives: { bike: 'maximize' },
@@ -89,7 +127,7 @@ describe('whole-athlete strategy overlay', () => {
       returnToRun: true,
       recentBoneStress: true,
       health: {
-        energyAvailability: 'adequate',
+        energyAvailability: 'concerning',
         menstrualRecovery: 'stable',
         boneStress: 'recent',
         injuryConstraint: 'monitor',
