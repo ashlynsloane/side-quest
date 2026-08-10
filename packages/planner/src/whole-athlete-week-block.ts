@@ -1,8 +1,10 @@
 import {
   buildWholeAthleteWeek as buildStrategyWholeAthleteWeek,
 } from './whole-athlete-week-strategy';
+import { applyBikeQualityAnchor } from './bike-quality-anchor';
 import { applyTrainingBlockRhythm } from './whole-athlete-week-rhythm';
 import { applyWeekendLongRideAnchor } from './bike-long-ride-anchor';
+import { applyDisciplineDaySpread } from './discipline-day-spread';
 import type {
   WholeAthleteWeeklyPlannerInput,
   WholeAthleteWeekPlan,
@@ -17,13 +19,19 @@ export type { BlockWorkoutStage, TrainingWorkoutIdentity } from './whole-athlete
  *
  * 1. Safety / load governance builds the allowed week.
  * 2. Race Intent + Coach Strategy may adjust that allowed allocation.
- * 3. Block rhythm preserves repeatable weekdays and chooses the week's workout
+ * 3. A bike-development week converts one approved weekday ride into quality
+ *    without adding training time or impact.
+ * 4. Block rhythm preserves repeatable weekdays and chooses the week's workout
  *    families without increasing the approved dose.
- * 4. Long-course triathlon bike volume is shaped around one weekend long ride
+ * 5. Long-course triathlon bike volume is shaped around one weekend long ride
  *    rather than several nearly-identical medium-long rides.
+ * 6. Accidental generated swim doubles are spread across distinct days while
+ *    preserving fixed athlete commitments and the lowest-load recovery day.
  */
 export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): WholeAthleteWeekPlan {
   const strategicPlan = buildStrategyWholeAthleteWeek(input);
-  const rhythmedPlan = applyTrainingBlockRhythm(strategicPlan, input);
-  return applyWeekendLongRideAnchor(rhythmedPlan, input);
+  const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, input);
+  const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, input);
+  const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, input);
+  return applyDisciplineDaySpread(longRidePlan, input);
 }
