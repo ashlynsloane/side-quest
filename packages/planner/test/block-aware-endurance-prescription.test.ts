@@ -39,7 +39,7 @@ describe('block-aware endurance prescription', () => {
       durationMinutes: 65,
       intensity: 'moderate',
     }), {
-      swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'strong' },
+      swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'average' },
     });
     const main = prescription?.blocks.find((block) => block.id === 'main');
     const secondary = prescription?.blocks.find((block) => block.id === 'secondary');
@@ -62,7 +62,7 @@ describe('block-aware endurance prescription', () => {
       durationMinutes: 65,
       intensity: 'moderate',
     }), {
-      swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'strong' },
+      swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'average' },
     });
     const main = prescription?.blocks.find((block) => block.id === 'main');
     const secondary = prescription?.blocks.find((block) => block.id === 'secondary');
