@@ -19,7 +19,7 @@ import {
 import { loadTrainingAvailabilityProfile } from '@/services/training-availability';
 import type { TrainingOutingScheduledSession } from '@/services/training-outings';
 import { conciseSessionLabel } from '@/services/training-synthesis';
-import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
+import { SIDE_QUEST_PLAN_SOURCE_ID, type GeneratedWholeAthleteBlock } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
@@ -33,10 +33,12 @@ export default function PlanTab() {
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const { openPlannedWorkoutPreview, activeWorkout, activePlanLink } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
+  const [wholeAthletePlan, setWholeAthletePlan] = useState<GeneratedWholeAthleteBlock | null>(null);
   const [events, setEvents] = useState<TrainingCalendarEvent[]>([]);
   const [scheduledSessions, setScheduledSessions] = useState<TrainingOutingScheduledSession[]>([]);
   const [availabilityEnabled, setAvailabilityEnabled] = useState(false);
   const [anchorDate, setAnchorDate] = useState(() => localDate());
+  const [weekLoading, setWeekLoading] = useState(false);
   const [hasTrainingHistory, setHasTrainingHistory] = useState(false);
   const [hasReadinessData, setHasReadinessData] = useState(false);
   const [hasConnectedTrainingData, setHasConnectedTrainingData] = useState(false);
@@ -74,8 +76,9 @@ export default function PlanTab() {
         listTrainingCalendarSources(),
       ]);
       if (!live) return;
-      const wholeWeek = wholeAthlete?.weeks.find((week) => nextAnchor >= week.weekStartDate && nextAnchor <= week.weekEndDate) ?? wholeAthlete?.weeks[0];
+      const wholeWeek = findWholeAthleteWeek(wholeAthlete, nextAnchor);
       setBlock(nextBlock);
+      setWholeAthletePlan(wholeAthlete);
       setAnchorDate(nextAnchor);
       setEvents(calendar);
       setScheduledSessions((wholeWeek?.sessions ?? []) as TrainingOutingScheduledSession[]);
@@ -83,13 +86,33 @@ export default function PlanTab() {
       setPlanningState(wholeWeek?.planningState ?? null);
       setWeekDecision(wholeWeek?.weekDecision ?? null);
       setWeekDecisionReason(wholeWeek?.weekDecisionReason ?? null);
-      setPlanningNotice(wholeWeek?.warnings.find((warning) => /return-to-run protocol calls for|left unscheduled because no saved availability/i.test(warning)) ?? null);
+      setPlanningNotice(weekNotice(wholeWeek?.warnings));
       setHasTrainingHistory(history.length > 0);
       setHasReadinessData(Boolean(readiness));
       setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
     })();
     return () => { live = false; };
   }, []));
+
+  const selectPlanWeek = useCallback(async (requestedAnchor: string) => {
+    if (!block || weekLoading) return;
+    const nextAnchor = clampPlanWeekAnchor(requestedAnchor, block);
+    setWeekLoading(true);
+    try {
+      const { from, to } = weekRange(nextAnchor);
+      const calendar = await getTrainingCalendarEvents({ from, to });
+      const wholeWeek = findWholeAthleteWeek(wholeAthletePlan, nextAnchor);
+      setAnchorDate(nextAnchor);
+      setEvents(calendar);
+      setScheduledSessions((wholeWeek?.sessions ?? []) as TrainingOutingScheduledSession[]);
+      setPlanningState(wholeWeek?.planningState ?? null);
+      setWeekDecision(wholeWeek?.weekDecision ?? null);
+      setWeekDecisionReason(wholeWeek?.weekDecisionReason ?? null);
+      setPlanningNotice(weekNotice(wholeWeek?.warnings));
+    } finally {
+      setWeekLoading(false);
+    }
+  }, [block, weekLoading, wholeAthletePlan]);
 
   const strength = block?.weeks.flatMap((week) => week.sessions) ?? [];
   const days = weekDays(events, strength, anchorDate, scheduledSessions, availabilityEnabled);
@@ -99,6 +122,17 @@ export default function PlanTab() {
   const currentWeek = block?.weeks.find((week) => anchorDate >= week.weekStartDate && anchorDate <= addDays(week.weekStartDate, 6)) ?? block?.weeks[0];
   const phase = currentWeek?.phase;
   const totalSessions = counts.swim + counts.bike + counts.run + counts.strength;
+  const selectedWeekStart = weekStartDate(anchorDate);
+  const currentWeekStart = weekStartDate(today);
+  const blockWeekIndex = block ? block.weeks.findIndex((week) => week.weekStartDate === selectedWeekStart) : -1;
+  const isCurrentCalendarWeek = selectedWeekStart === currentWeekStart;
+  const canPreviousWeek = Boolean(block && blockWeekIndex > 0);
+  const canNextWeek = Boolean(block && blockWeekIndex >= 0 && blockWeekIndex < block.weeks.length - 1);
+  const weekPositionLabel = blockWeekIndex >= 0 && block ? `WEEK ${blockWeekIndex + 1} OF ${block.weeks.length}` : 'WEEK';
+
+  const moveWeek = (offset: -1 | 1) => {
+    void selectPlanWeek(addDays(selectedWeekStart, offset * 7));
+  };
 
   const openStrength = (session: PlannedStrengthSession) => {
     openPlannedWorkoutPreview(session, {
@@ -154,11 +188,11 @@ export default function PlanTab() {
     {activeWorkout ? <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink} onResume={() => router.push('/active-workout' as Href)} compact /> : null}
 
     <ProductHero
-      eyebrow={`WEEK · ${phaseLabel(phase)}`}
+      eyebrow={`${weekPositionLabel} · ${phaseLabel(phase)}`}
       title={block.goal.name}
       body={planningWarning ?? weekDecisionReason ?? planningStateBody(planningState, true)}
       meta={<>
-        {weekDecision ? <ProductMetric label="this week" value={weekDecisionLabel(weekDecision)} emphasis /> : null}
+        {weekDecision ? <ProductMetric label={isCurrentCalendarWeek ? 'this week' : 'week state'} value={weekDecisionLabel(weekDecision)} emphasis /> : null}
         <ProductMetric label="sessions" value={String(totalSessions)} />
         {counts.swim ? <ProductMetric label="swim" value={String(counts.swim)} /> : null}
         {counts.bike ? <ProductMetric label="bike" value={String(counts.bike)} /> : null}
@@ -168,7 +202,9 @@ export default function PlanTab() {
       </>}
       actions={<>
         <Pressable onPress={() => router.push('/session-adjustment' as Href)} style={styles.heroButton}><V23Icon name="adjust" color="#FFFFFF" size={16} /><Text style={styles.heroButtonText}>Adjust week</Text></Pressable>
-        <Pressable onPress={() => router.push('/schedule' as Href)} style={styles.heroButtonSecondary}><V23Icon name="plan" color="#FFFFFF" size={16} /><Text style={styles.heroButtonText}>Full schedule</Text></Pressable>
+        {canNextWeek ? <Pressable disabled={weekLoading} onPress={() => moveWeek(1)} style={[styles.heroButtonSecondary, weekLoading && styles.disabled]}><Text style={styles.heroButtonText}>Next week</Text><V23Icon name="chevron" color="#FFFFFF" size={16} /></Pressable>
+          : !isCurrentCalendarWeek ? <Pressable disabled={weekLoading} onPress={() => void selectPlanWeek(today)} style={[styles.heroButtonSecondary, weekLoading && styles.disabled]}><Text style={styles.heroButtonText}>This week</Text></Pressable>
+            : null}
       </>}
     />
 
@@ -177,7 +213,19 @@ export default function PlanTab() {
       <View style={styles.noticeCopy}><Text style={styles.noticeLabel}>PLAN NEEDS ATTENTION</Text><Text style={styles.noticeText}>{planningNotice}</Text></View>
     </View> : null}
 
-    <ProductSection eyebrow="THIS WEEK" title={formatWeekRange(days)}>
+    <ProductSection eyebrow={isCurrentCalendarWeek ? 'THIS WEEK' : weekPositionLabel} title={formatWeekRange(days)}>
+      <View style={styles.weekNavigator}>
+        <Pressable accessibilityRole="button" disabled={!canPreviousWeek || weekLoading} onPress={() => moveWeek(-1)} style={[styles.weekNavButton, (!canPreviousWeek || weekLoading) && styles.weekNavDisabled]}>
+          <Text style={styles.weekNavArrow}>‹</Text><Text style={styles.weekNavText}>Previous</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" disabled={isCurrentCalendarWeek || weekLoading} onPress={() => void selectPlanWeek(today)} style={[styles.weekTodayButton, (isCurrentCalendarWeek || weekLoading) && styles.weekNavDisabled]}>
+          <Text style={[styles.weekTodayText, isCurrentCalendarWeek && styles.weekTodayCurrentText]}>{isCurrentCalendarWeek ? 'Current week' : 'This week'}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" disabled={!canNextWeek || weekLoading} onPress={() => moveWeek(1)} style={[styles.weekNavButton, styles.weekNavButtonRight, (!canNextWeek || weekLoading) && styles.weekNavDisabled]}>
+          <Text style={styles.weekNavText}>Next</Text><Text style={styles.weekNavArrow}>›</Text>
+        </Pressable>
+      </View>
+
       <View style={styles.weekSurface}>
         <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
           <Text style={styles.dayInitial}>{day.weekday}</Text>
@@ -387,6 +435,23 @@ function weeklyCounts(days: ReturnType<typeof weekDays>) {
   return counts;
 }
 
+function findWholeAthleteWeek(plan: GeneratedWholeAthleteBlock | null, anchorDate: string) {
+  return plan?.weeks.find((week) => anchorDate >= week.weekStartDate && anchorDate <= week.weekEndDate) ?? null;
+}
+
+function weekNotice(warnings: string[] | undefined): string | null {
+  return warnings?.find((warning) => /return-to-run protocol calls for|left unscheduled because no saved availability/i.test(warning)) ?? null;
+}
+
+function clampPlanWeekAnchor(anchorDate: string, block: TrainingBlockPlan): string {
+  const requested = weekStartDate(anchorDate);
+  const first = block.weeks[0]?.weekStartDate;
+  const last = block.weeks.at(-1)?.weekStartDate;
+  if (first && requested < first) return first;
+  if (last && requested > last) return last;
+  return requested;
+}
+
 function planningStateBody(state: 'build' | 'hold' | 'protect' | 'recover' | null, hasBlock: boolean): string {
   if (!hasBlock) return 'Choose a goal and weekly availability to build a training week.';
   if (state === 'recover') return 'Recovery week. Keep training light and leave room to recover.';
@@ -425,6 +490,7 @@ function raceCountdown(eventDate: string): string {
 
 function strengthStatusLabel(status: PlannedStrengthSession['completionStatus']): string { if (status === 'completed') return 'Completed'; if (status === 'skipped') return 'Skipped'; if (status === 'modified') return 'Adjusted'; return ''; }
 function weekRange(anchorDate: string) { const start = new Date(`${anchorDate}T12:00:00`); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); const end = new Date(start); end.setDate(end.getDate() + 7); return { from: start.toISOString(), to: end.toISOString() }; }
+function weekStartDate(anchorDate: string) { return weekRange(anchorDate).from.slice(0, 10); }
 function formatWeekRange(days: ReturnType<typeof weekDays>) { if (!days.length) return ''; const first = new Date(`${days[0]!.date}T12:00:00`); const last = new Date(`${days[days.length - 1]!.date}T12:00:00`); const firstLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(first); const lastLabel = new Intl.DateTimeFormat('en-US', { month: first.getMonth() === last.getMonth() ? undefined : 'short', day: 'numeric' }).format(last); return `${firstLabel} – ${lastLabel}`; }
 function previousStrengthDate(session: PlannedStrengthSession, sessions: PlannedStrengthSession[]): string | undefined { return sessions.filter((candidate) => candidate.id !== session.id && candidate.date < session.date).sort((left, right) => right.date.localeCompare(left.date))[0]?.date; }
 function nextEnduranceDate(session: PlannedStrengthSession, events: TrainingCalendarEvent[]): string | undefined { return events.filter((event) => event.startAt.slice(0, 10) >= session.date && event.discipline !== 'strength' && event.discipline !== 'rest').sort((left, right) => left.startAt.localeCompare(right.startAt))[0]?.startAt.slice(0, 10); }
@@ -446,6 +512,17 @@ function makeStyles(tokens: DesignTokens) {
     noticeCopy: { flex: 1, gap: 3 },
     noticeLabel: { color: tokens.warning, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
     noticeText: { color: tokens.text, fontSize: 12, lineHeight: 17 },
+
+    weekNavigator: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 },
+    weekNavButton: { minHeight: 38, minWidth: 88, flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 11 },
+    weekNavButtonRight: { justifyContent: 'flex-end' },
+    weekNavText: { color: tokens.text, fontSize: 11.5, lineHeight: 15, fontWeight: '800' },
+    weekNavArrow: { color: tokens.accent, fontSize: 20, lineHeight: 22, fontWeight: '700', marginTop: -2 },
+    weekTodayButton: { minHeight: 38, flex: 1, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+    weekTodayText: { color: tokens.accent, fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
+    weekTodayCurrentText: { color: tokens.textMuted },
+    weekNavDisabled: { opacity: 0.38 },
+    disabled: { opacity: 0.55 },
 
     weekSurface: { borderRadius: 20, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, overflow: 'hidden' },
     calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 11, paddingTop: 12, paddingBottom: 11, backgroundColor: tokens.surfaceMuted, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
