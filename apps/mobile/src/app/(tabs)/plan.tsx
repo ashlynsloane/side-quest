@@ -23,6 +23,8 @@ import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
 import type { DesignTokens } from '@/theme';
 
+type WeekDecision = 'progress' | 'maintain' | 'reduce' | 'recover';
+
 export default function PlanTab() {
   const router = useRouter();
   const { tokens } = useTheme();
@@ -35,6 +37,8 @@ export default function PlanTab() {
   const [hasReadinessData, setHasReadinessData] = useState(false);
   const [hasConnectedTrainingData, setHasConnectedTrainingData] = useState(false);
   const [planningState, setPlanningState] = useState<'build' | 'hold' | 'protect' | 'recover' | null>(null);
+  const [weekDecision, setWeekDecision] = useState<WeekDecision | null>(null);
+  const [weekDecisionReason, setWeekDecisionReason] = useState<string | null>(null);
   const [planningWarning, setPlanningWarning] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -70,6 +74,8 @@ export default function PlanTab() {
       setAnchorDate(nextAnchor);
       setEvents(calendar);
       setPlanningState(wholeWeek?.planningState ?? null);
+      setWeekDecision(wholeWeek?.weekDecision ?? null);
+      setWeekDecisionReason(wholeWeek?.weekDecisionReason ?? null);
       setHasTrainingHistory(history.length > 0);
       setHasReadinessData(Boolean(readiness));
       setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
@@ -123,9 +129,10 @@ export default function PlanTab() {
     <ProductHero
       eyebrow={`WEEK · ${phaseLabel(phase)}`}
       title={block.goal.name}
-      body={planningWarning ?? planningStateBody(planningState, true)}
+      body={planningWarning ?? weekDecisionReason ?? planningStateBody(planningState, true)}
       meta={<>
-        <ProductMetric label="sessions" value={String(totalSessions)} emphasis />
+        {weekDecision ? <ProductMetric label="this week" value={weekDecisionLabel(weekDecision)} emphasis /> : null}
+        <ProductMetric label="sessions" value={String(totalSessions)} />
         {counts.swim ? <ProductMetric label="swim" value={String(counts.swim)} /> : null}
         {counts.bike ? <ProductMetric label="bike" value={String(counts.bike)} /> : null}
         {counts.run ? <ProductMetric label="run" value={String(counts.run)} /> : null}
@@ -254,6 +261,13 @@ function planningStateToolBody(state: 'build' | 'hold' | 'protect' | 'recover' |
   if (state === 'protect') return 'This week has an active training cap.';
   if (state === 'hold') return 'Progression is paused this week.';
   return 'Review the current training limits.';
+}
+
+function weekDecisionLabel(value: WeekDecision): string {
+  if (value === 'progress') return 'Progress';
+  if (value === 'maintain') return 'Maintain';
+  if (value === 'reduce') return 'Reduce';
+  return 'Recover';
 }
 
 function phaseLabel(value: string | undefined): string {
