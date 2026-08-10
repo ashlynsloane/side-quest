@@ -38,6 +38,22 @@ describe('endurance workout shape library', () => {
     }
   });
 
+  it('breaks long solo aerobic swims into varied blocks instead of wallpaper repeats', () => {
+    const longAerobicShapes = listSwimPoolWorkoutShapes().filter((shape) =>
+      shape.type !== 'swim_quality' && swimPoolWorkoutShapeDistance(shape) >= 2600);
+
+    for (const shape of longAerobicShapes) {
+      expect(shape.main.repeatDistance, shape.id).toBeLessThanOrEqual(400);
+      expect(shape.main.repeats * shape.main.repeatDistance, shape.id).toBeLessThanOrEqual(1600);
+      expect(shape.secondary, `${shape.id} should change structure during a long solo swim`).toBeDefined();
+    }
+
+    const endurance3000 = selectSwimPoolWorkoutShape('swim_endurance', 3000);
+    expect(endurance3000.id).toBe('swim-endurance-3000');
+    expect(endurance3000.main).toMatchObject({ repeats: 4, repeatDistance: 300 });
+    expect(endurance3000.secondary).toMatchObject({ repeats: 6, repeatDistance: 200 });
+  });
+
   it('selects recognizable pool shapes near the requested training dose', () => {
     const technique = selectSwimPoolWorkoutShape('swim_technique', 1370);
     expect(technique.id).toBe('swim-technique-1400');
