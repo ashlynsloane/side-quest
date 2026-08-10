@@ -66,6 +66,108 @@ describe('whole-athlete weekly planner', () => {
     expect(plan.sessions.some((item) => item.planningCommitment === 'generated')).toBe(true);
   });
 
+  it('never creates a generated same-discipline double day', () => {
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 650,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      frequencyTargets: {
+        swim: { min: 3, preferred: 4, max: 5 },
+        bike: { min: 3, preferred: 3, max: 5 },
+        run: { min: 2, preferred: 2, max: 5 },
+        strength: { min: 2, preferred: 2, max: 3 },
+      },
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'moderate',
+      },
+    });
+
+    const generated = plan.sessions.filter((item) => item.planningCommitment === 'generated');
+    for (const current of generated) {
+      const sameDisciplineSameDay = plan.sessions.filter((item) => item.date === current.date && item.discipline === current.discipline);
+      expect(sameDisciplineSameDay).toHaveLength(1);
+    }
+  });
+
+  it('preserves an athlete-specified same-discipline double without teaching the generator to copy it', () => {
+    const fixed = [
+      session('am-swim', '2026-08-11', 'swim', 45),
+      session('pm-swim', '2026-08-11', 'swim', 35),
+    ];
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 650,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      fixedSessions: fixed,
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'moderate',
+      },
+    });
+
+    expect(plan.sessions.filter((item) => item.date === '2026-08-11' && item.discipline === 'swim')).toHaveLength(2);
+    const summary = plan.doubleDays.find((item) => item.date === '2026-08-11');
+    expect(summary?.athleteSpecified).toBe(true);
+    expect(summary?.rationale).toContain('Athlete-specified');
+    const generatedSwimOnThatDay = plan.sessions.some((item) => item.date === '2026-08-11' && item.discipline === 'swim' && item.planningCommitment === 'generated');
+    expect(generatedSwimOnThatDay).toBe(false);
+  });
+
+  it('only creates cross-discipline generated doubles with an explicit rationale', () => {
+    const fixedSessions = [0, 1, 2, 3, 4, 5, 6].map((offset) =>
+      session(`fixed-swim-${offset}`, `2026-08-${String(10 + offset).padStart(2, '0')}`, 'swim', 25));
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 800,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      fixedSessions,
+      frequencyTargets: {
+        swim: { min: 0, preferred: 0, max: 7 },
+        bike: { min: 2, preferred: 2, max: 3 },
+        run: { min: 2, preferred: 2, max: 3 },
+        strength: { min: 0, preferred: 0, max: 2 },
+      },
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'moderate',
+      },
+    });
+
+    const generatedDoubles = plan.doubleDays.filter((item) => !item.athleteSpecified);
+    expect(generatedDoubles.length).toBeGreaterThan(0);
+    for (const double of generatedDoubles) {
+      expect(new Set(double.disciplines).size).toBe(double.disciplines.length);
+      expect(double.rationale).toContain('Intentional double day:');
+    }
+  });
+
+  it('separates Build phase from a lower-volume availability decision', () => {
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 300,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      previousWeek,
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'moderate',
+      },
+    });
+
+    expect(plan.planningState).toBe('build');
+    expect(plan.weekDecision).toBe('reduce');
+    expect(plan.weekDecisionReason.toLowerCase()).toContain('available training time');
+    expect(plan.weekDecisionReason.toLowerCase()).toContain('remains a build phase');
+  });
+
   it('holds progression and removes generated high intensity when energy-availability signals are concerning', () => {
     const previousMinutes = previousWeek.reduce((sum, item) => sum + item.durationMinutes, 0);
     const plan = buildWholeAthleteWeek({
@@ -83,6 +185,8 @@ describe('whole-athlete weekly planner', () => {
     });
 
     expect(plan.planningState).toBe('protect');
+    expect(plan.weekDecision).toBe('reduce');
+    expect(plan.weekDecisionReason.toLowerCase()).toContain('build phase');
     expect(plan.progressionAllowed).toBe(false);
     expect(plan.progressionBudget.primary).toBeNull();
     expect(plan.targetMinutes).toBeLessThanOrEqual(previousMinutes);
@@ -159,6 +263,7 @@ describe('whole-athlete weekly planner', () => {
     });
 
     expect(plan.planningState).toBe('recover');
+    expect(plan.weekDecision).toBe('recover');
     expect(plan.sessions.filter((item) => item.planningCommitment === 'generated')).toHaveLength(0);
     expect(plan.sessions.some((item) => item.id === 'fixed-swim')).toBe(true);
     expect(plan.sessions.some((item) => item.id === 'preferred-bike')).toBe(false);
