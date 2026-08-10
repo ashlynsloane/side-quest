@@ -18,7 +18,7 @@ import {
 } from '@/services/database';
 import { loadTrainingAvailabilityProfile } from '@/services/training-availability';
 import type { TrainingOutingScheduledSession } from '@/services/training-outings';
-import { conciseSessionLabel, plannedStrengthDisplayName } from '@/services/training-synthesis';
+import { conciseSessionLabel, generatedEnduranceDisplayName, plannedStrengthDisplayName } from '@/services/training-synthesis';
 import { SIDE_QUEST_PLAN_SOURCE_ID, type GeneratedWholeAthleteBlock } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
@@ -329,7 +329,9 @@ function weekDays(
       return [{
         id: event.id,
         kind: 'event' as const,
-        title: conciseSessionLabel({ discipline: event.discipline, title: event.title }),
+        title: event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(event)
+          ? generatedEnduranceDisplayName(event)
+          : conciseSessionLabel({ discipline: event.discipline, title: event.title }),
         meta: eventMeta(event),
         discipline: event.discipline,
         event,
