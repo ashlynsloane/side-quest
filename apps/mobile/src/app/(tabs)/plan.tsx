@@ -323,9 +323,10 @@ function weekDays(
     const date = new Date(start);
     date.setDate(start.getDate() + index);
     const iso = date.toISOString().slice(0, 10);
-    const eventItems: DayItem[] = events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => {
-      const planned = scheduled.find((session) => event.id.endsWith(`_${safeId(session.id)}`));
-      return {
+    const eventItems: DayItem[] = events.filter((event) => event.startAt.slice(0, 10) === iso).flatMap((event) => {
+      const planned = scheduledSessionForEvent(event, scheduled);
+      if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && scheduled.length > 0 && !planned) return [];
+      return [{
         id: event.id,
         kind: 'event' as const,
         title: conciseSessionLabel({ discipline: event.discipline, title: event.title }),
@@ -338,7 +339,7 @@ function weekDays(
         outingId: planned?.trainingOutingId,
         locationName: planned?.scheduledLocationName,
         transitionMinutes: planned?.transitionMinutes,
-      };
+      }];
     });
     const strengthItems: DayItem[] = strength.flatMap((session) => {
       const planned = scheduledStrength.get(session.id) as TrainingOutingScheduledSession | undefined;
@@ -352,8 +353,8 @@ function weekDays(
       return [{
         id: session.id,
         kind: 'strength' as const,
-        title: session.title,
-        meta: [time, `${duration} min`, status].filter(Boolean).join(' · '),
+        title: strengthDisplayTitle(session),
+        meta: [time, formatTrainingDuration(duration), status].filter(Boolean).join(' · '),
         session: displaySession,
         sortAt: planned?.scheduledStartAt ?? `${iso}T23:58:00`,
         scheduledStartAt: planned?.scheduledStartAt,
@@ -402,10 +403,70 @@ function eventMeta(event: TrainingCalendarEvent): string {
   if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID) {
     const match = event.description?.match(/Side Quest generated · (\d+) min · ([a-z_]+)/i);
     const time = event.allDay ? null : formatScheduledTime(event.startAt);
-    if (match) return `${time ? `${time} · ` : ''}${match[1]} min · ${match[2]!.replaceAll('_', ' ')}`;
-    if (event.endAt) return `${time ? `${time} · ` : ''}${Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000))} min · Side Quest`;
+    if (match) return `${time ? `${time} · ` : ''}${formatTrainingDuration(Number(match[1]))} · ${match[2]!.replaceAll('_', ' ')}`;
+    if (event.endAt) {
+      const minutes = Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000));
+      return `${time ? `${time} · ` : ''}${formatTrainingDuration(minutes)} · Side Quest`;
+    }
   }
   return event.allDay ? 'Flexible' : formatScheduledTime(event.startAt) ?? 'Scheduled';
+}
+
+function scheduledSessionForEvent(
+  event: TrainingCalendarEvent,
+  scheduled: TrainingOutingScheduledSession[],
+): TrainingOutingScheduledSession | undefined {
+  const suffixMatch = scheduled.find((session) => event.id.endsWith(`_${safeId(session.id)}`));
+  if (suffixMatch) return suffixMatch;
+  if (event.sourceId !== SIDE_QUEST_PLAN_SOURCE_ID) return undefined;
+  const date = event.startAt.slice(0, 10);
+  const duration = event.endAt
+    ? Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000))
+    : undefined;
+  return scheduled.find((session) =>
+    session.date === date
+    && session.discipline === event.discipline
+    && (duration === undefined || Math.abs(session.durationMinutes - duration) <= 1)
+    && conciseSessionLabel({ discipline: session.discipline, title: session.title }) === conciseSessionLabel({ discipline: event.discipline, title: event.title }));
+}
+
+function formatTrainingDuration(minutes: number): string {
+  const rounded = Math.max(1, Math.round(minutes));
+  if (rounded <= 120) return `${rounded} min`;
+  const hours = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
+  const hourLabel = `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  if (!remainder) return hourLabel;
+  return `${hourLabel}, ${remainder} ${remainder === 1 ? 'min' : 'mins'}`;
+}
+
+function strengthDisplayTitle(session: PlannedStrengthSession): string {
+  const role = session.purpose === 'posterior_durability'
+    ? 'Posterior Chain'
+    : session.purpose === 'swim_support'
+      ? 'Swim Support'
+      : session.purpose === 'single_leg_durability'
+        ? 'Single-Leg Strength'
+        : session.purpose === 'maintenance'
+          ? 'Strength Maintenance'
+          : session.title;
+  const anchors = uniqueStrings(session.workout.stations.flatMap((station) =>
+    station.exercises.slice(0, 1).map((exercise) => compactExerciseName(exercise.exerciseSnapshot.name))));
+  return anchors.length ? `${role} · ${anchors.slice(0, 2).join(' + ')}` : session.title;
+}
+
+function compactExerciseName(value: string): string {
+  return value
+    .replace(/^Dumbbell\s+/i, 'DB ')
+    .replace(/^Kettlebell\s+/i, 'KB ')
+    .replace(/^Barbell\s+/i, 'BB ')
+    .replace(/^Cable\s+/i, 'Cable ')
+    .replace(/Romanian Deadlift/gi, 'RDL')
+    .trim();
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function stripLeadingTime(value: string): string {
