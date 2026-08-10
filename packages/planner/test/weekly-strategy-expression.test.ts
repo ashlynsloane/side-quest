@@ -56,7 +56,7 @@ describe('weekly strategy expression', () => {
     if (expression.state === 'partially_expressed') expect(expression.summary).toContain('remains prioritized');
   });
 
-  it('reports strategy as held when protection prevents discretionary progression', () => {
+  it('reports a bike strategy as expressed when return-to-run protection is impact-local', () => {
     const strategy = {
       primaryFocus: 'bike' as const,
       disciplineObjectives: { bike: 'maximize' as const, swim: 'maintain' as const, run: 'minimum_viable' as const },
@@ -68,6 +68,33 @@ describe('weekly strategy expression', () => {
       returnToRun: true,
       health: {
         energyAvailability: 'adequate',
+        menstrualRecovery: 'stable',
+        boneStress: 'recent',
+        injuryConstraint: 'monitor',
+        mentalEnergy: 'good',
+        lifeStress: 'low',
+      },
+    }));
+    const expression = buildWeeklyStrategyExpression(week, strategy);
+
+    expect(week.planningState).toBe('build');
+    expect(week.progressionBudget.primary).toBe('bike_volume');
+    expect(expression.state).toBe('expressed');
+    expect(expression.targetSupport?.support).toBe('direct');
+  });
+
+  it('reports strategy as held when a broader recovery constraint prevents discretionary progression', () => {
+    const strategy = {
+      primaryFocus: 'bike' as const,
+      disciplineObjectives: { bike: 'maximize' as const, swim: 'maintain' as const, run: 'minimum_viable' as const },
+      racePriority: { discipline: 'bike' as const, objective: 'time_goal' as const, target: '2:35:00' },
+    };
+    configureWholeAthleteCoachStrategy(strategy);
+    const week = buildWholeAthleteWeek(input({
+      recentBoneStress: true,
+      returnToRun: true,
+      health: {
+        energyAvailability: 'concerning',
         menstrualRecovery: 'stable',
         boneStress: 'recent',
         injuryConstraint: 'monitor',
