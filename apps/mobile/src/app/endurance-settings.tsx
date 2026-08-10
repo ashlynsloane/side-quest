@@ -1,4 +1,4 @@
-import type { BikeEnvironment, RunEnvironment, SwimEnvironment } from '@circuit/planner/endurance-prescription';
+import type { SwimEnvironment } from '@circuit/planner/endurance-prescription';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -64,14 +64,14 @@ export default function EnduranceSettingsScreen() {
   return <V23Screen contentStyle={styles.page}>
     <View style={styles.intro}>
       <Text style={styles.eyebrow}>ENDURANCE SETUP</Text>
-      <Text style={styles.title}>How you train</Text>
-      <Text style={styles.subtitle}>These details let Side Quest prescribe sport-specific sessions instead of generic cardio blocks.</Text>
+      <Text style={styles.title}>Prescription setup</Text>
+      <Text style={styles.subtitle}>Only details that materially change the workout live here. Surface, terrain, and where you train can stay flexible day to day.</Text>
     </View>
 
     <View>
       <V23SectionHeader>SWIM</V23SectionHeader>
       <V23Card style={styles.card}>
-        <Text style={styles.label}>Environment</Text>
+        <Text style={styles.label}>Session environment</Text>
         <OptionRow options={[
           ['pool', 'Pool'],
           ['open_water', 'Open water'],
@@ -105,33 +105,6 @@ export default function EnduranceSettingsScreen() {
     </View>
 
     <View>
-      <V23SectionHeader>BIKE</V23SectionHeader>
-      <V23Card style={styles.card}>
-        <Text style={styles.label}>Default environment</Text>
-        <OptionRow options={[
-          ['outdoor', 'Outdoor'],
-          ['indoor_trainer', 'Indoor trainer'],
-          ['mountain_bike', 'Mountain bike'],
-        ] as Array<[BikeEnvironment, string]>} selected={profile.bikeEnvironment} onSelect={(value) => setProfile((current) => ({ ...current, bikeEnvironment: value }))} styles={styles} />
-        <Text style={styles.note}>Course terrain from your goal is layered on top of this—for example, hilly outdoor rides can use climbs for work intervals.</Text>
-      </V23Card>
-    </View>
-
-    <View>
-      <V23SectionHeader>RUN</V23SectionHeader>
-      <V23Card style={styles.card}>
-        <Text style={styles.label}>Default environment</Text>
-        <OptionRow options={[
-          ['outdoor', 'Outdoor'],
-          ['treadmill', 'Treadmill'],
-          ['track', 'Track'],
-          ['trail', 'Trail'],
-        ] as Array<[RunEnvironment, string]>} selected={profile.runEnvironment} onSelect={(value) => setProfile((current) => ({ ...current, runEnvironment: value }))} styles={styles} />
-        <Text style={styles.note}>Terrain changes the workout cue. Hills use effort on climbs; technical trail work avoids pretending flat-road pace is meaningful.</Text>
-      </V23Card>
-    </View>
-
-    <View>
       <V23SectionHeader>RETURN TO RUN</V23SectionHeader>
       <V23Card style={styles.card}>
         <Text style={styles.sectionTitle}>Run / walk stage</Text>
@@ -146,6 +119,14 @@ export default function EnduranceSettingsScreen() {
         </Pressable>)}
       </V23Card>
     </View>
+
+    <V23Card style={styles.flexibilityCard}>
+      <V23Icon name="insights" color={tokens.accent} size={18} />
+      <View style={styles.flexibilityCopy}>
+        <Text style={styles.sectionTitle}>Keep the environment flexible</Text>
+        <Text style={styles.note}>A normal run or ride is prescribed by training purpose, not by a permanent surface or venue. Each workout shows compatible options, and Coach can adapt it if you want hills, trail, treadmill, track, or another setup that day.</Text>
+      </View>
+    </V23Card>
 
     {message ? <Text style={styles.message}>{message}</Text> : null}
     <Pressable accessibilityRole="button" disabled={saving} onPress={() => void save()} style={[styles.saveButton, saving && styles.disabled]}>
@@ -193,6 +174,8 @@ function makeStyles(tokens: DesignTokens) {
     stageCopy: { flex: 1, gap: 2 },
     stageTitle: { color: tokens.text, fontSize: 13, fontWeight: '900' },
     stageDetail: { color: tokens.textMuted, fontSize: 11, lineHeight: 15 },
+    flexibilityCard: { padding: 16, flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
+    flexibilityCopy: { flex: 1, gap: 4 },
     message: { color: tokens.accent, fontSize: 12.5, lineHeight: 18, fontWeight: '800' },
     saveButton: { minHeight: 50, borderRadius: 15, backgroundColor: tokens.accent, alignItems: 'center', justifyContent: 'center' },
     saveButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
