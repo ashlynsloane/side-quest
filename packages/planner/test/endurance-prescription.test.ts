@@ -34,7 +34,7 @@ const runWalkStage: ReturnToRunProtocol = {
 describe('endurance prescription', () => {
   it('materializes a complete inspectable bike prescription', () => {
     const result = buildEndurancePrescription(session());
-    expect(result?.prescriptionVersion).toBe(2);
+    expect(result?.prescriptionVersion).toBe(3);
     expect(result?.workoutType).toBe('bike_long_aerobic');
     expect(result?.steps.reduce((sum, step) => sum + step.minutes, 0)).toBe(120);
     expect(result?.blocks.reduce((sum, block) => sum + block.totalMinutes, 0)).toBe(120);
@@ -60,15 +60,39 @@ describe('endurance prescription', () => {
     expect(serialized).not.toContain('min/mile');
   });
 
-  it('turns a quality bike session into repeatable work and recovery blocks', () => {
+  it('selects a canonical 3 x 10 bike-quality workout instead of solving arbitrary repeat math', () => {
     const result = buildEndurancePrescription(session({ id: 'bike-quality', title: 'Bike · quality intervals', durationMinutes: 60, intensity: 'hard' }));
     const main = result?.blocks.find((item) => item.id === 'main');
     expect(result?.workoutType).toBe('bike_quality_intervals');
+    expect(result?.workoutShapeId).toBe('bike-3x10-r5');
     expect(main?.kind).toBe('intervals');
-    expect(main?.repeats).toBeGreaterThanOrEqual(2);
-    expect(main?.workMinutes).toBeGreaterThanOrEqual(2);
-    expect(main?.recoveryMinutes).toBeGreaterThanOrEqual(1);
-    expect(result?.blocks.reduce((sum, item) => sum + item.totalMinutes, 0)).toBe(60);
+    expect(main?.repeats).toBe(3);
+    expect(main?.workMinutes).toBe(10);
+    expect(main?.recoveryMinutes).toBe(5);
+    expect(result?.blocks.map((item) => item.totalMinutes)).toEqual([10, 40, 10]);
+  });
+
+  it('selects a canonical 3 x 10 run-quality workout when the dose supports it', () => {
+    const result = buildEndurancePrescription(session({
+      id: 'run-quality-60', discipline: 'run', title: 'Run quality', durationMinutes: 60, intensity: 'hard', priority: 'key',
+    }));
+    const main = result?.blocks.find((item) => item.id === 'main');
+    expect(result?.workoutShapeId).toBe('run-3x10-r5');
+    expect(main?.repeats).toBe(3);
+    expect(main?.workMinutes).toBe(10);
+    expect(main?.recoveryMinutes).toBe(5);
+    expect(result?.blocks.map((item) => item.totalMinutes)).toEqual([10, 40, 10]);
+  });
+
+  it('uses the workout title to prefer sustained canonical reps for tempo work', () => {
+    const result = buildEndurancePrescription(session({
+      id: 'run-tempo-50', discipline: 'run', title: 'Tempo run', durationMinutes: 50, intensity: 'hard', priority: 'key',
+    }));
+    const main = result?.blocks.find((item) => item.id === 'main');
+    expect(result?.workoutShapeId).toBe('run-3x8-r3');
+    expect(main?.repeats).toBe(3);
+    expect(main?.workMinutes).toBe(8);
+    expect(main?.recoveryMinutes).toBe(3);
   });
 
   it('makes pool swims distance-based instead of minute-based cardio blocks', () => {
@@ -79,6 +103,7 @@ describe('endurance prescription', () => {
     });
     expect(result?.distanceUnit).toBe('yd');
     expect(result?.totalDistance).toBeGreaterThan(1000);
+    expect(result?.workoutShapeId).toMatch(/^swim-endurance-/);
     expect(result?.blocks.every((item) => item.totalDistance && item.distanceUnit === 'yd')).toBe(true);
     const main = result?.blocks.find((item) => item.id === 'main');
     expect(main?.repeatDistance).toBeGreaterThanOrEqual(200);
@@ -98,28 +123,34 @@ describe('endurance prescription', () => {
     expect(drill?.restSeconds).toBe(15);
   });
 
-  it('rounds short technique swims into clean even drill structures', () => {
+  it('turns a short technique swim into a complete 1400 yd coach-shaped workout', () => {
     const result = buildEndurancePrescription(session({
       id: 'swim-technique-odd', discipline: 'swim', title: 'Aerobic + technique swim', durationMinutes: 31, intensity: 'easy', priority: 'support',
     }), { swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', proficiency: 'average' } });
     const drill = result?.blocks.find((item) => item.kind === 'drill');
+    const main = result?.blocks.find((item) => item.id === 'main');
     expect(result?.totalMinutes).toBe(30);
-    expect(drill?.repeats).toBeGreaterThanOrEqual(4);
-    expect((drill?.repeats ?? 1) % 2).toBe(0);
-    expect(drill?.repeats).not.toBe(7);
     expect(result?.totalDistance).toBe(1400);
+    expect(result?.workoutShapeId).toBe('swim-technique-1400');
+    expect(drill?.repeats).toBe(6);
+    expect(drill?.repeatDistance).toBe(50);
+    expect(main?.repeats).toBe(3);
+    expect(main?.repeatDistance).toBe(200);
   });
 
-  it('uses CSS to create real swim pace targets when CSS is explicitly known', () => {
+  it('uses CSS on the quality set inside a named long swim template', () => {
     const result = buildEndurancePrescription(session({
       id: 'swim-quality', discipline: 'swim', title: 'Swim quality', durationMinutes: 60, intensity: 'hard', priority: 'key',
     }), {
       swim: { environment: 'pool', poolLength: 25, distanceUnit: 'yd', cssSecondsPer100: 85, proficiency: 'strong' },
     });
     const main = result?.blocks.find((item) => item.id === 'main');
-    expect(main?.repeatDistance).toBe(200);
+    expect(result?.workoutShapeId).toBe('swim-quality-3200');
+    expect(result?.totalDistance).toBe(3200);
+    expect(main?.repeatDistance).toBe(300);
     expect(main?.repeats).toBe(6);
     expect(main?.paceTarget).toEqual({ unit: 'yd', fastSecondsPer100: 85, slowSecondsPer100: 91, basis: 'css' });
+    expect(result?.blocks.find((item) => item.id === 'secondary')?.repeatDistance).toBe(200);
     expect(result?.effortGuide.toLowerCase()).toContain('css');
   });
 
@@ -158,6 +189,7 @@ describe('endurance prescription', () => {
     expect(main?.workLabel).toBe('run');
     expect(main?.recoveryMinutes).toBe(1);
     expect(main?.recoveryLabel).toBe('walk');
+    expect(result?.workoutShapeId).toBe('return-to-run-4x3-r1');
     expect(result?.blocks.at(-1)?.label).toBe('Walk cool-down');
   });
 
@@ -171,7 +203,7 @@ describe('endurance prescription', () => {
     expect(result?.blocks[0]?.instruction).toContain('will not invent impact progression');
   });
 
-  it('can translate a hilly run when terrain is supplied as one-off context', () => {
+  it('can translate a hilly run while preserving the selected workout shape', () => {
     const result = buildEndurancePrescription(session({
       id: 'run-hills', discipline: 'run', title: 'Run quality', durationMinutes: 50, intensity: 'hard', priority: 'key',
     }), { goalTerrain: 'hilly', run: { environment: 'outdoor' } });
@@ -179,6 +211,7 @@ describe('endurance prescription', () => {
     expect(main?.label).toBe('Hill set');
     expect(main?.instruction.toLowerCase()).toContain('uphill');
     expect(main?.instruction.toLowerCase()).toContain('rpe, not pace');
+    expect(result?.workoutShapeId).toBe('run-4x6-r2');
     expect(result?.environmentLabel).toBe('Hilly');
   });
 
