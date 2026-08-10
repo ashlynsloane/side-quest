@@ -19,7 +19,7 @@ describe('week plan readability', () => {
 
   it('uses athlete-facing identities instead of exercise-list titles for strength', () => {
     expect(plan).toContain('title: plannedStrengthDisplayName(session)');
-    expect(synthesis).toContain('export function plannedStrengthDisplayName(session: PlannedStrengthSession)');
+    expect(synthesis).toContain('export function plannedStrengthDisplayName(session: PlannedStrengthSession, hints: StrengthNamingHints = {})');
     expect(synthesis).toContain('session.workout.stations');
     expect(synthesis).toContain('`${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`');
     expect(synthesis).toContain("discipline: 'strength'");
@@ -30,6 +30,20 @@ describe('week plan readability', () => {
     expect(personality).toContain("p('Pick Things Up, Put Them Down'");
     expect(personality).toContain("p('Leg Day, But Responsible'");
     expect(plan).not.toContain('compactExerciseName(exercise.exerciseSnapshot.name)');
+  });
+
+  it('keeps dose-specific names honest and cools names down for 30 days', () => {
+    expect(personality).toContain("['T-Shirt Ride', { min: 45, max: 75 }]");
+    expect(personality).toContain("['Three Hours of Snacks', { min: 180 }]");
+    expect(personality).toContain("['Snack Acquisition Ride', { min: 120 }]");
+    expect(personality).toContain("['Twenty Minutes of Character Development', { min: 18, max: 25 }]");
+    expect(personality).toContain("if (entry.intents?.includes('long') && duration < minimumLongMinutes(context.discipline)) return false");
+    expect(personality).toContain("if (context.intensity === 'hard')");
+    expect(personality).toContain('const freshCandidates = candidates.filter');
+    expect(synthesis).toContain('const WORKOUT_NAME_COOLDOWN_DAYS = 30');
+    expect(synthesis).toContain('const runtimeNameAssignments = new Map<string, NameHistoryItem>()');
+    expect(synthesis).toContain('days >= 0 && days < WORKOUT_NAME_COOLDOWN_DAYS');
+    expect(synthesis).toContain('cooldownNames([...runtimeNameAssignments.values()], event.discipline, date)');
   });
 
   it('does not render a Side Quest generated event that cannot be reconciled to the current scheduled week', () => {
