@@ -380,7 +380,7 @@ function friendlyProgressionDomain(domain: ProgressionDomain): string {
   if (domain === 'strength_volume') return 'Strength volume';
   if (domain === 'strength_intensity') return 'Strength intensity';
   if (domain === 'impact') return 'Impact exposure';
-  return domain.replaceAll('_', ' ');
+  return 'Training load';
 }
 
 function buildGuardrails(input: WholeAthleteWeeklyPlannerInput, state: WholeAthletePlanningState): string[] {
@@ -751,7 +751,6 @@ function assessDoubleDay(
   if (!isTrainableDiscipline(existing.discipline) || existing.discipline === discipline) return null;
   const candidateHard = template.intensity === 'hard' || template.intensity === 'max';
   if (candidateHard && isHard(existing)) return null;
-  if (existing.discipline === 'rest' || existing.discipline === 'mobility') return null;
 
   const pair = new Set<TrainableDiscipline>([discipline, existing.discipline]);
   const athleteCommitted = existing.planningCommitment === 'fixed' || existing.planningCommitment === 'preferred';
