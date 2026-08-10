@@ -23,6 +23,64 @@ export interface EnduranceNamingHints {
   weeksToRace?: number;
   raceName?: string;
   raceLocation?: string;
+  recentNames?: string[];
+}
+
+export interface StrengthNamingHints {
+  recentNames?: string[];
+}
+
+const WORKOUT_NAME_COOLDOWN_DAYS = 30;
+
+type CooldownDiscipline = 'swim' | 'bike' | 'run' | 'strength';
+type NameHistoryItem = { discipline: CooldownDiscipline; date: string; name: string };
+type NameAssignmentItem =
+  | { kind: 'endurance'; id: string; date: string; discipline: 'swim' | 'bike' | 'run'; event: TrainingCalendarEvent }
+  | { kind: 'strength'; id: string; date: string; discipline: 'strength'; session: PlannedStrengthSession };
+
+export function workoutNameAssignmentKey(kind: 'endurance' | 'strength', id: string): string {
+  return `${kind}:${id}`;
+}
+
+/**
+ * Assigns the visible names for the whole generated block in chronological order.
+ * Names stay stable for a specific session, while a name used by the same sport is
+ * quarantined for 30 days whenever the catalog has another eligible option.
+ */
+export function buildWorkoutNameAssignments(
+  events: TrainingCalendarEvent[],
+  strength: PlannedStrengthSession[],
+): Map<string, string> {
+  const assignments = new Map<string, string>();
+  const history: NameHistoryItem[] = [];
+  const items: NameAssignmentItem[] = [
+    ...events
+      .filter((event): event is TrainingCalendarEvent & { discipline: 'swim' | 'bike' | 'run' } => event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run')
+      .map((event) => ({
+        kind: 'endurance' as const,
+        id: event.id,
+        date: event.startAt.slice(0, 10),
+        discipline: event.discipline,
+        event,
+      })),
+    ...strength.map((session) => ({
+      kind: 'strength' as const,
+      id: session.id,
+      date: session.date,
+      discipline: 'strength' as const,
+      session,
+    })),
+  ].sort((left, right) => left.date.localeCompare(right.date) || left.discipline.localeCompare(right.discipline) || left.id.localeCompare(right.id));
+
+  for (const item of items) {
+    const recentNames = cooldownNames(history, item.discipline, item.date);
+    const name = item.kind === 'endurance'
+      ? generatedEnduranceDisplayName(item.event, { recentNames })
+      : plannedStrengthDisplayName(item.session, { recentNames });
+    assignments.set(workoutNameAssignmentKey(item.kind, item.id), name);
+    history.push({ discipline: item.discipline, date: item.date, name });
+  }
+  return assignments;
 }
 
 export function conciseSessionLabel(input: { discipline?: string; name?: string; title?: string; trainer?: boolean }): string {
@@ -88,6 +146,7 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
     raceLocation: hints.raceLocation,
     environment: generatedEnvironment(event.discipline, text),
     seedKey: `${event.id}|${event.startAt.slice(0, 10)}|${event.discipline}|${raw}|${durationMinutes}|${intensity}`,
+    recentNames: hints.recentNames,
   });
 }
 
@@ -96,7 +155,7 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
  * That keeps a rendered session stable without naming every recurring circuit
  * exactly the same thing for an entire block.
  */
-export function plannedStrengthDisplayName(session: PlannedStrengthSession): string {
+export function plannedStrengthDisplayName(session: PlannedStrengthSession, hints: StrengthNamingHints = {}): string {
   const intent: WorkoutNameIntent = session.purpose === 'swim_support'
     ? 'swim_support'
     : session.purpose === 'posterior_durability'
@@ -116,7 +175,22 @@ export function plannedStrengthDisplayName(session: PlannedStrengthSession): str
     intents: [intent],
     durationMinutes: Math.max(1, Math.round(session.workout.estimatedElapsedSeconds / 60)),
     seedKey: `${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}`,
+    recentNames: hints.recentNames,
   });
+}
+
+function cooldownNames(history: NameHistoryItem[], discipline: CooldownDiscipline, date: string): string[] {
+  const current = Date.parse(`${date}T12:00:00Z`);
+  if (!Number.isFinite(current)) return [];
+  return history
+    .filter((item) => item.discipline === discipline)
+    .filter((item) => {
+      const previous = Date.parse(`${item.date}T12:00:00Z`);
+      if (!Number.isFinite(previous)) return false;
+      const days = (current - previous) / 86_400_000;
+      return days >= 0 && days < WORKOUT_NAME_COOLDOWN_DAYS;
+    })
+    .map((item) => item.name);
 }
 
 function generatedNameIntents(
