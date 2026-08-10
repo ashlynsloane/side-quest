@@ -1,24 +1,28 @@
 import { buildDailyAdjustmentOptions, normalizeStrengthSession, type AdjustmentReason, type DailyAdjustmentResult } from '@circuit/planner';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { V23Card, V23Icon, V23PageIntro, V23Screen, V23SectionHeader } from '@/components/v23-ui';
 import { getLatestTrainingBlock } from '@/services/database';
+import { useTheme } from '@/state/theme-context';
+import type { DesignTokens } from '@/theme';
 
 const REASONS: Array<{ id: AdjustmentReason; title: string; detail: string }> = [
-  { id: 'fatigue', title: 'I’m too tired', detail: 'Use current fatigue without treating it as a failure.' },
-  { id: 'time', title: 'I have less time', detail: 'Keep the highest-priority work and remove optional volume.' },
-  { id: 'access', title: 'Location or equipment unavailable', detail: 'Pool closed, gym unavailable, or equipment changed.' },
-  { id: 'pain', title: 'I have pain or symptoms', detail: 'Health overrides the planned session.' },
-  { id: 'preference', title: 'I need something different', detail: 'Move, replace, or recover based on the whole week.' },
+  { id: 'fatigue', title: 'I’m too tired', detail: 'Reduce today’s cost without treating fatigue as a failure.' },
+  { id: 'time', title: 'I have less time', detail: 'Keep the highest-priority work and trim optional volume.' },
+  { id: 'access', title: 'Location or equipment unavailable', detail: 'Adapt around a closed gym, missing equipment, or changed setup.' },
+  { id: 'pain', title: 'I have pain or symptoms', detail: 'Health and restrictions override the planned session.' },
+  { id: 'preference', title: 'I need something different', detail: 'Move, replace, or recover based on the rest of the week.' },
 ];
 
 export default function SessionAdjustmentScreen() {
   const router = useRouter();
+  const { tokens } = useTheme();
+  const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [reason, setReason] = useState<AdjustmentReason>('fatigue');
   const [result, setResult] = useState<DailyAdjustmentResult | null>(null);
-  const [sessionTitle, setSessionTitle] = useState('Today’s session');
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
 
   const requestAction = useMemo(() => reason === 'time' ? 'shorter' : reason === 'fatigue' ? 'easier' : reason === 'pain' ? 'skip' : 'different', [reason]);
 
@@ -28,14 +32,19 @@ export default function SessionAdjustmentScreen() {
       const sessions = saved?.block.weeks.flatMap((week) => week.sessions) ?? [];
       const planned = sessions.find((session) => session.date === today && session.completionStatus !== 'completed' && session.completionStatus !== 'skipped');
       if (!planned) {
+        setSessionTitle(null);
         setResult(null);
         return;
       }
       setSessionTitle(planned.title);
       const unified = normalizeStrengthSession(planned);
-      const week = sessions.filter((session) => Math.abs(new Date(session.date).getTime() - new Date(today).getTime()) <= 6 * 86400000).map(normalizeStrengthSession);
+      const week = sessions
+        .filter((session) => Math.abs(new Date(session.date).getTime() - new Date(today).getTime()) <= 6 * 86400000)
+        .map(normalizeStrengthSession);
       const availableDates = Array.from({ length: 6 }, (_, index) => {
-        const date = new Date(); date.setDate(date.getDate() + index + 1); return date.toISOString().slice(0, 10);
+        const date = new Date();
+        date.setDate(date.getDate() + index + 1);
+        return date.toISOString().slice(0, 10);
       });
       setResult(buildDailyAdjustmentOptions({
         sessionId: unified.id,
@@ -56,62 +65,107 @@ export default function SessionAdjustmentScreen() {
 
   useFocusEffect(load);
 
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
-      <View style={styles.topBar}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}><Text style={styles.backText}>‹ Today</Text></Pressable>
-        <Text style={styles.topTitle}>Adjust session</Text>
-      </View>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.eyebrow}>ATHLETE-FIRST REPLANNING</Text>
-        <Text style={styles.title}>What changed?</Text>
-        <Text style={styles.subtitle}>Side Quest protects mental and physical health before performance or completion percentage.</Text>
+  return <V23Screen contentStyle={styles.page}>
+    <V23PageIntro
+      label="ADJUST SESSION"
+      title="What changed?"
+      body="Tell Side Quest what is different today. The goal is to preserve the useful training stimulus without forcing the original plan."
+    />
 
-        <View style={styles.reasonList}>
-          {REASONS.map((item) => (
-            <Pressable key={item.id} onPress={() => setReason(item.id)} style={[styles.reasonCard, reason === item.id && styles.selectedCard]}>
-              <Text style={styles.reasonTitle}>{item.title}</Text>
-              <Text style={styles.helper}>{item.detail}</Text>
-            </Pressable>
-          ))}
-        </View>
+    <View style={styles.reasonList}>
+      {REASONS.map((item) => {
+        const selected = reason === item.id;
+        return <Pressable
+          accessibilityRole="button"
+          key={item.id}
+          onPress={() => setReason(item.id)}
+          style={({ pressed }) => [styles.reasonCard, selected && styles.reasonSelected, pressed && styles.pressed]}
+        >
+          <View style={styles.reasonCopy}>
+            <Text style={styles.reasonTitle}>{item.title}</Text>
+            <Text style={styles.helper}>{item.detail}</Text>
+          </View>
+          <View style={[styles.choiceIcon, selected && styles.choiceIconSelected]}>
+            {selected ? <V23Icon name="check" color="#FFFFFF" size={14} /> : null}
+          </View>
+        </Pressable>;
+      })}
+    </View>
 
-        <View style={styles.sessionCard}>
-          <Text style={styles.cardEyebrow}>PLANNED</Text>
+    <View>
+      <V23SectionHeader>PLANNED</V23SectionHeader>
+      {sessionTitle ? <V23Card style={styles.sessionCard}>
+        <View style={styles.sessionIcon}><V23Icon name="strength" color={tokens.accent} size={19} /></View>
+        <View style={styles.sessionCopy}>
+          <Text style={styles.sessionEyebrow}>TODAY’S STRENGTH</Text>
           <Text style={styles.sessionTitle}>{sessionTitle}</Text>
         </View>
+      </V23Card> : <V23Card style={styles.emptyCard}>
+        <View style={styles.sessionIcon}><V23Icon name="adjust" color={tokens.accent} size={19} /></View>
+        <View style={styles.sessionCopy}>
+          <Text style={styles.emptyTitle}>No strength session to adjust today</Text>
+          <Text style={styles.helper}>This adjustment flow currently edits planned strength sessions. Open a swim, bike, or run workout to adapt that session with Coach.</Text>
+        </View>
+      </V23Card>}
+    </View>
 
-        {result ? (
-          <View style={styles.optionsSection}>
-            <Text style={styles.sectionTitle}>{result.headline}</Text>
-            {result.safetyMessage ? <Text style={styles.safety}>{result.safetyMessage}</Text> : null}
-            {result.options.map((option) => (
-              <View key={option.id} style={[styles.optionCard, option.id === result.recommendedOptionId && styles.recommendedCard]}>
-                <Text style={styles.optionLabel}>{option.id === result.recommendedOptionId ? 'RECOMMENDED' : option.recommendationLevel.toUpperCase()}</Text>
-                <Text style={styles.optionTitle}>{option.title}</Text>
-                <Text style={styles.helper}>{option.description}</Text>
-                {option.rationale.map((line) => <Text key={line} style={styles.bullet}>• {line}</Text>)}
-                <Text style={styles.consequenceTitle}>Effect on the week</Text>
-                {option.weeklyConsequences.map((line) => <Text key={line} style={styles.bullet}>• {line}</Text>)}
-              </View>
-            ))}
-            <Text style={styles.footer}>Major changes remain proposals until the athlete approves them. Missed work is never automatically compressed into later days.</Text>
-          </View>
-        ) : <Text style={styles.helper}>No adjustable planned strength session was found for today.</Text>}
-      </ScrollView>
-    </SafeAreaView>
-  );
+    {result ? <View>
+      <V23SectionHeader>{result.headline.toUpperCase()}</V23SectionHeader>
+      <View style={styles.optionsSection}>
+        {result.safetyMessage ? <V23Card style={styles.safetyCard}><Text style={styles.safety}>{result.safetyMessage}</Text></V23Card> : null}
+        {result.options.map((option) => {
+          const recommended = option.id === result.recommendedOptionId;
+          return <V23Card key={option.id} style={[styles.optionCard, recommended && styles.recommendedCard]}>
+            <Text style={[styles.optionLabel, recommended && styles.optionLabelRecommended]}>{recommended ? 'RECOMMENDED' : option.recommendationLevel.toUpperCase()}</Text>
+            <Text style={styles.optionTitle}>{option.title}</Text>
+            <Text style={styles.helper}>{option.description}</Text>
+            {option.rationale.map((line) => <Text key={line} style={styles.bullet}>• {line}</Text>)}
+            <Text style={styles.consequenceTitle}>Effect on the week</Text>
+            {option.weeklyConsequences.map((line) => <Text key={line} style={styles.bullet}>• {line}</Text>)}
+          </V23Card>;
+        })}
+        <Text style={styles.footer}>Major changes remain proposals until you approve them. Missed work is never automatically compressed into later days.</Text>
+      </View>
+    </View> : null}
+
+    <Pressable accessibilityRole="button" onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+      <V23Icon name="chevron" color={tokens.accent} size={15} />
+      <Text style={styles.backText}>Back to plan</Text>
+    </Pressable>
+  </V23Screen>;
 }
 
-const colors = { background: '#E4EBE3', card: '#FFFDF8', ink: '#01234D', muted: '#6B7770', border: '#164C73', accent: '#153E2F', soft: '#D8E9DF', warning: '#6E2C2C' };
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.background },
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.card },
-  backButton: { flex: 1, paddingVertical: 6 }, backText: { color: colors.accent, fontSize: 16, fontWeight: '700' }, topTitle: { color: colors.ink, fontSize: 17, fontWeight: '700' },
-  content: { padding: 20, paddingBottom: 56, gap: 15 }, eyebrow: { color: colors.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
-  title: { color: colors.ink, fontSize: 30, fontWeight: '700' }, subtitle: { color: colors.muted, fontSize: 15, lineHeight: 22 }, helper: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  reasonList: { gap: 8 }, reasonCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, gap: 3 }, selectedCard: { backgroundColor: colors.soft, borderColor: colors.accent }, reasonTitle: { color: colors.ink, fontSize: 16, fontWeight: '700' },
-  sessionCard: { backgroundColor: colors.accent, borderRadius: 18, padding: 17, gap: 4 }, cardEyebrow: { color: '#C7D9CE', fontSize: 10, fontWeight: '800', letterSpacing: 1 }, sessionTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
-  optionsSection: { gap: 10 }, sectionTitle: { color: colors.ink, fontSize: 22, fontWeight: '700' }, safety: { color: colors.warning, fontWeight: '700', lineHeight: 20 },
-  optionCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: 16, gap: 6 }, recommendedCard: { backgroundColor: colors.soft, borderColor: colors.accent, borderWidth: 2 }, optionLabel: { color: colors.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, optionTitle: { color: colors.ink, fontSize: 18, fontWeight: '700' }, bullet: { color: colors.muted, fontSize: 13, lineHeight: 19 }, consequenceTitle: { color: colors.ink, fontSize: 13, fontWeight: '800', marginTop: 4 }, footer: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
-});
+function makeStyles(tokens: DesignTokens) {
+  return StyleSheet.create({
+    page: { paddingTop: 16, paddingBottom: 36, gap: 22 },
+    reasonList: { gap: 9 },
+    reasonCard: { minHeight: 78, borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    reasonSelected: { borderColor: tokens.accent, backgroundColor: tokens.surfaceMuted },
+    reasonCopy: { flex: 1, gap: 3 },
+    reasonTitle: { color: tokens.text, fontSize: 16, lineHeight: 20, fontWeight: '850' as never },
+    helper: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
+    choiceIcon: { width: 26, height: 26, borderRadius: 13, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, alignItems: 'center', justifyContent: 'center' },
+    choiceIconSelected: { borderColor: tokens.accent, backgroundColor: tokens.accent },
+    sessionCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+    emptyCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16 },
+    sessionIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: tokens.accentSoft, alignItems: 'center', justifyContent: 'center' },
+    sessionCopy: { flex: 1, gap: 3 },
+    sessionEyebrow: { color: tokens.accent, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1.1 },
+    sessionTitle: { color: tokens.text, fontSize: 19, lineHeight: 24, fontWeight: '900' },
+    emptyTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '850' as never },
+    optionsSection: { gap: 10 },
+    safetyCard: { padding: 14, backgroundColor: tokens.surfaceMuted },
+    safety: { color: tokens.text, fontSize: 13, lineHeight: 19, fontWeight: '750' as never },
+    optionCard: { padding: 16, gap: 6 },
+    recommendedCard: { borderColor: tokens.accent, borderWidth: 1.5 },
+    optionLabel: { color: tokens.textMuted, fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1 },
+    optionLabelRecommended: { color: tokens.accent },
+    optionTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+    bullet: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
+    consequenceTitle: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '850' as never, marginTop: 4 },
+    footer: { color: tokens.textMuted, fontSize: 12, lineHeight: 18, marginTop: 2 },
+    backButton: { alignSelf: 'flex-start', minHeight: 42, borderRadius: 13, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 7 },
+    backText: { color: tokens.accent, fontSize: 13, fontWeight: '850' as never },
+    pressed: { opacity: 0.72 },
+  });
+}
