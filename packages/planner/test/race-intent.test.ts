@@ -11,12 +11,18 @@ import {
 } from '../src/race-intent';
 
 describe('Race Intent V2', () => {
-  it('maps legacy race intent into a balanced structured default', () => {
+  it('maps a normal performance goal into balanced maintenance rather than developing every sport', () => {
     const intent = defaultRaceIntent('ironman_70_3', ['swim', 'bike', 'run'], 'perform');
     expect(intent.overallObjective).toBe('strong_finish');
     expect(intent.tradeoffTolerance).toBe('preserve_balance');
-    expect(intent.disciplinePriorities).toEqual({ swim: 'develop', bike: 'develop', run: 'develop' });
+    expect(intent.disciplinePriorities).toEqual({ swim: 'maintain', bike: 'maintain', run: 'maintain' });
     expect(intent.primaryDiscipline).toBeUndefined();
+  });
+
+  it('keeps explicit best-overall race intent development-oriented', () => {
+    const intent = defaultRaceIntent('ironman_70_3', ['swim', 'bike', 'run'], 'race');
+    expect(intent.overallObjective).toBe('best_overall');
+    expect(intent.disciplinePriorities).toEqual({ swim: 'develop', bike: 'develop', run: 'develop' });
   });
 
   it('compiles a bike-focused 70.3 intent without prescribing sessions', () => {
