@@ -1,11 +1,7 @@
 import {
   buildWholeAthleteWeek as buildStrategyWholeAthleteWeek,
 } from './whole-athlete-week-strategy';
-import {
-  applyTrainingBlockRhythm,
-  type BlockWorkoutStage,
-  type TrainingWorkoutIdentity,
-} from './whole-athlete-week-rhythm';
+import { applyTrainingBlockRhythm } from './whole-athlete-week-rhythm';
 import type {
   WholeAthleteWeeklyPlannerInput,
   WholeAthleteWeekPlan,
@@ -27,9 +23,3 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   const strategicPlan = buildStrategyWholeAthleteWeek(input);
   return applyTrainingBlockRhythm(strategicPlan, input);
 }
-
-// Keep these imports type-checked at this composition boundary. The explicit
-// exports above make the workout identity available to product consumers while
-// leaving the strategy module's isolated behavioral contract unchanged.
-type _BlockStageContract = BlockWorkoutStage;
-type _WorkoutIdentityContract = TrainingWorkoutIdentity;
