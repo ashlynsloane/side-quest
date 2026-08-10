@@ -20,12 +20,11 @@ type PersonalityWorkoutNameEntry = WorkoutNameEntry & {
   seasons?: WorkoutNameSeason[];
   holidayOnly?: boolean;
   raceWeekOnly?: boolean;
+  phaseOnly?: boolean;
   raceKeywords?: string[];
 };
 
-/** Athlete-facing voice. Prescription logic stays elsewhere. */
-export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
-  // Swim
+const BASE_PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   p('Chlorine & Delusion', 'swim', ['easy', 'aerobic']),
   p('Goggles Before Feelings', 'swim', ['easy', 'recovery']),
   p('Counting Tiles Again', 'swim', ['long', 'aerobic']),
@@ -39,7 +38,6 @@ export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   p('Wet Hair, Clear Brain', 'swim', ['easy', 'aerobic']),
   p('Pool Goblin Hours', 'swim', ['aerobic']),
 
-  // Bike
   p('Zone 2 & Vibes', 'bike', ['easy', 'aerobic']),
   p('Pedal Now, Brunch Later', 'bike', ['easy', 'aerobic']),
   p('Ride Bikes, Avoid Emails', 'bike', ['easy', 'aerobic']),
@@ -55,7 +53,6 @@ export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   p('Watts Before Snacks', 'bike', ['threshold', 'intervals']),
   p('Indoor Bike Jail', 'bike', ['threshold', 'intervals'], { environments: ['trainer'] }),
 
-  // Run
   p('No Pace, Just Vibes', 'run', ['easy', 'aerobic']),
   p('Shoes On, Brain Off', 'run', ['easy', 'aerobic']),
   p('The Silly Little Run', 'run', ['easy', 'aerobic']),
@@ -73,7 +70,6 @@ export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   p('Back Outside, Casually', 'run', ['return_to_run', 'easy']),
   p('Run / Walk / Do Not Panic', 'run', ['return_to_run', 'easy']),
 
-  // Strength
   p('Pick Things Up, Put Them Down', 'strength', ['general_strength']),
   p('Leg Day, But Responsible', 'strength', ['maintenance', 'posterior_durability']),
   p('Hinge Responsibly', 'strength', ['posterior_durability']),
@@ -85,7 +81,6 @@ export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   p('Core Values', 'strength', ['swim_support', 'general_strength']),
   p('Tiny Gym Side Quest', 'strength', ['general_strength']),
 
-  // Triathlon-specific voice.
   tri('Goggles, Gears & Bad Ideas', ['swim', 'bike', 'run', 'strength'], ['race_specific']),
   tri('Three Sports, One Personality', ['swim', 'bike', 'run', 'strength'], ['race_specific']),
   tri('Because One Sport Was Too Easy', ['swim', 'bike', 'run'], ['race_specific']),
@@ -106,14 +101,9 @@ export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   tri('Wetsuit Wrestling', ['swim'], ['race_specific']),
   tri('Where Did I Park My Bike?', ['bike', 'run'], ['race_specific']),
   tri('Transition Brain', ['swim', 'bike', 'run'], ['race_specific'], { phases: ['taper', 'race_week'] }),
-
-  ...SEASONAL_WORKOUT_NAMES,
-  ...RACE_WEEK_WORKOUT_NAMES,
-  ...RACE_THEME_WORKOUT_NAMES,
 ];
 
 const SEASONAL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
-  // Summer
   seasonal('Pool Deck Season', 'swim', ['easy', 'aerobic'], ['summer']),
   seasonal("Sun's Out, Goggles On", 'swim', ['easy', 'aerobic'], ['summer']),
   seasonal('Open Water Office Hours', 'swim', ['aerobic'], ['summer'], { environments: ['open_water'] }),
@@ -125,7 +115,6 @@ const SEASONAL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   seasonal('Early Before It Melts', 'run', ['easy', 'aerobic'], ['summer']),
   seasonal('AC Appreciation Society', 'strength', ['maintenance', 'general_strength'], ['summer']),
 
-  // Fall
   seasonal('Back to the Black Line', 'swim', ['easy', 'aerobic'], ['fall']),
   seasonal('Summer Is Over, Pool Is Forever', 'swim', ['easy', 'aerobic'], ['fall']),
   seasonal('Leaf Peeping Peloton', 'bike', ['easy', 'aerobic'], ['fall']),
@@ -137,7 +126,6 @@ const SEASONAL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   seasonal('Leaf Pile Line Choice', 'run', ['fartlek', 'aerobic'], ['fall']),
   seasonal('Hinge Season', 'strength', ['posterior_durability', 'general_strength'], ['fall']),
 
-  // Winter
   seasonal('Chlorine > Darkness', 'swim', ['easy', 'aerobic'], ['winter']),
   seasonal('Steam Room Motivation', 'swim', ['easy', 'recovery'], ['winter']),
   seasonal('Basement World Champs', 'bike', ['threshold', 'intervals'], ['winter'], { environments: ['trainer'] }),
@@ -149,7 +137,6 @@ const SEASONAL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   seasonal('Hat Hair Miles', 'run', ['easy', 'aerobic'], ['winter']),
   seasonal('Hibernate, But Make It Strength', 'strength', ['maintenance', 'general_strength'], ['winter']),
 
-  // Spring
   seasonal('First Shorts Day', 'bike', ['easy', 'aerobic'], ['spring']),
   seasonal('Pollen & Pedals', 'bike', ['easy', 'aerobic'], ['spring']),
   seasonal("Sun's Back, Bikes Out", 'bike', ['long', 'aerobic'], ['spring']),
@@ -158,7 +145,6 @@ const SEASONAL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   seasonal('Lane Lines Before Daylight', 'swim', ['easy', 'aerobic'], ['spring']),
   seasonal('Spring Cleaning, But Heavy', 'strength', ['general_strength'], ['spring']),
 
-  // Holiday window: Dec 15 through Jan 2. No food-compensation language.
   holiday('Deck the Lanes', 'swim', ['easy', 'aerobic']),
   holiday('Mistletoe Main Set', 'swim', ['intervals', 'aerobic']),
   holiday('Holiday Chlorine', 'swim', ['easy', 'aerobic']),
@@ -170,6 +156,21 @@ const SEASONAL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   holiday('Silent Night, Loud Shoes', 'run', ['easy', 'aerobic']),
   holiday('Hinge All the Way', 'strength', ['posterior_durability', 'general_strength']),
   holiday('Sleigh Bells & Dumbbells', 'strength', ['general_strength', 'maintenance']),
+];
+
+const PHASE_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
+  phaseName('Fitness, But Casual', ['swim', 'bike', 'run'], ['easy', 'aerobic'], ['offseason']),
+  phaseName('No One Is Peaking Today', ['bike', 'run'], ['easy', 'aerobic'], ['offseason']),
+  phaseName('Drills & Daydreams', ['swim'], ['technique'], ['offseason']),
+  phaseName('Coffee Shop Recon', ['bike'], ['easy', 'aerobic'], ['offseason']),
+  phaseName('No Splits, No Problems', ['run'], ['easy', 'aerobic'], ['offseason']),
+  phaseName('Gym Era', ['strength'], ['general_strength', 'maintenance'], ['offseason']),
+  phaseName('This Is the Part With Work', ['swim', 'bike', 'run'], ['threshold', 'intervals'], ['build', 'peak']),
+  phaseName('Slightly More Serious', ['swim', 'bike', 'run'], ['tempo', 'threshold', 'intervals'], ['build', 'peak']),
+  phaseName('Do Less, Freak Out More', ['swim', 'bike', 'run'], ['easy', 'aerobic'], ['taper']),
+  phaseName('Taper Tantrum', ['swim', 'bike', 'run'], ['easy', 'aerobic'], ['taper']),
+  phaseName('Why Do My Legs Feel Weird?', ['bike', 'run'], ['easy', 'aerobic'], ['taper']),
+  phaseName('Stop Adding Fitness', ['swim', 'bike', 'run'], ['easy', 'aerobic'], ['taper']),
 ];
 
 const RACE_WEEK_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
@@ -191,7 +192,6 @@ const RACE_WEEK_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
 ];
 
 const RACE_THEME_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
-  // Oceanside / SoCal
   raceTheme('Pacific Pull', 'swim', ['easy', 'aerobic'], ['oceanside', 'san diego', 'southern california']),
   raceTheme('Pier Pressure', 'swim', ['threshold', 'intervals'], ['oceanside', 'san diego']),
   raceTheme('Marine Layer Main Set', 'swim', ['aerobic', 'intervals'], ['oceanside', 'san diego']),
@@ -200,8 +200,6 @@ const RACE_THEME_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   raceTheme('Pacific Coast Problems', 'bike', ['long', 'aerobic'], ['oceanside', 'san diego']),
   raceTheme('Boardwalk Legs', 'run', ['easy', 'aerobic'], ['oceanside', 'san diego']),
   raceTheme('Marine Layer Miles', 'run', ['easy', 'aerobic'], ['oceanside', 'san diego']),
-
-  // Nice / Riviera
   raceTheme('Azure Water', 'swim', ['easy', 'aerobic'], ['nice', "côte d'azur", 'cote d azur', 'riviera']),
   raceTheme('Mediterranean Main Set', 'swim', ['intervals', 'aerobic'], ['nice', 'mediterranean', 'riviera']),
   raceTheme('Riviera Laps', 'swim', ['easy', 'aerobic'], ['nice', 'riviera']),
@@ -210,6 +208,14 @@ const RACE_THEME_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   raceTheme('Riviera Roll', 'bike', ['easy', 'aerobic'], ['nice', 'riviera']),
   raceTheme('Promenade Legs', 'run', ['easy', 'aerobic'], ['nice', 'promenade', 'riviera']),
   raceTheme("Côte d'Azur Shuffle", 'run', ['easy', 'aerobic'], ['nice', "côte d'azur", 'cote d azur', 'riviera']),
+];
+
+export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
+  ...BASE_PLAYFUL_WORKOUT_NAMES,
+  ...SEASONAL_WORKOUT_NAMES,
+  ...PHASE_WORKOUT_NAMES,
+  ...RACE_WEEK_WORKOUT_NAMES,
+  ...RACE_THEME_WORKOUT_NAMES,
 ];
 
 const SERIOUS_OR_STALE_NAMES = new Set([
@@ -222,7 +228,6 @@ const SERIOUS_OR_STALE_NAMES = new Set([
   'Race Legs Loading',
   'Keep the Fuse Lit',
 ]);
-
 const PLAYFUL_NAMES = new Set(PLAYFUL_WORKOUT_NAMES.map((entry) => entry.name));
 const HARD_QUALITY_INTENTS = new Set<WorkoutNameIntent>(['fartlek', 'tempo', 'threshold', 'intervals', 'progressive', 'brick', 'race_specific']);
 const STRUCTURE_LOCKED_INTENTS = new Set<WorkoutNameIntent>(['return_to_run', 'brick', 'technique', 'fartlek', 'progressive', 'threshold']);
@@ -248,10 +253,6 @@ const HARD_DURATION_GATES = new Map<string, { min?: number; max?: number }>([
   ['Twenty Minutes of Character Development', { min: 18, max: 25 }],
 ]);
 
-/**
- * Selects a stable athlete-facing name while protecting dose, structure,
- * season, race proximity, and recent-name semantics.
- */
 export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): string {
   const recent = new Set((context.recentNames ?? []).map((value) => value.toLowerCase()));
   const dominant = dominantIntent(context);
@@ -259,8 +260,9 @@ export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): stri
   const holiday = context.workoutDate ? isHolidayNamingWindow(context.workoutDate) : false;
   const effectivePhase = effectiveWorkoutNamePhase(context.phase, context.weeksToRace);
   const raceText = `${context.raceName ?? ''} ${context.raceLocation ?? ''}`.toLowerCase();
+  const catalog = WORKOUT_NAME_CATALOG as PersonalityWorkoutNameEntry[];
 
-  const eligible = [...PLAYFUL_WORKOUT_NAMES, ...WORKOUT_NAME_CATALOG as PersonalityWorkoutNameEntry[]]
+  const eligible = [...PLAYFUL_WORKOUT_NAMES, ...catalog]
     .filter((entry) => !SERIOUS_OR_STALE_NAMES.has(entry.name))
     .filter((entry) => entry.disciplines.includes(context.discipline))
     .filter((entry) => !entry.triathlonOnly || context.triathlon)
@@ -273,6 +275,7 @@ export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): stri
     .filter((entry) => !entry.environments?.length || !context.environment || entry.environments.includes(context.environment))
     .filter((entry) => !entry.seasons?.length || Boolean(season && entry.seasons.includes(season)))
     .filter((entry) => !entry.holidayOnly || holiday)
+    .filter((entry) => !entry.phaseOnly || Boolean(effectivePhase && entry.phases?.includes(effectivePhase)))
     .filter((entry) => !entry.raceWeekOnly || effectivePhase === 'race_week')
     .filter((entry) => !entry.raceKeywords?.length || entry.raceKeywords.some((keyword) => raceText.includes(keyword)));
 
@@ -280,7 +283,6 @@ export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): stri
   const candidates = dominantPool.length >= 3 ? dominantPool : eligible;
   const freshCandidates = candidates.filter((entry) => !recent.has(entry.name.toLowerCase()));
   const selectionPool = freshCandidates.length ? freshCandidates : candidates;
-
   const scored = selectionPool
     .map((entry) => ({ entry, score: humanScore(entry, context, recent, dominant, season, holiday, effectivePhase, raceText) }))
     .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
@@ -306,7 +308,6 @@ function dominantIntent(context: WorkoutNamingContext): WorkoutNameIntent | unde
   if (has('intervals') && context.intensity === 'hard') return 'intervals';
   if (has('fartlek')) return 'fartlek';
   if (has('progressive')) return 'progressive';
-
   const duration = context.durationMinutes ?? 0;
   if ((has('long') && duration >= minimumLongMinutes(context.discipline))
     || (context.discipline === 'bike' && duration >= 150)
@@ -388,7 +389,6 @@ function p(
 ): PersonalityWorkoutNameEntry {
   return { name, disciplines: [discipline], intents, ...options };
 }
-
 function tri(
   name: string,
   disciplines: WorkoutNameDiscipline[],
@@ -397,7 +397,6 @@ function tri(
 ): PersonalityWorkoutNameEntry {
   return { name, disciplines, intents, triathlonOnly: true, ...options };
 }
-
 function seasonal(
   name: string,
   discipline: WorkoutNameDiscipline,
@@ -407,7 +406,6 @@ function seasonal(
 ): PersonalityWorkoutNameEntry {
   return { name, disciplines: [discipline], intents, seasons, ...options };
 }
-
 function holiday(
   name: string,
   discipline: WorkoutNameDiscipline,
@@ -416,15 +414,21 @@ function holiday(
 ): PersonalityWorkoutNameEntry {
   return { name, disciplines: [discipline], intents, holidayOnly: true, ...options };
 }
-
+function phaseName(
+  name: string,
+  disciplines: WorkoutNameDiscipline[],
+  intents: WorkoutNameIntent[],
+  phases: NonNullable<WorkoutNameEntry['phases']>,
+): PersonalityWorkoutNameEntry {
+  return { name, disciplines, intents, phases, phaseOnly: true };
+}
 function raceWeek(
   name: string,
   disciplines: WorkoutNameDiscipline[],
   intents: WorkoutNameIntent[],
 ): PersonalityWorkoutNameEntry {
-  return { name, disciplines, intents, phases: ['race_week'], raceWeekOnly: true };
+  return { name, disciplines, intents, phases: ['race_week'], raceWeekOnly: true, phaseOnly: true };
 }
-
 function raceTheme(
   name: string,
   discipline: WorkoutNameDiscipline,
@@ -434,14 +438,12 @@ function raceTheme(
 ): PersonalityWorkoutNameEntry {
   return { name, disciplines: [discipline], intents, raceKeywords, ...options };
 }
-
 function fallbackName(discipline: WorkoutNameDiscipline): string {
   if (discipline === 'swim') return 'Chlorine & Delusion';
   if (discipline === 'bike') return 'Zone 2 & Vibes';
   if (discipline === 'run') return 'The Silly Little Run';
   return 'Pick Things Up, Put Them Down';
 }
-
 function stableIndex(value: string, length: number): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
