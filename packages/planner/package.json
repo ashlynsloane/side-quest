@@ -10,6 +10,7 @@
     "./multisport": "./src/multisport.ts",
     "./multisport-governance": "./src/multisport-governance.ts",
     "./endurance-prescription": "./src/endurance-prescription.ts",
+    "./training-availability": "./src/training-availability.ts",
     "./athlete-progression-engine": "./src/athlete-progression-engine.ts",
     "./training-continuity": "./src/training-continuity.ts",
     "./adaptive-prescription": "./src/adaptive-prescription.ts",
