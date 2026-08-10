@@ -244,7 +244,7 @@ export default function WorkoutPreviewScreenV2() {
               <Pressable accessibilityRole="button" onPress={() => setDemoExercise(item.exerciseSnapshot)} style={({ pressed }) => [styles.exerciseCopy, pressed && styles.pressed]}>
                 <Text style={styles.exerciseName}>{item.exerciseSnapshot.name}</Text>
                 <Text style={styles.exerciseMeta}>{formatPrescription(item.target, item.unit)} · {item.exerciseSnapshot.category}</Text>
-                {item.adaptationNote ? <Text style={styles.adaptationText}>{item.adaptationNote}</Text> : null}
+                {showExerciseAdaptation(item.adaptationNote, workout.recentLoadAdjustments) ? <Text style={styles.adaptationText}>{item.adaptationNote}</Text> : null}
               </Pressable>
               <View style={styles.exerciseActions}>
                 <Pressable accessibilityRole="button" accessibilityLabel={`View demo for ${item.exerciseSnapshot.name}`} onPress={() => setDemoExercise(item.exerciseSnapshot)} style={styles.demoButton}>
@@ -305,6 +305,17 @@ function formatPrescription(target: number, unit: 'total' | 'per_side' | 'second
   if (unit === 'seconds') return `${target} sec`;
   if (unit === 'per_side') return `${target}/side`;
   return `${target} reps`;
+}
+
+function showExerciseAdaptation(note: string | undefined, sessionNotes: string[]): boolean {
+  if (!note) return false;
+  const normalized = note.trim().toLowerCase();
+  return !sessionNotes.some((sessionNote) => {
+    const sessionNormalized = sessionNote.trim().toLowerCase();
+    if (sessionNormalized === normalized) return true;
+    if (normalized.startsWith('re-entry dose:') && sessionNormalized.startsWith('re-entry dose:')) return true;
+    return sessionNormalized.includes(normalized) || normalized.includes(sessionNormalized);
+  });
 }
 
 function cloneWorkout(workout: GeneratedWorkout): GeneratedWorkout {
