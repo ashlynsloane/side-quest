@@ -68,6 +68,8 @@ function optimizeWeek(
           const location = facilityLocations[0]!;
           const outingId = `outing:${date}:${safeId(swim.id)}:${safeId(strength.id)}`;
           const note = `Bundled into one visit at ${location.name}: swim and support strength fit inside the same availability window.`;
+          const swimTime = formatAvailabilityTime(placement.swimStart) ?? 'the selected time';
+          const strengthTime = formatAvailabilityTime(placement.strengthStart) ?? 'the selected time';
           sessions = sessions.map((session) => {
             if (session.id === swim.id) {
               return {
@@ -80,7 +82,11 @@ function optimizeWeek(
                 scheduledLocationId: location.id,
                 scheduledLocationName: location.name,
                 transitionMinutes: STACK_TRANSITION_MINUTES,
-                rationale: unique([...withoutOutingRationale(session.rationale), note]),
+                rationale: unique([
+                  ...withoutOutingRationale(session.rationale),
+                  `Scheduled for ${swimTime} inside your saved availability.`,
+                  note,
+                ]),
               };
             }
             if (session.id === strength.id) {
@@ -94,7 +100,11 @@ function optimizeWeek(
                 scheduledLocationId: location.id,
                 scheduledLocationName: location.name,
                 transitionMinutes: STACK_TRANSITION_MINUTES,
-                rationale: unique([...withoutOutingRationale(session.rationale), note]),
+                rationale: unique([
+                  ...withoutOutingRationale(session.rationale),
+                  `Scheduled for ${strengthTime} inside your saved availability.`,
+                  note,
+                ]),
               };
             }
             return session;
@@ -139,6 +149,16 @@ function findStackPlacement({
       ? [{ start: Date.parse(session.scheduledStartAt), end: Date.parse(session.scheduledEndAt) }]
       : []);
   const blockMinutes = swim.durationMinutes + STACK_TRANSITION_MINUTES + strength.durationMinutes;
+  const originalSwimStart = swim.scheduledStartAt ? Date.parse(swim.scheduledStartAt) : undefined;
+  const originalStrengthStart = strength.scheduledStartAt ? Date.parse(strength.scheduledStartAt) : undefined;
+  const candidates: Array<{
+    windowId: string;
+    swimStart: string;
+    swimEnd: string;
+    strengthStart: string;
+    strengthEnd: string;
+    movementCost: number;
+  }> = [];
 
   for (const window of windows.filter((candidate) => candidate.date === date)) {
     const windowStart = Date.parse(window.startsAt);
@@ -153,16 +173,30 @@ function findStackPlacement({
       const swimEnd = swimStart + swim.durationMinutes * 60_000;
       const strengthStart = swimEnd + STACK_TRANSITION_MINUTES * 60_000;
       const strengthEnd = strengthStart + strength.durationMinutes * 60_000;
-      return {
+      // Preserve the endurance session's already-selected daypart when possible;
+      // support strength is deliberately cheaper to move inside a shared outing.
+      const swimMovement = Number.isFinite(originalSwimStart) ? Math.abs(swimStart - originalSwimStart!) / 60_000 : 0;
+      const strengthMovement = Number.isFinite(originalStrengthStart) ? Math.abs(strengthStart - originalStrengthStart!) / 60_000 : 0;
+      candidates.push({
         windowId: window.id,
         swimStart: new Date(swimStart).toISOString(),
         swimEnd: new Date(swimEnd).toISOString(),
         strengthStart: new Date(strengthStart).toISOString(),
         strengthEnd: new Date(strengthEnd).toISOString(),
-      };
+        movementCost: swimMovement + strengthMovement * 0.25,
+      });
     }
   }
-  return null;
+
+  const best = candidates.sort((left, right) => left.movementCost - right.movementCost || left.swimStart.localeCompare(right.swimStart))[0];
+  if (!best) return null;
+  return {
+    windowId: best.windowId,
+    swimStart: best.swimStart,
+    swimEnd: best.swimEnd,
+    strengthStart: best.strengthStart,
+    strengthEnd: best.strengthEnd,
+  };
 }
 
 function canStackSwimAndStrength(
@@ -186,15 +220,23 @@ function eventForScheduledSession(
 ): TrainingCalendarEvent {
   const session = sessions.find((candidate) => event.id.endsWith(`_${safeId(candidate.id)}`));
   if (!session?.scheduledStartAt || !session.scheduledEndAt) return event;
+  const scheduledTime = formatAvailabilityTime(session.scheduledStartAt) ?? 'the selected time';
   const outingLine = session.trainingOutingId
-    ? `Training outing · ${session.scheduledLocationName ?? 'shared location'} · ${formatAvailabilityTime(session.scheduledStartAt) ?? 'scheduled'}`
+    ? `Training outing · ${session.scheduledLocationName ?? 'shared location'} · ${scheduledTime}`
     : undefined;
+  const descriptionLines = (event.description ?? '')
+    .split('\n')
+    .filter((line) => !line.startsWith('Scheduled for ') && !line.startsWith('Training outing · '));
   return {
     ...event,
     startAt: session.scheduledStartAt,
     endAt: session.scheduledEndAt,
     allDay: false,
-    description: unique([event.description ?? '', outingLine ?? '']).filter(Boolean).join('\n'),
+    description: unique([
+      ...descriptionLines,
+      `Scheduled for ${scheduledTime} inside your saved availability.`,
+      outingLine ?? '',
+    ]).join('\n'),
   };
 }
 
@@ -231,7 +273,7 @@ function isTrainable(value: string): value is 'swim' | 'bike' | 'run' | 'strengt
 }
 
 function withoutOutingRationale(values: string[]): string[] {
-  return values.filter((line) => !line.startsWith('Bundled into one visit at '));
+  return values.filter((line) => !line.startsWith('Bundled into one visit at ') && !line.startsWith('Scheduled for '));
 }
 
 function addDays(value: string, days: number): string {
