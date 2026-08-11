@@ -230,7 +230,7 @@ export interface FocusTarget {
 
 export interface WorkoutGenerationRequest {
   workMinutes: number;
-  allowedStationMinutes: Array<4 | 8 | 12>;
+  allowedStationMinutes: Array<4 | 6 | 8 | 12>;
   restSeconds: number;
   exercisesPerStation: 2 | 3 | 'mixed';
   focusTargets: FocusTarget[];

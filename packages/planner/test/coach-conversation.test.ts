@@ -1,0 +1,248 @@
+import { describe, expect, it } from 'vitest';
+
+import { resolveCoachConversationMessage } from '../src/coach-conversation';
+import { buildDailyAdjustmentOptions } from '../src/daily-adjustment';
+import { buildCoachMessageAdaptation, interpretCoachMessage } from '../src/coach-message-adaptation';
+import type { UnifiedTrainingSession } from '../src/unified-training';
+
+function session(overrides: Partial<UnifiedTrainingSession> = {}): UnifiedTrainingSession {
+  return {
+    id: 'bike-1',
+    date: '2026-08-12',
+    title: 'Threshold ride',
+    discipline: 'bike',
+    durationMinutes: 75,
+    intensity: 'hard',
+    cardiovascularDemand: 'high',
+    musculoskeletalDemand: 'moderate',
+    lowerBodyDemand: 'high',
+    upperBodyDemand: 'none',
+    impact: 'none',
+    technicalDemand: 'moderate',
+    recoveryCost: 4,
+    priority: 'required',
+    source: 'side_quest',
+    keySession: true,
+    ...overrides,
+  };
+}
+
+describe('coach conversation resolver', () => {
+  it('keeps the prior target when the athlete asks to move it to a named weekday', () => {
+    const previous = interpretCoachMessage('My legs are sore during my bike week.');
+    const result = resolveCoachConversationMessage('Could we move it to Friday instead?', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: '2026-08-12',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.intent).toBe('refine_move');
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.preferredTargetDate).toBe('2026-08-14');
+    expect(result.focusDate).toBeUndefined();
+    expect(result.interpretation.requestedAction).toBe('move');
+    expect(result.keepPriorTarget).toBe(true);
+  });
+
+  it('treats a date question as a planning horizon instead of a move command', () => {
+    const previous = interpretCoachMessage('My hip has sharp pain.');
+    const result = resolveCoachConversationMessage('I already did the bike today. What about tomorrow?', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: '2026-08-07',
+      referenceDate: '2026-08-07',
+    });
+
+    expect(result.intent).toBe('follow_up');
+    expect(result.preferredTargetDate).toBeUndefined();
+    expect(result.focusDate).toBe('2026-08-08');
+    expect(result.targetDiscipline).toBeUndefined();
+    expect(result.keepPriorTarget).toBe(false);
+    expect(result.interpretation.requestedAction).not.toBe('move');
+  });
+
+  it('does not treat a retrospective sport mention as the workout to rewrite', () => {
+    const result = resolveCoachConversationMessage('I was limping for a few minutes after my ride.', undefined, {
+      referenceDate: '2026-08-07',
+    });
+
+    expect(result.targetDiscipline).toBeUndefined();
+    expect(result.conversationSignals).toContain('Sport mention describes completed or prior training');
+  });
+
+  it('treats "I would rather swim" as a replacement preference, not a new swim target', () => {
+    const previous = interpretCoachMessage('The weather is too icy for my bike ride.');
+    const result = resolveCoachConversationMessage("I'd rather swim instead.", undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: '2026-08-12',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.intent).toBe('refine_replacement');
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.preferredReplacementDiscipline).toBe('swim');
+    expect(result.interpretation.requestedAction).toBe('different');
+  });
+
+  it('turns a duration-only reply into a refinement of the same session', () => {
+    const previous = interpretCoachMessage('My legs are heavy on the bike today.');
+    const result = resolveCoachConversationMessage('Make it 30 minutes.', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: '2026-08-12',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.intent).toBe('refine_duration');
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.interpretation.availableMinutes).toBe(30);
+    expect(result.interpretation.requestedAction).toBe('shorter');
+  });
+
+  it('escalates worsening fatigue without losing the original target or affected area', () => {
+    const previous = interpretCoachMessage('My legs are sore and heavy after yesterday.');
+    const result = resolveCoachConversationMessage('Actually I feel worse now.', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'run',
+      previousSessionDate: '2026-08-12',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.intent).toBe('worsening');
+    expect(result.recentFatigueTrend).toBe('worsening');
+    expect(result.targetDiscipline).toBe('run');
+    expect(result.interpretation.reason).toBe('fatigue');
+    expect(result.interpretation.affectedArea).toBe('lower_body');
+  });
+
+  it('lets new focal pain override a previous ordinary-fatigue interpretation', () => {
+    const previous = interpretCoachMessage('My legs are tired.');
+    const result = resolveCoachConversationMessage('Actually my knee has sharp pain too.', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'run',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.interpretation.reason).toBe('pain');
+    expect(result.interpretation.focalPain).toBe(true);
+    expect(result.interpretation.symptomSeverity).toBe(4);
+    expect(result.targetDiscipline).toBe('run');
+  });
+
+  it('does not forget a prior pain signal just because the athlete asks to reschedule', () => {
+    const previous = interpretCoachMessage('I have sharp knee pain on my run.');
+    const result = resolveCoachConversationMessage('Could we just move it to Friday?', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'run',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.interpretation.reason).toBe('pain');
+    expect(result.interpretation.focalPain).toBe(true);
+    expect(result.interpretation.painContext?.kind).toBe('focal_musculoskeletal');
+    expect(result.preferredTargetDate).toBe('2026-08-14');
+  });
+
+  it('allows a fresh adaptation after the athlete explicitly reports the pain is gone', () => {
+    const previous = interpretCoachMessage('I have sharp knee pain on my run.');
+    const result = resolveCoachConversationMessage('The pain is gone. Could we move it to Friday?', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'run',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.interpretation.reason).toBe('preference');
+    expect(result.interpretation.focalPain).toBeUndefined();
+    expect(result.interpretation.painContext).toBeUndefined();
+    expect(result.interpretation.requestedAction).toBe('move');
+    expect(result.preferredTargetDate).toBe('2026-08-14');
+  });
+
+  it('treats a compensatory cross-sport request as a new request constrained by recent pain rather than current pain', () => {
+    const previous = interpretCoachMessage('I had sharp knee pain and had to quit my track workout.');
+    const result = resolveCoachConversationMessage("I'm frustrated and want to ride a century tomorrow to make up for it.", undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'run',
+      previousSessionDate: '2026-08-10',
+      referenceDate: '2026-08-10',
+    });
+
+    expect(result.targetDiscipline).toBe('bike');
+    expect(result.keepPriorTarget).toBe(false);
+    expect(result.interpretation.reason).not.toBe('pain');
+    expect(result.interpretation.painContext).toBeUndefined();
+    expect(result.interpretation.compensatoryTrainingIntent).toBe(true);
+    expect(result.interpretation.requestedLargeTrainingLoad).toBe(true);
+    expect(result.conversationSignals).toContain('New request constrained by recent interruption');
+  });
+
+  it('recognizes confirmation and cancellation as conversation actions', () => {
+    const context = { referenceDate: '2026-08-10' } as const;
+    expect(resolveCoachConversationMessage('Do it', undefined, context).confirmProposal).toBe(true);
+    expect(resolveCoachConversationMessage('Never mind, keep the original.', undefined, context).cancelProposal).toBe(true);
+  });
+
+  it('honors a requested move date only when it passes the existing spacing checks', () => {
+    const planned = session();
+    const hardFriday = session({ id: 'run-hard', date: '2026-08-14', discipline: 'run' });
+    const result = buildDailyAdjustmentOptions({
+      sessionId: planned.id,
+      reason: 'preference',
+      requestedAction: 'move',
+      preferredTargetDate: '2026-08-14',
+    }, {
+      plannedSession: planned,
+      weekSessions: [planned, hardFriday],
+      availableDates: ['2026-08-13', '2026-08-14', '2026-08-15'],
+    });
+
+    const move = result.options.find((option) => option.action === 'move');
+    expect(move?.targetDate).toBe('2026-08-13');
+    expect(move?.description).toContain('requested date conflicts');
+  });
+
+  it('honors a safe requested replacement discipline before another available sport', () => {
+    const planned = session({ lowerBodyDemand: 'moderate' });
+    const result = buildDailyAdjustmentOptions({
+      sessionId: planned.id,
+      reason: 'preference',
+      requestedAction: 'different',
+      availableDisciplines: ['run', 'swim'],
+      preferredReplacementDiscipline: 'swim',
+    }, {
+      plannedSession: planned,
+      weekSessions: [planned],
+      availableDates: ['2026-08-13'],
+    });
+
+    const replacement = result.options.find((option) => option.action === 'replace');
+    expect(replacement?.replacementDiscipline).toBe('swim');
+    expect(result.recommendedOptionId).toBe(replacement?.id);
+  });
+
+  it('passes resolved follow-up context through the adaptation builder', () => {
+    const planned = session({ lowerBodyDemand: 'moderate' });
+    const previous = interpretCoachMessage('My bike workout does not fit today.');
+    const resolution = resolveCoachConversationMessage('Move it to Friday instead.', undefined, {
+      previousInterpretation: previous,
+      previousTargetDiscipline: 'bike',
+      previousSessionDate: planned.date,
+      referenceDate: '2026-08-10',
+    });
+    const adaptation = buildCoachMessageAdaptation({
+      message: 'Move it to Friday instead.',
+      session: planned,
+      weekSessions: [planned],
+      availableDates: ['2026-08-13', '2026-08-14', '2026-08-15'],
+      interpretation: resolution.interpretation,
+      preferredTargetDate: resolution.preferredTargetDate,
+      recentFatigueTrend: resolution.recentFatigueTrend,
+    });
+
+    const move = adaptation.adjustment.options.find((option) => option.action === 'move');
+    expect(move?.targetDate).toBe('2026-08-14');
+    expect(adaptation.adjustment.recommendedOptionId).toBe(move?.id);
+  });
+});

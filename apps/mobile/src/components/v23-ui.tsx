@@ -9,7 +9,7 @@ import { SportIcon, type SportIconKind } from '@/components/sport-icon';
 
 const TAB_PATHS = new Set(['/', '/plan', '/train', '/coach', '/profile']);
 
-export type V23IconName = 'bell' | 'info' | 'settings' | 'home' | 'plan' | 'train' | 'insights' | 'profile' | 'chevron' | 'play' | 'adjust' | 'clock' | 'equipment' | 'heart' | 'log' | 'search' | 'goal' | 'back' | 'more' | 'check';
+export type V23IconName = 'bell' | 'info' | 'settings' | 'home' | 'plan' | 'train' | 'insights' | 'profile' | 'chevron' | 'play' | 'pause' | 'swap' | 'adjust' | 'clock' | 'equipment' | 'heart' | 'log' | 'search' | 'goal' | 'back' | 'more' | 'check';
 const ICONS: Record<V23IconName, { ios: string; android: string; web: string; fallback: string }> = {
   bell: { ios: 'bell', android: 'notifications_none', web: 'notifications_none', fallback: '○' },
   info: { ios: 'info.circle', android: 'info_outline', web: 'info_outline', fallback: 'i' },
@@ -21,6 +21,8 @@ const ICONS: Record<V23IconName, { ios: string; android: string; web: string; fa
   profile: { ios: 'person', android: 'person_outline', web: 'person_outline', fallback: '○' },
   chevron: { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right', fallback: '›' },
   play: { ios: 'play.fill', android: 'play_arrow', web: 'play_arrow', fallback: '▶' },
+  pause: { ios: 'pause.fill', android: 'pause', web: 'pause', fallback: 'Ⅱ' },
+  swap: { ios: 'arrow.left.arrow.right', android: 'swap_horiz', web: 'swap_horiz', fallback: '↔' },
   adjust: { ios: 'arrow.triangle.2.circlepath', android: 'sync', web: 'sync', fallback: '↔' },
   clock: { ios: 'clock.arrow.circlepath', android: 'schedule', web: 'schedule', fallback: '↘' },
   equipment: { ios: 'dumbbell', android: 'fitness_center', web: 'fitness_center', fallback: 'DB' },

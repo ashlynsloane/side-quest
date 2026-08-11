@@ -16,6 +16,7 @@ import {
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
+import { plannedStrengthDisplayName } from '@/services/training-synthesis';
 
 type PlannedPreviewSource = {
   session: PlannedStrengthSession;
@@ -102,7 +103,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
     },
     openPlannedWorkoutPreview(session, context = {}) {
       const source: PlannedPreviewSource = { session, context, modifiedFromPlan: false };
-      setPreviewWorkoutState(session.workout);
+      setPreviewWorkoutState({ ...session.workout, name: plannedStrengthDisplayName(session) });
       setPlannedPreviewSource(source);
       setPreviewExplanation(explainPlannedStrengthSession(session, context));
     },

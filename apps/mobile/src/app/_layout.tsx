@@ -53,7 +53,7 @@ function AuthGate() {
     if (loading || onboardingLoading) return;
     const authRoute = segments[0] === 'sign-in';
     const onboardingRoute = segments[0] === 'onboarding';
-    const onboardingSetupRoute = ['goal-catalog', 'goal-plan', 'equipment-profiles', 'pt-profile', 'training-intelligence', 'calendar-sync', 'generate'].includes(segments[0] ?? '');
+    const onboardingSetupRoute = ['goal-catalog', 'goal-plan', 'race-intent', 'equipment-profiles', 'pt-profile', 'training-intelligence', 'calendar-sync', 'generate'].includes(segments[0] ?? '');
     if (!user && !authRoute) router.replace('/sign-in' as Href);
     if (user && needsOnboarding && !onboardingRoute && !onboardingSetupRoute) router.replace('/onboarding' as Href);
     if (user && !needsOnboarding && authRoute) router.replace('/(tabs)' as Href);

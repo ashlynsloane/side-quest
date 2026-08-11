@@ -640,7 +640,7 @@ function buildWorkoutRequest(
 
   return {
     workMinutes: adjustedWorkMinutes,
-    allowedStationMinutes: [4, 8, 12],
+    allowedStationMinutes: [4, 6, 8, 12],
     restSeconds: 60,
     exercisesPerStation: phase === 'race_week' || phase === 'taper' ? 2 : 'mixed',
     focusTargets: blueprint.focusTargets,
