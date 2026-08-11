@@ -38,6 +38,7 @@ import {
   saveTrainingBlock,
   type EquipmentProfile,
 } from './database';
+import { raceLocationFromGoalName } from './race-location-personality';
 import { applyRaceIntent } from './race-intent-runtime';
 import { loadRaceIntent } from './race-intent-state';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
@@ -48,6 +49,7 @@ export type GoalSetupFocusLevel = 'primary_focus' | 'maximize';
 export interface GoalSetupDraft {
   goalType: PerformanceGoalType;
   eventDate?: string;
+  raceLocation?: string;
   terrain: GoalTerrain;
   overallObjective: RaceOverallObjective;
   overallTarget?: string;
@@ -150,6 +152,7 @@ export function resetDraftForGoal(
     ...current,
     goalType,
     eventDate,
+    raceLocation: goalType === 'general_offseason' ? undefined : current.raceLocation,
     terrain: defaultTerrain(goalType),
     primaryDiscipline: disciplines.length === 1 ? disciplines[0] : undefined,
     overallObjective: 'strong_finish',
@@ -243,10 +246,13 @@ export async function buildAndSaveGoalSetup(
   const weeks = weeksUntilEvent(draft);
   const recommendation = recommendedStrengthDoseForDraft(draft);
   const now = new Date().toISOString();
+  const location = draft.raceLocation?.replace(/\s+/g, ' ').trim();
   const goal: PerformanceGoal = {
     id: `goal_${draft.goalType}`,
     type: draft.goalType,
-    name: draft.goalType === 'general_offseason' ? option.title : `${option.title} · ${draft.eventDate}`,
+    name: draft.goalType === 'general_offseason'
+      ? option.title
+      : [option.title, location, draft.eventDate].filter(Boolean).join(' · '),
     eventDate: draft.goalType === 'general_offseason' ? undefined : draft.eventDate,
     weeksUntilEvent: draft.goalType === 'general_offseason' ? 0 : weeks,
     terrain: supportsTerrain(draft.goalType) ? draft.terrain : undefined,
@@ -364,6 +370,7 @@ function buildInitialDraft(
   return {
     goalType,
     eventDate,
+    raceLocation: goalType === 'general_offseason' ? undefined : raceLocationFromGoalName(matching?.name),
     terrain: matching?.terrain ?? defaultTerrain(goalType),
     overallObjective: matching?.priority === 'finish' ? 'finish_comfortably' : matching?.priority === 'race' ? 'best_overall' : 'strong_finish',
     primaryDiscipline: option.disciplines.length === 1 ? option.disciplines[0] : undefined,
