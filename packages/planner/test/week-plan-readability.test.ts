@@ -52,7 +52,7 @@ describe('week plan readability', () => {
     expect(synthesis).toContain(".filter(([key]) => key !== assignmentKey)");
   });
 
-  it('changes voice by season, holiday window, race phase, and named race context', () => {
+  it('changes voice by season, holiday window, race phase, and generic race-location context', () => {
     expect(namingContext).toContain("export type WorkoutNameSeason = 'winter' | 'spring' | 'summer' | 'fall'");
     expect(namingContext).toContain("return monthDay >= '12-15' || monthDay <= '01-02'");
     expect(namingContext).toContain("return 'race_week'");
@@ -62,8 +62,12 @@ describe('week plan readability', () => {
     expect(personality).toContain("holiday('Hinge All the Way'");
     expect(personality).toContain("raceWeek('Do Not Invent New Fitness'");
     expect(personality).toContain("raceWeek('Where Did I Put My Goggles?'");
-    expect(personality).toContain("raceTheme('Pacific Pull'");
-    expect(personality).toContain("raceTheme('Corniche Cruise'");
+    expect(personality).toContain('deriveRaceLocationPersonality');
+    expect(personality).toContain('buildRaceLocationEntries');
+    expect(personality).toContain('`${place} Lane Lines`');
+    expect(personality).toContain('`Roads to ${place}`');
+    expect(personality).not.toContain("raceTheme('Pacific Pull'");
+    expect(personality).not.toContain("raceTheme('Corniche Cruise'");
     expect(synthesis).toContain('workoutDate: date');
     expect(synthesis).toContain('weeksUntilRace(date, metadata.raceDate)');
     expect(wholeAthletePlan).toContain('generatedWorkoutNamingMetadata({');
