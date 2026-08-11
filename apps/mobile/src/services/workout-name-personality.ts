@@ -11,6 +11,11 @@ import {
   workoutNameSeason,
   type WorkoutNameSeason,
 } from './workout-name-context';
+import {
+  deriveRaceLocationPersonality,
+  raceLocationFromGoalName,
+  type RaceLocationEnvironment,
+} from './race-location-personality';
 
 export interface HumanWorkoutNamingContext extends WorkoutNamingContext {
   workoutDate?: string;
@@ -21,7 +26,7 @@ type PersonalityWorkoutNameEntry = WorkoutNameEntry & {
   holidayOnly?: boolean;
   raceWeekOnly?: boolean;
   phaseOnly?: boolean;
-  raceKeywords?: string[];
+  raceLocationOnly?: boolean;
 };
 
 const BASE_PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
@@ -191,31 +196,11 @@ const RACE_WEEK_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   tri('Race Kit, Real Problems', ['swim', 'bike', 'run'], ['race_specific'], { phases: ['race_week'], raceWeekOnly: true }),
 ];
 
-const RACE_THEME_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
-  raceTheme('Pacific Pull', 'swim', ['easy', 'aerobic'], ['oceanside', 'san diego', 'southern california']),
-  raceTheme('Pier Pressure', 'swim', ['threshold', 'intervals'], ['oceanside', 'san diego']),
-  raceTheme('Marine Layer Main Set', 'swim', ['aerobic', 'intervals'], ['oceanside', 'san diego']),
-  raceTheme('Coast Highway Office Hours', 'bike', ['tempo', 'aerobic'], ['oceanside', 'san diego']),
-  raceTheme('SoCal Aero Club', 'bike', ['race_specific', 'tempo'], ['oceanside', 'san diego'], { triathlonOnly: true }),
-  raceTheme('Pacific Coast Problems', 'bike', ['long', 'aerobic'], ['oceanside', 'san diego']),
-  raceTheme('Boardwalk Legs', 'run', ['easy', 'aerobic'], ['oceanside', 'san diego']),
-  raceTheme('Marine Layer Miles', 'run', ['easy', 'aerobic'], ['oceanside', 'san diego']),
-  raceTheme('Azure Water', 'swim', ['easy', 'aerobic'], ['nice', "côte d'azur", 'cote d azur', 'riviera']),
-  raceTheme('Mediterranean Main Set', 'swim', ['intervals', 'aerobic'], ['nice', 'mediterranean', 'riviera']),
-  raceTheme('Riviera Laps', 'swim', ['easy', 'aerobic'], ['nice', 'riviera']),
-  raceTheme('Corniche Cruise', 'bike', ['long', 'aerobic'], ['nice', 'riviera', 'côte d’azur', 'cote d azur']),
-  raceTheme('Bonjour, Quads', 'bike', ['threshold', 'intervals'], ['nice', 'france', 'riviera']),
-  raceTheme('Riviera Roll', 'bike', ['easy', 'aerobic'], ['nice', 'riviera']),
-  raceTheme('Promenade Legs', 'run', ['easy', 'aerobic'], ['nice', 'promenade', 'riviera']),
-  raceTheme("Côte d'Azur Shuffle", 'run', ['easy', 'aerobic'], ['nice', "côte d'azur", 'cote d azur', 'riviera']),
-];
-
 export const PLAYFUL_WORKOUT_NAMES: PersonalityWorkoutNameEntry[] = [
   ...BASE_PLAYFUL_WORKOUT_NAMES,
   ...SEASONAL_WORKOUT_NAMES,
   ...PHASE_WORKOUT_NAMES,
   ...RACE_WEEK_WORKOUT_NAMES,
-  ...RACE_THEME_WORKOUT_NAMES,
 ];
 
 const SERIOUS_OR_STALE_NAMES = new Set([
@@ -259,10 +244,13 @@ export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): stri
   const season = context.workoutDate ? workoutNameSeason(context.workoutDate) : undefined;
   const holiday = context.workoutDate ? isHolidayNamingWindow(context.workoutDate) : false;
   const effectivePhase = effectiveWorkoutNamePhase(context.phase, context.weeksToRace);
-  const raceText = `${context.raceName ?? ''} ${context.raceLocation ?? ''}`.toLowerCase();
+  const raceLocation = deriveRaceLocationPersonality(context.raceLocation ?? raceLocationFromGoalName(context.raceName));
+  const raceEntries = buildRaceLocationEntries(raceLocation);
   const catalog = WORKOUT_NAME_CATALOG as PersonalityWorkoutNameEntry[];
+  const allPlayful = [...PLAYFUL_WORKOUT_NAMES, ...raceEntries];
+  const playfulNames = new Set(allPlayful.map((entry) => entry.name));
 
-  const eligible = [...PLAYFUL_WORKOUT_NAMES, ...catalog]
+  const eligible = [...allPlayful, ...catalog]
     .filter((entry) => !SERIOUS_OR_STALE_NAMES.has(entry.name))
     .filter((entry) => entry.disciplines.includes(context.discipline))
     .filter((entry) => !entry.triathlonOnly || context.triathlon)
@@ -277,14 +265,14 @@ export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): stri
     .filter((entry) => !entry.holidayOnly || holiday)
     .filter((entry) => !entry.phaseOnly || Boolean(effectivePhase && entry.phases?.includes(effectivePhase)))
     .filter((entry) => !entry.raceWeekOnly || effectivePhase === 'race_week')
-    .filter((entry) => !entry.raceKeywords?.length || entry.raceKeywords.some((keyword) => raceText.includes(keyword)));
+    .filter((entry) => !entry.raceLocationOnly || Boolean(raceLocation));
 
   const dominantPool = dominant ? eligible.filter((entry) => entry.intents?.includes(dominant)) : [];
   const candidates = dominantPool.length >= 3 ? dominantPool : eligible;
   const freshCandidates = candidates.filter((entry) => !recent.has(entry.name.toLowerCase()));
   const selectionPool = freshCandidates.length ? freshCandidates : candidates;
   const scored = selectionPool
-    .map((entry) => ({ entry, score: humanScore(entry, context, recent, dominant, season, holiday, effectivePhase, raceText) }))
+    .map((entry) => ({ entry, score: humanScore(entry, context, recent, dominant, season, holiday, effectivePhase, raceLocation != null, playfulNames) }))
     .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
 
   if (!scored.length) return fallbackName(context.discipline);
@@ -295,6 +283,68 @@ export function selectHumanWorkoutName(context: HumanWorkoutNamingContext): stri
 
 export function dominantWorkoutNameIntent(context: WorkoutNamingContext): WorkoutNameIntent | undefined {
   return dominantIntent(context);
+}
+
+function buildRaceLocationEntries(
+  location: ReturnType<typeof deriveRaceLocationPersonality>,
+): PersonalityWorkoutNameEntry[] {
+  if (!location) return [];
+  const place = location.placeLabel;
+  const entries: PersonalityWorkoutNameEntry[] = [
+    locationName(`${place} Lane Lines`, 'swim', ['easy', 'aerobic']),
+    locationName(`${place} Pool Goblins`, 'swim', ['easy', 'aerobic']),
+    locationName(`Postcards from ${place}`, 'swim', ['easy', 'aerobic']),
+    locationName(`${place} Roll Call`, 'bike', ['easy', 'aerobic']),
+    locationName(`Roads to ${place}`, 'bike', ['long', 'aerobic'], { minMinutes: 120 }),
+    locationName(`${place} Snack Tour`, 'bike', ['long', 'aerobic'], { minMinutes: 120 }),
+    locationName(`${place} Legs Department`, 'run', ['easy', 'aerobic']),
+    locationName(`${place} Shuffle`, 'run', ['easy', 'aerobic']),
+    locationName(`${place} Hinge Department`, 'strength', ['posterior_durability', 'general_strength']),
+    locationName(`See You in ${place}`, ['swim', 'bike', 'run'], ['easy', 'aerobic', 'race_specific'], { phases: ['taper', 'race_week'], triathlonOnly: true }),
+    locationName(`${place} Loading…`, ['swim', 'bike', 'run'], ['easy', 'aerobic', 'race_specific'], { phases: ['taper', 'race_week'], triathlonOnly: true }),
+  ];
+  for (const environment of location.environmentTags) entries.push(...environmentLocationEntries(environment));
+  return entries;
+}
+
+function environmentLocationEntries(environment: RaceLocationEnvironment): PersonalityWorkoutNameEntry[] {
+  if (environment === 'coastal') return [
+    locationName('Salt Air, Zero Thoughts', 'bike', ['easy', 'aerobic']),
+    locationName('Sea Breeze Spin', 'bike', ['easy', 'aerobic']),
+    locationName('Tide Table Training', 'swim', ['aerobic']),
+    locationName('Boardwalk Shuffle', 'run', ['easy', 'aerobic']),
+  ];
+  if (environment === 'mountain' || environment === 'high_altitude') return [
+    locationName('Switchback Snack Club', 'bike', ['long', 'aerobic'], { minMinutes: 120 }),
+    locationName('Thin Air, Thick Quads', 'bike', ['threshold', 'intervals']),
+    locationName('Ridge Line Roll', 'bike', ['easy', 'aerobic']),
+    locationName('Mountain Legs Pending', 'run', ['easy', 'aerobic']),
+  ];
+  if (environment === 'lake') return [
+    locationName('Dockside Delusion', 'swim', ['easy', 'aerobic']),
+    locationName('Lake Loop Loading', 'bike', ['easy', 'aerobic']),
+  ];
+  if (environment === 'river') return [
+    locationName('Current Events', 'swim', ['aerobic']),
+    locationName('River Road Roll', 'bike', ['easy', 'aerobic']),
+  ];
+  if (environment === 'desert') return [
+    locationName('Shade Is Currency', 'run', ['easy', 'aerobic']),
+    locationName('Dusty Bottle Club', 'bike', ['long', 'aerobic'], { minMinutes: 120 }),
+  ];
+  if (environment === 'forest') return [
+    locationName('Pine Needle Paceline', 'bike', ['easy', 'aerobic']),
+    locationName('Trailhead Trot', 'run', ['easy', 'aerobic']),
+  ];
+  if (environment === 'island') return [
+    locationName('Island Time, Literally', 'bike', ['easy', 'aerobic']),
+    locationName('Island Legs', 'run', ['easy', 'aerobic']),
+  ];
+  if (environment === 'urban') return [
+    locationName('City Limits Spin', 'bike', ['easy', 'aerobic']),
+    locationName('Crosswalk Fartlek', 'run', ['fartlek']),
+  ];
+  return [];
 }
 
 function dominantIntent(context: WorkoutNamingContext): WorkoutNameIntent | undefined {
@@ -363,19 +413,20 @@ function humanScore(
   season: WorkoutNameSeason | undefined,
   holiday: boolean,
   effectivePhase: ReturnType<typeof effectiveWorkoutNamePhase>,
-  raceText: string,
+  hasRaceLocation: boolean,
+  playfulNames: Set<string>,
 ): number {
   let score = 0;
   const matches = entry.intents?.filter((intent) => context.intents.includes(intent)).length ?? 0;
   score += matches * 5;
   if (dominant && entry.intents?.includes(dominant)) score += 7;
-  if (PLAYFUL_NAMES.has(entry.name)) score += 5;
+  if (playfulNames.has(entry.name)) score += 5;
   if (entry.intensities?.includes(context.intensity ?? 'easy')) score += 2;
   if (entry.phases?.includes(effectivePhase ?? context.phase ?? 'base')) score += 6;
   if (entry.seasons?.includes(season ?? 'summer')) score += 4;
   if (entry.holidayOnly && holiday) score += 8;
   if (entry.raceWeekOnly && effectivePhase === 'race_week') score += 10;
-  if (entry.raceKeywords?.some((keyword) => raceText.includes(keyword))) score += 12;
+  if (entry.raceLocationOnly && hasRaceLocation) score += effectivePhase === 'race_week' ? 14 : context.weeksToRace != null && context.weeksToRace <= 6 ? 9 : 5;
   if (entry.triathlonOnly && context.triathlon) score += 3;
   if (recent.has(entry.name.toLowerCase())) score -= 20;
   return score;
@@ -429,14 +480,13 @@ function raceWeek(
 ): PersonalityWorkoutNameEntry {
   return { name, disciplines, intents, phases: ['race_week'], raceWeekOnly: true, phaseOnly: true };
 }
-function raceTheme(
+function locationName(
   name: string,
-  discipline: WorkoutNameDiscipline,
+  disciplines: WorkoutNameDiscipline | WorkoutNameDiscipline[],
   intents: WorkoutNameIntent[],
-  raceKeywords: string[],
-  options: Omit<PersonalityWorkoutNameEntry, 'name' | 'disciplines' | 'intents' | 'raceKeywords'> = {},
+  options: Omit<PersonalityWorkoutNameEntry, 'name' | 'disciplines' | 'intents' | 'raceLocationOnly'> = {},
 ): PersonalityWorkoutNameEntry {
-  return { name, disciplines: [discipline], intents, raceKeywords, ...options };
+  return { name, disciplines: Array.isArray(disciplines) ? disciplines : [disciplines], intents, raceLocationOnly: true, ...options };
 }
 function fallbackName(discipline: WorkoutNameDiscipline): string {
   if (discipline === 'swim') return 'Chlorine & Delusion';
