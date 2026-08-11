@@ -19,7 +19,7 @@ import {
   ProductMetric,
   ProductSection,
 } from '@/components/product-ui';
-import { V23Chip, V23Icon, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
+import { V23Icon, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
 import {
   buildAndSaveGoalSetup,
   goalSetupOption,
@@ -112,12 +112,8 @@ export default function GoalPlanScreen() {
     </V23Screen>;
   }
 
-  // Capture the successfully loaded setup state for event-handler closures.
-  // React state remains nullable while loading, but everything below the guard
-  // operates on a fully initialized Goal Setup environment and draft.
   const activeEnvironment = environment;
   const activeDraft = draft;
-
   const option = goalSetupOption(draft.goalType);
   const recommendation = recommendedStrengthDoseForDraft(draft);
   const weeks = weeksUntilEvent(draft);
@@ -239,39 +235,32 @@ export default function GoalPlanScreen() {
     <SetupProgress step={step} styles={styles} />
 
     {step === 'goal' ? <>
-      <ProductHero
-        eyebrow="1 · GOAL"
-        title="What are you training toward?"
-        body="Choose the event first. Side Quest will coordinate strength with the sport, race timeline, and the rest of your weekly training."
-        tone="surface"
-      />
+      <ProductHero eyebrow="1 · GOAL" title="What are you training toward?" body="Choose the event first. Side Quest will coordinate strength with the sport, race timeline, and the rest of your weekly training." tone="surface" />
       <View style={styles.categoryRow}>
-        {([
-          ['triathlon', 'Triathlon'], ['running', 'Road'], ['trail', 'Trail'], ['performance', 'Strength + swim'],
-        ] as const).map(([id, label]) => <Pressable key={id} onPress={() => setGoalCategory(id)} style={[styles.category, goalCategory === id && styles.categorySelected]}>
+        {([['triathlon', 'Triathlon'], ['running', 'Road'], ['trail', 'Trail'], ['performance', 'Strength + swim']] as const).map(([id, label]) => <Pressable key={id} onPress={() => setGoalCategory(id)} style={[styles.category, goalCategory === id && styles.categorySelected]}>
           <Text style={[styles.categoryText, goalCategory === id && styles.categoryTextSelected]}>{label}</Text>
         </Pressable>)}
       </View>
       <View style={styles.choiceStack}>
-        {GOAL_SETUP_OPTIONS.filter((goal) => goal.category === goalCategory).map((goal) => <ProductChoiceRow
-          key={goal.type}
-          title={goal.title}
-          body={goal.description}
-          selected={draft.goalType === goal.type}
-          onPress={() => chooseGoal(goal.type)}
-          icon="goal"
-        />)}
+        {GOAL_SETUP_OPTIONS.filter((goal) => goal.category === goalCategory).map((goal) => <ProductChoiceRow key={goal.type} title={goal.title} body={goal.description} selected={draft.goalType === goal.type} onPress={() => chooseGoal(goal.type)} icon="goal" />)}
       </View>
 
-      <ProductSection title={draft.goalType === 'general_offseason' ? 'Training horizon' : 'Race timing'} body={draft.goalType === 'general_offseason' ? 'Choose how much of the strength block to generate now.' : 'The race date determines the phase and how much room the current block has to progress.'}>
-        {draft.goalType !== 'general_offseason' ? <TextInput
-          value={draft.eventDate ?? ''}
-          onChangeText={updateEventDate}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={tokens.textMuted}
-          keyboardType="numbers-and-punctuation"
-          style={styles.largeInput}
-        /> : null}
+      <ProductSection title={draft.goalType === 'general_offseason' ? 'Training horizon' : 'Race timing'} body={draft.goalType === 'general_offseason' ? 'Choose how much of the strength block to generate now.' : 'The race date sets the phase. Add the race location if you want the training calendar to pick up some local personality too.'}>
+        {draft.goalType !== 'general_offseason' ? <>
+          <Text style={styles.smallLabel}>RACE DATE</Text>
+          <TextInput value={draft.eventDate ?? ''} onChangeText={updateEventDate} placeholder="YYYY-MM-DD" placeholderTextColor={tokens.textMuted} keyboardType="numbers-and-punctuation" style={styles.largeInput} />
+          <Text style={styles.smallLabel}>RACE LOCATION · OPTIONAL</Text>
+          <TextInput
+            value={draft.raceLocation ?? ''}
+            onChangeText={(raceLocation) => patch({ raceLocation })}
+            placeholder="Nice, France · Oceanside, CA · Lake Placid, NY"
+            placeholderTextColor={tokens.textMuted}
+            autoCapitalize="words"
+            autoCorrect={false}
+            style={styles.largeInput}
+          />
+          <Text style={styles.contextNote}>Used for workout-name personality only. It does not tell you where to train or change the workout prescription.</Text>
+        </> : null}
         <View style={styles.metricRow}>
           {draft.goalType !== 'general_offseason' && weeks >= 0 ? <ProductMetric label="to event" value={weeks === 0 ? 'Race week' : `${weeks} wk`} emphasis /> : null}
           <ProductMetric label="block" value={`${draft.blockLength} wk`} />
@@ -297,25 +286,14 @@ export default function GoalPlanScreen() {
         <Stepper value={draft.totalWeeklyHours} min={3} max={25} onChange={(totalWeeklyHours) => patch({ totalWeeklyHours, currentEnduranceHours: Math.min(draft.currentEnduranceHours, totalWeeklyHours) })} styles={styles} />
       </View>
       <ProductSection title="Current endurance load" body="How many of those hours are already swim, bike, run, or other endurance work?">
-        <View style={styles.capacityInline}>
-          <Text style={styles.capacityInlineValue}>{draft.currentEnduranceHours} hr/week</Text>
-          <Stepper value={draft.currentEnduranceHours} min={0} max={draft.totalWeeklyHours} onChange={(currentEnduranceHours) => patch({ currentEnduranceHours })} styles={styles} small />
-        </View>
+        <View style={styles.capacityInline}><Text style={styles.capacityInlineValue}>{draft.currentEnduranceHours} hr/week</Text><Stepper value={draft.currentEnduranceHours} min={0} max={draft.totalWeeklyHours} onChange={(currentEnduranceHours) => patch({ currentEnduranceHours })} styles={styles} small /></View>
       </ProductSection>
       <View style={styles.recommendation}>
         <View style={styles.recommendationIcon}><V23Icon name="train" color={tokens.accent} size={20} /></View>
-        <View style={styles.recommendationCopy}>
-          <Text style={styles.smallLabel}>RECOMMENDED STARTING DOSE</Text>
-          <Text style={styles.recommendationTitle}>{recommendation.sessionsPerWeek} strength sessions · {recommendation.minutesPerWeek} min/week</Text>
-          <Text style={styles.recommendationBody}>{recommendation.trainingBudget.strength.hours}h strength inside a {draft.totalWeeklyHours}h weekly budget · {recommendation.weeklyAllocationHours.recoveryMargin}h recovery margin.</Text>
-        </View>
+        <View style={styles.recommendationCopy}><Text style={styles.smallLabel}>RECOMMENDED STARTING DOSE</Text><Text style={styles.recommendationTitle}>{recommendation.sessionsPerWeek} strength sessions · {recommendation.minutesPerWeek} min/week</Text><Text style={styles.recommendationBody}>{recommendation.trainingBudget.strength.hours}h strength inside a {draft.totalWeeklyHours}h weekly budget · {recommendation.weeklyAllocationHours.recoveryMargin}h recovery margin.</Text></View>
       </View>
       <ProductSection title="Current running status" body="Running and impact progression are treated separately from general endurance fitness.">
-        <View style={styles.choiceStack}>
-          {([
-            ['normal', 'Running normally'], ['reduced', 'Running less than usual'], ['return_to_run', 'Returning to running'], ['not_running', 'Not currently running'],
-          ] as const).map(([id, title]) => <ProductChoiceRow key={id} title={title} selected={draft.runStatus === id} onPress={() => patch({ runStatus: id })} />)}
-        </View>
+        <View style={styles.choiceStack}>{([['normal', 'Running normally'], ['reduced', 'Running less than usual'], ['return_to_run', 'Returning to running'], ['not_running', 'Not currently running']] as const).map(([id, title]) => <ProductChoiceRow key={id} title={title} selected={draft.runStatus === id} onPress={() => patch({ runStatus: id })} />)}</View>
       </ProductSection>
       <ProductDisclosure title="Athlete context" summary="Experience, mileage history, and bone-stress history refine the starting dose." expanded={advancedCapacity} onPress={() => setAdvancedCapacity((value) => !value)}>
         <Text style={styles.smallLabel}>HIGHEST RUN MILEAGE · LAST 12 WEEKS</Text>
@@ -331,10 +309,7 @@ export default function GoalPlanScreen() {
     {step === 'setup' ? <>
       <ProductHero eyebrow="4 · SCHEDULE + SETUP" title="Give the planner realistic places to put the work." body="Choose days that could work, the equipment you normally have, and any protection context that should constrain the first block." tone="surface" />
       <ProductSection title="Strength-day options" body={`Side Quest currently recommends ${recommendation.sessionsPerWeek} sessions. Choose at least that many realistic days; it may use fewer than the days you make available.`}>
-        <View style={styles.dayRow}>{weekdays().map((day) => <Pressable key={day} onPress={() => toggleStrengthDay(day)} style={[styles.day, draft.preferredStrengthDays.includes(day) && styles.daySelected]}>
-          <Text style={[styles.dayText, draft.preferredStrengthDays.includes(day) && styles.dayTextSelected]}>{WEEKDAY_LABELS[day]}</Text>
-          <Text style={[styles.daySub, draft.preferredStrengthDays.includes(day) && styles.dayTextSelected]}>{WEEKDAY_SHORT[day]}</Text>
-        </Pressable>)}</View>
+        <View style={styles.dayRow}>{weekdays().map((day) => <Pressable key={day} onPress={() => toggleStrengthDay(day)} style={[styles.day, draft.preferredStrengthDays.includes(day) && styles.daySelected]}><Text style={[styles.dayText, draft.preferredStrengthDays.includes(day) && styles.dayTextSelected]}>{WEEKDAY_LABELS[day]}</Text><Text style={[styles.daySub, draft.preferredStrengthDays.includes(day) && styles.dayTextSelected]}>{WEEKDAY_SHORT[day]}</Text></Pressable>)}</View>
       </ProductSection>
       <ProductSection title="Training location" body="Use a saved equipment location. You can refine individual equipment later without rebuilding the race strategy.">
         <View style={styles.choiceStack}>
@@ -343,39 +318,28 @@ export default function GoalPlanScreen() {
         </View>
       </ProductSection>
       {option.disciplines.length ? <ProductDisclosure title="Key endurance days" summary={keyDaySummary(draft, option.disciplines)} expanded={keyDaysOpen} onPress={() => setKeyDaysOpen((value) => !value)}>
-        {option.disciplines.map((discipline) => <View key={discipline} style={styles.keyDayBlock}>
-          <Text style={styles.smallLabel}>KEY {discipline.toUpperCase()} DAY</Text>
-          <View style={styles.chipRow}>
-            <ChoiceChip label="None" selected={!keyDayFor(draft, discipline)} onPress={() => setKeyDay(discipline, null)} styles={styles} />
-            {weekdays().map((day) => <ChoiceChip key={day} label={WEEKDAY_SHORT[day]} selected={keyDayFor(draft, discipline) === day} onPress={() => setKeyDay(discipline, day)} styles={styles} />)}
-          </View>
-        </View>)}
+        {option.disciplines.map((discipline) => <View key={discipline} style={styles.keyDayBlock}><Text style={styles.smallLabel}>KEY {discipline.toUpperCase()} DAY</Text><View style={styles.chipRow}><ChoiceChip label="None" selected={!keyDayFor(draft, discipline)} onPress={() => setKeyDay(discipline, null)} styles={styles} />{weekdays().map((day) => <ChoiceChip key={day} label={WEEKDAY_SHORT[day]} selected={keyDayFor(draft, discipline) === day} onPress={() => setKeyDay(discipline, day)} styles={styles} />)}</View></View>)}
       </ProductDisclosure> : null}
       <ProductSection title="Anything to protect right now?" body="This is a conservative first-block filter, not a diagnosis. Any active PT profile and today’s check-in are also applied automatically.">
-        <View style={styles.choiceStack}>
-          {([
-            ['none', 'Nothing extra', 'Use the existing PT/check-in context only.'],
-            ['lower_body', 'Lower body', 'Conservatively exclude direct lower-body loading in the generated strength block.'],
-            ['upper_body', 'Upper body', 'Conservatively exclude direct pressing/pulling regions in the generated strength block.'],
-            ['back', 'Back / trunk', 'Conservatively reduce direct lower-back and rotational loading.'],
-            ['other', 'Something else', 'Build from the saved PT/check-in profile; refine the specific restriction before training.'],
-          ] as Array<[GoalSetupRestriction, string, string]>).map(([id, title, body]) => <ProductChoiceRow key={id} title={title} body={body} selected={draft.restriction === id} onPress={() => patch({ restriction: id })} icon="heart" />)}
-        </View>
+        <View style={styles.choiceStack}>{([
+          ['none', 'Nothing extra', 'Use the existing PT/check-in context only.'],
+          ['lower_body', 'Lower body', 'Conservatively exclude direct lower-body loading in the generated strength block.'],
+          ['upper_body', 'Upper body', 'Conservatively exclude direct pressing/pulling regions in the generated strength block.'],
+          ['back', 'Back / trunk', 'Conservatively reduce direct lower-back and rotational loading.'],
+          ['other', 'Something else', 'Build from the saved PT/check-in profile; refine the specific restriction before training.'],
+        ] as Array<[GoalSetupRestriction, string, string]>).map(([id, title, body]) => <ProductChoiceRow key={id} title={title} body={body} selected={draft.restriction === id} onPress={() => patch({ restriction: id })} icon="heart" />)}</View>
         {environment.ptProfile?.active ? <Text style={styles.contextNote}>Active PT profile will also be applied: {environment.ptProfile.conditions.length ? environment.ptProfile.conditions.map((condition) => condition.name).join(' · ') : 'saved movement restrictions'}.</Text> : null}
         {environment.activeCheckIn ? <Text style={styles.contextNote}>Today’s check-in is active through {formatDate(environment.activeCheckIn.activeUntil.slice(0, 10))} and will be layered on top.</Text> : null}
       </ProductSection>
     </> : null}
 
     {step === 'review' ? <ReviewStep draft={draft} environment={environment} recommendation={recommendation} option={option} styles={styles} tokens={tokens} /> : null}
-
     {error ? <View style={styles.errorBox}><V23Icon name="info" color={tokens.danger} size={17} /><Text style={styles.errorText}>{error}</Text></View> : null}
 
     <View style={styles.navActions}>
       <ProductAction label={stepIndex === 0 ? 'Back' : 'Previous'} onPress={goBack} variant="secondary" icon="back" disabled={busy} />
       {step === 'review'
-        ? <View style={styles.buildAction}><Pressable disabled={busy || exercises.length === 0} onPress={() => void buildPlan()} style={({ pressed }) => [styles.buildButton, (busy || exercises.length === 0) && styles.disabled, pressed && styles.pressed]}>
-            {busy ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.buildButtonText}>{environment.existingBlock ? 'Apply and rebuild plan' : 'Build my plan'}</Text><V23Icon name="check" color="#FFFFFF" size={18} /></>}
-          </Pressable></View>
+        ? <View style={styles.buildAction}><Pressable disabled={busy || exercises.length === 0} onPress={() => void buildPlan()} style={({ pressed }) => [styles.buildButton, (busy || exercises.length === 0) && styles.disabled, pressed && styles.pressed]}>{busy ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.buildButtonText}>{environment.existingBlock ? 'Apply and rebuild plan' : 'Build my plan'}</Text><V23Icon name="check" color="#FFFFFF" size={18} /></>}</Pressable></View>
         : <ProductAction label="Continue" onPress={goNext} icon="chevron" />}
     </View>
 
@@ -393,29 +357,17 @@ function OutcomeStep({ draft, disciplines, patch, choosePrimary, styles, tokens 
 }) {
   if (draft.goalType === 'general_offseason' || !disciplines.length) return <>
     <ProductHero eyebrow="2 · TRAINING INTENT" title="What should this block optimize?" body="For offseason strength, the race-specific allocation layer is not needed. Side Quest will use the weekly capacity and athlete context you enter next." tone="surface" />
-    <View style={styles.infoPanel}><V23Icon name="train" color={tokens.accent} size={20} /><Text style={styles.infoText}>This block will prioritize broad strength development while respecting the weekly time budget and any saved restrictions.</Text></View>
+    <View style={styles.infoPanel}><V23Icon name="train" color={tokens.accent} size={20} /><Text style={styles.infoText}>This block will prioritize broad strength development while respecting the weekly time budget and athlete context.</Text></View>
   </>;
-
   const primaryTarget = draft.primaryDiscipline && draft.disciplineTargetKind;
   return <>
     <ProductHero eyebrow="2 · RACE OUTCOME" title="What matters most at this race?" body="This becomes the durable race strategy beneath temporary Strategy Coach blocks." tone="surface" />
-    <ProductSection title="Overall objective">
-      <View style={styles.choiceStack}>{OUTCOMES.map((option) => <ProductChoiceRow key={option.id} title={option.title} body={option.body} selected={draft.overallObjective === option.id} onPress={() => patch({ overallObjective: option.id })} icon="goal" />)}</View>
-      {draft.overallObjective === 'specific_overall_time' ? <TextInput value={draft.overallTarget ?? ''} onChangeText={(overallTarget) => patch({ overallTarget })} placeholder="Example: 5:15:00" placeholderTextColor={tokens.textMuted} style={styles.largeInput} /> : null}
-    </ProductSection>
+    <ProductSection title="Overall objective"><View style={styles.choiceStack}>{OUTCOMES.map((item) => <ProductChoiceRow key={item.id} title={item.title} body={item.body} selected={draft.overallObjective === item.id} onPress={() => patch({ overallObjective: item.id })} icon="goal" />)}</View>{draft.overallObjective === 'specific_overall_time' ? <TextInput value={draft.overallTarget ?? ''} onChangeText={(overallTarget) => patch({ overallTarget })} placeholder="Example: 5:15:00" placeholderTextColor={tokens.textMuted} style={styles.largeInput} /> : null}</ProductSection>
     <ProductSection title="Where should extra development go?" body="Only one discipline can hold the top focus. Choose Balanced if the overall result matters more than a specific split.">
-      <View style={styles.chipRow}>
-        {disciplines.length > 1 ? <ChoiceChip label="Balanced" selected={!draft.primaryDiscipline} onPress={() => choosePrimary(undefined)} styles={styles} /> : null}
-        {disciplines.map((discipline) => <ChoiceChip key={discipline} label={disciplineLabel(discipline)} selected={draft.primaryDiscipline === discipline} onPress={() => choosePrimary(discipline)} styles={styles} />)}
-      </View>
-      {draft.primaryDiscipline ? <View style={styles.focusLevelRow}>
-        <ProductChoiceRow title="Primary focus" body="Give this discipline first claim on discretionary progression." selected={draft.focusLevel === 'primary_focus'} onPress={() => patch({ focusLevel: 'primary_focus' })} />
-        <ProductChoiceRow title="Maximize" body="Push it as far as time, recovery, race floors, and safety ceilings allow." selected={draft.focusLevel === 'maximize'} onPress={() => patch({ focusLevel: 'maximize' })} />
-      </View> : null}
+      <View style={styles.chipRow}>{disciplines.length > 1 ? <ChoiceChip label="Balanced" selected={!draft.primaryDiscipline} onPress={() => choosePrimary(undefined)} styles={styles} /> : null}{disciplines.map((discipline) => <ChoiceChip key={discipline} label={disciplineLabel(discipline)} selected={draft.primaryDiscipline === discipline} onPress={() => choosePrimary(discipline)} styles={styles} />)}</View>
+      {draft.primaryDiscipline ? <View style={styles.focusLevelRow}><ProductChoiceRow title="Primary focus" body="Give this discipline first claim on discretionary progression." selected={draft.focusLevel === 'primary_focus'} onPress={() => patch({ focusLevel: 'primary_focus' })} /><ProductChoiceRow title="Maximize" body="Push it as far as time, recovery, race floors, and safety ceilings allow." selected={draft.focusLevel === 'maximize'} onPress={() => patch({ focusLevel: 'maximize' })} /></View> : null}
     </ProductSection>
-    {disciplines.length > 1 && draft.primaryDiscipline ? <ProductSection title="How much tradeoff is acceptable?">
-      <View style={styles.choiceStack}>{TRADEOFFS.map((option) => <ProductChoiceRow key={option.id} title={option.title} body={option.body} selected={draft.tradeoffTolerance === option.id} onPress={() => patch({ tradeoffTolerance: option.id })} />)}</View>
-    </ProductSection> : null}
+    {disciplines.length > 1 && draft.primaryDiscipline ? <ProductSection title="How much tradeoff is acceptable?"><View style={styles.choiceStack}>{TRADEOFFS.map((item) => <ProductChoiceRow key={item.id} title={item.title} body={item.body} selected={draft.tradeoffTolerance === item.id} onPress={() => patch({ tradeoffTolerance: item.id })} />)}</View></ProductSection> : null}
     {draft.primaryDiscipline ? <ProductDisclosure title={`Optional ${disciplineLabel(draft.primaryDiscipline)} target`} summary={primaryTarget ? `${targetLabel(draft.disciplineTargetKind!)}${draft.disciplineTargetValue ? ` · ${draft.disciplineTargetValue}` : ''}` : 'No specific split target'} expanded={Boolean(draft.disciplineTargetKind)} onPress={() => patch({ disciplineTargetKind: draft.disciplineTargetKind ? undefined : 'pr', disciplineTargetValue: draft.disciplineTargetKind ? undefined : draft.disciplineTargetValue })}>
       <View style={styles.chipRow}>{TARGETS.map((target) => <ChoiceChip key={target.id} label={target.label} selected={draft.disciplineTargetKind === target.id} onPress={() => patch({ disciplineTargetKind: target.id })} styles={styles} />)}</View>
       {draft.disciplineTargetKind && draft.disciplineTargetKind !== 'pr' ? <TextInput value={draft.disciplineTargetValue ?? ''} onChangeText={(disciplineTargetValue) => patch({ disciplineTargetValue })} placeholder={targetPlaceholder(draft.disciplineTargetKind)} placeholderTextColor={tokens.textMuted} style={styles.largeInput} /> : null}
@@ -436,31 +388,15 @@ function ReviewStep({ draft, environment, recommendation, option, styles, tokens
     ? 'Broad strength development'
     : `${outcomeLabel(draft.overallObjective)}${draft.primaryDiscipline ? ` · ${disciplineLabel(draft.primaryDiscipline)} ${formatLabel(draft.focusLevel)}` : ' · balanced development'}`;
   return <>
-    <ProductHero
-      eyebrow="5 · REVIEW"
-      title={environment.existingBlock ? 'Ready to rebuild the plan.' : 'Ready to build the plan.'}
-      body="This is the small set of inputs Side Quest will treat as authoritative. The planner still decides the exact weekly distribution under phase, recovery, and safety constraints."
-      meta={<>
-        <ProductMetric label="weekly capacity" value={`${draft.totalWeeklyHours}h`} emphasis />
-        <ProductMetric label="strength" value={`${recommendation.sessionsPerWeek}×`} />
-        <ProductMetric label="block" value={`${draft.blockLength} wk`} />
-        {draft.goalType !== 'general_offseason' && weeks >= 0 ? <ProductMetric label="to event" value={`${weeks} wk`} /> : null}
-      </>}
-    />
+    <ProductHero eyebrow="5 · REVIEW" title={environment.existingBlock ? 'Ready to rebuild the plan.' : 'Ready to build the plan.'} body="This is the small set of inputs Side Quest will treat as authoritative. The planner still decides the exact weekly distribution under phase, recovery, and safety constraints." meta={<><ProductMetric label="weekly capacity" value={`${draft.totalWeeklyHours}h`} emphasis /><ProductMetric label="strength" value={`${recommendation.sessionsPerWeek}×`} /><ProductMetric label="block" value={`${draft.blockLength} wk`} />{draft.goalType !== 'general_offseason' && weeks >= 0 ? <ProductMetric label="to event" value={`${weeks} wk`} /> : null}</>} />
     <ProductSection eyebrow="GOAL" title={option.title} body={draft.goalType === 'general_offseason' ? 'No race date.' : `${formatDate(draft.eventDate!)} · ${formatLabel(draft.terrain)} course`}>
+      {draft.raceLocation?.trim() ? <ReviewRow label="Race location" value={draft.raceLocation.trim()} styles={styles} /> : null}
       <ReviewRow label="Outcome" value={raceSummary} styles={styles} />
       {draft.overallTarget ? <ReviewRow label="Overall target" value={draft.overallTarget} styles={styles} /> : null}
       {draft.primaryDiscipline && draft.disciplineTargetKind ? <ReviewRow label={`${disciplineLabel(draft.primaryDiscipline)} target`} value={`${targetLabel(draft.disciplineTargetKind)}${draft.disciplineTargetValue ? ` · ${draft.disciplineTargetValue}` : ''}`} styles={styles} /> : null}
     </ProductSection>
-    <ProductSection eyebrow="WEEK" title={`${recommendation.sessionsPerWeek} strength sessions · ${recommendation.minutesPerWeek} min/week`} body={`Current endurance: ${draft.currentEnduranceHours}h/week · Recovery margin: ${recommendation.weeklyAllocationHours.recoveryMargin}h`}>
-      <ReviewRow label="Strength can fit" value={sortDays(draft.preferredStrengthDays).map((day) => WEEKDAY_SHORT[day]).join(' · ')} styles={styles} />
-      <ReviewRow label="Key endurance" value={keyDaySummary(draft, option.disciplines)} styles={styles} />
-    </ProductSection>
-    <ProductSection eyebrow="SETUP" title={environment.equipmentProfiles.find((profile) => profile.id === draft.equipmentProfileId)?.name ?? 'Bodyweight only'} body={`${draft.equipment.length} equipment option${draft.equipment.length === 1 ? '' : 's'} available to the generator.`}>
-      <ReviewRow label="Protection" value={restrictionLabel(draft.restriction)} styles={styles} />
-      <ReviewRow label="Run status" value={formatLabel(draft.runStatus)} styles={styles} />
-      <ReviewRow label="Strength experience" value={formatLabel(draft.strengthExperience)} styles={styles} />
-    </ProductSection>
+    <ProductSection eyebrow="WEEK" title={`${recommendation.sessionsPerWeek} strength sessions · ${recommendation.minutesPerWeek} min/week`} body={`Current endurance: ${draft.currentEnduranceHours}h/week · Recovery margin: ${recommendation.weeklyAllocationHours.recoveryMargin}h`}><ReviewRow label="Strength can fit" value={sortDays(draft.preferredStrengthDays).map((day) => WEEKDAY_SHORT[day]).join(' · ')} styles={styles} /><ReviewRow label="Key endurance" value={keyDaySummary(draft, option.disciplines)} styles={styles} /></ProductSection>
+    <ProductSection eyebrow="SETUP" title={environment.equipmentProfiles.find((profile) => profile.id === draft.equipmentProfileId)?.name ?? 'Bodyweight only'} body={`${draft.equipment.length} equipment option${draft.equipment.length === 1 ? '' : 's'} available to the generator.`}><ReviewRow label="Protection" value={restrictionLabel(draft.restriction)} styles={styles} /><ReviewRow label="Run status" value={formatLabel(draft.runStatus)} styles={styles} /><ReviewRow label="Strength experience" value={formatLabel(draft.strengthExperience)} styles={styles} /></ProductSection>
     <View style={styles.principles}><V23Icon name="heart" color={tokens.accent} size={18} /><View style={styles.principlesCopy}><Text style={styles.principlesTitle}>Planner guardrails remain in force.</Text><Text style={styles.principlesBody}>Race priorities do not override recovery, injury/protection context, fixed commitments, taper/race-week rules, or the total weekly time budget. Side Quest does not diagnose injuries or infer medical clearance.</Text></View></View>
   </>;
 }
@@ -471,10 +407,7 @@ function SetupProgress({ step, styles }: { step: SetupStep; styles: ReturnType<t
 }
 
 function Stepper({ value, min, max, onChange, styles, small = false }: { value: number; min: number; max: number; onChange: (value: number) => void; styles: ReturnType<typeof makeStyles>; small?: boolean }) {
-  return <View style={[styles.stepper, small && styles.stepperSmall]}>
-    <Pressable onPress={() => onChange(Math.max(min, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>−</Text></Pressable>
-    <Pressable onPress={() => onChange(Math.min(max, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable>
-  </View>;
+  return <View style={[styles.stepper, small && styles.stepperSmall]}><Pressable onPress={() => onChange(Math.max(min, value - 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>−</Text></Pressable><Pressable onPress={() => onChange(Math.min(max, value + 1))} style={styles.stepperButton}><Text style={styles.stepperButtonText}>+</Text></Pressable></View>;
 }
 
 function CompactChoice<T extends string>({ title, value, options, onChange, styles }: { title: string; value: T; options: Array<[T, string]>; onChange: (value: T) => void; styles: ReturnType<typeof makeStyles> }) {
@@ -495,10 +428,7 @@ function keyDayFor(draft: GoalSetupDraft, discipline: EnduranceDiscipline): Week
 
 function keyDaySummary(draft: GoalSetupDraft, disciplines: EnduranceDiscipline[]): string {
   if (!disciplines.length) return 'No endurance key days';
-  return disciplines.map((discipline) => {
-    const day = keyDayFor(draft, discipline);
-    return `${disciplineLabel(discipline)} ${day ? WEEKDAY_SHORT[day] : 'flexible'}`;
-  }).join(' · ');
+  return disciplines.map((discipline) => { const day = keyDayFor(draft, discipline); return `${disciplineLabel(discipline)} ${day ? WEEKDAY_SHORT[day] : 'flexible'}`; }).join(' · ');
 }
 
 function restrictionLabel(value: GoalSetupRestriction): string {
@@ -508,21 +438,9 @@ function restrictionLabel(value: GoalSetupRestriction): string {
   if (value === 'back') return 'Conservative back/trunk filter';
   return 'Use saved PT/check-in context; refine before training';
 }
-
-function outcomeLabel(value: RaceOverallObjective): string {
-  return OUTCOMES.find((option) => option.id === value)?.title ?? formatLabel(value);
-}
-
-function disciplineLabel(value: EnduranceDiscipline): string {
-  if (value === 'swim') return 'Swim';
-  if (value === 'bike') return 'Bike';
-  return 'Run';
-}
-
-function targetLabel(value: RaceTargetKind): string {
-  return TARGETS.find((target) => target.id === value)?.label ?? formatLabel(value);
-}
-
+function outcomeLabel(value: RaceOverallObjective): string { return OUTCOMES.find((option) => option.id === value)?.title ?? formatLabel(value); }
+function disciplineLabel(value: EnduranceDiscipline): string { return value === 'swim' ? 'Swim' : value === 'bike' ? 'Bike' : 'Run'; }
+function targetLabel(value: RaceTargetKind): string { return TARGETS.find((target) => target.id === value)?.label ?? formatLabel(value); }
 function targetPlaceholder(kind: RaceTargetKind): string {
   if (kind === 'time') return 'Example: 2:35:00';
   if (kind === 'pace') return 'Example: 7:30/mi or 1:45/100m';
@@ -531,31 +449,12 @@ function targetPlaceholder(kind: RaceTargetKind): string {
   if (kind === 'placement') return 'Example: top 10 age group';
   return 'Optional target';
 }
-
-function supportsTerrain(type: PerformanceGoalType): boolean {
-  return type !== 'swim_speed' && type !== 'general_offseason';
-}
-
-function allowsTechnicalTerrain(type: PerformanceGoalType): boolean {
-  return type === 'trail_50k' || type === 'trail_100k' || type === 'swimrun';
-}
-
-function parseGoalType(value: string | undefined): PerformanceGoalType | undefined {
-  return GOAL_SETUP_OPTIONS.some((option) => option.type === value) ? value as PerformanceGoalType : undefined;
-}
-
-function sortDays(days: Weekday[]): Weekday[] {
-  const order = weekdays();
-  return [...days].sort((left, right) => order.indexOf(left) - order.indexOf(right));
-}
-
-function formatLabel(value: string): string {
-  return value.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T12:00:00`));
-}
+function supportsTerrain(type: PerformanceGoalType): boolean { return type !== 'swim_speed' && type !== 'general_offseason'; }
+function allowsTechnicalTerrain(type: PerformanceGoalType): boolean { return type === 'trail_50k' || type === 'trail_100k' || type === 'swimrun'; }
+function parseGoalType(value: string | undefined): PerformanceGoalType | undefined { return GOAL_SETUP_OPTIONS.some((option) => option.type === value) ? value as PerformanceGoalType : undefined; }
+function sortDays(days: Weekday[]): Weekday[] { const order = weekdays(); return [...days].sort((left, right) => order.indexOf(left) - order.indexOf(right)); }
+function formatLabel(value: string): string { return value.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase()); }
+function formatDate(value: string): string { return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T12:00:00`)); }
 
 function makeStyles(tokens: DesignTokens) {
   return StyleSheet.create({
