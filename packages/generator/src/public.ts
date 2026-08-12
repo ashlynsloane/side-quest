@@ -8,6 +8,7 @@ import {
 
 export * from './index';
 export * from './training-environment';
+export * from './training-space';
 
 const GYM_SIGNAL_EQUIPMENT = new Set<EquipmentId>([
   'barbell',
