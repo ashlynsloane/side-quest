@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./exercises.json": "./data/exercises.json",
+    "./environment-exercises.json": "./data/environment-exercises.json",
     "./equipment.json": "./data/equipment.json",
     "./substitution-groups.json": "./data/substitution-groups.json"
   },
@@ -13,7 +14,7 @@
     "@circuit/domain": "workspace:*"
   },
   "scripts": {
-    "validate": "node ./scripts/validate-exercises.mjs",
+    "validate": "node ./scripts/validate-exercises.mjs && node ./scripts/validate-environment-exercises.mjs",
     "typecheck": "tsc --noEmit",
     "validate:media": "node ./scripts/validate-media-coverage.mjs"
   }
