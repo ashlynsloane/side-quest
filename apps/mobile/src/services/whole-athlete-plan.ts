@@ -6,15 +6,25 @@ import type {
   TrainingCalendarSource,
   TrainingCheckIn,
 } from '@circuit/domain';
-import { normalizeCalendarEvent, normalizeStrengthSession } from '@circuit/planner';
-import { applyApprovedFrequencySuppression, type DisciplineCountMap } from '@circuit/planner/frequency-suppression';
+import {
+  applyReturnToRunProgression,
+  buildRaceHorizonDevelopmentPlan,
+  raceHorizonWeekForDate,
+  recentReturnToRunDurations,
+  normalizeCalendarEvent,
+  normalizeStrengthSession,
+  type RaceHorizonDevelopmentPlan,
+} from '@circuit/planner';
+import { applyApprovedFrequencySuppression,
+  type DisciplineCountMap } from '@circuit/planner/frequency-suppression';
 import {
   applyProgressionToWholeAthleteWeek,
   buildWholeAthleteProgressionContextFromHistory,
   type CompletedDisciplineExposure,
-} from '@circuit/planner/whole-athlete-progression';
+  } from '@circuit/planner/whole-athlete-progression';
 import {
   buildWholeAthleteWeek,
+  resolveWeeklySchedulePreference,
   type DisciplineBaseline,
   type MentalEnergySignal,
   type LifeStressSignal,
@@ -41,10 +51,12 @@ import {
 import {
   applyAvailabilityToWholeAthleteWeeks,
   loadTrainingAvailabilityProfile,
+  plannerWeeklySchedule,
   type AvailabilityScheduledSession,
   type AvailabilityScheduledWeekPlan,
 } from './training-availability';
 import { generatedWorkoutNamingMetadata } from './workout-name-context';
+import { applyRaceHorizonStrengthDose } from './race-horizon-strength-dose';
 
 export const SIDE_QUEST_PLAN_SOURCE_ID = 'side_quest_generated_plan';
 const PLAN_EVENT_PREFIX = 'sq_plan_';
@@ -80,6 +92,7 @@ export interface GenerateWholeAthleteBlockInput {
 export interface GeneratedWholeAthleteBlock {
   weeks: AvailabilityScheduledWeekPlan[];
   generatedEvents: TrainingCalendarEvent[];
+  developmentPlan?: RaceHorizonDevelopmentPlan;
 }
 
 export async function generateAndPersistWholeAthleteBlock(
@@ -115,13 +128,44 @@ export async function generateAndPersistWholeAthleteBlock(
   const absentGoalDisciplines = (['swim', 'bike', 'run'] as const).filter((discipline) => !input.goal.disciplines.includes(discipline));
   const frequencyTargets = Object.fromEntries(absentGoalDisciplines.map((discipline) => [discipline, { min: 0, preferred: 0, max: 0 }])) as Partial<Record<TrainableDiscipline, { min: number; preferred: number; max: number }>>;
   if (input.capacity.runStatus === 'not_running') frequencyTargets.run = { min: 0, preferred: 0, max: 0 };
+  if (
+    input.capacity.runStatus === 'return_to_run'
+    && health.boneStress !== 'active'
+    && health.injuryConstraint !== 'restricted'
+    && !health.noImpact
+  ) {
+    frequencyTargets.run = { min: 3, preferred: 3, max: 3 };
+  }
+  const returnToRunSeedMinutes = input.capacity.runStatus === 'return_to_run'
+    ? recentReturnToRunDurations(input.completedHistory ?? [], firstWeek.weekStartDate)
+    : [];
+  const developmentPlan = input.goal.eventDate
+    ? buildRaceHorizonDevelopmentPlan({
+        startDate: firstWeek.weekStartDate,
+        raceDate: input.goal.eventDate,
+        goalType: input.goal.type,
+        runStatus: input.capacity.runStatus,
+        recentBoneStress: input.capacity.boneStressInjuryHistory === 'recent_or_current',
+      })
+    : undefined;
 
   const weeks: AvailabilityScheduledWeekPlan[] = [];
   const generatedEvents: TrainingCalendarEvent[] = [];
   let previousWeek: NonNullable<Parameters<typeof buildWholeAthleteWeek>[0]['previousWeek']> =
     previousWeekFromActivities(recentActivities, firstWeek.weekStartDate);
 
-  for (const week of input.block.weeks) {
+  for (const [weekIndex, week] of input.block.weeks.entries()) {
+    const developmentWeek = developmentPlan
+      ? raceHorizonWeekForDate(developmentPlan, week.weekStartDate)
+      : undefined;
+    const resolvedPhase = developmentWeek?.phase ?? week.phase;
+    const absoluteWeeklyCeilingMinutes = Math.max(0, Math.round(input.capacity.totalWeeklyHours * 60));
+    const weekPlanningCeilingMinutes = developmentWeek
+      ? Math.min(
+          absoluteWeeklyCeilingMinutes,
+          Math.max(0, Math.round(absoluteWeeklyCeilingMinutes * developmentWeek.targetLoadFactor)),
+        )
+      : absoluteWeeklyCeilingMinutes;
     const weekEnd = addDays(week.weekStartDate, 6);
     const inCurrentWeek = (date: string) => date >= week.weekStartDate && date <= weekEnd;
     const fixedCalendar = athleteCalendarEvents
@@ -132,13 +176,29 @@ export async function generateAndPersistWholeAthleteBlock(
       .filter((event) => inCurrentWeek(event.startAt.slice(0, 10)))
       .filter(isTrainingCalendarCommitment)
       .map((event) => ({ ...normalizeCalendarEvent(event), priority: 'required' as const }));
-    const fixedStrength = week.sessions
-      .filter((session) => session.completionStatus !== 'skipped')
-      .map((session) => ({
-        ...normalizeStrengthSession(session),
-        priority: 'required' as const,
-        keySession: session.intendedLoad === 'high',
-      }));
+    const weeklySchedule = plannerWeeklySchedule(availabilityProfile);
+    const resolvedWeeklySchedule = resolveWeeklySchedulePreference(
+      input.goal.type,
+      weeklySchedule,
+    );
+    if (resolvedWeeklySchedule) {
+      Object.assign(weeklySchedule, resolvedWeeklySchedule);
+    }
+    const fixedStrength = alignSideQuestStrengthToWeeklyScaffold(
+      week.sessions
+        .filter((session) => session.completionStatus !== 'skipped')
+        .map((session) => applyRaceHorizonStrengthDose(session, developmentWeek))
+        .map((session) => ({
+          ...normalizeStrengthSession(session),
+          priority: 'required' as const,
+          keySession: session.intendedLoad === 'high',
+        })),
+      week.weekStartDate,
+      input.goal.type,
+      weeklySchedule.preferredDays?.strength,
+      weeklySchedule.availableDays?.strength,
+      weeklySchedule.restDays,
+    );
 
     const rawWeekEvents = calendarEvents.filter((event) => inCurrentWeek(event.startAt.slice(0, 10)));
     const weekOverrides = overrides.filter((override) => inCurrentWeek(override.baseEvent.startAt.slice(0, 10)));
@@ -169,16 +229,18 @@ export async function generateAndPersistWholeAthleteBlock(
 
     const basePlan = buildWholeAthleteWeek({
       weekStartDate: week.weekStartDate,
-      availableMinutes: Math.max(0, Math.round(input.capacity.totalWeeklyHours * 60)),
+      availableMinutes: weekPlanningCeilingMinutes,
       goalType: input.goal.type,
-      phase: week.phase,
+      phase: resolvedPhase,
       health,
+      developmentWeek,
       fixedSessions: [...fixedCalendar, ...fixedApprovedEndurance, ...fixedStrength],
       previousWeek,
       baselines,
       frequencyTargets: weekFrequencyTargets,
       recentBoneStress: input.capacity.boneStressInjuryHistory === 'recent_or_current',
       returnToRun: input.capacity.runStatus === 'return_to_run',
+      weeklySchedule,
     });
     const progressionApplies = Boolean(
       input.progressionDate
@@ -196,7 +258,14 @@ export async function generateAndPersistWholeAthleteBlock(
           }),
         )
       : basePlan;
-    const scheduledPlan = applyAvailabilityToWholeAthleteWeeks([progressedPlan], availabilityProfile)[0]!;
+    const returnToRunPlan = input.capacity.runStatus === 'return_to_run'
+      ? applyReturnToRunProgression(progressedPlan, {
+          weekIndex,
+          recentBoneStress: input.capacity.boneStressInjuryHistory === 'recent_or_current',
+          recentCompletedRunMinutes: returnToRunSeedMinutes,
+        })
+      : progressedPlan;
+    const scheduledPlan = applyAvailabilityToWholeAthleteWeeks([returnToRunPlan], availabilityProfile)[0]!;
 
     weeks.push(scheduledPlan);
     previousWeek = scheduledPlan.sessions;
@@ -206,8 +275,11 @@ export async function generateAndPersistWholeAthleteBlock(
       const event = plannedSessionToCalendarEvent(session, input.block.id);
       event.description = [
         event.description,
+        developmentWeek
+          ? `Race horizon · week ${developmentWeek.weekNumber}/${developmentWeek.totalWeeks} · ${developmentWeek.phase.replaceAll('_', ' ')} · ${developmentWeek.loadIntent}\nWeek purpose: ${developmentWeek.weekPurpose}\nPlanning ceiling: ${Math.round(developmentWeek.targetLoadFactor * 100)}% of available weekly capacity (${weekPlanningCeilingMinutes} min). Availability remains a ceiling, not a target.`
+          : undefined,
         generatedWorkoutNamingMetadata({
-          phase: week.phase,
+          phase: resolvedPhase,
           goalType: input.goal.type,
           raceDate: input.goal.eventDate,
           raceName: input.goal.name,
@@ -219,7 +291,48 @@ export async function generateAndPersistWholeAthleteBlock(
 
   const persistedEvents = dedupeEvents([...approvedGeneratedEvents, ...generatedEvents]);
   await persistGeneratedPlanEvents(persistedEvents);
-  return { weeks, generatedEvents: persistedEvents };
+  return { weeks, generatedEvents: persistedEvents, developmentPlan };
+}
+
+
+function alignSideQuestStrengthToWeeklyScaffold<T extends { date: string }>(
+  sessions: T[],
+  weekStartDate: string,
+  goalType: PerformanceGoal['type'],
+  explicitPreferred: readonly number[] | undefined,
+  availableDays: readonly number[] | undefined,
+  restDays: readonly number[] | undefined,
+): T[] {
+  if (!sessions.length) return sessions;
+
+  const rest = new Set(restDays ?? []);
+  const triathlon = goalType === 'triathlon_sprint'
+    || goalType === 'triathlon_olympic'
+    || goalType === 'ironman_70_3'
+    || goalType === 'ironman_full';
+
+  const available = availableDays?.length ? new Set(availableDays) : null;
+  const legal = (weekday: number) => !rest.has(weekday) && (!available || available.has(weekday));
+  const requested = (explicitPreferred?.length
+    ? [...explicitPreferred]
+    : triathlon
+      ? [2, 4]
+      : [])
+    .filter((weekday) => Number.isInteger(weekday) && weekday >= 0 && weekday <= 6)
+    .filter(legal);
+
+  const fallback = [2, 4, 3, 5, 6, 1, 0].filter(legal);
+  const weekdays = [...new Set([...requested, ...fallback])];
+  if (!weekdays.length) return sessions;
+
+  return sessions.map((session, index) => {
+    const weekday = weekdays[index];
+    if (weekday === undefined) return session;
+    return {
+      ...session,
+      date: addDays(weekStartDate, weekday),
+    };
+  });
 }
 
 export async function clearSideQuestGeneratedPlanEvents(): Promise<void> {
@@ -293,8 +406,14 @@ export function buildDisciplineBaselines(
     const weights = goalFallbackWeights(goal);
     for (const discipline of ['swim', 'bike', 'run'] as const) {
       if (!goal.disciplines.includes(discipline) || weights[discipline] <= 0) continue;
-      const minutesPerWeek = Math.round(fallbackMinutes * weights[discipline]);
-      const sessionsPerWeek = discipline === 'run' && capacity.runStatus === 'return_to_run' ? 2 : discipline === 'run' && capacity.runStatus === 'not_running' ? 0 : 2;
+      const sessionsPerWeek = discipline === 'run' && capacity.runStatus === 'return_to_run'
+        ? 3
+        : discipline === 'run' && capacity.runStatus === 'not_running'
+          ? 0
+          : 2;
+      const minutesPerWeek = discipline === 'run' && capacity.runStatus === 'return_to_run'
+        ? 60
+        : Math.round(fallbackMinutes * weights[discipline]);
       if (sessionsPerWeek === 0) continue;
       baselines[discipline] = {
         sessionsPerWeek,

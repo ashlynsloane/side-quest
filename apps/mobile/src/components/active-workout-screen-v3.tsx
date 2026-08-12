@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import {
   Alert,
   AppState,
+  BackHandler,
   Modal,
   Pressable,
   StyleSheet,
@@ -53,7 +54,14 @@ import {
   saveLiveWorkoutSession,
   type LiveWorkoutLoadValue as LoadValue,
   type LiveWorkoutRestEntry as RestEntry,
+  type LiveWorkoutSessionSnapshot,
 } from '@/services/active-workout-persistence';
+import {
+  activeWorkoutCompletionFraction,
+  activeWorkoutCompletionRecordId,
+  completionSaveEyebrow,
+  type ActiveWorkoutCompletionSaveState,
+} from '@/services/active-workout-execution';
 import { publishWorkoutActivity } from '@/services/social';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import {
@@ -115,10 +123,13 @@ export default function ActiveWorkoutScreenV3() {
   const [cuePreferences, setCuePreferences] = useState<WorkoutCuePreferences>(() => getWorkoutCuePreferences());
   const [cueSettingsOpen, setCueSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [completionSaveState, setCompletionSaveState] = useState<ActiveWorkoutCompletionSaveState>('idle');
+  const [completionSaveMessage, setCompletionSaveMessage] = useState<string | null>(null);
   const startedAt = useRef(new Date().toISOString());
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
   const cueKey = useRef<string | null>(null);
+  const hardwareLeaveRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     if (!workoutSessionReady) return;
@@ -173,6 +184,14 @@ export default function ActiveWorkoutScreenV3() {
   useEffect(() => {
     void getLatestExerciseLoads().then(setLatestLoads);
     void setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      hardwareLeaveRef.current();
+      return true;
+    });
+    return () => subscription.remove();
   }, []);
 
   const elapsedSeconds = useMemo(() => {
@@ -275,6 +294,14 @@ export default function ActiveWorkoutScreenV3() {
     if (cuePreferences.hapticsEnabled) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }, [completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
 
+  hardwareLeaveRef.current = () => {
+    if (phase === 'complete') {
+      if (completionSaveState === 'saved') void finishAndExit();
+      return;
+    }
+    void pauseAndLeave();
+  };
+
   if (!workoutSessionReady || (workout && !sessionHydrated)) {
     return <SafeAreaView style={styles.safeArea}><View style={styles.missingCard}><Text style={styles.completeTitle}>Restoring workout…</Text><Text style={styles.helper}>Loading the last saved station and timer state.</Text></View></SafeAreaView>;
   }
@@ -292,6 +319,30 @@ export default function ActiveWorkoutScreenV3() {
     stationRounds,
     exerciseSets,
   });
+
+  async function persistExecutionCheckpoint(
+    overrides: Partial<LiveWorkoutSessionSnapshot> = {},
+  ): Promise<void> {
+    if (!workout) return;
+    await saveLiveWorkoutSession({
+      schemaVersion: 1,
+      savedAt: new Date().toISOString(),
+      workout,
+      startedAt: startedAt.current,
+      stationIndex,
+      phase: phase === 'complete' ? 'rest' : phase,
+      remainingSeconds,
+      running,
+      stationRounds,
+      exerciseLoads,
+      exerciseSets,
+      restEntries,
+      restRounds,
+      restLoadUnit,
+      planLink: activePlanLink ?? undefined,
+      ...overrides,
+    });
+  }
 
   function initializeRestLog(targetStation: WorkoutStation) {
     setRestRounds(Math.max(1, stationRounds[targetStation.id] ?? 1));
@@ -319,47 +370,64 @@ export default function ActiveWorkoutScreenV3() {
   ) {
     if (savedCompletion.current) return;
     savedCompletion.current = true;
-    const timestamp = new Date().toISOString();
+    setCompletionSaveState('saving');
+    setCompletionSaveMessage(null);
+
+    const timestamp = completedAt.current ?? new Date().toISOString();
     completedAt.current = timestamp;
+    const completionRecordId = activeWorkoutCompletionRecordId(activeWorkout.id, startedAt.current);
     const completedRounds = override?.stationRounds ?? stationRounds;
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
-    await saveCompletedWorkout({
-      workout: activeWorkout,
-      startedAt: startedAt.current,
-      completedAt: timestamp,
-      completionFraction,
-      stationRounds: completedRounds,
-      exerciseLoads: completedLoads,
-      exerciseSets: completedSets,
-      plannedSessionId: activePlanLink?.sessionId,
-      relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
-    });
-    await clearLiveWorkoutSession();
-    if (cloudEnabled && user?.mode === 'cloud') {
-      const ledgerId = `${activeWorkout.id}_${timestamp}`;
-      try {
-        const [entry, preferences, weekEntries] = await Promise.all([
-          getWorkoutLedgerEntry(ledgerId),
-          getSocialPreferences(),
-          listWorkoutLedgerEntries({ from: startOfWeekIso(), limit: 100 }),
-        ]);
-        if (entry) {
-          await publishWorkoutActivity({
-            userId: user.id,
-            ledgerId: entry.id,
-            workoutType: activeWorkout.source === 'manual' ? 'Custom strength' : 'Side Quest strength',
-            title: entry.name,
-            durationMinutes: Math.max(1, Math.round(activeWorkout.estimatedElapsedSeconds * completionFraction / 60)),
-            weeklyCount: weekEntries.length,
-            completedAt: timestamp,
-            exercises: entry.exercises,
-            preferences,
-          });
-        }
-      } catch {
-        // Local completion remains authoritative if optional social publishing fails.
+
+    try {
+      await saveCompletedWorkout({
+        workout: activeWorkout,
+        startedAt: startedAt.current,
+        completedAt: timestamp,
+        completionFraction,
+        stationRounds: completedRounds,
+        exerciseLoads: completedLoads,
+        exerciseSets: completedSets,
+        plannedSessionId: activePlanLink?.sessionId,
+        relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
+        idempotencyKey: completionRecordId,
+      });
+      await clearLiveWorkoutSession();
+      setCompletionSaveState('saved');
+
+      if (cloudEnabled && user?.mode === 'cloud') {
+        void (async () => {
+          try {
+            const [entry, preferences, weekEntries] = await Promise.all([
+              getWorkoutLedgerEntry(completionRecordId),
+              getSocialPreferences(),
+              listWorkoutLedgerEntries({ from: startOfWeekIso(), limit: 100 }),
+            ]);
+            if (entry) {
+              await publishWorkoutActivity({
+                userId: user.id,
+                ledgerId: entry.id,
+                workoutType: activeWorkout.source === 'manual' ? 'Custom strength' : 'Side Quest strength',
+                title: entry.name,
+                durationMinutes: Math.max(1, Math.round(activeWorkout.estimatedElapsedSeconds * completionFraction / 60)),
+                weeklyCount: weekEntries.length,
+                completedAt: timestamp,
+                exercises: entry.exercises,
+                preferences,
+              });
+            }
+          } catch {
+            // Local completion remains authoritative if optional social publishing fails.
+          }
+        })();
       }
+    } catch (cause) {
+      savedCompletion.current = false;
+      setCompletionSaveState('error');
+      setCompletionSaveMessage(cause instanceof Error
+        ? cause.message
+        : 'Side Quest could not save this workout locally. Your active workout is still preserved so you can retry.');
     }
   }
 
@@ -417,9 +485,19 @@ export default function ActiveWorkoutScreenV3() {
       return;
     }
     const nextIndex = stationIndex + 1;
+    const nextRemaining = activeWorkout.stations[nextIndex]!.durationSeconds;
+    void persistExecutionCheckpoint({
+      stationIndex: nextIndex,
+      phase: 'work',
+      remainingSeconds: nextRemaining,
+      running: true,
+      stationRounds: logged?.stationRounds ?? stationRounds,
+      exerciseLoads: logged?.exerciseLoads ?? exerciseLoads,
+      exerciseSets: logged?.exerciseSets ?? exerciseSets,
+    });
     setStationIndex(nextIndex);
     setPhase('work');
-    setRemainingSeconds(activeWorkout.stations[nextIndex]!.durationSeconds);
+    setRemainingSeconds(nextRemaining);
     setRunning(true);
     cueKey.current = null;
     if (cuePreferences.hapticsEnabled) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -429,51 +507,44 @@ export default function ActiveWorkoutScreenV3() {
     if (phase === 'work') setRemainingSeconds(0);
   }
 
-  function pauseAndLeave() {
+  async function pauseAndLeave() {
     setRunning(false);
-    void saveLiveWorkoutSession({
-      schemaVersion: 1,
-      savedAt: new Date().toISOString(),
-      workout: activeWorkout,
-      startedAt: startedAt.current,
-      stationIndex,
-      phase: phase === 'complete' ? 'rest' : phase,
-      remainingSeconds,
-      running: false,
-      stationRounds,
-      exerciseLoads,
-      exerciseSets,
-      restEntries,
-      restRounds,
-      restLoadUnit,
-      planLink: activePlanLink ?? undefined,
-    }).then(() => router.replace('/' as Href));
+    if (workout) await persistExecutionCheckpoint({ running: false });
+    router.replace('/' as Href);
+  }
+
+  async function discardAndExit() {
+    await clearLiveWorkoutSession();
+    clearActiveWorkout();
+    router.replace('/train' as Href);
   }
 
   function endEarly() {
     Alert.alert('End workout?', 'Save the work you completed, discard this session, or keep training.', [
       { text: 'Keep training', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: () => { clearActiveWorkout(); router.replace('/train' as Href); } },
+      { text: 'Discard', style: 'destructive', onPress: () => { void discardAndExit(); } },
       {
         text: 'Save partial',
         onPress: () => {
-          const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+          const logged = phase === 'rest' ? commitRestLog() : undefined;
+          const fraction = activeWorkoutCompletionFraction(elapsedSeconds, totalPlannedSeconds);
           setPhase('complete');
           setRunning(false);
-          void persistCompletion(fraction);
+          void persistCompletion(fraction, logged);
         },
       },
     ]);
   }
 
   async function finishAndExit() {
+    if (!workout || completionSaveState !== 'saved') return;
     const completed = completedAt.current;
     if (completed && (sessionRpe !== null || energyAfter !== null || reflectionNotes.trim())) {
-      const instanceId = `${activeWorkout.id}_${completed}`;
+      const instanceId = activeWorkoutCompletionRecordId(workout.id, startedAt.current);
       await saveWorkoutReflection({
         workoutInstanceId: instanceId,
-        workoutId: activeWorkout.id,
-        workoutName: activeWorkout.name,
+        workoutId: workout.id,
+        workoutName: workout.name,
         rpe: sessionRpe ?? undefined,
         energyAfter: energyAfter ?? undefined,
         notes: reflectionNotes.trim() || undefined,
@@ -483,7 +554,7 @@ export default function ActiveWorkoutScreenV3() {
       setReflectionSaved(true);
     }
     clearActiveWorkout();
-    router.replace('/' as Href);
+    router.replace((activePlanLink ? '/(tabs)/plan' : '/') as Href);
   }
 
   async function saveFavorite() {
@@ -493,7 +564,7 @@ export default function ActiveWorkoutScreenV3() {
 
   async function recordFeedback(value: WorkoutDifficultyFeedback) {
     await saveWorkoutFeedback({
-      workoutInstanceId: `${activeWorkout.id}_${completedAt.current ?? startedAt.current}`,
+      workoutInstanceId: activeWorkoutCompletionRecordId(activeWorkout.id, startedAt.current),
       workoutId: activeWorkout.id,
       difficulty: value,
     });
@@ -532,7 +603,15 @@ export default function ActiveWorkoutScreenV3() {
         Alert.alert('Replacement unavailable', result.message);
         return;
       }
-      updateActiveWorkout(result.workout);
+      const nextPlanLink = activePlanLink
+        ? { ...activePlanLink, modifiedFromPlan: true }
+        : undefined;
+      await persistExecutionCheckpoint({
+        workout: result.workout,
+        planLink: nextPlanLink,
+        running,
+      });
+      updateActiveWorkout(result.workout, { modifiedFromPlan: true });
       if (reason === 'dislike') {
         await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       }
@@ -548,14 +627,27 @@ export default function ActiveWorkoutScreenV3() {
       <SafeAreaView style={styles.safeArea}>
         <KeyboardSafeScreen contentContainerStyle={styles.completeContainer}>
           <View style={styles.completeHero}>
-            <View style={styles.completeIcon}><V23Icon name="check" color="#FFFFFF" size={23} /></View>
-            <Text style={styles.completeEyebrow}>WORKOUT SAVED</Text>
+            <View style={styles.completeIcon}><V23Icon name={completionSaveState === 'saved' ? 'check' : 'clock'} color="#FFFFFF" size={23} /></View>
+            <Text style={styles.completeEyebrow}>{completionSaveEyebrow(completionSaveState)}</Text>
             <Text style={styles.completeTitle}>{activeWorkout.name}</Text>
             <Text style={styles.completeBody}>
-              {activePlanLink
-                ? `${activePlanLink.sessionTitle} is complete. This training record is already part of the plan.`
-                : 'This session is saved to your training history.'}
+              {completionSaveState === 'error'
+                ? (completionSaveMessage ?? 'The local save needs to be retried. Your workout checkpoint is still preserved.')
+                : completionSaveState === 'saving'
+                  ? 'Saving the completed workout locally before you leave this screen.'
+                  : activePlanLink
+                    ? `${activePlanLink.sessionTitle} is complete${activePlanLink.modifiedFromPlan ? ' as modified' : ''}. The completed record is already part of the plan.`
+                    : 'This session is saved to your training history.'}
             </Text>
+            {completionSaveState === 'error' ? <Pressable
+              accessibilityRole="button"
+              onPress={() => void persistCompletion(
+                activeWorkoutCompletionFraction(elapsedSeconds, totalPlannedSeconds),
+              )}
+              style={styles.retrySaveButton}
+            >
+              <Text style={styles.retrySaveText}>Retry local save</Text>
+            </Pressable> : null}
             <View style={styles.summaryRow}>
               <SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} />
               <SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} />
@@ -648,11 +740,19 @@ export default function ActiveWorkoutScreenV3() {
             </View>
           </ProductDisclosure>
 
-          <Pressable onPress={() => void finishAndExit()} style={({ pressed }) => [styles.doneButton, pressed && styles.pressed]}>
-            <Text style={styles.doneButtonText}>Done</Text>
+          <Pressable
+            disabled={completionSaveState !== 'saved'}
+            onPress={() => void finishAndExit()}
+            style={({ pressed }) => [styles.doneButton, completionSaveState !== 'saved' && styles.doneButtonDisabled, pressed && completionSaveState === 'saved' && styles.pressed]}
+          >
+            <Text style={styles.doneButtonText}>{completionSaveState === 'saved' ? (activePlanLink ? 'Done · back to Week' : 'Done') : 'Saving…'}</Text>
             <V23Icon name="chevron" color="#FFFFFF" size={16} />
           </Pressable>
-          <Text style={styles.doneNote}>Your completed training is already saved. Feedback and reflection are optional.</Text>
+          <Text style={styles.doneNote}>{completionSaveState === 'saved'
+            ? 'Your completed training is saved. Feedback and reflection are optional.'
+            : completionSaveState === 'error'
+              ? 'Retry the local save before leaving so this workout cannot be lost.'
+              : 'Keep this screen open until the local save finishes.'}</Text>
         </KeyboardSafeScreen>
         <WorkoutShareModal summary={completedSummary} visible={shareOpen} onClose={() => setShareOpen(false)} />
       </SafeAreaView>
@@ -669,7 +769,7 @@ export default function ActiveWorkoutScreenV3() {
         <Pressable accessibilityLabel="Workout cue settings" onPress={() => setCueSettingsOpen(true)} style={styles.iconHeaderButton}>
           <V23Icon name="settings" color={tokens.text} size={19} />
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={pauseAndLeave} style={styles.leaveButton}>
+        <Pressable accessibilityRole="button" onPress={() => void pauseAndLeave()} style={styles.leaveButton}>
           <Text style={styles.leaveButtonText}>Leave</Text>
         </Pressable>
       </View>
@@ -1095,6 +1195,8 @@ function makeStyles(tokens: DesignTokens) {
     completeEyebrow: { color: 'rgba(255,255,255,0.72)', fontSize: 9.5, lineHeight: 12, fontWeight: '900', letterSpacing: 1 },
     completeTitle: { color: '#FFFFFF', fontSize: 29, lineHeight: 34, fontWeight: '900', letterSpacing: -0.4 },
     completeBody: { color: 'rgba(255,255,255,0.82)', fontSize: 12.5, lineHeight: 18 },
+    retrySaveButton: { alignSelf: 'flex-start', minHeight: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.16)', paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center', marginTop: 5 },
+    retrySaveText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900' },
     summaryRow: { flexDirection: 'row', gap: 7, marginTop: 6 },
     summaryMetric: { flex: 1, minHeight: 65, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.11)', alignItems: 'center', justifyContent: 'center' },
     summaryMetricValue: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
@@ -1133,6 +1235,7 @@ function makeStyles(tokens: DesignTokens) {
     detailTitle: { color: tokens.text, fontSize: 13, lineHeight: 17, fontWeight: '900' },
     detailText: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 15 },
     doneButton: { minHeight: 51, borderRadius: 16, backgroundColor: tokens.header, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    doneButtonDisabled: { opacity: 0.48 },
     doneButtonText: { color: '#FFFFFF', fontSize: 14.5, lineHeight: 18, fontWeight: '900' },
     doneNote: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 15, textAlign: 'center', paddingHorizontal: 10 },
 

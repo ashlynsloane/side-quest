@@ -19,11 +19,13 @@ describe('Strategy Coach wiring', () => {
     expect(composedPlanner).toContain("from './whole-athlete-week-rhythm'");
     expect(composedPlanner).toContain("from './bike-long-ride-anchor'");
     expect(composedPlanner).toContain("from './discipline-day-spread'");
-    expect(composedPlanner).toContain('const strategicPlan = buildStrategyWholeAthleteWeek(input)');
-    expect(composedPlanner).toContain('const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, input)');
-    expect(composedPlanner).toContain('const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, input)');
-    expect(composedPlanner).toContain('const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, input)');
-    expect(composedPlanner).toContain('return applyDisciplineDaySpread(longRidePlan, input)');
+    expect(composedPlanner).toContain('const resolvedWeeklySchedule = resolveWeeklySchedulePreference(');
+    expect(composedPlanner).toContain('const strategicPlan = buildStrategyWholeAthleteWeek(resolvedInput)');
+    expect(composedPlanner).toContain('const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, resolvedInput)');
+    expect(composedPlanner).toContain('const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, resolvedInput)');
+    expect(composedPlanner).toContain('const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, resolvedInput)');
+    expect(composedPlanner).toContain('const spreadPlan = applyDisciplineDaySpread(longRidePlan, resolvedInput)');
+    expect(composedPlanner).toContain('return applyBikeQualityAnchor(spreadPlan, resolvedInput)');
   });
 
   it('configures Race Intent and the full approved season schedule as separate weekly layers', () => {

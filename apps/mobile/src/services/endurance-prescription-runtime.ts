@@ -1,4 +1,5 @@
 import type { PerformanceGoal, TrainingCalendarEvent } from '@circuit/domain';
+import { resolveGeneratedSessionByEventId, resolveGeneratedSessionForPreview } from '@circuit/planner';
 import {
   buildEndurancePrescription,
   type EndurancePrescriptionContext,
@@ -9,19 +10,31 @@ import type { PlannedMultisportSession, SessionIntensity } from '@circuit/planne
 import { getLatestTrainingBlock, getTrainingCalendarEvents } from './database';
 import { loadEndurancePrescriptionProfile } from './endurance-profile';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from './whole-athlete-plan';
-import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
+import {
+  getLatestWholeAthletePlanSnapshot,
+  refreshLatestWholeAthletePlan,
+} from './whole-athlete-plan-runtime';
 
 export interface EndurancePrescriptionPreview {
   event: TrainingCalendarEvent;
   prescription: EnduranceSessionPrescription;
-  source: 'whole_athlete_plan' | 'calendar_fallback';
+  source: 'whole_athlete_plan' | 'calendar_fallback' | 'route_snapshot';
+}
+
+export interface EndurancePrescriptionRouteHint {
+  title?: string;
+  discipline?: 'swim' | 'bike' | 'run';
+  startAt?: string;
+  endAt?: string;
 }
 
 export async function loadEndurancePrescriptionPreview(
   eventId: string,
   date: string,
+  routeHint: EndurancePrescriptionRouteHint = {},
 ): Promise<EndurancePrescriptionPreview | null> {
   if (!eventId || !date) return null;
+
   const [events, savedBlock] = await Promise.all([
     getTrainingCalendarEvents({
       from: `${addDays(date, -1)}T00:00:00.000Z`,
@@ -29,22 +42,50 @@ export async function loadEndurancePrescriptionPreview(
     }),
     getLatestTrainingBlock(),
   ]);
-  const event = events.find((candidate) => candidate.id === eventId);
-  if (!event || !isEnduranceEvent(event)) return null;
+
+  const exactEvent = events.find((candidate) => candidate.id === eventId) ?? null;
+  const generatedRoute = exactEvent?.sourceId === SIDE_QUEST_PLAN_SOURCE_ID
+    || eventId.startsWith('sq_plan_');
   const context = prescriptionContext(savedBlock?.block.goal);
 
-  if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID) {
-    const generated = await refreshLatestWholeAthletePlan().catch(() => null);
-    const planned = generated ? resolveWholeAthleteSession(event, generated) : null;
+  if (generatedRoute) {
+    // A reconciliation can replace persisted calendar rows between the tap on
+    // Week and this screen loading. Resolve planner identity BEFORE requiring
+    // the exact event row so a harmless refresh does not become
+    // "Workout unavailable".
+    const cached = savedBlock?.block.id
+      ? getLatestWholeAthletePlanSnapshot(savedBlock.block.id)
+      : getLatestWholeAthletePlanSnapshot();
+    const generated = cached ?? await refreshLatestWholeAthletePlan().catch(() => null);
+    const planned = generated
+      ? resolveWholeAthleteSession(eventId, date, routeHint, exactEvent, generated)
+      : null;
+
     if (planned) {
+      const event = exactEvent
+        ?? findCurrentLinkedEvent(events, planned)
+        ?? eventFromPlannedSession(eventId, planned, routeHint);
       const prescription = buildEndurancePrescription(toPrescriptionSession(planned), context);
       if (prescription) return { event, prescription, source: 'whole_athlete_plan' };
     }
   }
 
+  const event = exactEvent
+    ?? findHintedCalendarEvent(events, date, routeHint)
+    ?? eventFromRouteHint(eventId, date, routeHint);
+
+  if (!event || !isEnduranceEvent(event)) return null;
+
   const fallback = calendarEventToPrescriptionSession(event);
   const prescription = fallback ? buildEndurancePrescription(fallback, context) : null;
-  return prescription ? { event, prescription, source: 'calendar_fallback' } : null;
+  if (!prescription) return null;
+  return {
+    event,
+    prescription,
+    source: exactEvent || events.some((candidate) => candidate.id === event.id)
+      ? 'calendar_fallback'
+      : 'route_snapshot',
+  };
 }
 
 type GeneratedWholeAthletePlan = NonNullable<Awaited<ReturnType<typeof refreshLatestWholeAthletePlan>>>;
@@ -67,25 +108,124 @@ function prescriptionContext(goal: PerformanceGoal | undefined): EndurancePrescr
 }
 
 function resolveWholeAthleteSession(
-  event: TrainingCalendarEvent,
+  eventId: string,
+  date: string,
+  routeHint: EndurancePrescriptionRouteHint,
+  event: TrainingCalendarEvent | null,
   generated: GeneratedWholeAthletePlan,
 ): WholeAthleteSession | null {
-  const eventDate = event.startAt.slice(0, 10);
-  const eventDuration = durationMinutes(event);
-  const eventIntensity = generatedEventIntensity(event);
-  const candidates = generated.weeks
-    .flatMap((week) => week.sessions)
-    .filter((session) => session.date === eventDate)
-    .filter((session) => session.discipline === event.discipline)
-    .filter((session) => session.title === event.title);
+  const sessions = generated.weeks.flatMap((week) => week.sessions);
+  const discipline = isEnduranceEvent(event ?? undefined) ? event!.discipline : routeHint.discipline;
+  const duration = event ? durationMinutes(event) : hintedDurationMinutes(routeHint);
+
+  const linked = resolveGeneratedSessionForPreview(
+    eventId,
+    {
+      date,
+      discipline,
+      title: event?.title ?? routeHint.title,
+      durationMinutes: duration,
+    },
+    sessions,
+  );
+  if (!linked) return null;
+  if (linked.discipline !== 'swim' && linked.discipline !== 'bike' && linked.discipline !== 'run') return null;
+  return linked;
+}
+
+function findCurrentLinkedEvent(
+  events: TrainingCalendarEvent[],
+  session: WholeAthleteSession,
+): TrainingCalendarEvent | null {
+  const linked = events.find((event) =>
+    event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID
+    && resolveGeneratedSessionByEventId(event.id, [session]) === session);
+  return linked ?? null;
+}
+
+function findHintedCalendarEvent(
+  events: TrainingCalendarEvent[],
+  date: string,
+  hint: EndurancePrescriptionRouteHint,
+): TrainingCalendarEvent | null {
+  let candidates = events
+    .filter(isEnduranceEvent)
+    .filter((event) => event.startAt.slice(0, 10) === date)
+    .filter((event) => !hint.discipline || event.discipline === hint.discipline);
 
   if (!candidates.length) return null;
-  if (candidates.length === 1) return candidates[0] ?? null;
 
-  const exact = candidates.find((session) =>
-    session.durationMinutes === eventDuration
-    && (!eventIntensity || normalizeIntensity(session.intensity) === eventIntensity));
-  return exact ?? candidates.find((session) => session.durationMinutes === eventDuration) ?? candidates[0] ?? null;
+  if (hint.title) {
+    const titleMatches = candidates.filter((event) => event.title === hint.title);
+    if (titleMatches.length === 1) return titleMatches[0] ?? null;
+    if (titleMatches.length > 1) candidates = titleMatches;
+  }
+
+  const hintDuration = hintedDurationMinutes(hint);
+  if (hintDuration) {
+    const durationMatches = candidates.filter((event) => durationMinutes(event) === hintDuration);
+    if (durationMatches.length === 1) return durationMatches[0] ?? null;
+    if (durationMatches.length > 1) candidates = durationMatches;
+  }
+
+  return candidates.length === 1 ? candidates[0] ?? null : null;
+}
+
+function eventFromPlannedSession(
+  eventId: string,
+  session: WholeAthleteSession,
+  hint: EndurancePrescriptionRouteHint,
+): TrainingCalendarEvent {
+  const startAt = hint.startAt && hint.startAt.slice(0, 10) === session.date
+    ? hint.startAt
+    : `${session.date}T12:00:00.000Z`;
+  const endAt = hint.endAt && hint.startAt === startAt
+    ? hint.endAt
+    : new Date(Date.parse(startAt) + session.durationMinutes * 60_000).toISOString();
+  return {
+    id: eventId,
+    sourceId: SIDE_QUEST_PLAN_SOURCE_ID,
+    title: session.title,
+    startAt,
+    endAt,
+    allDay: !hint.startAt,
+    discipline: session.discipline as 'swim' | 'bike' | 'run',
+    description: [
+      `Side Quest generated · ${session.durationMinutes} min · ${normalizeIntensity(session.intensity)}`,
+      ...session.rationale,
+    ].join('\n'),
+    externalUid: eventId,
+  };
+}
+
+function eventFromRouteHint(
+  eventId: string,
+  date: string,
+  hint: EndurancePrescriptionRouteHint,
+): TrainingCalendarEvent | null {
+  if (!hint.title || !hint.discipline) return null;
+  const startAt = hint.startAt || `${date}T12:00:00.000Z`;
+  const hintedDuration = hintedDurationMinutes(hint) ?? 60;
+  const endAt = hint.endAt || new Date(Date.parse(startAt) + hintedDuration * 60_000).toISOString();
+  return {
+    id: eventId,
+    sourceId: SIDE_QUEST_PLAN_SOURCE_ID,
+    title: hint.title,
+    startAt,
+    endAt,
+    allDay: !hint.startAt,
+    discipline: hint.discipline,
+    description: `Side Quest generated · ${hintedDuration} min · moderate`,
+    externalUid: eventId,
+  };
+}
+
+function hintedDurationMinutes(hint: EndurancePrescriptionRouteHint): number | undefined {
+  if (!hint.startAt || !hint.endAt) return undefined;
+  const start = Date.parse(hint.startAt);
+  const end = Date.parse(hint.endAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return undefined;
+  return Math.max(10, Math.round((end - start) / 60_000));
 }
 
 function toPrescriptionSession(session: WholeAthleteSession): PlannedMultisportSession {
@@ -132,9 +272,9 @@ function calendarEventToPrescriptionSession(event: TrainingCalendarEvent): Plann
 }
 
 function isEnduranceEvent(
-  event: TrainingCalendarEvent,
+  event: TrainingCalendarEvent | null | undefined,
 ): event is TrainingCalendarEvent & { discipline: 'swim' | 'bike' | 'run' } {
-  return event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run';
+  return event?.discipline === 'swim' || event?.discipline === 'bike' || event?.discipline === 'run';
 }
 
 function generatedEventIntensity(event: TrainingCalendarEvent): SessionIntensity | null {

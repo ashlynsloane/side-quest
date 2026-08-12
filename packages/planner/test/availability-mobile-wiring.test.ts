@@ -1,51 +1,69 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const source = (path: string) => readFileSync(resolve(repoRoot, path), 'utf8');
+function readRepo(path: string): string {
+  return readFileSync(resolve(process.cwd(), '../../', path), 'utf8');
+}
 
-describe('availability intelligence mobile wiring', () => {
-  it('stores recurring weekly windows, dated exceptions, and soft sport preferences', () => {
-    const availability = source('apps/mobile/src/services/training-availability.ts');
-    expect(availability).toContain("mode: 'unavailable' | 'replace' | 'block'");
-    expect(availability).toContain('weekly: WeeklyAvailabilityDay[]');
-    expect(availability).toContain('preferredWeekdays: number[]');
-    expect(availability).toContain('preferredDayPart: TrainingDayPart');
-    expect(availability).toContain('applyExceptions');
-    expect(availability).toContain('subtractWindow');
+describe('mobile availability wiring', () => {
+  const availability = readRepo('apps/mobile/src/services/training-availability.ts');
+  const planner = readRepo('packages/planner/src/whole-athlete-week.ts');
+
+  it('keeps post-planner availability scheduling on the planner-selected weekday', () => {
+    expect(availability).toContain(
+      'const sameDayWindows = windows.filter((window) => window.date === session.date);',
+    );
+    expect(availability).toContain(
+      'session,\n      placed,\n      sameDayWindows,',
+    );
   });
 
-  it('schedules the actual whole-athlete plan before generated calendar events are persisted', () => {
-    const plan = source('apps/mobile/src/services/whole-athlete-plan.ts');
-    expect(plan).toContain('loadTrainingAvailabilityProfile()');
-    expect(plan).toContain('applyAvailabilityToWholeAthleteWeeks([progressedPlan], availabilityProfile)');
-    expect(plan).toContain('previousWeek = scheduledPlan.sessions');
-    expect(plan).toContain('plannedSessionToCalendarEvent(session, input.block.id)');
-    expect(plan).toContain('allDay: !session.scheduledStartAt');
+  it('exposes real weekday capacity to the planner', () => {
+    expect(availability).toContain(
+      'const totalAvailableMinutesByDay: Partial<Record<WeekdayIndex, number>> = {};',
+    );
+    expect(availability).toContain(
+      'const maxContinuousMinutesByDay: Partial<Record<WeekdayIndex, number>> = {};',
+    );
+    expect(availability).toContain(
+      'totalAvailableMinutesByDay[weekday] = durations.reduce',
+    );
+    expect(availability).toContain(
+      'maxContinuousMinutesByDay[weekday] = durations.length ? Math.max(...durations) : 0;',
+    );
   });
 
-  it('keeps availability optional and makes generated doubles use separated windows', () => {
-    const availability = source('apps/mobile/src/services/training-availability.ts');
-    expect(availability).toContain('if (!profile.enabled) return weeks as AvailabilityScheduledWeekPlan[]');
-    expect(availability).toContain('minimumGapMinutes: sameDay.length ? 180 : 0');
-    expect(availability).toContain('if (gapMinutes >= 360) return 18');
-    expect(availability).toContain('Intentional double day:');
+  it('uses sport weekday selections as feasibility constraints, not requested frequency', () => {
+    expect(availability).toContain(
+      "const availableDays: WeeklySchedulePreference['availableDays'] = {};",
+    );
+    expect(availability).toContain(
+      'availableDays[preference.discipline] = days;',
+    );
+    expect(planner).toContain(
+      'const sportAvailableDays = input.weeklySchedule?.availableDays?.[discipline];',
+    );
+    expect(planner).toContain(
+      '!sportAvailableDays.includes(offset as WeekdayIndex)',
+    );
   });
 
-  it('surfaces availability in You and shows scheduled times in Week', () => {
-    const profile = source('apps/mobile/src/app/(tabs)/profile.tsx');
-    const week = source('apps/mobile/src/app/(tabs)/plan.tsx');
-    const settings = source('apps/mobile/src/app/availability-settings.tsx');
-    expect(profile).toContain('title="Training availability"');
-    expect(profile).toContain("router.push('/availability-settings' as Href)");
-    expect(week).toContain('scheduledSessions');
-    expect(week).toContain('formatScheduledTime');
-    expect(week).toContain('loadTrainingAvailabilityProfile().enabled');
-    expect(settings).toContain('YOUR NORMAL WEEK');
-    expect(settings).toContain('EXCEPTIONS');
-    expect(settings).toContain('SPORT PREFERENCES');
-    expect(settings).toContain('Save and update plan');
+  it('does not manufacture hard, long, or quality-session ownership from availability chips', () => {
+    const start = availability.indexOf(
+      'export function plannerWeeklySchedule(',
+    );
+    const end = availability.indexOf(
+      'export function applyAvailabilityToWholeAthleteWeeks',
+      start,
+    );
+    const functionSource = availability.slice(start, end);
+
+    expect(functionSource).not.toContain('hardBikeDay');
+    expect(functionSource).not.toContain('longBikeDay');
+    expect(functionSource).not.toContain('hardRunDay');
+    expect(functionSource).not.toContain('longRunDay');
+    expect(functionSource).not.toContain('groupSwimDays');
+    expect(functionSource).not.toContain('qualitySwimDay');
   });
 });

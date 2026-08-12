@@ -129,7 +129,7 @@ export default function AvailabilitySettingsScreen() {
     <V23PageIntro
       label="SCHEDULE"
       title="When can you train?"
-      body="Set your normal weekly windows, then add exceptions for the weeks when real life changes. Availability is a hard limit; sport and time-of-day preferences are flexible."
+      body="Set your normal weekly windows, protect a rest day, and choose the sport weekdays that need to stay consistent. Time-of-day preferences stay flexible inside those anchors."
     />
 
     <V23Card style={styles.enableCard}>
@@ -141,6 +141,18 @@ export default function AvailabilitySettingsScreen() {
         <View style={[styles.knob, profile.enabled && styles.knobOn]} />
       </Pressable>
     </V23Card>
+
+    <View>
+      <V23SectionHeader detail="Weekly anchor">REST DAY</V23SectionHeader>
+      <V23Card style={styles.preferenceCard}>
+        <Text style={styles.preferenceTitle}>Protected rest day</Text>
+        <Text style={styles.helper}>Generated training will not be moved onto this day. Change it when your real weekly schedule uses a different recovery day.</Text>
+        <View style={styles.dayChips}>{SHORT_DAYS.map((label, weekday) => {
+          const selected = profile.restWeekday === weekday;
+          return <Pressable key={`rest:${weekday}`} onPress={() => setProfile((current) => ({ ...current, restWeekday: weekday as TrainingAvailabilityProfile['restWeekday'] }))} style={[styles.dayChip, selected && styles.dayChipSelected]}><Text style={[styles.dayChipText, selected && styles.dayChipTextSelected]}>{label}</Text></Pressable>;
+        })}</View>
+      </V23Card>
+    </View>
 
     <View>
       <V23SectionHeader>YOUR NORMAL WEEK</V23SectionHeader>
@@ -200,8 +212,8 @@ export default function AvailabilitySettingsScreen() {
     </View>
 
     <View>
-      <V23SectionHeader detail="Soft preferences">SPORT PREFERENCES</V23SectionHeader>
-      <Text style={styles.sectionHelper}>Side Quest will prefer these days and times when they fit the training plan. It can use another available window when recovery or key-session placement matters more.</Text>
+      <V23SectionHeader detail="Sport constraints">SPORT AVAILABILITY</V23SectionHeader>
+      <Text style={styles.sectionHelper}>Select every day this sport is possible. These choices limit where Side Quest may place the sport; they do not set weekly frequency or require a workout on every selected day. Leave the weekdays empty when any available training day can work. Time of day remains flexible.</Text>
       <View style={styles.preferenceStack}>{DISCIPLINES.map((discipline) => {
         const preference = profile.preferences.find((item) => item.discipline === discipline) ?? { discipline, preferredWeekdays: [], preferredDayPart: 'any' as const };
         return <V23Card key={discipline} style={styles.preferenceCard}>

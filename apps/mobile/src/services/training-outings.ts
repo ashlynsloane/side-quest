@@ -51,6 +51,7 @@ function optimizeWeek(
     const facilityLocations = locations.filter((location) => supportsPoolAndStrength(location));
     if (facilityLocations.length) {
       for (let date = week.weekStartDate; date <= week.weekEndDate; date = addDays(date, 1)) {
+        if (weekdayIndex(date) === profile.restWeekday) continue;
         const day = sessions.filter((session) => session.date === date);
         const swims = day.filter((session) => session.discipline === 'swim' && !session.trainingOutingId);
         const strengths = day.filter((session) => session.discipline === 'strength' && !session.trainingOutingId);
@@ -279,6 +280,11 @@ function withoutOutingRationale(values: string[]): string[] {
     && !line.startsWith('Scheduled for ')
     && !line.startsWith('Intentional double day:')
     && !line.startsWith('Intentional double day preserved'));
+}
+
+function weekdayIndex(date: string): number {
+  const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return (day + 6) % 7;
 }
 
 function addDays(value: string, days: number): string {

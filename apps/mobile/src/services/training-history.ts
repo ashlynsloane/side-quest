@@ -8,11 +8,13 @@ import type {
 import {
   getTrainingCalendarEvents,
   listEnduranceActivities,
+  listEnduranceSessionResponses,
   listPlannedCompletedMatches,
   listWorkoutFeedbackSince,
   listWorkoutLedgerEntries,
   listWorkoutReflectionsSince,
   listWorkoutSensorLinks,
+  type EnduranceSessionResponseRecord,
   type WorkoutFeedbackSummary,
   type WorkoutLedgerEntry,
   type WorkoutReflection,
@@ -40,17 +42,19 @@ export interface EnduranceHistoryItem {
   plannedMatch?: PlannedCompletedMatch;
   plannedEvent?: TrainingCalendarEvent;
   sensorLink?: WorkoutSensorLink;
+  response?: EnduranceSessionResponseRecord;
   needsReview: boolean;
 }
 
 export type TrainingHistoryItem = StrengthHistoryItem | EnduranceHistoryItem;
 
 export async function loadTrainingHistory(limit = 500): Promise<TrainingHistoryItem[]> {
-  const [workouts, activities, matches, links] = await Promise.all([
+  const [workouts, activities, matches, links, enduranceResponses] = await Promise.all([
     listWorkoutLedgerEntries({ limit }),
     listEnduranceActivities({ includeDeleted: true, limit }),
     listPlannedCompletedMatches(),
     listWorkoutSensorLinks(),
+    listEnduranceSessionResponses(),
   ]);
 
   const earliest = earliestHistoryInstant(workouts, activities);
@@ -75,6 +79,9 @@ export async function loadTrainingHistory(limit = 500): Promise<TrainingHistoryI
     feedback.map((item) => [item.workoutInstanceId, item]),
   );
   const eventById = new Map(calendar.map((event) => [event.id, event]));
+  const enduranceResponseByActivity = new Map(
+    enduranceResponses.map((response) => [response.activityId, response]),
+  );
   const linkedActivityIds = new Set<string>();
 
   const strengthItems: StrengthHistoryItem[] = workouts.map((workout) => {
@@ -115,6 +122,7 @@ export async function loadTrainingHistory(limit = 500): Promise<TrainingHistoryI
         plannedMatch,
         plannedEvent,
         sensorLink,
+        response: enduranceResponseByActivity.get(activity.id),
         needsReview: plannedMatch?.status === 'ambiguous'
           || sensorLink?.status === 'ambiguous'
           || unresolvedStrengthLink,

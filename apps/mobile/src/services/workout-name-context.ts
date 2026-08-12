@@ -21,11 +21,13 @@ const PHASES = new Set<WorkoutNamePhase>([
 ]);
 
 export function workoutNameSeason(date: string): WorkoutNameSeason {
-  const month = Number(date.slice(5, 7));
-  if (month === 12 || month === 1 || month === 2) return 'winter';
-  if (month >= 3 && month <= 5) return 'spring';
-  if (month >= 6 && month <= 8) return 'summer';
-  return 'fall';
+  const monthDay = date.slice(5, 10);
+  // Athlete-facing seasonal copy should be conservative. In particular,
+  // September is not automatically "crunchy leaves" season.
+  if (monthDay >= '12-01' || monthDay <= '02-29') return 'winter';
+  if (monthDay >= '03-01' && monthDay <= '05-31') return 'spring';
+  if (monthDay >= '09-22' && monthDay <= '11-30') return 'fall';
+  return 'summer';
 }
 
 export function isHolidayNamingWindow(date: string): boolean {

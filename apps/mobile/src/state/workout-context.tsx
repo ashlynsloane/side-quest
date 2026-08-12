@@ -37,7 +37,7 @@ type WorkoutContextValue = {
   updatePreviewWorkout: (workout: GeneratedWorkout) => void;
   openPlannedWorkoutPreview: (session: PlannedStrengthSession, context?: RecommendationExplanationContext) => void;
   beginWorkout: (workout: GeneratedWorkout) => void;
-  updateActiveWorkout: (workout: GeneratedWorkout) => void;
+  updateActiveWorkout: (workout: GeneratedWorkout, options?: { modifiedFromPlan?: boolean }) => void;
   clearActiveWorkout: () => void;
 };
 
@@ -115,8 +115,11 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setRestoredActiveWorkout(false);
       void saveLiveWorkoutSession(snapshot);
     },
-    updateActiveWorkout(workout) {
+    updateActiveWorkout(workout, options) {
       setActiveWorkout(workout);
+      if (options?.modifiedFromPlan) {
+        setActivePlanLink((current) => current ? { ...current, modifiedFromPlan: true } : current);
+      }
     },
     clearActiveWorkout() {
       setActiveWorkout(null);

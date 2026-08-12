@@ -9,6 +9,7 @@ import type {
   WholeAthleteWeeklyPlannerInput,
   WholeAthleteWeekPlan,
 } from './whole-athlete-week';
+import { resolveWeeklySchedulePreference } from './whole-athlete-week';
 
 export * from './whole-athlete-week-strategy';
 export { applyTrainingBlockRhythm } from './whole-athlete-week-rhythm';
@@ -29,9 +30,22 @@ export type { BlockWorkoutStage, TrainingWorkoutIdentity } from './whole-athlete
  *    preserving fixed athlete commitments and the lowest-load recovery day.
  */
 export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): WholeAthleteWeekPlan {
-  const strategicPlan = buildStrategyWholeAthleteWeek(input);
-  const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, input);
-  const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, input);
-  const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, input);
-  return applyDisciplineDaySpread(longRidePlan, input);
+  const resolvedWeeklySchedule = resolveWeeklySchedulePreference(
+    input.goalType,
+    input.weeklySchedule,
+  );
+  const resolvedInput: WholeAthleteWeeklyPlannerInput = resolvedWeeklySchedule
+    ? { ...input, weeklySchedule: resolvedWeeklySchedule }
+    : input;
+
+  const strategicPlan = buildStrategyWholeAthleteWeek(resolvedInput);
+  const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, resolvedInput);
+  const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, resolvedInput);
+  const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, resolvedInput);
+  const spreadPlan = applyDisciplineDaySpread(longRidePlan, resolvedInput);
+
+  // Calendar shaping may legitimately move support work, but the resolved
+  // quality-bike weekday is a weekly anchor. Re-assert it on the final plan so
+  // downstream rhythm/spread logic cannot leave the hard ride on the wrong day.
+  return applyBikeQualityAnchor(spreadPlan, resolvedInput);
 }

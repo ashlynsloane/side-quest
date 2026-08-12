@@ -10,14 +10,14 @@ function source(path: string): string {
 }
 
 describe('endurance prescription mobile UI', () => {
-  it('resolves Side Quest calendar events back to the production session with only prescription-essential athlete context', () => {
+  it('resolves Side Quest calendar events back to the production session without requiring the exact persisted event row', () => {
     const runtime = source('apps/mobile/src/services/endurance-prescription-runtime.ts');
-    expect(runtime).toContain('refreshLatestWholeAthletePlan()');
-    expect(runtime).toContain('resolveWholeAthleteSession(event, generated)');
-    expect(runtime).toContain('session.date === eventDate');
-    expect(runtime).toContain('session.discipline === event.discipline');
-    expect(runtime).toContain('session.title === event.title');
-    expect(runtime).toContain('session.durationMinutes === eventDuration');
+    expect(runtime).toContain('getLatestWholeAthletePlanSnapshot');
+    expect(runtime).toContain('refreshLatestWholeAthletePlan().catch(() => null)');
+    expect(runtime).toContain('resolveWholeAthleteSession(eventId, date, routeHint, exactEvent, generated)');
+    expect(runtime).toContain('resolveGeneratedSessionForPreview(');
+    expect(runtime).toContain('eventFromPlannedSession(eventId, planned, routeHint)');
+    expect(runtime).toContain("source: 'whole_athlete_plan' | 'calendar_fallback' | 'route_snapshot'");
     expect(runtime).toContain('loadEndurancePrescriptionProfile()');
     expect(runtime).toContain('cssSecondsPer100: profile.cssSecondsPer100');
     expect(runtime).toContain('returnToRunProtocol: profile.returnToRunProtocol');
@@ -84,9 +84,14 @@ describe('endurance prescription mobile UI', () => {
     expect(profile).toContain("router.push('/endurance-settings' as Href)");
   });
 
-  it('opens generated swim, bike, and run prescriptions directly from Week', () => {
+  it('opens generated swim, bike, and run prescriptions directly from Week with a recovery snapshot', () => {
     const plan = source('apps/mobile/src/app/(tabs)/plan.tsx');
-    expect(plan).toContain('/endurance-preview?id=');
+    expect(plan).toContain('const params = new URLSearchParams({');
+    expect(plan).toContain('title: event.title');
+    expect(plan).toContain('discipline: event.discipline');
+    expect(plan).toContain('startAt: event.startAt');
+    expect(plan).toContain("endAt: event.endAt ?? ''");
+    expect(plan).toContain('router.push(`/endurance-preview?${params.toString()}` as Href)');
     expect(plan).toContain('item.event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID');
     expect(plan).toContain('openEndurance(item.event)');
   });

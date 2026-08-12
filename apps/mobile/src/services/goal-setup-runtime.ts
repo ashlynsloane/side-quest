@@ -344,12 +344,10 @@ export function suggestedBlockLength(weeksUntil: number): TrainingBlockLength {
   return [...PLAN_LENGTHS].reverse().find((weeks) => weeks <= weeksUntil) ?? 1;
 }
 
-export function defaultEnduranceSchedule(disciplines: EnduranceDiscipline[]): EnduranceSchedule {
-  return {
-    keySwim: disciplines.includes('swim') ? 'tuesday' : null,
-    keyBike: disciplines.includes('bike') ? 'saturday' : null,
-    keyRun: disciplines.includes('run') ? 'sunday' : null,
-  };
+export function defaultEnduranceSchedule(_disciplines: EnduranceDiscipline[]): EnduranceSchedule {
+  // Goal Setup no longer assigns key weekdays. Long/quality/support roles are
+  // derived later from race needs, rest day, and saved availability.
+  return { keySwim: null, keyBike: null, keyRun: null };
 }
 
 export function weekdays(): Weekday[] {
@@ -385,7 +383,7 @@ function buildInitialDraft(
     bikeProficiency: capacity?.bikeProficiency ?? 'average',
     runProficiency: capacity?.runProficiency ?? 'average',
     strengthExperience: capacity?.strengthExperience ?? 'intermediate',
-    preferredStrengthDays: ['tuesday', 'thursday', 'saturday'],
+    preferredStrengthDays: [...WEEKDAYS],
     enduranceSchedule: defaultEnduranceSchedule(option.disciplines),
     equipmentProfileId: defaultProfile?.id,
     equipment: defaultProfile?.equipment ?? (['bodyweight'] as EquipmentId[]),

@@ -48,9 +48,14 @@ describe('long-course weekend bike anchor', () => {
     expect(longRide).toBeDefined();
     expect(weekdayIndex(longRide!.date)).toBeGreaterThanOrEqual(5);
     expect(longRide!.durationMinutes).toBeGreaterThanOrEqual(180);
+    expect(longRide!.durationMinutes).toBeLessThanOrEqual(270);
     expect(longRide!.keySession).toBe(true);
     expect(longRide!.durationMinutes - Math.max(...supportRides.map((session) => session.durationMinutes))).toBeGreaterThanOrEqual(30);
     expect(supportRides.every((session) => !/long ride/i.test(session.title))).toBe(true);
+    expect(supportRides.filter((session) => session.intensity === 'easy').every((session) => session.durationMinutes <= 120)).toBe(true);
+    const quality = bikes.filter((session) => session.intensity === 'hard' || session.intensity === 'max' || session.recoveryCost >= 4);
+    expect(quality).toHaveLength(1);
+    expect(quality[0]!.durationMinutes).toBeLessThanOrEqual(105);
     expect(plan.plannedMinutes).toBeLessThanOrEqual(840);
     expect(plan.guardrails.join(' ')).toContain('Saturday/Sunday long-ride anchor');
   });

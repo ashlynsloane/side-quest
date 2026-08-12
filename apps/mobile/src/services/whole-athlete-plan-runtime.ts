@@ -19,6 +19,15 @@ import {
   saveTrainingBlock,
 } from './database';
 import { loadApprovedCoachStrategySchedule } from './coach-strategy-state';
+import {
+  buildAppliedPlanDecisionSnapshot,
+  type AppliedPlanDecisionSnapshot,
+} from './applied-plan-decision';
+import {
+  applyCompletedWorkoutAdaptationToProgressionHistory,
+  buildCompletedWorkoutAdaptationSnapshot,
+  type CompletedWorkoutAdaptationSnapshot,
+} from './completed-workout-adaptation';
 import { loadRaceIntent } from './race-intent-state';
 import { applyCurrentWeekStrengthProgression } from './strength-progression-persistence';
 import { loadTrainingAvailabilityProfile } from './training-availability';
@@ -45,6 +54,8 @@ const DEFAULT_HEALTH_PREFERENCES: WholeAthleteHealthPreferences = {
 
 let reconciliationQueue: Promise<GeneratedWholeAthleteBlock | null> = Promise.resolve(null);
 let latestReconciledPlan: { blockId: string; generated: GeneratedWholeAthleteBlock } | null = null;
+let latestCompletedWorkoutAdaptation: CompletedWorkoutAdaptationSnapshot | null = null;
+let latestAppliedPlanDecision: AppliedPlanDecisionSnapshot | null = null;
 
 export function getDefaultWholeAthleteHealthPreferences(): WholeAthleteHealthPreferences {
   return { ...DEFAULT_HEALTH_PREFERENCES };
@@ -80,6 +91,20 @@ export function getLatestWholeAthletePlanSnapshot(blockId?: string): GeneratedWh
   return latestReconciledPlan.generated;
 }
 
+export function getLatestRaceHorizonDevelopmentPlan(
+  blockId?: string,
+): GeneratedWholeAthleteBlock['developmentPlan'] | null {
+  return getLatestWholeAthletePlanSnapshot(blockId)?.developmentPlan ?? null;
+}
+
+export function getLatestCompletedWorkoutAdaptationSnapshot(): CompletedWorkoutAdaptationSnapshot | null {
+  return latestCompletedWorkoutAdaptation;
+}
+
+export function getLatestAppliedPlanDecisionSnapshot(): AppliedPlanDecisionSnapshot | null {
+  return latestAppliedPlanDecision;
+}
+
 export function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
   const next = reconciliationQueue.then(runWholeAthleteReconciliation, runWholeAthleteReconciliation);
   reconciliationQueue = next.catch(() => null);
@@ -91,6 +116,8 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
   if (!saved?.block) {
     configureWholeAthleteCoachStrategy(undefined);
     latestReconciledPlan = null;
+    latestCompletedWorkoutAdaptation = null;
+    latestAppliedPlanDecision = null;
     await clearSideQuestGeneratedPlanEvents();
     return null;
   }
@@ -111,13 +138,31 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
   const now = new Date();
   const progressionDate = localDateKey(now);
   const currentWeekStart = currentTrainingWeekStart(saved.block, progressionDate);
-  const allCompletedHistory = progressionHistoryFromTrainingHistory(trainingHistory);
-  const completedHistory = currentWeekStart
-    ? historyEnteringWeek(allCompletedHistory, currentWeekStart)
-    : allCompletedHistory;
   const progressionAsOf = currentWeekStart
     ? weekEntryInstant(currentWeekStart)
     : now.toISOString();
+  const adaptationSnapshot = buildCompletedWorkoutAdaptationSnapshot({
+    history: trainingHistory,
+    block: saved.block,
+    activeCheckIn,
+    decisionCutoff: progressionAsOf,
+    asOf: now.toISOString(),
+  });
+  latestCompletedWorkoutAdaptation = adaptationSnapshot;
+
+  // Keep the existing progression-history translation intact, then apply the
+  // closed-loop interpretation as a conservative evidence layer. This now
+  // covers strength plus matched Side Quest swim/bike/run sessions. Endurance
+  // progression now requires athlete response capture; RTR stays suppressed
+  // until three separated exposures also have explicit next-day clearance.
+  const rawCompletedHistory = progressionHistoryFromTrainingHistory(trainingHistory);
+  const allCompletedHistory = applyCompletedWorkoutAdaptationToProgressionHistory(
+    rawCompletedHistory,
+    adaptationSnapshot,
+  );
+  const completedHistory = currentWeekStart
+    ? historyEnteringWeek(allCompletedHistory, currentWeekStart)
+    : allCompletedHistory;
   const progressionContext = currentWeekStart
     ? buildWholeAthleteProgressionContextFromHistory({
         weekStartDate: currentWeekStart,
@@ -160,10 +205,23 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     locationProfiles as TrainingLocationProfile[],
     capacity.runStatus,
   );
-  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, shaped.generatedEvents);
+  const shapedWithDevelopment: GeneratedWholeAthleteBlock = {
+    ...shaped,
+    developmentPlan: generated.developmentPlan,
+  };
 
-  latestReconciledPlan = { blockId: saved.block.id, generated: shaped };
-  return shaped;
+  // Applied decisions are computed from the final shaped prescription the athlete
+  // will actually see, not from pre-availability intent.
+  latestAppliedPlanDecision = buildAppliedPlanDecisionSnapshot({
+    generated: shapedWithDevelopment,
+    adaptation: adaptationSnapshot,
+    asOf: now.toISOString(),
+  });
+
+  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, shapedWithDevelopment.generatedEvents);
+
+  latestReconciledPlan = { blockId: saved.block.id, generated: shapedWithDevelopment };
+  return shapedWithDevelopment;
 }
 
 export function progressionHistoryFromTrainingHistory(

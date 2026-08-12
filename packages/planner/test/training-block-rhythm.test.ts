@@ -106,4 +106,5 @@ describe('training block rhythm', () => {
     const strength = next.sessions.find((session) => session.id === 'strength-current');
     expect(strength?.date).toBe('2026-08-18');
   });
+
 });

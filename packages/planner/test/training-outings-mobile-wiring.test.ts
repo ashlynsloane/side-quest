@@ -36,7 +36,9 @@ describe('training outings and human scheduling', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const week = source('apps/mobile/src/app/(tabs)/plan.tsx');
     expect(runtime).toContain('applyTrainingOutingsToGeneratedBlock');
-    expect(runtime).toContain('replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, shaped.generatedEvents)');
+    expect(runtime).toContain('const shaped = applyTrainingOutingsToGeneratedBlock');
+    expect(runtime).toContain('const shapedWithDevelopment: GeneratedWholeAthleteBlock = {');
+    expect(runtime).toContain('replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, shapedWithDevelopment.generatedEvents)');
     expect(week).toContain('groupDayItems');
     expect(week).toContain('ONE TRIP');
     expect(week).toContain('Combined visit');

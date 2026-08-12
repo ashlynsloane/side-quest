@@ -87,6 +87,47 @@ describe('block-aware endurance prescription', () => {
     expect(main && prescription ? enduranceCoachLines(prescription, main)[0]?.text : '').toMatch(/4 min steady \+ 1 min brisk cadence/);
   });
 
+  it('materializes distinct VO2, tempo, threshold, over-under, and race-specific bike stimuli', () => {
+    const cases = [
+      ['VO2 · 6 × 4', 'bike-vo2-6x4-r4', 6, 4, 4],
+      ['Tempo · Aerobic Strength', 'bike-tempo-3x15-r5', 3, 15, 5],
+      ['VO2 · 8 × 2', 'bike-vo2-8x2-r2', 8, 2, 2],
+      ['Over / Under · 4 × 10', 'bike-over-under-4x10-r5', 4, 10, 5],
+      ['Threshold · Cruise Control', 'bike-threshold-cruise-4x10-r5', 4, 10, 5],
+      ['VO2 · 5 × 5', 'bike-vo2-5x5-r5', 5, 5, 5],
+      ['Threshold · Long Repeats', 'bike-threshold-3x12-r4', 3, 12, 4],
+      ['Over / Under · 3 × 12', 'bike-over-under-3x12-r5', 3, 12, 5],
+      ['Race Pace · 3 × 15', 'bike-race-pace-3x15-r5', 3, 15, 5],
+      ['VO2 · 6 × 3', 'bike-vo2-6x3-r3', 6, 3, 3],
+      ['Threshold · 3 × 10', 'bike-threshold-3x10-r5', 3, 10, 5],
+      ['Race Pace + Surges · 4 × 10', 'bike-race-pace-surges-4x10-r5', 4, 10, 5],
+    ] as const;
+
+    const shapes = cases.map(([title, shapeId, repeats, workMinutes, recoveryMinutes]) => {
+      const prescription = buildEndurancePrescription(session({
+        discipline: 'bike',
+        title,
+        durationMinutes: 105,
+        intensity: 'hard',
+        priority: 'key',
+      }));
+      const main = prescription?.blocks.find((block) => block.id === 'main');
+
+      expect(prescription?.totalMinutes).toBe(105);
+      expect(prescription?.workoutShapeId).toBe(shapeId);
+      expect(main).toMatchObject({
+        shapeId,
+        repeats,
+        workMinutes,
+        recoveryMinutes,
+      });
+
+      return JSON.stringify(main);
+    });
+
+    expect(new Set(shapes).size).toBe(cases.length);
+  });
+
   it('creates a continuous running fartlek rather than making every quality change a passive-rest interval workout', () => {
     const prescription = buildEndurancePrescription(session({
       discipline: 'run',

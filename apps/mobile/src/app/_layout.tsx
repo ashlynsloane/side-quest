@@ -69,5 +69,5 @@ function AuthGate() {
   if (loading || onboardingLoading) {
     return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.canvas }}><ActivityIndicator size="large" color={palette.forest} /></View>;
   }
-  return <><StatusBar style="light" /><Stack screenOptions={{ headerShown: true, header: () => <V23BrandHeader />, contentStyle: { backgroundColor: palette.canvas } }}><Stack.Screen name="active-workout" options={{ headerShown: false }} /></Stack></>;
+  return <><StatusBar style="light" /><Stack screenOptions={{ headerShown: true, header: () => <V23BrandHeader />, contentStyle: { backgroundColor: palette.canvas } }}><Stack.Screen name="active-workout" options={{ headerShown: false, gestureEnabled: false }} /><Stack.Screen name="endurance-response" options={{ headerShown: false }} /></Stack></>;
 }

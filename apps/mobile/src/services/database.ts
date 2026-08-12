@@ -57,6 +57,22 @@ export interface FavoriteWorkoutRecord {
   createdAt: string;
 }
 
+export type EnduranceSessionPerceivedDifficulty = 'too_easy' | 'about_right' | 'too_hard';
+export type EnduranceSessionNextDayStatus = 'same_or_better' | 'worse';
+
+export interface EnduranceSessionResponseRecord {
+  activityId: string;
+  plannedEventId: string;
+  perceivedDifficulty?: EnduranceSessionPerceivedDifficulty;
+  sessionRpe?: number;
+  symptomsDuring?: boolean;
+  symptomsAfter?: boolean;
+  nextDayStatus?: EnduranceSessionNextDayStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function initializeDatabase(): Promise<void> {
   if (initialized) return;
 
@@ -352,6 +368,17 @@ export async function initializeDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_planned_completed_activity
       ON planned_completed_matches(activity_id);
 
+    CREATE TABLE IF NOT EXISTS endurance_session_responses (
+      activity_id TEXT PRIMARY KEY NOT NULL,
+      planned_event_id TEXT NOT NULL,
+      response_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_endurance_session_responses_updated
+      ON endurance_session_responses(updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS endurance_region_contributions (
       id TEXT PRIMARY KEY NOT NULL,
       activity_id TEXT NOT NULL,
@@ -511,7 +538,17 @@ export async function saveCompletedWorkout({
     'SELECT id FROM completed_workouts WHERE id = ? LIMIT 1',
     workoutInstanceId,
   );
-  if (existing) return;
+  if (existing) {
+    // A prior attempt may have committed the canonical row and then been
+    // interrupted before rebuilding derived memory or updating the plan.
+    await rebuildDerivedTrainingMemory();
+    await markPlannedSessionCompletedForWorkout(
+      workout.id,
+      plannedSessionId,
+      friendSubstitution ? { ...friendSubstitution, completedAt } : undefined,
+    );
+    return;
+  }
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(
@@ -2387,6 +2424,7 @@ export async function softDeleteEnduranceActivity({
         JSON.stringify(updated), deletedAt, deletedAt, row.id,
       );
       await db.runAsync('DELETE FROM planned_completed_matches WHERE activity_id = ?', row.id);
+      await db.runAsync('DELETE FROM endurance_session_responses WHERE activity_id = ?', row.id);
       await db.runAsync('DELETE FROM endurance_region_contributions WHERE activity_id = ?', row.id);
       await db.runAsync('DELETE FROM workout_sensor_links WHERE activity_id = ?', row.id);
     });
@@ -2413,6 +2451,7 @@ export async function softDeleteEnduranceActivitiesBySource(
           JSON.stringify(updated), deletedAt, deletedAt, row.id,
         );
         await db.runAsync('DELETE FROM planned_completed_matches WHERE activity_id = ?', row.id);
+        await db.runAsync('DELETE FROM endurance_session_responses WHERE activity_id = ?', row.id);
         await db.runAsync('DELETE FROM endurance_region_contributions WHERE activity_id = ?', row.id);
         await db.runAsync('DELETE FROM workout_sensor_links WHERE activity_id = ?', row.id);
       } catch {}
@@ -2492,6 +2531,57 @@ export async function getWorkoutSensorContext(workoutId: string): Promise<{ link
       activity: JSON.parse(row.activity_json) as EnduranceActivity,
     };
   } catch { return null; }
+}
+
+export async function saveEnduranceSessionResponse(
+  response: EnduranceSessionResponseRecord,
+): Promise<void> {
+  await initializeDatabase();
+  const sessionRpe = response.sessionRpe;
+  if (sessionRpe !== undefined && (!Number.isFinite(sessionRpe) || sessionRpe < 1 || sessionRpe > 10)) {
+    throw new Error('Session RPE must be between 1 and 10.');
+  }
+  await db.runAsync(
+    `INSERT INTO endurance_session_responses
+     (activity_id, planned_event_id, response_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(activity_id) DO UPDATE SET
+       planned_event_id = excluded.planned_event_id,
+       response_json = excluded.response_json,
+       updated_at = excluded.updated_at`,
+    response.activityId,
+    response.plannedEventId,
+    JSON.stringify(response),
+    response.createdAt,
+    response.updatedAt,
+  );
+}
+
+export async function getEnduranceSessionResponse(
+  activityId: string,
+): Promise<EnduranceSessionResponseRecord | null> {
+  await initializeDatabase();
+  const row = await db.getFirstAsync<{ response_json: string }>(
+    'SELECT response_json FROM endurance_session_responses WHERE activity_id = ?',
+    activityId,
+  );
+  if (!row) return null;
+  try { return JSON.parse(row.response_json) as EnduranceSessionResponseRecord; } catch { return null; }
+}
+
+export async function listEnduranceSessionResponses(): Promise<EnduranceSessionResponseRecord[]> {
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{ response_json: string }>(
+    'SELECT response_json FROM endurance_session_responses ORDER BY updated_at DESC',
+  );
+  return rows.flatMap((row) => {
+    try { return [JSON.parse(row.response_json) as EnduranceSessionResponseRecord]; } catch { return []; }
+  });
+}
+
+export async function deleteEnduranceSessionResponse(activityId: string): Promise<void> {
+  await initializeDatabase();
+  await db.runAsync('DELETE FROM endurance_session_responses WHERE activity_id = ?', activityId);
 }
 
 export async function replacePlannedCompletedMatches(
@@ -2877,7 +2967,7 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue'] as const;
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_session_responses','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue'] as const;
 export async function exportLocalData():Promise<Record<string,unknown[]>>{await initializeDatabase();const output:Record<string,unknown[]>={};for(const table of EXPORT_TABLES){try{output[table]=await db.getAllAsync<Record<string,unknown>>(`SELECT * FROM ${table}`)}catch{output[table]=[]}}return output;}
 export async function deleteAllLocalData():Promise<void>{await initializeDatabase();await db.withTransactionAsync(async()=>{for(const table of EXPORT_TABLES){try{await db.runAsync(`DELETE FROM ${table}`)}catch{}}});}
 export async function countCompletedWorkouts():Promise<number>{await initializeDatabase();const row=await db.getFirstAsync<{total:number}>('SELECT COUNT(*) AS total FROM workout_ledger');return row?.total??0;}

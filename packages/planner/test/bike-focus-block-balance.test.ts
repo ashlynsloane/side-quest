@@ -55,6 +55,7 @@ describe('bike-focus long-course block balance', () => {
     expect(quality).toHaveLength(1);
     expect(weekday(quality[0]!.date)).toBeLessThan(5);
     expect(quality[0]!.title).toMatch(/threshold|fartlek|quality/i);
+    expect(quality[0]!.durationMinutes).toBeLessThanOrEqual(105);
 
     expect(long).toHaveLength(1);
     expect(weekday(long[0]!.date)).toBeGreaterThanOrEqual(5);
@@ -63,9 +64,26 @@ describe('bike-focus long-course block balance', () => {
 
     const support = bikes.filter((session) => session.id !== quality[0]!.id && session.id !== long[0]!.id);
     expect(support.every((session) => !hard(session))).toBe(true);
+    expect(support.every((session) => session.durationMinutes <= 120)).toBe(true);
 
     const runs = plan.sessions.filter((session) => session.discipline === 'run');
+    expect(runs).toHaveLength(3);
     expect(runs.every((session) => session.intensity === 'easy' && session.durationMinutes <= 30)).toBe(true);
+    const runDates = runs
+      .map((session) => Date.parse(`${session.date}T12:00:00Z`))
+      .sort((left, right) => left - right);
+    expect(runDates.slice(1).every((date, index) => (date - runDates[index]!) / 86_400_000 >= 2)).toBe(true);
+    expect(new Set(bikes.map((session) => session.date)).size).toBe(bikes.length);
+
+    const trainableByDate = new Map<string, number>();
+    for (const session of plan.sessions.filter((session) =>
+      session.discipline === 'swim'
+      || session.discipline === 'bike'
+      || session.discipline === 'run'
+      || session.discipline === 'strength')) {
+      trainableByDate.set(session.date, (trainableByDate.get(session.date) ?? 0) + 1);
+    }
+    expect([...trainableByDate.values()].every((count) => count <= 2)).toBe(true);
   });
 
   it('does not count an accidental same-day swim double as useful frequency', () => {

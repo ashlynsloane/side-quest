@@ -111,8 +111,21 @@ describe('whole-athlete strategy overlay', () => {
     expect(bikeMinutes).toBeGreaterThanOrEqual(420);
     expect(swim.length).toBeGreaterThanOrEqual(3);
     expect(swimMinutes).toBeGreaterThanOrEqual(120);
-    expect(run.length).toBeLessThanOrEqual(2);
+    expect(run).toHaveLength(3);
     expect(run.every((session) => session.intensity === 'easy' && session.durationMinutes <= 30)).toBe(true);
+    const runDates = run
+      .map((session) => Date.parse(`${session.date}T12:00:00Z`))
+      .sort((left, right) => left - right);
+    expect(runDates.slice(1).every((date, index) => (date - runDates[index]!) / 86_400_000 >= 2)).toBe(true);
+    const trainableByDate = new Map<string, number>();
+    for (const session of adjusted.sessions.filter((session) =>
+      session.discipline === 'swim'
+      || session.discipline === 'bike'
+      || session.discipline === 'run'
+      || session.discipline === 'strength')) {
+      trainableByDate.set(session.date, (trainableByDate.get(session.date) ?? 0) + 1);
+    }
+    expect([...trainableByDate.values()].every((count) => count <= 2)).toBe(true);
     expect(adjusted.plannedMinutes).toBeLessThanOrEqual(840);
     expect(adjusted.guardrails.join(' ')).toContain('discipline-local');
   });

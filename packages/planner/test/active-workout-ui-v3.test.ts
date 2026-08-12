@@ -49,9 +49,12 @@ describe('Active Workout UI V3', () => {
     expect(screen).toContain("text: 'Discard'");
   });
 
-  it('keeps completion feedback quick and deeper details optional', () => {
+  it('keeps completion feedback quick, save state truthful, and deeper details optional', () => {
     const screen = source('apps/mobile/src/components/active-workout-screen-v3.tsx');
-    expect(screen).toContain('WORKOUT SAVED');
+    expect(screen).toContain('completionSaveEyebrow(completionSaveState)');
+    expect(screen).toContain("completionSaveState === 'saved'");
+    expect(screen).toContain('Retry local save');
+    expect(screen).toContain("disabled={completionSaveState !== 'saved'}");
     expect(screen).toContain('How did that prescription feel?');
     expect(screen).toContain('Private reflection');
     expect(screen).toContain('Workout details');

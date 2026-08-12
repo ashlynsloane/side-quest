@@ -3,7 +3,6 @@ import type {
   GoalTerrain,
   PerformanceGoalType,
   TrainingBlockLength,
-  Weekday,
 } from '@circuit/domain';
 import type { CoachStrategyTradeoff } from '@circuit/planner/coach-semantic-frame';
 import type { RaceOverallObjective, RaceTargetKind } from '@circuit/planner/race-intent';
@@ -30,7 +29,6 @@ import {
   resetDraftForGoal,
   suggestedBlockLength,
   validateGoalSetupDraft,
-  weekdays,
   weeksUntilEvent,
   type GoalSetupDraft,
   type GoalSetupEnvironment,
@@ -45,13 +43,6 @@ type SetupStep = 'goal' | 'outcome' | 'capacity' | 'setup' | 'review';
 type GoalCategory = 'triathlon' | 'running' | 'trail' | 'performance';
 const STEPS: SetupStep[] = ['goal', 'outcome', 'capacity', 'setup', 'review'];
 const PLAN_LENGTHS: TrainingBlockLength[] = [1, 2, 4, 8, 12];
-const WEEKDAY_LABELS: Record<Weekday, string> = {
-  monday: 'M', tuesday: 'T', wednesday: 'W', thursday: 'T', friday: 'F', saturday: 'S', sunday: 'S',
-};
-const WEEKDAY_SHORT: Record<Weekday, string> = {
-  monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun',
-};
-
 const OUTCOMES: Array<{ id: RaceOverallObjective; title: string; body: string }> = [
   { id: 'finish_comfortably', title: 'Finish comfortably', body: 'Prepare to complete the event without spending extra training budget chasing performance.' },
   { id: 'strong_finish', title: 'Race strong', body: 'Build performance while keeping the overall plan broadly balanced.' },
@@ -88,7 +79,6 @@ export default function GoalPlanScreen() {
   const [step, setStep] = useState<SetupStep>('goal');
   const [goalCategory, setGoalCategory] = useState<GoalCategory>('triathlon');
   const [advancedCapacity, setAdvancedCapacity] = useState(false);
-  const [keyDaysOpen, setKeyDaysOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -138,31 +128,6 @@ export default function GoalPlanScreen() {
       const until = weeksUntilEvent(candidate);
       return { ...candidate, blockLength: until >= 0 ? suggestedBlockLength(Math.max(1, until)) : current.blockLength };
     });
-    setError(null);
-  }
-
-  function toggleStrengthDay(day: Weekday) {
-    setDraft((current) => {
-      if (!current) return current;
-      const selected = current.preferredStrengthDays.includes(day);
-      return {
-        ...current,
-        preferredStrengthDays: selected
-          ? current.preferredStrengthDays.filter((candidate) => candidate !== day)
-          : [...current.preferredStrengthDays, day],
-      };
-    });
-    setError(null);
-  }
-
-  function setKeyDay(discipline: EnduranceDiscipline, day: Weekday | null) {
-    setDraft((current) => current ? {
-      ...current,
-      enduranceSchedule: {
-        ...current.enduranceSchedule,
-        ...(discipline === 'swim' ? { keySwim: day } : discipline === 'bike' ? { keyBike: day } : { keyRun: day }),
-      },
-    } : current);
     setError(null);
   }
 
@@ -308,18 +273,13 @@ export default function GoalPlanScreen() {
 
     {step === 'setup' ? <>
       <ProductHero eyebrow="4 · SCHEDULE + SETUP" title="Give the planner realistic places to put the work." body="Choose days that could work, the equipment you normally have, and any protection context that should constrain the first block." tone="surface" />
-      <ProductSection title="Strength-day options" body={`Side Quest currently recommends ${recommendation.sessionsPerWeek} sessions. Choose at least that many realistic days; it may use fewer than the days you make available.`}>
-        <View style={styles.dayRow}>{weekdays().map((day) => <Pressable key={day} onPress={() => toggleStrengthDay(day)} style={[styles.day, draft.preferredStrengthDays.includes(day) && styles.daySelected]}><Text style={[styles.dayText, draft.preferredStrengthDays.includes(day) && styles.dayTextSelected]}>{WEEKDAY_LABELS[day]}</Text><Text style={[styles.daySub, draft.preferredStrengthDays.includes(day) && styles.dayTextSelected]}>{WEEKDAY_SHORT[day]}</Text></Pressable>)}</View>
-      </ProductSection>
+      <ProductSection title="Training-day availability" body="Use Availability to tell Side Quest when each sport or strength training is possible. Goal Setup does not assign workout weekdays; the planner derives frequency and long/quality/support placement from those constraints." />
       <ProductSection title="Training location" body="Use a saved equipment location. You can refine individual equipment later without rebuilding the race strategy.">
         <View style={styles.choiceStack}>
           {environment.equipmentProfiles.map((profile) => <ProductChoiceRow key={profile.id} title={profile.name} body={`${profile.equipment.length} equipment options`} selected={draft.equipmentProfileId === profile.id} onPress={() => chooseEquipment(profile.id)} icon="equipment" />)}
           <ProductChoiceRow title="Bodyweight only" body="No equipment required." selected={!draft.equipmentProfileId && draft.equipment.length === 1 && draft.equipment[0] === 'bodyweight'} onPress={() => chooseEquipment(undefined)} icon="equipment" />
         </View>
       </ProductSection>
-      {option.disciplines.length ? <ProductDisclosure title="Key endurance days" summary={keyDaySummary(draft, option.disciplines)} expanded={keyDaysOpen} onPress={() => setKeyDaysOpen((value) => !value)}>
-        {option.disciplines.map((discipline) => <View key={discipline} style={styles.keyDayBlock}><Text style={styles.smallLabel}>KEY {discipline.toUpperCase()} DAY</Text><View style={styles.chipRow}><ChoiceChip label="None" selected={!keyDayFor(draft, discipline)} onPress={() => setKeyDay(discipline, null)} styles={styles} />{weekdays().map((day) => <ChoiceChip key={day} label={WEEKDAY_SHORT[day]} selected={keyDayFor(draft, discipline) === day} onPress={() => setKeyDay(discipline, day)} styles={styles} />)}</View></View>)}
-      </ProductDisclosure> : null}
       <ProductSection title="Anything to protect right now?" body="This is a conservative first-block filter, not a diagnosis. Any active PT profile and today’s check-in are also applied automatically.">
         <View style={styles.choiceStack}>{([
           ['none', 'Nothing extra', 'Use the existing PT/check-in context only.'],
@@ -395,7 +355,7 @@ function ReviewStep({ draft, environment, recommendation, option, styles, tokens
       {draft.overallTarget ? <ReviewRow label="Overall target" value={draft.overallTarget} styles={styles} /> : null}
       {draft.primaryDiscipline && draft.disciplineTargetKind ? <ReviewRow label={`${disciplineLabel(draft.primaryDiscipline)} target`} value={`${targetLabel(draft.disciplineTargetKind)}${draft.disciplineTargetValue ? ` · ${draft.disciplineTargetValue}` : ''}`} styles={styles} /> : null}
     </ProductSection>
-    <ProductSection eyebrow="WEEK" title={`${recommendation.sessionsPerWeek} strength sessions · ${recommendation.minutesPerWeek} min/week`} body={`Current endurance: ${draft.currentEnduranceHours}h/week · Recovery margin: ${recommendation.weeklyAllocationHours.recoveryMargin}h`}><ReviewRow label="Strength can fit" value={sortDays(draft.preferredStrengthDays).map((day) => WEEKDAY_SHORT[day]).join(' · ')} styles={styles} /><ReviewRow label="Key endurance" value={keyDaySummary(draft, option.disciplines)} styles={styles} /></ProductSection>
+    <ProductSection eyebrow="WEEK" title={`${recommendation.sessionsPerWeek} strength sessions · ${recommendation.minutesPerWeek} min/week`} body={`Current endurance: ${draft.currentEnduranceHours}h/week · Recovery margin: ${recommendation.weeklyAllocationHours.recoveryMargin}h`}><ReviewRow label="Scheduling" value="Planner-derived from saved availability, rest day, race needs, and fixed commitments" styles={styles} /></ProductSection>
     <ProductSection eyebrow="SETUP" title={environment.equipmentProfiles.find((profile) => profile.id === draft.equipmentProfileId)?.name ?? 'Bodyweight only'} body={`${draft.equipment.length} equipment option${draft.equipment.length === 1 ? '' : 's'} available to the generator.`}><ReviewRow label="Protection" value={restrictionLabel(draft.restriction)} styles={styles} /><ReviewRow label="Run status" value={formatLabel(draft.runStatus)} styles={styles} /><ReviewRow label="Strength experience" value={formatLabel(draft.strengthExperience)} styles={styles} /></ProductSection>
     <View style={styles.principles}><V23Icon name="heart" color={tokens.accent} size={18} /><View style={styles.principlesCopy}><Text style={styles.principlesTitle}>Planner guardrails remain in force.</Text><Text style={styles.principlesBody}>Race priorities do not override recovery, injury/protection context, fixed commitments, taper/race-week rules, or the total weekly time budget. Side Quest does not diagnose injuries or infer medical clearance.</Text></View></View>
   </>;
@@ -422,15 +382,6 @@ function ReviewRow({ label, value, styles }: { label: string; value: string; sty
   return <View style={styles.reviewRow}><Text style={styles.reviewLabel}>{label}</Text><Text style={styles.reviewValue}>{value}</Text></View>;
 }
 
-function keyDayFor(draft: GoalSetupDraft, discipline: EnduranceDiscipline): Weekday | null | undefined {
-  return discipline === 'swim' ? draft.enduranceSchedule.keySwim : discipline === 'bike' ? draft.enduranceSchedule.keyBike : draft.enduranceSchedule.keyRun;
-}
-
-function keyDaySummary(draft: GoalSetupDraft, disciplines: EnduranceDiscipline[]): string {
-  if (!disciplines.length) return 'No endurance key days';
-  return disciplines.map((discipline) => { const day = keyDayFor(draft, discipline); return `${disciplineLabel(discipline)} ${day ? WEEKDAY_SHORT[day] : 'flexible'}`; }).join(' · ');
-}
-
 function restrictionLabel(value: GoalSetupRestriction): string {
   if (value === 'none') return 'Existing PT/check-in context only';
   if (value === 'lower_body') return 'Conservative lower-body filter';
@@ -452,7 +403,6 @@ function targetPlaceholder(kind: RaceTargetKind): string {
 function supportsTerrain(type: PerformanceGoalType): boolean { return type !== 'swim_speed' && type !== 'general_offseason'; }
 function allowsTechnicalTerrain(type: PerformanceGoalType): boolean { return type === 'trail_50k' || type === 'trail_100k' || type === 'swimrun'; }
 function parseGoalType(value: string | undefined): PerformanceGoalType | undefined { return GOAL_SETUP_OPTIONS.some((option) => option.type === value) ? value as PerformanceGoalType : undefined; }
-function sortDays(days: Weekday[]): Weekday[] { const order = weekdays(); return [...days].sort((left, right) => order.indexOf(left) - order.indexOf(right)); }
 function formatLabel(value: string): string { return value.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase()); }
 function formatDate(value: string): string { return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T12:00:00`)); }
 

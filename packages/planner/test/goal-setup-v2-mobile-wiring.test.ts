@@ -77,6 +77,19 @@ describe('Unified Goal Setup V2', () => {
     expect(runtime).toContain('refreshLatestWholeAthletePlan');
   });
 
+  it('keeps weekday capability in Availability instead of duplicating key-day selectors in Goal Setup', () => {
+    const route = source('apps/mobile/src/app/goal-plan.tsx');
+    const availability = source('apps/mobile/src/app/availability-settings.tsx');
+    const runtime = source('apps/mobile/src/services/goal-setup-runtime.ts');
+
+    expect(route).toContain('Training-day availability');
+    expect(route).not.toContain('Key endurance days');
+    expect(route).not.toContain('Strength-day options');
+    expect(availability).toContain('SPORT AVAILABILITY');
+    expect(availability).toContain('do not set weekly frequency');
+    expect(runtime).toContain('keySwim: null, keyBike: null, keyRun: null');
+  });
+
   it('requires explicit review/application before replacing the saved plan', () => {
     const route = source('apps/mobile/src/app/goal-plan.tsx');
     expect(route).toContain('Ready to build the plan.');

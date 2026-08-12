@@ -6,6 +6,7 @@ import {
   type TrainableDiscipline,
 } from './whole-athlete-week';
 import { validateUnifiedWeek, type UnifiedTrainingSession } from './unified-training';
+import type { RaceHorizonDevelopmentWeek, RaceHorizonWorkoutObjective } from './race-development-types';
 
 export * from './whole-athlete-week';
 
@@ -53,15 +54,16 @@ export function applyTrainingBlockRhythm(
   const stage = nextBlockStage(previous);
 
   let sessions = base.sessions.map((session) => ({ ...session })) as RhythmedSession[];
-  const recoveryWeekday = chooseRecoveryWeekday(previous, sessions);
+  const recoveryWeekday = chooseRecoveryWeekday(previous, sessions, input);
 
   // Week one establishes the athlete's actual rhythm. We do not reshuffle an
   // otherwise valid first week simply to manufacture our preferred template.
   if (hasPreviousRhythm) {
-    sessions = preserveWeeklyAnchors(sessions, previous, input.weekStartDate, recoveryWeekday);
-    sessions = protectLowerLoadDay(sessions, input.weekStartDate, recoveryWeekday);
+    sessions = preserveWeeklyAnchors(sessions, previous, input.weekStartDate, recoveryWeekday, input);
   }
-  sessions = decorateWorkoutFamilies(sessions, stage);
+  sessions = establishSideQuestStrengthAnchors(sessions, input, recoveryWeekday, previous);
+  sessions = protectLowerLoadDay(sessions, input.weekStartDate, recoveryWeekday);
+  sessions = decorateWorkoutFamilies(sessions, stage, input.phase, input.developmentWeek);
 
   const datesChanged = sessions.some((session) => {
     const original = base.sessions.find((item) => item.id === session.id);
@@ -110,7 +112,20 @@ function nextBlockStage(previous: PreviousRhythmedSession[]): BlockWorkoutStage 
   return ((Math.max(...stages) + 1) % 4) as BlockWorkoutStage;
 }
 
-function chooseRecoveryWeekday(previous: PreviousRhythmedSession[], current: RhythmedSession[]): number {
+function chooseRecoveryWeekday(
+  previous: PreviousRhythmedSession[],
+  current: RhythmedSession[],
+  input: WholeAthleteWeeklyPlannerInput,
+): number {
+  const explicitRest = input.weeklySchedule?.restDays?.[0];
+  if (explicitRest !== undefined) return explicitRest;
+  if (input.goalType === 'triathlon_sprint'
+    || input.goalType === 'triathlon_olympic'
+    || input.goalType === 'ironman_70_3'
+    || input.goalType === 'ironman_full') {
+    return 0;
+  }
+
   const source = previous.some(isTrainable) ? previous : current;
   const fixedCurrent = current.filter((session) => session.planningCommitment !== 'generated' && session.source !== 'side_quest');
   const candidates = [2, 1, 4, 0, 3, 6, 5];
@@ -124,11 +139,71 @@ function chooseRecoveryWeekday(previous: PreviousRhythmedSession[], current: Rhy
   return [...Array(7).keys()].sort((left, right) => dayLoad(source, left) - dayLoad(source, right))[0] ?? 2;
 }
 
+function establishSideQuestStrengthAnchors(
+  sessions: RhythmedSession[],
+  input: WholeAthleteWeeklyPlannerInput,
+  recoveryWeekday: number,
+  previous: PreviousRhythmedSession[],
+): RhythmedSession[] {
+  const explicitPreferred = input.weeklySchedule?.preferredDays?.strength;
+  const hasEstablishedStrengthRhythm = previous.some((session) => session.discipline === 'strength');
+
+  // Precedence:
+  // 1. athlete-configured recurring strength weekdays
+  // 2. the athlete's established prior-week Side Quest strength rhythm
+  // 3. default multisport strength scaffold for a new/unanchored block
+  //
+  // preserveWeeklyAnchors has already restored historical strength dates. Do
+  // not overwrite them with generic defaults when the athlete did not specify
+  // a different recurring strength schedule.
+  if (hasEstablishedStrengthRhythm && !explicitPreferred?.length) return sessions;
+
+  const preferred = explicitPreferred ?? [2, 4];
+  const strengthSlots = sessions
+    .map((session, index) => ({ session, index }))
+    .filter(({ session }) => session.discipline === 'strength' && session.source === 'side_quest')
+    .sort((left, right) => compareSessionDate(left.session, right.session));
+
+  if (!strengthSlots.length) return sessions;
+  const next = sessions.map((session) => ({ ...session }));
+
+  strengthSlots.forEach(({ index }, ordinal) => {
+    const session = next[index];
+    if (!session) return;
+    const orderedWeekdays = [
+      preferred[Math.min(ordinal, Math.max(0, preferred.length - 1))],
+      ...preferred,
+      2, 4, 3, 5, 6, 1,
+    ].filter((value, position, values): value is number =>
+      value !== undefined
+      && value !== recoveryWeekday
+      && values.indexOf(value) === position);
+
+    for (const weekday of orderedWeekdays) {
+      const targetDate = addDays(input.weekStartDate, weekday);
+      if (targetDate === session.date) break;
+      if (!canMove(next, index, targetDate, recoveryWeekday)) continue;
+      next[index] = {
+        ...session,
+        date: targetDate,
+        rationale: unique([
+          ...session.rationale,
+          `Strength is anchored to ${WEEKDAY_NAMES[weekday]} so it supports the weekly endurance rhythm instead of consuming the protected recovery day.`,
+        ]),
+      };
+      break;
+    }
+  });
+
+  return next.sort(compareSessionDate);
+}
+
 function preserveWeeklyAnchors(
   sessions: RhythmedSession[],
   previous: PreviousRhythmedSession[],
   weekStartDate: string,
   recoveryWeekday: number,
+  input: WholeAthleteWeeklyPlannerInput,
 ): RhythmedSession[] {
   const next = sessions.map((session) => ({ ...session }));
   const disciplines: TrainableDiscipline[] = ['swim', 'bike', 'run', 'strength'];
@@ -146,7 +221,8 @@ function preserveWeeklyAnchors(
       const target = currentSlots[ordinal];
       const anchor = previousSlots[ordinal];
       if (!target || !anchor || !isRhythmMovable(target.session)) continue;
-      const targetWeekday = weekdayIndex(anchor.date);
+      const configuredWeekday = configuredWeekdayForSession(target.session, ordinal, input);
+      const targetWeekday = configuredWeekday ?? weekdayIndex(anchor.date);
       if (targetWeekday === recoveryWeekday && !isActiveRecovery(target.session)) continue;
       const targetDate = addDays(weekStartDate, targetWeekday);
       if (targetDate === target.session.date) continue;
@@ -162,6 +238,29 @@ function preserveWeeklyAnchors(
     }
   }
   return next.sort(compareSessionDate);
+}
+
+function configuredWeekdayForSession(
+  session: RhythmedSession,
+  ordinal: number,
+  input: WholeAthleteWeeklyPlannerInput,
+): number | undefined {
+  const schedule = input.weeklySchedule;
+
+  if (session.discipline === 'bike') {
+    if (isHard(session)) return schedule?.hardBikeDay ?? 1;
+    if (/\blong\b/i.test(session.title)) return schedule?.longBikeDay ?? 5;
+  }
+
+  if (session.discipline === 'run') {
+    if (isHard(session)) return schedule?.hardRunDay ?? 4;
+    if (/\blong\b/i.test(session.title)) return schedule?.longRunDay ?? 6;
+  }
+
+  if (!TRAINABLE.has(session.discipline as TrainableDiscipline)) return undefined;
+  const preferred = schedule?.preferredDays?.[session.discipline as TrainableDiscipline];
+  if (preferred?.length && ordinal < preferred.length) return preferred[ordinal];
+  return undefined;
 }
 
 function protectLowerLoadDay(
@@ -221,7 +320,12 @@ function compatiblePair(left: RhythmedSession, right: RhythmedSession): boolean 
   if (pair.has('strength') && (pair.has('bike') || pair.has('run'))) {
     const strength = left.discipline === 'strength' ? left : right;
     const endurance = left.discipline === 'strength' ? right : left;
-    return strength.intensity === 'easy' && !isHard(endurance) && endurance.lowerBodyDemand !== 'high';
+    return !isHard(strength)
+      && !isHard(endurance)
+      && strength.lowerBodyDemand !== 'high'
+      && endurance.lowerBodyDemand !== 'high'
+      && strength.recoveryCost <= 3
+      && endurance.recoveryCost <= 3;
   }
   return false;
 }
@@ -235,7 +339,12 @@ function isRhythmMovable(session: RhythmedSession): boolean {
   return session.discipline === 'strength' && session.source === 'side_quest';
 }
 
-function decorateWorkoutFamilies(sessions: RhythmedSession[], stage: BlockWorkoutStage): RhythmedSession[] {
+function decorateWorkoutFamilies(
+  sessions: RhythmedSession[],
+  stage: BlockWorkoutStage,
+  phase: WholeAthleteWeeklyPlannerInput['phase'],
+  developmentWeek?: RaceHorizonDevelopmentWeek,
+): RhythmedSession[] {
   const next = sessions.map((session) => ({ ...session }));
   for (const discipline of ['swim', 'bike', 'run'] as const) {
     const slots = next
@@ -244,7 +353,7 @@ function decorateWorkoutFamilies(sessions: RhythmedSession[], stage: BlockWorkou
       .sort((left, right) => compareSessionDate(left.session, right.session));
 
     slots.forEach(({ session, index }, ordinal) => {
-      const identity = workoutIdentity(session, ordinal, stage);
+      const identity = workoutIdentity(session, ordinal, stage, phase, developmentWeek);
       if (!identity) return;
       next[index] = {
         ...session,
@@ -253,6 +362,7 @@ function decorateWorkoutFamilies(sessions: RhythmedSession[], stage: BlockWorkou
         rationale: unique([
           ...session.rationale,
           stageRationale(stage, identity.identity.benchmarkRepeat),
+          ...developmentRationale(session, developmentWeek),
         ]),
       };
     });
@@ -264,13 +374,15 @@ function workoutIdentity(
   session: RhythmedSession,
   ordinal: number,
   stage: BlockWorkoutStage,
+  phase: WholeAthleteWeeklyPlannerInput['phase'],
+  developmentWeek?: RaceHorizonDevelopmentWeek,
 ): { title: string; identity: TrainingWorkoutIdentity } | null {
   if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') return null;
   if (session.discipline === 'run' && /return-to-run/i.test(session.title)) {
     return identityResult('Easy return-to-run', 'run_return_to_run', 'protocol', stage, `run:${ordinal}`, false);
   }
 
-  if (isHard(session)) return hardWorkoutIdentity(session.discipline, ordinal, stage);
+  if (isHard(session)) return hardWorkoutIdentity(session.discipline, ordinal, stage, phase, developmentWeek);
 
   if (session.discipline === 'swim') {
     const primary = [
@@ -290,6 +402,9 @@ function workoutIdentity(
   }
 
   if (session.discipline === 'bike') {
+    if (developmentWeek) {
+      return developmentBikeIdentity(session, ordinal, stage, developmentWeek);
+    }
     const primary = [
       ['Aerobic · Steady State', 'bike_steady_state', 'reference'],
       ['Fartlek · Cadence Change-Up', 'bike_cadence_fartlek', '4_1'],
@@ -304,6 +419,13 @@ function workoutIdentity(
     ] as const;
     const selected = (ordinal === 0 ? primary : secondary)[stage];
     return identityResult(selected[0], selected[1], selected[2], stage, `bike:${ordinal}`, stage === 3);
+  }
+
+  if (developmentWeek && developmentWeek.runMode !== 'return_to_run') {
+    const objective = isLongRunSession(session)
+      ? developmentWeek.longRun
+      : developmentWeek.runSupport;
+    return objectiveIdentity(objective, stage, `run:${ordinal}:${isLongRunSession(session) ? 'long' : 'support'}`);
   }
 
   const primary = [
@@ -326,29 +448,152 @@ function hardWorkoutIdentity(
   discipline: 'swim' | 'bike' | 'run',
   ordinal: number,
   stage: BlockWorkoutStage,
+  phase: WholeAthleteWeeklyPlannerInput['phase'],
+  developmentWeek?: RaceHorizonDevelopmentWeek,
 ): { title: string; identity: TrainingWorkoutIdentity } {
+  const swim = [
+    ['Threshold · Broken Tempo', 'swim_threshold', 'broken'],
+    ['Threshold · Fast & Smooth', 'swim_threshold', 'fast_smooth'],
+    ['Threshold · Ladder Day', 'swim_threshold', 'ladder'],
+    ['Threshold · Broken Tempo', 'swim_threshold', 'broken'],
+  ] as const;
+  const run = [
+    ['Tempo · Cruise Control', 'run_tempo', 'cruise'],
+    ['Intervals · Broken Repeats', 'run_intervals', 'broken'],
+    ['Fartlek · Change of Pace', 'run_fartlek_quality', '3_1_2'],
+    ['Tempo · Cruise Control', 'run_tempo', 'cruise'],
+  ] as const;
+
+  if (discipline !== 'bike') {
+    const selected = (discipline === 'swim' ? swim : run)[stage];
+    return identityResult(
+      selected[0],
+      selected[1],
+      selected[2],
+      stage,
+      `${discipline}:${ordinal}:quality`,
+      stage === 3,
+    );
+  }
+
+  if (developmentWeek) {
+    return objectiveIdentity(
+      developmentWeek.bikeQuality,
+      stage,
+      `bike:${ordinal}:quality`,
+    );
+  }
+
   const libraries = {
-    swim: [
-      ['Threshold · Broken Tempo', 'swim_threshold', 'broken'],
-      ['Threshold · Fast & Smooth', 'swim_threshold', 'fast_smooth'],
-      ['Threshold · Ladder Day', 'swim_threshold', 'ladder'],
-      ['Threshold · Broken Tempo', 'swim_threshold', 'broken'],
+    base: [
+      ['VO2 · 6 × 4', 'bike_vo2', '6x4'],
+      ['Tempo · Aerobic Strength', 'bike_tempo', '3x15'],
+      ['VO2 · 8 × 2', 'bike_vo2', '8x2'],
+      ['Over / Under · 4 × 10', 'bike_over_under', '4x10'],
     ],
-    bike: [
-      ['Threshold · Cruise Control', 'bike_threshold', 'cruise'],
-      ['Fartlek · Over / Under', 'bike_over_under', 'over_under'],
-      ['Threshold · Long Repeats', 'bike_threshold', 'long'],
-      ['Threshold · Cruise Control', 'bike_threshold', 'cruise'],
+    build: [
+      ['Threshold · Cruise Control', 'bike_threshold', '4x10'],
+      ['VO2 · 5 × 5', 'bike_vo2', '5x5'],
+      ['Threshold · Long Repeats', 'bike_threshold', '3x12'],
+      ['Over / Under · 3 × 12', 'bike_over_under', '3x12'],
     ],
-    run: [
-      ['Tempo · Cruise Control', 'run_tempo', 'cruise'],
-      ['Intervals · Broken Repeats', 'run_intervals', 'broken'],
-      ['Fartlek · Change of Pace', 'run_fartlek_quality', '3_1_2'],
-      ['Tempo · Cruise Control', 'run_tempo', 'cruise'],
+    peak: [
+      ['Race Pace · 3 × 15', 'bike_race_specific', '3x15'],
+      ['VO2 · 6 × 3', 'bike_vo2', '6x3'],
+      ['Threshold · 3 × 10', 'bike_threshold', '3x10'],
+      ['Race Pace + Surges · 4 × 10', 'bike_race_specific', '4x10_surges'],
     ],
   } as const;
-  const selected = libraries[discipline][stage];
-  return identityResult(selected[0], selected[1], selected[2], stage, `${discipline}:${ordinal}:quality`, stage === 3);
+
+  const library = phase === 'base'
+    ? libraries.base
+    : phase === 'peak'
+      ? libraries.peak
+      : libraries.build;
+  const selected = library[stage];
+
+  return identityResult(
+    selected[0],
+    selected[1],
+    selected[2],
+    stage,
+    `bike:${ordinal}:quality`,
+    false,
+  );
+}
+
+function developmentBikeIdentity(
+  session: RhythmedSession,
+  ordinal: number,
+  stage: BlockWorkoutStage,
+  developmentWeek: RaceHorizonDevelopmentWeek,
+): { title: string; identity: TrainingWorkoutIdentity } {
+  if (isLongBikeSession(session)) {
+    return objectiveIdentity(developmentWeek.longRide, stage, `bike:${ordinal}:long`);
+  }
+  if (isRecoveryBikeSession(session)) {
+    return identityResult(
+      'Recovery Spin · Aerobic Reset',
+      'bike_recovery',
+      'aerobic_reset',
+      stage,
+      `bike:${ordinal}:recovery`,
+      false,
+    );
+  }
+  return objectiveIdentity(developmentWeek.bikeSupport, stage, `bike:${ordinal}:support`);
+}
+
+function objectiveIdentity(
+  objective: RaceHorizonWorkoutObjective,
+  stage: BlockWorkoutStage,
+  role: string,
+): { title: string; identity: TrainingWorkoutIdentity } {
+  return identityResult(
+    objective.title,
+    objective.familyId,
+    objective.variantId,
+    stage,
+    role,
+    false,
+  );
+}
+
+function developmentRationale(
+  session: RhythmedSession,
+  developmentWeek: RaceHorizonDevelopmentWeek | undefined,
+): string[] {
+  if (!developmentWeek) return [];
+  const horizon = `Race horizon: week ${developmentWeek.weekNumber} of ${developmentWeek.totalWeeks} · ${developmentWeek.phase.replaceAll('_', ' ')} · ${developmentWeek.loadIntent}.`;
+  if (session.discipline === 'bike') {
+    const objective = isHard(session)
+      ? developmentWeek.bikeQuality.objective
+      : isLongBikeSession(session)
+        ? developmentWeek.longRide.objective
+        : isRecoveryBikeSession(session)
+          ? 'Distribute low-cost aerobic volume without creating another meaningful stressor.'
+          : developmentWeek.bikeSupport.objective;
+    return [horizon, `Season objective: ${objective}`];
+  }
+  if (session.discipline === 'swim') return [horizon, `Season objective: ${developmentWeek.swimObjective}`];
+  if (session.discipline === 'run') return [horizon, `Season objective: ${developmentWeek.runObjective}`];
+  return [horizon];
+}
+
+function isLongBikeSession(session: UnifiedTrainingSession): boolean {
+  return /\blong\b/i.test(session.title)
+    || (session.keySession && session.durationMinutes >= 150);
+}
+
+function isRecoveryBikeSession(session: UnifiedTrainingSession): boolean {
+  return session.intensity === 'easy'
+    && !session.keySession
+    && session.durationMinutes <= 60;
+}
+
+function isLongRunSession(session: UnifiedTrainingSession): boolean {
+  return /\blong\b/i.test(session.title)
+    || (session.keySession && session.discipline === 'run' && session.durationMinutes >= 75);
 }
 
 function identityResult(
@@ -370,7 +615,7 @@ function stageRationale(stage: BlockWorkoutStage, benchmarkRepeat: boolean): str
   if (stage === 0) return 'Block foundation: establish a repeatable reference workout and weekly rhythm.';
   if (stage === 1) return 'Block variation: change the internal stimulus while keeping the weekly rhythm stable.';
   if (stage === 2) return 'Block specificity: progress the workout structure without automatically adding more time.';
-  return 'Block consolidation: compare against an earlier reference before the next progression.';
+  return 'Block consolidation: keep the weekly rhythm stable while changing the internal stimulus before the next progression.';
 }
 
 function summarizeDoubleDays(sessions: RhythmedSession[]): WholeAthleteWeekPlan['doubleDays'] {

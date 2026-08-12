@@ -1,5 +1,7 @@
 import type { PerformanceGoalType, TrainingPhase } from '@circuit/domain';
 
+import type { RaceHorizonDevelopmentWeek } from './race-development-types';
+
 import { canonicalEnduranceMinutes } from './endurance-prescription';
 import {
   chooseProgressionBudget,
@@ -23,6 +25,20 @@ export type BoneStressSignal = 'none' | 'remote' | 'recent' | 'active';
 export type InjuryConstraint = 'none' | 'monitor' | 'restricted';
 export type MentalEnergySignal = 'good' | 'limited' | 'depleted';
 export type LifeStressSignal = 'low' | 'moderate' | 'high' | 'overwhelming';
+export type WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface WeeklySchedulePreference {
+  preferredDays?: Partial<Record<TrainableDiscipline, WeekdayIndex[]>>;
+  availableDays?: Partial<Record<TrainableDiscipline, WeekdayIndex[]>>;
+  maxContinuousMinutesByDay?: Partial<Record<WeekdayIndex, number>>;
+  totalAvailableMinutesByDay?: Partial<Record<WeekdayIndex, number>>;
+  restDays?: WeekdayIndex[];
+  hardBikeDay?: WeekdayIndex;
+  longBikeDay?: WeekdayIndex;
+  hardRunDay?: WeekdayIndex;
+  longRunDay?: WeekdayIndex;
+  groupSwimDays?: WeekdayIndex[];
+}
 
 /**
  * Training-planning inputs only. These signals limit training stress and never
@@ -68,6 +84,8 @@ export interface WholeAthleteWeeklyPlannerInput {
   recentBoneStress?: boolean;
   returnToRun?: boolean;
   maxSessionsPerDay?: 1 | 2;
+  weeklySchedule?: WeeklySchedulePreference;
+  developmentWeek?: RaceHorizonDevelopmentWeek;
 }
 
 export interface WholeAthletePlannedSession extends UnifiedTrainingSession {
@@ -111,6 +129,7 @@ export interface WholeAthleteWeekPlan {
   guardrails: string[];
   warnings: string[];
   quality: PlanQualityReport;
+  developmentWeek?: RaceHorizonDevelopmentWeek;
 }
 
 interface ResolvedFrequencyTarget {
@@ -271,6 +290,11 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   addPass(requiredCounts, true);
   if (planningState === 'build') addPass(preferredCounts, false);
   else if (planningState === 'hold') addPass(preferredCounts, false);
+  else if (planningState === 'protect' && isImpactLocalProtection(input)) {
+    // Only swim/bike can exceed minimum frequency here; run and strength
+    // preferred counts remain at their protected minimums.
+    addPass(preferredCounts, false);
+  }
 
   const quality = validateUnifiedWeek(sessions, {
     availableMinutes: input.availableMinutes,
@@ -283,6 +307,7 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   });
 
   warnings.push(...frequencyWarnings(sessions, frequency));
+  warnings.push(...weekCoherenceWarnings(sessions));
   if (totalMinutes(sessions) > targetMinutes && totalMinutes(fixed) <= targetMinutes) {
     warnings.push('The plan is above the preferred health-adjusted volume ceiling; review preferred commitments before adding more work.');
   }
@@ -296,6 +321,7 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
     planningState,
     weekDecision,
     weekDecisionReason,
+    developmentWeek: input.developmentWeek,
     sessions,
     progressionBudget,
     progressionAllowed,
@@ -433,9 +459,31 @@ function applyHealthToProgressionBudget(
   };
 }
 
+function isImpactLocalProtection(input: WholeAthleteWeeklyPlannerInput): boolean {
+  const health = input.health;
+  const impactSignal = Boolean(
+    input.returnToRun
+    || input.recentBoneStress
+    || health.boneStress === 'recent',
+  );
+  if (!impactSignal) return false;
+
+  // These signals indicate a broader recovery ceiling, not merely an impact
+  // restriction. In those cases the ordinary protect/hold frequency reduction
+  // remains authoritative.
+  if (health.energyAvailability === 'concerning' || health.menstrualRecovery === 'disrupted') return false;
+  if (health.boneStress === 'active' || health.injuryConstraint === 'restricted' || health.noImpact) return false;
+  if (health.illnessOrSystemicSymptoms || health.athleteRequestedRest) return false;
+  if (health.mentalEnergy === 'depleted' || health.lifeStress === 'overwhelming') return false;
+  if ((health.restrictedDisciplines ?? []).some((discipline) => discipline !== 'run')) return false;
+
+  return true;
+}
+
 function resolveFrequencyPlan(input: WholeAthleteWeeklyPlannerInput, state: WholeAthletePlanningState): FrequencyPlan {
   const defaults = DEFAULT_FREQUENCY[input.goalType];
   const plan = {} as FrequencyPlan;
+  const impactLocalProtection = isImpactLocalProtection(input);
   for (const discipline of TRAINABLE_DISCIPLINES) {
     const override = input.frequencyTargets?.[discipline];
     const base = defaults[discipline];
@@ -451,10 +499,31 @@ function resolveFrequencyPlan(input: WholeAthleteWeeklyPlannerInput, state: Whol
       min = 0;
       preferred = 0;
     } else if (state === 'protect' || state === 'hold') {
-      preferred = min;
+      // A clean return-to-run / recent-bone-stress signal is discipline-local:
+      // impact exposure is protected, but low-impact race training does not
+      // automatically collapse from preferred frequency to the bare minimum.
+      if (!(impactLocalProtection && (discipline === 'swim' || discipline === 'bike'))) {
+        preferred = min;
+      }
     }
 
-    if (discipline === 'run' && (input.returnToRun || input.recentBoneStress || input.health.boneStress === 'recent')) {
+    if (
+      discipline === 'run'
+      && input.returnToRun
+      && impactLocalProtection
+      && state !== 'recover'
+      && !isDisciplineRestricted(discipline, input)
+    ) {
+      // When impact is permitted, return-to-run is a three-exposure rhythm.
+      // Dose changes before frequency; broader recovery ceilings can still
+      // reduce frequency through the ordinary protection path above.
+      min = 3;
+      preferred = 3;
+      max = 3;
+    } else if (
+      discipline === 'run'
+      && (input.recentBoneStress || input.health.boneStress === 'recent')
+    ) {
       min = Math.min(min, 2);
       preferred = Math.min(preferred, 3);
       max = Math.min(max, 3);
@@ -640,11 +709,22 @@ function buildTemplate({
   const makeHard = hardEligible && qualityDiscipline && existingDisciplineCount === 0;
 
   if (discipline === 'swim') {
+    const qualitySwim = existingDisciplineCount === 0;
     return {
-      title: makeHard ? 'Swim quality' : existingDisciplineCount === 0 ? 'Aerobic + technique swim' : 'Swim endurance',
-      intensity: makeHard ? 'hard' : existingDisciplineCount === 0 ? 'easy' : 'moderate',
+      title: makeHard
+        ? 'Swim quality'
+        : qualitySwim
+          ? 'Swim quality'
+          : existingDisciplineCount === 1
+            ? 'Aerobic + technique swim'
+            : 'Recovery swim',
+      intensity: makeHard
+        ? 'hard'
+        : qualitySwim
+          ? 'moderate'
+          : 'easy',
       durationMinutes: duration,
-      keySession: makeHard,
+      keySession: makeHard || qualitySwim,
       progressionTarget: progresses ? progressionTarget : undefined,
     };
   }
@@ -654,10 +734,10 @@ function buildTemplate({
       ? Math.min(proposedLong, canonicalEnduranceMinutes(baseline.longestSessionMinutes * (progresses ? 1.05 : 1)))
       : proposedLong;
     return {
-      title: makeHard ? 'Bike quality' : existingDisciplineCount >= 2 ? 'Long endurance ride' : 'Aerobic ride',
-      intensity: makeHard ? 'hard' : existingDisciplineCount >= 2 ? 'moderate' : 'easy',
-      durationMinutes: existingDisciplineCount >= 2 ? longDuration : duration,
-      keySession: makeHard || existingDisciplineCount >= 2,
+      title: makeHard ? 'Bike quality' : existingDisciplineCount === 2 ? 'Long endurance ride' : 'Aerobic ride',
+      intensity: makeHard ? 'hard' : existingDisciplineCount === 2 ? 'moderate' : 'easy',
+      durationMinutes: existingDisciplineCount === 2 ? longDuration : duration,
+      keySession: makeHard || existingDisciplineCount === 2,
       progressionTarget: progresses ? progressionTarget : undefined,
     };
   }
@@ -668,10 +748,10 @@ function buildTemplate({
       ? Math.min(proposedLong, canonicalEnduranceMinutes(baseline.longestSessionMinutes * (progresses ? 1.05 : 1)))
       : proposedLong;
     return {
-      title: protectedRun ? 'Easy return-to-run' : makeHard ? 'Run quality' : existingDisciplineCount >= 3 ? 'Long aerobic run' : 'Easy aerobic run',
-      intensity: protectedRun ? 'easy' : makeHard ? 'hard' : existingDisciplineCount >= 3 ? 'moderate' : 'easy',
-      durationMinutes: protectedRun ? Math.min(30, duration) : existingDisciplineCount >= 3 ? longDuration : duration,
-      keySession: !protectedRun && (makeHard || existingDisciplineCount >= 3),
+      title: protectedRun ? 'Easy return-to-run' : makeHard ? 'Run quality' : existingDisciplineCount >= 2 ? 'Long aerobic run' : 'Easy aerobic run',
+      intensity: protectedRun ? 'easy' : makeHard ? 'hard' : existingDisciplineCount >= 2 ? 'moderate' : 'easy',
+      durationMinutes: protectedRun ? Math.min(30, duration) : existingDisciplineCount >= 2 ? longDuration : duration,
+      keySession: !protectedRun && (makeHard || existingDisciplineCount >= 2),
       progressionTarget: progresses ? progressionTarget : undefined,
     };
   }
@@ -719,32 +799,539 @@ function placementScore(
 ): number {
   const sameDay = sessions.filter((session) => session.date === date);
   if (sameDay.length >= maxSessionsPerDay) return Number.NEGATIVE_INFINITY;
+  const sportAvailableDays = input.weeklySchedule?.availableDays?.[discipline];
+  if (sportAvailableDays?.length && !sportAvailableDays.includes(offset as WeekdayIndex)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
   if (sameDay.some((session) => session.discipline === discipline)) return Number.NEGATIVE_INFINITY;
-  const doubleDay = sameDay.length ? assessDoubleDay(discipline, template, sameDay) : null;
-  if (sameDay.length && !doubleDay) return Number.NEGATIVE_INFINITY;
+
   if ((input.returnToRun || input.recentBoneStress || input.health.boneStress === 'recent') && discipline === 'run') {
     const runDates = sessions.filter((session) => session.discipline === 'run').map((session) => session.date);
     if (runDates.some((runDate) => Math.abs(dayDifference(runDate, date)) < 2)) return Number.NEGATIVE_INFINITY;
   }
 
-  let score = sameDay.length === 0 ? 18 : doubleDay!.score;
-  if ((template.intensity === 'hard' || template.intensity === 'max') && sessions.some((session) => isHard(session) && Math.abs(dayDifference(session.date, date)) <= 1)) score -= 100;
-  if (discipline === 'bike' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 28 : 0;
-  if (discipline === 'run' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 22 : 0;
-  if (discipline === 'strength') {
-    const neighboringLower = sessions.filter((session) => Math.abs(dayDifference(session.date, date)) <= 1 && session.lowerBodyDemand === 'high');
-    score -= neighboringLower.length * 18;
-    if (offset === 1 || offset === 4) score += 8;
+  const hardCandidate = template.intensity === 'hard' || template.intensity === 'max';
+  const weeklyStructure = resolveWeeklySchedule(input);
+  const structureScore = weeklyStructurePlacementScore({
+    offset,
+    discipline,
+    template,
+    sessions,
+    input,
+    structure: weeklyStructure,
+  });
+  if (!Number.isFinite(structureScore)) return Number.NEGATIVE_INFINITY;
+  const longCandidate = (discipline === 'bike' || discipline === 'run')
+    && template.title.toLowerCase().includes('long');
+  const keyLowerBodyCandidate = (discipline === 'bike' || discipline === 'run')
+    && (template.keySession || hardCandidate || longCandidate);
+
+  const recentPreviousWeek = (input.previousWeek ?? []).filter((session) => {
+    const gap = dayDifference(session.date, date);
+    return gap >= 1 && gap <= 2;
+  });
+  const contextSessions = [...sessions, ...recentPreviousWeek];
+  const adjacent = contextSessions.filter((session) => Math.abs(dayDifference(session.date, date)) === 1);
+  const previousDay = contextSessions.filter((session) => dayDifference(session.date, date) === 1);
+  const nextDay = contextSessions.filter((session) => dayDifference(date, session.date) === 1);
+  const adjacentKeyLower = adjacent.filter(isKeyLowerBodySession);
+  const sameDayKeyLower = sameDay.filter(isKeyLowerBodySession);
+  const adjacentCommittedKeyLower = adjacentKeyLower.filter(
+    (session) => (session as WholeAthletePlannedSession).planningCommitment !== 'generated',
+  );
+
+  // Athlete/calendar commitments remain hard anchors. Generated strength may
+  // sit beside an intentionally structured generated key day, but it must not
+  // be placed immediately before or after a fixed/preferred key lower-body
+  // session that the athlete did not ask Side Quest to move.
+  if (discipline === 'strength' && adjacentCommittedKeyLower.length > 0) {
+    return Number.NEGATIVE_INFINITY;
   }
-  if (discipline === 'swim' && (offset === 0 || offset === 2 || offset === 4)) score += 5;
-  if (discipline === 'bike' && (offset === 2 || offset === 5)) score += 5;
-  if (discipline === 'run' && (offset === 1 || offset === 4 || offset === 6)) score += 5;
+
+  // Strength should not share the same day as a hard bike workout. The
+  // supported consolidation pattern is long run + controlled strength.
+  if (
+    discipline === 'strength'
+    && sameDayKeyLower.some((session) => session.discipline === 'bike' && isHard(session))
+  ) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const activeDates = new Set(
+    sessions
+      .filter((session) => session.discipline !== 'rest' && session.discipline !== 'mobility')
+      .map((session) => session.date),
+  );
+
+  const compatibleDouble = sameDay.length > 0
+    && sameDay.every((session) => isCompatibleSameDayPair(session, discipline, template));
+
+  let score = structureScore;
+
+  if (sameDay.length === 0) {
+    score += 14;
+    if (activeDates.size >= 5) score -= 8;
+    if (activeDates.size >= 6) score -= 14;
+
+  } else if (compatibleDouble) {
+    score += 24;
+    if (activeDates.size >= 5) score += 8;
+  } else if (discipline === 'swim' && !hardCandidate) {
+    score += 4;
+  } else {
+    score -= 20;
+  }
+
+  if (hardCandidate) {
+    if (adjacent.some(isHard)) score -= 120;
+    score -= adjacent.filter((session) => session.recoveryCost >= 3).length * 20;
+    if (previousDay.length === 0 || previousDay.every(isLowLoadSession)) score += 10;
+  }
+
+  if (keyLowerBodyCandidate) {
+    score -= adjacentKeyLower.length * 34;
+    score -= adjacent.filter(
+      (session) => session.discipline === 'strength' && session.lowerBodyDemand !== 'none',
+    ).length * 22;
+    if (previousDay.length === 0 || previousDay.every(isLowLoadSession)) score += 10;
+    if (nextDay.length === 0 || nextDay.every(isLowLoadSession)) score += 6;
+  }
+
+  if (discipline === 'strength') {
+    const hasSwim = sameDay.some((session) => session.discipline === 'swim');
+    const hasLongRun = sameDay.some(
+      (session) => session.discipline === 'run' && /\blong\b/i.test(session.title),
+    );
+    if (hasLongRun && !hardCandidate) score += 52;
+    if (hasSwim && !hardCandidate) score += 18;
+    score -= adjacentKeyLower.length * 24;
+    score -= sameDayKeyLower.filter((session) => session.discipline === 'bike').length
+      * (hardCandidate ? 34 : 18);
+
+    const neighboringLower = adjacent.filter(
+      (session) => session.lowerBodyDemand === 'high'
+        || (session.lowerBodyDemand === 'moderate' && session.recoveryCost >= 3),
+    );
+    const adjacentHardLower = adjacent.filter(
+      (session) => (session.discipline === 'bike' || session.discipline === 'run')
+        && isHard(session),
+    );
+    score -= neighboringLower.length * 18;
+    score -= adjacentHardLower.length * 30;
+
+    if ((offset === 1 || offset === 4) && adjacentKeyLower.length === 0) score += 5;
+  }
+
+  if (discipline === 'swim') {
+    if (!hardCandidate && sameDay.some((session) => session.discipline === 'strength')) score += 16;
+    if (!hardCandidate && previousDay.some(isKeyLowerBodySession)) score += 12;
+    if (offset === 1 || offset === 3 || offset === 6) score += 4;
+  }
+
+  if (discipline === 'bike') {
+    if (longCandidate) score += offset >= 5 ? 24 : 0;
+    else if (offset === 1 || offset === 3) score += 4;
+  }
+
+  if (discipline === 'run') {
+    if (longCandidate) score += offset === 6 ? 28 : offset >= 5 ? 12 : 0;
+    else if (offset === 2 || offset === 4 || offset === 6) score += 4;
+  }
+
+  if (longCandidate) {
+    score -= adjacent.filter((session) => isHard(session) || session.recoveryCost >= 4).length * 28;
+    score -= adjacentKeyLower.length * 14;
+  }
 
   for (const session of sameDay) {
-    if (session.recoveryCost >= 4 || template.intensity === 'hard') score -= 12;
-    if ((discipline === 'run' || discipline === 'bike') && session.lowerBodyDemand === 'high') score -= 24;
+    if (hardCandidate && session.recoveryCost >= 4) score -= 24;
+    if ((discipline === 'run' || discipline === 'bike') && session.lowerBodyDemand === 'high') score -= 28;
   }
+
   return score;
+}
+
+
+function resolveWeeklySchedule(input: WholeAthleteWeeklyPlannerInput): WeeklySchedulePreference | null {
+  return resolveWeeklySchedulePreference(input.goalType, input.weeklySchedule);
+}
+
+export function resolveWeeklySchedulePreference(
+  goalType: PerformanceGoalType,
+  override?: WeeklySchedulePreference,
+): WeeklySchedulePreference | null {
+  const usesTriathlonStructure = [
+    'triathlon_sprint',
+    'triathlon_olympic',
+    'ironman_70_3',
+    'ironman_full',
+  ].includes(goalType);
+
+  if (!usesTriathlonStructure && !override) return null;
+
+  const requestedRestDay = override?.restDays?.[0] ?? 0;
+  const base = usesTriathlonStructure
+    ? deriveAutomaticTriathlonSchedule(requestedRestDay, override)
+    : null;
+
+  if (!override) return base;
+
+  return {
+    ...(base ?? {}),
+    ...override,
+    preferredDays: {
+      ...(base?.preferredDays ?? {}),
+      ...(override.preferredDays ?? {}),
+    },
+  };
+}
+
+type AutomaticTriathlonRole =
+  | 'quality'
+  | 'easyRunStrength'
+  | 'support'
+  | 'qualityRunStrength'
+  | 'longBike'
+  | 'longRunSwim';
+
+function deriveAutomaticTriathlonSchedule(
+  restDay: number,
+  override?: WeeklySchedulePreference,
+): WeeklySchedulePreference {
+  const normalizedRest: WeekdayIndex = Number.isInteger(restDay) && restDay >= 0 && restDay <= 6
+    ? restDay as WeekdayIndex
+    : 0;
+
+  const days: WeekdayIndex[] = ([0, 1, 2, 3, 4, 5, 6] as WeekdayIndex[])
+    .filter((day) => day !== normalizedRest);
+  const roles: AutomaticTriathlonRole[] = [
+    'quality',
+    'easyRunStrength',
+    'support',
+    'qualityRunStrength',
+    'longBike',
+    'longRunSwim',
+  ];
+
+  let best:
+    | { score: number; assignment: Record<AutomaticTriathlonRole, WeekdayIndex> }
+    | undefined;
+
+  for (const permutation of permutations(days)) {
+    const assignment = Object.fromEntries(
+      roles.map((role, index) => [role, permutation[index]!]),
+    ) as Record<AutomaticTriathlonRole, WeekdayIndex>;
+    const score = automaticTriathlonScheduleScore(
+      assignment,
+      normalizedRest,
+      override,
+    );
+    if (!best || score < best.score) best = { score, assignment };
+  }
+
+  const assignment: Record<AutomaticTriathlonRole, WeekdayIndex> = best?.assignment ?? {
+    quality: 1,
+    easyRunStrength: 2,
+    support: 3,
+    qualityRunStrength: 4,
+    longBike: 5,
+    longRunSwim: 6,
+  };
+
+  return {
+    preferredDays: {
+      swim: [assignment.quality, assignment.support, assignment.longRunSwim],
+      bike: [assignment.quality, assignment.support, assignment.longBike],
+      run: [assignment.easyRunStrength, assignment.qualityRunStrength, assignment.longRunSwim],
+      strength: [assignment.easyRunStrength, assignment.qualityRunStrength],
+    },
+    restDays: [normalizedRest],
+    hardBikeDay: assignment.quality,
+    longBikeDay: assignment.longBike,
+    hardRunDay: assignment.qualityRunStrength,
+    longRunDay: assignment.longRunSwim,
+    groupSwimDays: [assignment.quality],
+  };
+}
+
+function automaticTriathlonScheduleScore(
+  assignment: Record<AutomaticTriathlonRole, WeekdayIndex>,
+  restDay: WeekdayIndex,
+  override?: WeeklySchedulePreference,
+): number {
+  let score = 0;
+
+  score += Math.abs(assignment.longBike - 5) * 80;
+  score += Math.abs(assignment.longRunSwim - 6) * 80;
+
+  score += Math.abs(assignment.quality - 1) * 8;
+  score += Math.abs(assignment.support - 3) * 4;
+  score += Math.abs(assignment.easyRunStrength - 2) * 5;
+  score += Math.abs(assignment.qualityRunStrength - 4) * 5;
+
+  for (const longRole of ['longBike', 'longRunSwim'] as const) {
+    if (cyclicWeekdayDistance(assignment.quality, assignment[longRole]) === 1) score += 35;
+  }
+
+  if (cyclicWeekdayDistance(assignment.qualityRunStrength, assignment.longRunSwim) === 1) score += 22;
+  if (cyclicWeekdayDistance(assignment.easyRunStrength, assignment.longRunSwim) === 1) score += 12;
+  if (cyclicWeekdayDistance(assignment.easyRunStrength, assignment.qualityRunStrength) === 1) score += 18;
+  if (cyclicWeekdayDistance(assignment.quality, assignment.support) === 1) score += 8;
+
+  if ((assignment.quality + 1) % 7 === restDay) score -= 10;
+  if (assignment.support === 0 && assignment.longRunSwim === 6) score -= 8;
+  if (assignment.easyRunStrength === 0 && assignment.longRunSwim === 6) score += 18;
+  if (assignment.qualityRunStrength === 0 && assignment.longRunSwim === 6) score += 30;
+
+  // Explicit recurring weekday preferences shape the AUTOMATIC scaffold rather
+  // than being pasted over it after the fact. This lets the remaining roles
+  // reflow coherently around a partial override such as:
+  //   Sunday rest + swims on Monday / Wednesday / Friday.
+  //
+  // A preference is strong but not impossible: if an athlete supplies fewer
+  // preferred weekdays than the requested discipline frequency, the solver can
+  // still use additional legal days.
+  const preferred = override?.preferredDays;
+  const available = override?.availableDays;
+  score += automaticRoleAvailabilityPenalty(assignment.quality, available?.swim);
+  score += automaticRoleAvailabilityPenalty(assignment.support, available?.swim);
+  score += automaticRoleAvailabilityPenalty(assignment.longRunSwim, available?.swim);
+  score += automaticRoleAvailabilityPenalty(assignment.quality, available?.bike);
+  score += automaticRoleAvailabilityPenalty(assignment.support, available?.bike);
+  score += automaticRoleAvailabilityPenalty(assignment.longBike, available?.bike);
+  score += automaticRoleAvailabilityPenalty(assignment.easyRunStrength, available?.run);
+  score += automaticRoleAvailabilityPenalty(assignment.qualityRunStrength, available?.run);
+  score += automaticRoleAvailabilityPenalty(assignment.longRunSwim, available?.run);
+  score += automaticRoleAvailabilityPenalty(assignment.easyRunStrength, available?.strength);
+  score += automaticRoleAvailabilityPenalty(assignment.qualityRunStrength, available?.strength);
+
+  score += automaticRolePreferencePenalty(assignment.quality, preferred?.swim);
+  score += automaticRolePreferencePenalty(assignment.support, preferred?.swim);
+  score += automaticRolePreferencePenalty(assignment.longRunSwim, preferred?.swim);
+
+  score += automaticRolePreferencePenalty(assignment.quality, preferred?.bike);
+  score += automaticRolePreferencePenalty(assignment.support, preferred?.bike);
+  score += automaticRolePreferencePenalty(assignment.longBike, preferred?.bike);
+
+  score += automaticRolePreferencePenalty(assignment.easyRunStrength, preferred?.run);
+  score += automaticRolePreferencePenalty(assignment.qualityRunStrength, preferred?.run);
+  score += automaticRolePreferencePenalty(assignment.longRunSwim, preferred?.run);
+
+  score += automaticRolePreferencePenalty(assignment.easyRunStrength, preferred?.strength);
+  score += automaticRolePreferencePenalty(assignment.qualityRunStrength, preferred?.strength);
+
+  if (override?.groupSwimDays?.length
+    && !override.groupSwimDays.includes(assignment.quality)) {
+    score += 500;
+  }
+
+  if (override?.hardBikeDay !== undefined && assignment.quality !== override.hardBikeDay) {
+    score += 600;
+  }
+  if (override?.longBikeDay !== undefined && assignment.longBike !== override.longBikeDay) {
+    score += 600;
+  }
+  if (override?.hardRunDay !== undefined
+    && assignment.qualityRunStrength !== override.hardRunDay) {
+    score += 600;
+  }
+  if (override?.longRunDay !== undefined && assignment.longRunSwim !== override.longRunDay) {
+    score += 600;
+  }
+
+  return score;
+}
+
+function automaticRoleAvailabilityPenalty(
+  weekday: WeekdayIndex,
+  available: WeekdayIndex[] | undefined,
+): number {
+  if (!available?.length) return 0;
+  return available.includes(weekday) ? 0 : 10_000;
+}
+
+function automaticRolePreferencePenalty(
+  weekday: WeekdayIndex,
+  preferred: WeekdayIndex[] | undefined,
+): number {
+  if (!preferred?.length) return 0;
+  return preferred.includes(weekday) ? 0 : 220;
+}
+
+function cyclicWeekdayDistance(left: WeekdayIndex, right: WeekdayIndex): number {
+  const direct = Math.abs(left - right);
+  return Math.min(direct, 7 - direct);
+}
+
+function permutations(values: WeekdayIndex[]): WeekdayIndex[][] {
+  if (values.length <= 1) return [values];
+  const result: WeekdayIndex[][] = [];
+  values.forEach((value, index) => {
+    const remaining = [...values.slice(0, index), ...values.slice(index + 1)];
+    for (const tail of permutations(remaining)) result.push([value, ...tail]);
+  });
+  return result;
+}
+
+function weeklyStructurePlacementScore({
+  offset,
+  discipline,
+  template,
+  sessions,
+  input,
+  structure,
+}: {
+  offset: number;
+  discipline: TrainableDiscipline;
+  template: SessionTemplate;
+  sessions: WholeAthletePlannedSession[];
+  input: WholeAthleteWeeklyPlannerInput;
+  structure: WeeklySchedulePreference | null;
+}): number {
+  if (!structure) return 0;
+
+  if (structure.restDays?.includes(offset as WeekdayIndex)) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  let score = 0;
+  const preferred = structure.preferredDays?.[discipline];
+  if (preferred?.length) {
+    score += preferred.includes(offset as WeekdayIndex) ? 34 : -24;
+  }
+
+  const hard = template.intensity === 'hard' || template.intensity === 'max';
+  const long = template.title.toLowerCase().includes('long');
+  const existingCount = sessions.filter((session) => session.discipline === discipline).length;
+
+  if (discipline === 'bike') {
+    if (long && structure.longBikeDay !== undefined) {
+      score += offset === structure.longBikeDay ? 52 : -28;
+    } else if (hard && structure.hardBikeDay !== undefined) {
+      score += offset === structure.hardBikeDay ? 48 : -24;
+    } else if (!hard && !long && preferred?.length) {
+      const supportBikeDays = preferred.filter(
+        (day) => day !== structure.hardBikeDay && day !== structure.longBikeDay,
+      );
+      const occupiedBikeDays = new Set(
+        sessions
+          .filter((session) => session.discipline === 'bike')
+          .map((session) => dayOffset(input.weekStartDate, session.date)),
+      );
+      const target = supportBikeDays.find((day) => !occupiedBikeDays.has(day))
+        ?? supportBikeDays[0]
+        ?? preferred[0];
+      if (target !== undefined) {
+        score += offset === target ? 54 : -16;
+      }
+    }
+  }
+
+  if (discipline === 'run') {
+    if (long && structure.longRunDay !== undefined) {
+      score += offset === structure.longRunDay ? 48 : -24;
+    } else if (hard && structure.hardRunDay !== undefined) {
+      score += offset === structure.hardRunDay ? 48 : -24;
+    } else if (input.returnToRun || input.recentBoneStress || input.health.boneStress === 'recent') {
+      const protectedOrder: WeekdayIndex[] = [2, 4, 6];
+      const target = protectedOrder[Math.min(existingCount, protectedOrder.length - 1)];
+      score += offset === target ? 30 : 0;
+    } else if (!hard && !long && preferred?.length) {
+      score += offset === preferred[0] ? 22 : 0;
+    }
+  }
+
+  if (discipline === 'swim') {
+    const groupDays = structure.groupSwimDays ?? [];
+    if (template.intensity === 'moderate' || hard) {
+      score += groupDays.includes(offset as WeekdayIndex) ? 40 : -12;
+    } else if (preferred?.length) {
+      const easySwimOrder = preferred.filter((day) => !groupDays.includes(day));
+      const existingEasySwims = sessions.filter(
+        (session) => session.discipline === 'swim'
+          && session.intensity !== 'moderate'
+          && session.intensity !== 'hard'
+          && session.intensity !== 'max',
+      ).length;
+      const target = easySwimOrder[Math.min(existingEasySwims, Math.max(0, easySwimOrder.length - 1))];
+      if (target !== undefined) score += offset === target ? 38 : -6;
+    }
+  }
+
+  if (discipline === 'strength' && preferred?.length) {
+    const target = preferred[Math.min(existingCount, preferred.length - 1)];
+    score += offset === target ? 28 : 0;
+  }
+
+  return score;
+}
+
+function dayOffset(weekStartDate: string, date: string): WeekdayIndex {
+  const raw = dayDifference(weekStartDate, date);
+  return clampInt(raw, 0, 6) as WeekdayIndex;
+}
+
+function isCompatibleSameDayPair(
+  existing: WholeAthletePlannedSession,
+  discipline: TrainableDiscipline,
+  template: SessionTemplate,
+): boolean {
+  const candidateHard = template.intensity === 'hard' || template.intensity === 'max';
+  const existingHard = isHard(existing);
+
+  if (existing.discipline === 'rest' || existing.discipline === 'mobility') return true;
+
+  const swimStrength = (
+    (existing.discipline === 'swim' && discipline === 'strength')
+    || (existing.discipline === 'strength' && discipline === 'swim')
+  );
+  if (swimStrength) return !(candidateHard && existingHard);
+
+  const longRunStrength = (
+    existing.discipline === 'run'
+    && discipline === 'strength'
+    && /\blong\b/i.test(existing.title)
+    && !candidateHard
+  ) || (
+    existing.discipline === 'strength'
+    && discipline === 'run'
+    && /\blong\b/i.test(template.title)
+    && !existingHard
+  );
+  if (longRunStrength) return true;
+
+  if (existing.discipline === 'swim' && discipline === 'bike') {
+    return existing.recoveryCost <= 2;
+  }
+
+  if (existing.discipline === 'swim' && discipline === 'run') {
+    return !candidateHard && existing.recoveryCost <= 2;
+  }
+
+  if (discipline === 'swim' && existing.discipline === 'bike') {
+    return template.intensity !== 'hard' && template.intensity !== 'max' && existing.recoveryCost <= 4;
+  }
+
+  if (discipline === 'swim' && existing.discipline === 'run') {
+    return !candidateHard && template.intensity === 'easy' && existing.recoveryCost <= 3;
+  }
+
+  return false;
+}
+
+function isKeyLowerBodySession(session: UnifiedTrainingSession): boolean {
+  if (session.discipline !== 'bike' && session.discipline !== 'run') return false;
+  return session.keySession
+    || isHard(session)
+    || session.recoveryCost >= 4
+    || /\blong\b/i.test(session.title);
+}
+
+function isLowLoadSession(session: UnifiedTrainingSession): boolean {
+  return session.recoveryCost <= 2
+    && session.lowerBodyDemand !== 'high'
+    && !isHard(session);
 }
 
 function assessDoubleDay(
@@ -781,6 +1368,26 @@ function assessDoubleDay(
     };
   }
 
+  if (pair.has('strength') && pair.has('run')) {
+    const longRunPair = (
+      (discipline === 'run' && /\\blong\\b/i.test(template.title))
+      || (existing.discipline === 'run' && /\\blong\\b/i.test(existing.title))
+    );
+    const strengthIsControlled = (
+      (discipline === 'strength' && !candidateHard)
+      || (existing.discipline === 'strength' && !isHard(existing))
+    );
+
+    if (longRunPair && strengthIsControlled) {
+      return {
+        score: athleteCommitted ? 3 : 1,
+        rationale: athleteCommitted
+          ? `Intentional double day: paired the long run with the athlete's ${label.toLowerCase()} commitment to consolidate lower-body load and preserve recovery space.`
+          : 'Intentional double day: long run and controlled strength are consolidated on the same day so the surrounding bike and run quality days stay protected.',
+      };
+    }
+  }
+
   if (pair.has('strength') && (pair.has('bike') || pair.has('run'))) {
     if (candidateHard || isHard(existing) || existing.lowerBodyDemand === 'high' || template.intensity !== 'easy') return null;
     return {
@@ -793,6 +1400,7 @@ function assessDoubleDay(
 
   return null;
 }
+
 
 function createGeneratedSession({
   date,
@@ -918,6 +1526,48 @@ function fixedConflictWarnings(sessions: WholeAthletePlannedSession[], input: Wh
     if (isHard(session) && derivePlanningState(input) !== 'build') warnings.push(`${session.title} is a fixed high-load session during a ${derivePlanningState(input)} week; generated training was reduced around it.`);
   }
   return warnings;
+}
+
+
+function weekCoherenceWarnings(sessions: WholeAthletePlannedSession[]): string[] {
+  const warnings: string[] = [];
+  const trainable = sessions.filter(
+    (session) => session.discipline !== 'rest' && session.discipline !== 'mobility',
+  );
+  const activeDates = new Set(trainable.map((session) => session.date));
+  const keyLowerBody = trainable.filter(isKeyLowerBodySession).sort(sortSessions);
+
+  for (let index = 1; index < keyLowerBody.length; index += 1) {
+    const previous = keyLowerBody[index - 1]!;
+    const current = keyLowerBody[index]!;
+    if (Math.abs(dayDifference(previous.date, current.date)) === 1) {
+      warnings.push(
+        `Key lower-body sessions are stacked on ${previous.date} and ${current.date}; protect the quality of both unless the back-to-back block is intentional.`,
+      );
+    }
+  }
+
+  for (const strength of trainable.filter(
+    (session) => session.discipline === 'strength' && session.lowerBodyDemand !== 'none',
+  )) {
+    const conflict = keyLowerBody.find(
+      (session) => session.id !== strength.id
+        && Math.abs(dayDifference(session.date, strength.date)) === 1,
+    );
+    if (conflict) {
+      warnings.push(
+        `${strength.title} sits next to ${conflict.title}; consider moving lower-body strength so it supports rather than compromises the key endurance session.`,
+      );
+    }
+  }
+
+  if (activeDates.size === 7 && trainable.length >= 7) {
+    warnings.push(
+      'Training occupies all seven days. Prefer a compatible double-session day when possible so the week retains at least one genuine low-load or off day.',
+    );
+  }
+
+  return unique(warnings);
 }
 
 function frequencyWarnings(sessions: WholeAthletePlannedSession[], frequency: FrequencyPlan): string[] {

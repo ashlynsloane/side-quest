@@ -106,10 +106,19 @@ function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapsh
   const snapshot = value as Partial<LiveWorkoutSessionSnapshot>;
   return snapshot.schemaVersion === 1
     && Boolean(snapshot.workout?.id)
+    && Array.isArray(snapshot.workout?.stations)
+    && snapshot.workout.stations.length > 0
+    && Boolean(snapshot.workout?.request)
     && typeof snapshot.startedAt === 'string'
     && Number.isInteger(snapshot.stationIndex)
     && (snapshot.phase === 'work' || snapshot.phase === 'rest')
     && typeof snapshot.remainingSeconds === 'number';
+}
+
+function recordOrEmpty<T>(value: unknown): Record<string, T> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, T>
+    : {};
 }
 
 export function createInitialLiveWorkoutSession(
@@ -154,6 +163,13 @@ export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapsh
       ...parsed,
       stationIndex: Math.max(0, parsed.stationIndex),
       remainingSeconds: Math.max(0, parsed.remainingSeconds),
+      running: Boolean(parsed.running),
+      stationRounds: recordOrEmpty<number>(parsed.stationRounds),
+      exerciseLoads: recordOrEmpty<LiveWorkoutLoadValue>(parsed.exerciseLoads),
+      exerciseSets: recordOrEmpty<LiveWorkoutLoggedSet[]>(parsed.exerciseSets),
+      restEntries: recordOrEmpty<LiveWorkoutRestEntry>(parsed.restEntries),
+      restRounds: Number.isFinite(parsed.restRounds) ? Math.max(1, Math.round(parsed.restRounds)) : 1,
+      restLoadUnit: parsed.restLoadUnit === 'kg' ? 'kg' : 'lb',
       planLink: isActiveWorkoutPlanLink(parsed.planLink) ? parsed.planLink : undefined,
     };
   } catch {

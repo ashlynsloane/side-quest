@@ -155,8 +155,10 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
   const weeksToRace = hints.weeksToRace ?? weeksUntilRace(date, metadata.raceDate);
   const phase = effectiveWorkoutNamePhase(hints.phase ?? metadata.phase, weeksToRace);
   const triathlon = hints.triathlon ?? metadata.triathlon;
-  const raceName = hints.raceName ?? metadata.raceName;
-  const contextFingerprint = [phase ?? '', triathlon ? 'tri' : '', weeksToRace?.toFixed(3) ?? '', raceName ?? '', hints.raceLocation ?? ''].join('|');
+  // Race identity belongs to planning context, not novelty naming. We do not
+  // synthesize event/location puns from an arbitrary race name unless Side Quest
+  // has explicit course knowledge (which this naming layer does not).
+  const contextFingerprint = [phase ?? '', triathlon ? 'tri' : '', weeksToRace?.toFixed(3) ?? ''].join('|');
   const assignmentKey = workoutNameAssignmentKey('endurance', event.id);
   if (hints.recentNames === undefined) {
     const cached = runtimeNameAssignments.get(assignmentKey);
@@ -182,8 +184,6 @@ export function generatedEnduranceDisplayName(event: TrainingCalendarEvent, hint
     phase,
     triathlon,
     weeksToRace,
-    raceName,
-    raceLocation: hints.raceLocation,
     workoutDate: date,
     environment: generatedEnvironment(event.discipline, text),
     seedKey: `${event.id}|${date}|${event.discipline}|${raw}|${durationMinutes}|${intensity}|${contextFingerprint}`,
@@ -212,8 +212,7 @@ export function plannedStrengthDisplayName(session: PlannedStrengthSession, hint
   const weeksToRace = hints.weeksToRace ?? weeksUntilRace(session.date, metadata?.raceDate);
   const phase = effectiveWorkoutNamePhase(hints.phase ?? metadata?.phase, weeksToRace);
   const triathlon = hints.triathlon ?? metadata?.triathlon;
-  const raceName = hints.raceName ?? metadata?.raceName;
-  const contextFingerprint = [phase ?? '', triathlon ? 'tri' : '', weeksToRace?.toFixed(3) ?? '', raceName ?? '', hints.raceLocation ?? '', fingerprint].join('|');
+  const contextFingerprint = [phase ?? '', triathlon ? 'tri' : '', weeksToRace?.toFixed(3) ?? '', fingerprint].join('|');
   const assignmentKey = workoutNameAssignmentKey('strength', session.id);
   if (hints.recentNames === undefined) {
     const cached = runtimeNameAssignments.get(assignmentKey);
@@ -232,8 +231,6 @@ export function plannedStrengthDisplayName(session: PlannedStrengthSession, hint
     phase,
     triathlon,
     weeksToRace,
-    raceName,
-    raceLocation: hints.raceLocation,
     workoutDate: session.date,
     seedKey: `${session.id}|${session.date}|${fingerprint || session.workout.name || session.title}|${contextFingerprint}`,
     recentNames,
@@ -249,7 +246,6 @@ function strengthHintsFromMetadata(metadata: GeneratedWorkoutNamingMetadata | un
     phase: effectiveWorkoutNamePhase(metadata.phase, weeksToRace),
     triathlon: metadata.triathlon,
     weeksToRace,
-    raceName: metadata.raceName,
   };
 }
 

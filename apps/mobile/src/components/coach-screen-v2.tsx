@@ -12,6 +12,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
 import { CoachClosedLoopPanel, CoachDecisionExplanationPanel } from '@/components/coach-closed-loop';
+import { CoachDecisionBriefCard } from '@/components/coach-decision-brief-card';
 import { CoachInsights } from '@/components/coach-insights';
 import { CoachOperatingInboxPanel } from '@/components/coach-operating-inbox';
 import { ProductAction, ProductDisclosure } from '@/components/product-ui';
@@ -26,6 +27,10 @@ import {
 } from '@/services/coach-closed-loop-runtime';
 import type { CoachClosedLoopSummary, CoachFollowUpResponse } from '@/services/coach-closed-loop-state';
 import { answerEnduranceEnvironmentQuestion } from '@/services/endurance-environment-coach';
+import {
+  buildCoachDecisionBrief,
+  type CoachDecisionBrief,
+} from '@/services/coach-decision-brief';
 import { loadEndurancePrescriptionPreview } from '@/services/endurance-prescription-runtime';
 import { refreshCoachObservedOutcomes } from '@/services/coach-observed-outcomes';
 import { buildCoachOperatingInbox, type CoachOperatingInboxItem } from '@/services/coach-operating-inbox';
@@ -43,6 +48,11 @@ import {
   type CoachMessageProposal,
 } from '@/services/coach-message-adaptation';
 import type { CoachConversationState } from '@/services/coach-conversation-state';
+import {
+  getLatestAppliedPlanDecisionSnapshot,
+  getLatestCompletedWorkoutAdaptationSnapshot,
+  refreshLatestWholeAthletePlan,
+} from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
 import type { DesignTokens } from '@/theme';
@@ -68,6 +78,7 @@ export default function CoachScreenV2() {
   const [conversation, setConversation] = useState<CoachConversationState | null>(null);
   const [closedLoopSummary, setClosedLoopSummary] = useState<CoachClosedLoopSummary | null>(null);
   const [coachInbox, setCoachInbox] = useState<CoachOperatingInboxItem[]>([]);
+  const [decisionBrief, setDecisionBrief] = useState<CoachDecisionBrief | null>(null);
   const [coachError, setCoachError] = useState<string | null>(null);
   const [coachResult, setCoachResult] = useState<string | null>(null);
   const [buildingProposal, setBuildingProposal] = useState(false);
@@ -85,6 +96,24 @@ export default function CoachScreenV2() {
     const saved = await getLatestTrainingBlock();
     const nextBlock = saved?.block ?? null;
     const now = new Date();
+    const wholeAthlete = nextBlock
+      ? await refreshLatestWholeAthletePlan().catch(() => null)
+      : null;
+    const adaptation = wholeAthlete
+      ? getLatestCompletedWorkoutAdaptationSnapshot()
+      : null;
+    const appliedPlan = wholeAthlete
+      ? getLatestAppliedPlanDecisionSnapshot()
+      : null;
+    const nextDecisionBrief = nextBlock
+      ? buildCoachDecisionBrief({
+          block: nextBlock,
+          developmentPlan: wholeAthlete?.developmentPlan ?? null,
+          adaptation,
+          appliedPlan,
+          asOf: now.toISOString(),
+        })
+      : null;
     const rangeStart = new Date(now);
     rangeStart.setDate(rangeStart.getDate() - 7);
     const rangeEnd = new Date(now);
@@ -110,6 +139,7 @@ export default function CoachScreenV2() {
     setProposal(thread?.pendingProposal ?? null);
     setSelectedOptionId(thread?.selectedOptionId ?? thread?.pendingProposal?.adaptation.adjustment.recommendedOptionId ?? null);
     setClosedLoopSummary(summary);
+    setDecisionBrief(nextDecisionBrief);
     setCoachInbox(buildCoachOperatingInbox({ block: nextBlock, calendarEvents: calendar, closedLoop: summary, observedOutcomes: observed, now: now.toISOString() }));
   }, []);
 
@@ -283,6 +313,8 @@ export default function CoachScreenV2() {
     <CoachOperatingInboxPanel items={coachInbox} />
 
     <CurrentCall session={nextSession} onOpen={openNextSession} tokens={tokens} styles={styles} />
+
+    {decisionBrief ? <CoachDecisionBriefCard brief={decisionBrief} /> : null}
 
     <View style={styles.conversationSection}>
       <View style={styles.conversationHeading}>

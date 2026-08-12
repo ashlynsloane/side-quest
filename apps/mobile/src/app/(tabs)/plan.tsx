@@ -17,10 +17,16 @@ import {
   listTrainingCalendarSources,
 } from '@/services/database';
 import { loadTrainingAvailabilityProfile } from '@/services/training-availability';
+import { applyRaceHorizonStrengthDose } from '@/services/race-horizon-strength-dose';
 import type { TrainingOutingScheduledSession } from '@/services/training-outings';
 import { conciseSessionLabel, generatedEnduranceDisplayName, plannedStrengthDisplayName } from '@/services/training-synthesis';
+import { trainingStimulusTagForEvent, trainingStimulusTagForStrength, type TrainingStimulusTag } from '@/services/training-stimulus-tag';
 import { SIDE_QUEST_PLAN_SOURCE_ID, type GeneratedWholeAthleteBlock } from '@/services/whole-athlete-plan';
-import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
+import {
+  getLatestCompletedWorkoutAdaptationSnapshot,
+  refreshLatestWholeAthletePlan,
+} from '@/services/whole-athlete-plan-runtime';
+import type { CompletedWorkoutAdaptationSnapshot } from '@/services/completed-workout-adaptation';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
 import type { DesignTokens } from '@/theme';
@@ -47,6 +53,7 @@ export default function PlanTab() {
   const [weekDecisionReason, setWeekDecisionReason] = useState<string | null>(null);
   const [planningWarning, setPlanningWarning] = useState<string | null>(null);
   const [planningNotice, setPlanningNotice] = useState<string | null>(null);
+  const [adaptationSnapshot, setAdaptationSnapshot] = useState<CompletedWorkoutAdaptationSnapshot | null>(null);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -54,7 +61,10 @@ export default function PlanTab() {
       let wholeAthlete: Awaited<ReturnType<typeof refreshLatestWholeAthletePlan>> = null;
       try {
         wholeAthlete = await refreshLatestWholeAthletePlan();
-        if (live) setPlanningWarning(null);
+        if (live) {
+          setPlanningWarning(null);
+          setAdaptationSnapshot(getLatestCompletedWorkoutAdaptationSnapshot());
+        }
       } catch (caught) {
         if (live) setPlanningWarning(caught instanceof Error ? caught.message : 'This week needs a refresh.');
       }
@@ -114,7 +124,10 @@ export default function PlanTab() {
     }
   }, [block, weekLoading, wholeAthletePlan]);
 
-  const strength = block?.weeks.flatMap((week) => week.sessions) ?? [];
+  const strength = block?.weeks.flatMap((week) => {
+    const developmentWeek = wholeAthletePlan?.developmentPlan?.weeks.find((item) => item.weekStartDate === week.weekStartDate);
+    return week.sessions.map((session) => applyRaceHorizonStrengthDose(session, developmentWeek));
+  }) ?? [];
   const days = weekDays(events, strength, anchorDate, scheduledSessions, availabilityEnabled);
   const today = localDate();
   const selectedIndex = days.findIndex((day) => day.date === today);
@@ -123,12 +136,13 @@ export default function PlanTab() {
   const phase = currentWeek?.phase;
   const totalSessions = counts.swim + counts.bike + counts.run + counts.strength;
   const selectedWeekStart = weekStartDate(anchorDate);
+  const developmentWeek = wholeAthletePlan?.developmentPlan?.weeks.find((item) => item.weekStartDate === selectedWeekStart);
   const currentWeekStart = weekStartDate(today);
   const blockWeekIndex = block ? block.weeks.findIndex((week) => week.weekStartDate === selectedWeekStart) : -1;
   const isCurrentCalendarWeek = selectedWeekStart === currentWeekStart;
   const canPreviousWeek = Boolean(block && blockWeekIndex > 0);
   const canNextWeek = Boolean(block && blockWeekIndex >= 0 && blockWeekIndex < block.weeks.length - 1);
-  const weekPositionLabel = blockWeekIndex >= 0 && block ? `WEEK ${blockWeekIndex + 1} OF ${block.weeks.length}` : 'WEEK';
+  const weekPositionLabel = blockWeekIndex >= 0 && block ? `VIEW WEEK ${blockWeekIndex + 1} OF ${block.weeks.length}` : 'WEEK';
 
   const moveWeek = (offset: -1 | 1) => {
     void selectPlanWeek(addDays(selectedWeekStart, offset * 7));
@@ -148,7 +162,15 @@ export default function PlanTab() {
 
   const openEndurance = (event: TrainingCalendarEvent) => {
     if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(event)) {
-      router.push(`/endurance-preview?id=${encodeURIComponent(event.id)}&date=${event.startAt.slice(0, 10)}` as Href);
+      const params = new URLSearchParams({
+        id: event.id,
+        date: event.startAt.slice(0, 10),
+        title: event.title,
+        discipline: event.discipline,
+        startAt: event.startAt,
+        endAt: event.endAt ?? '',
+      });
+      router.push(`/endurance-preview?${params.toString()}` as Href);
       return;
     }
     router.push('/schedule' as Href);
@@ -160,13 +182,13 @@ export default function PlanTab() {
       const closed = item.session.completionStatus === 'completed' || item.session.completionStatus === 'skipped';
       return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session)} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
         <V23SportPill kind="strength" />
-        <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><Text style={styles.sessionMeta}>{meta}</Text></View>
+        <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><View style={styles.sessionMetaRow}><StimulusTagBadge tag={item.stimulusTag} styles={styles} /><Text style={styles.sessionMeta}>{meta}</Text></View></View>
         {item.session.completionStatus === 'completed' ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View> : <V23Icon name="chevron" color={tokens.textMuted} size={15} />}
       </Pressable>;
     }
     return <Pressable key={item.id} onPress={() => openEndurance(item.event)} style={styles.sessionRow}>
       <V23SportPill kind={normalizeSportKind(item.discipline)} />
-      <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{item.title}</Text><Text style={styles.sessionMeta}>{meta}</Text></View>
+      <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{item.title}</Text><View style={styles.sessionMetaRow}><StimulusTagBadge tag={item.stimulusTag} styles={styles} /><Text style={styles.sessionMeta}>{meta}</Text></View></View>
       {item.event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(item.event)
         ? <V23Icon name="chevron" color={tokens.textMuted} size={15} />
         : <View style={[styles.statusDot, { backgroundColor: disciplineColor(item.discipline, tokens.accent) }]} />}
@@ -212,6 +234,36 @@ export default function PlanTab() {
       <View style={styles.noticeIcon}><V23Icon name="heart" color={tokens.warning} size={17} /></View>
       <View style={styles.noticeCopy}><Text style={styles.noticeLabel}>PLAN NEEDS ATTENTION</Text><Text style={styles.noticeText}>{planningNotice}</Text></View>
     </View> : null}
+
+    {developmentWeek ? <View style={styles.developmentCard}>
+      <View style={styles.developmentHeader}>
+        <Text style={styles.developmentEyebrow}>RACE HORIZON · WEEK {developmentWeek.weekNumber} OF {developmentWeek.totalWeeks} · {phaseLabel(developmentWeek.phase)}</Text>
+        <View style={styles.developmentLoadPill}><Text style={styles.developmentLoadText}>{developmentLoadLabel(developmentWeek.loadIntent)}</Text></View>
+      </View>
+      <Text style={styles.developmentTitle}>{developmentWeek.weekPurpose}</Text>
+      <View style={styles.developmentRows}>
+        <Text style={styles.developmentRow}><Text style={styles.developmentRowLabel}>TUE BIKE  </Text>{developmentWeek.bikeQuality.title}</Text>
+        <Text style={styles.developmentRow}><Text style={styles.developmentRowLabel}>SAT LONG  </Text>{developmentWeek.longRide.title}</Text>
+        <Text style={styles.developmentRow}><Text style={styles.developmentRowLabel}>RUN  </Text>{developmentWeek.runMode === 'return_to_run' ? '3 return-to-run exposures · duration before speed' : developmentWeek.longRun.title}</Text>
+      </View>
+    </View> : null}
+
+    {adaptationSnapshot?.pendingResponseRequests[0]
+      ? <EnduranceResponsePromptCard
+          request={adaptationSnapshot.pendingResponseRequests[0]}
+          remainingCount={Math.max(0, adaptationSnapshot.pendingResponseRequests.length - 1)}
+          onPress={() => {
+            const request = adaptationSnapshot.pendingResponseRequests[0]!;
+            const params = new URLSearchParams({ activityId: request.activityId, stage: request.stage });
+            router.push(`/endurance-response?${params.toString()}` as Href);
+          }}
+          styles={styles}
+        />
+      : null}
+
+    {adaptationSnapshot?.hasEvidence
+      ? <AdaptationSignalCard snapshot={adaptationSnapshot} styles={styles} />
+      : null}
 
     <ProductSection eyebrow={isCurrentCalendarWeek ? 'THIS WEEK' : weekPositionLabel} title={formatWeekRange(days)}>
       <View style={styles.weekNavigator}>
@@ -273,6 +325,63 @@ export default function PlanTab() {
   </V23Screen>;
 }
 
+function EnduranceResponsePromptCard({
+  request,
+  remainingCount,
+  onPress,
+  styles,
+}: {
+  request: CompletedWorkoutAdaptationSnapshot['pendingResponseRequests'][number];
+  remainingCount: number;
+  onPress: () => void;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const nextDay = request.stage === 'next_day';
+  return <Pressable accessibilityRole="button" onPress={onPress} style={styles.responsePromptCard}>
+    <View style={styles.responsePromptIcon}><V23Icon name={nextDay ? 'clock' : 'insights'} color="#526E9A" size={18} /></View>
+    <View style={styles.responsePromptCopy}>
+      <Text style={styles.responsePromptEyebrow}>{nextDay ? 'NEXT-DAY RTR CHECK' : 'COMPLETED SESSION'}</Text>
+      <Text style={styles.responsePromptTitle}>{nextDay ? 'How are you today?' : 'How did this session go?'}</Text>
+      <Text style={styles.responsePromptBody}>{request.sessionTitle}{remainingCount ? ` · ${remainingCount} more response${remainingCount === 1 ? '' : 's'} waiting` : ''}</Text>
+    </View>
+    <V23Icon name="chevron" color="#526E9A" size={16} />
+  </Pressable>;
+}
+
+function AdaptationSignalCard({
+  snapshot,
+  styles,
+}: {
+  snapshot: CompletedWorkoutAdaptationSnapshot;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const signal = snapshot.primary;
+  return <View style={styles.adaptationCard}>
+    <View style={styles.adaptationHeader}>
+      <Text style={styles.adaptationEyebrow}>COMPLETED-WORKOUT ADAPTATION</Text>
+      <View style={styles.adaptationPill}><Text style={styles.adaptationPillText}>{signal.actionLabel}</Text></View>
+    </View>
+    <Text style={styles.adaptationTitle}>{signal.title}</Text>
+    <Text style={styles.adaptationBody}>{signal.body}</Text>
+    {snapshot.statusChips.length ? <View style={styles.adaptationStatusRow}>
+      {snapshot.statusChips.map((chip) => <View key={chip.label} style={styles.adaptationStatusChip}>
+        <Text style={styles.adaptationStatusLabel}>{chip.label}</Text>
+        <Text style={styles.adaptationStatusValue}>{chip.actionLabel}</Text>
+      </View>)}
+    </View> : null}
+    {signal.pendingNote ? <View style={styles.adaptationPending}>
+      <V23Icon name="clock" color="#526E9A" size={14} />
+      <Text style={styles.adaptationPendingText}>{signal.pendingNote}</Text>
+    </View> : null}
+  </View>;
+}
+
+function StimulusTagBadge({ tag, styles }: { tag: TrainingStimulusTag; styles: ReturnType<typeof makeStyles> }) {
+  return <View style={[styles.stimulusTag, { backgroundColor: tag.backgroundColor }]}>
+    <Text style={[styles.stimulusTagText, { color: tag.textColor }]}>{tag.label}</Text>
+  </View>;
+}
+
 function ToolButton({ icon, title, body, onPress, styles, tokens }: {
   icon: 'adjust' | 'heart' | 'insights' | 'goal';
   title: string;
@@ -298,6 +407,7 @@ type DayItemBase = {
   outingId?: string;
   locationName?: string;
   transitionMinutes?: number;
+  stimulusTag: TrainingStimulusTag;
 };
 
 type DayItem =
@@ -332,7 +442,7 @@ function weekDays(
         title: event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID && isEnduranceEvent(event)
           ? generatedEnduranceDisplayName(event)
           : conciseSessionLabel({ discipline: event.discipline, title: event.title }),
-        meta: eventMeta(event),
+        meta: eventMeta(event, availabilityEnabled),
         discipline: event.discipline,
         event,
         sortAt: event.allDay ? `${iso}T23:59:00` : event.startAt,
@@ -341,6 +451,7 @@ function weekDays(
         outingId: planned?.trainingOutingId,
         locationName: planned?.scheduledLocationName,
         transitionMinutes: planned?.transitionMinutes,
+        stimulusTag: trainingStimulusTagForEvent(event),
       }];
     });
     const strengthItems: DayItem[] = strength.flatMap((session) => {
@@ -350,7 +461,7 @@ function weekDays(
       if (displayDate !== iso) return [];
       const displaySession = displayDate === session.date ? session : { ...session, date: displayDate };
       const time = planned?.scheduledStartAt
-        ? availabilityEnabled ? generatedDaypart(planned.scheduledStartAt) : formatScheduledTime(planned.scheduledStartAt)
+        ? formatScheduledTime(planned.scheduledStartAt)
         : null;
       const duration = Math.round(session.workout.estimatedElapsedSeconds / 60);
       const status = strengthStatusLabel(session.completionStatus);
@@ -366,6 +477,7 @@ function weekDays(
         outingId: planned?.trainingOutingId,
         locationName: planned?.scheduledLocationName,
         transitionMinutes: planned?.transitionMinutes,
+        stimulusTag: trainingStimulusTagForStrength(displaySession),
       }];
     });
     const items = [...eventItems, ...strengthItems].sort((left, right) => left.sortAt.localeCompare(right.sortAt) || left.id.localeCompare(right.id));
@@ -403,11 +515,11 @@ function groupDayItems(items: DayItem[]): DayGroup[] {
   return result;
 }
 
-function eventMeta(event: TrainingCalendarEvent): string {
+function eventMeta(event: TrainingCalendarEvent, availabilityEnabled: boolean): string {
   if (event.sourceId === SIDE_QUEST_PLAN_SOURCE_ID) {
     const match = event.description?.match(/Side Quest generated · (\d+) min · ([a-z_]+)/i);
-    const time = event.allDay ? 'Flexible' : generatedDaypart(event.startAt);
-    if (match) return `${time ? `${time} · ` : ''}${formatTrainingDuration(Number(match[1]))} · ${match[2]!.replaceAll('_', ' ')}`;
+    const time = event.allDay ? 'Flexible' : availabilityEnabled ? formatScheduledTime(event.startAt) : generatedDaypart(event.startAt);
+    if (match) return `${time ? `${time} · ` : ''}${formatTrainingDuration(Number(match[1]))}`;
     if (event.endAt) {
       const minutes = Math.max(1, Math.round((new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60_000));
       return `${time ? `${time} · ` : ''}${formatTrainingDuration(minutes)} · Side Quest`;
@@ -518,6 +630,14 @@ function weekDecisionLabel(value: WeekDecision): string {
   return 'Recover';
 }
 
+function developmentLoadLabel(value: 'build' | 'absorb' | 'recovery' | 'taper' | 'race'): string {
+  if (value === 'build') return 'PROGRESS WEEK';
+  if (value === 'absorb') return 'ABSORB WEEK';
+  if (value === 'recovery') return 'RECOVERY WEEK';
+  if (value === 'taper') return 'TAPER WEEK';
+  return 'RACE WEEK';
+}
+
 function phaseLabel(value: string | undefined): string {
   if (!value) return 'TRAINING';
   return value.replaceAll('_', ' ').toUpperCase();
@@ -538,7 +658,11 @@ function weekStartDate(anchorDate: string) { return weekRange(anchorDate).from.s
 function formatWeekRange(days: ReturnType<typeof weekDays>) { if (!days.length) return ''; const first = new Date(`${days[0]!.date}T12:00:00`); const last = new Date(`${days[days.length - 1]!.date}T12:00:00`); const firstLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(first); const lastLabel = new Intl.DateTimeFormat('en-US', { month: first.getMonth() === last.getMonth() ? undefined : 'short', day: 'numeric' }).format(last); return `${firstLabel} – ${lastLabel}`; }
 function previousStrengthDate(session: PlannedStrengthSession, sessions: PlannedStrengthSession[]): string | undefined { return sessions.filter((candidate) => candidate.id !== session.id && candidate.date < session.date).sort((left, right) => right.date.localeCompare(left.date))[0]?.date; }
 function nextEnduranceDate(session: PlannedStrengthSession, events: TrainingCalendarEvent[]): string | undefined { return events.filter((event) => event.startAt.slice(0, 10) >= session.date && event.discipline !== 'strength' && event.discipline !== 'rest').sort((left, right) => left.startAt.localeCompare(right.startAt))[0]?.startAt.slice(0, 10); }
-function isEnduranceEvent(event: TrainingCalendarEvent) { return event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run'; }
+function isEnduranceEvent(
+  event: TrainingCalendarEvent,
+): event is TrainingCalendarEvent & { discipline: 'swim' | 'bike' | 'run' } {
+  return event.discipline === 'swim' || event.discipline === 'bike' || event.discipline === 'run';
+}
 function disciplineColor(discipline: string | undefined, accent: string) { if (discipline === 'swim') return '#267BA6'; if (discipline === 'bike') return '#C58322'; if (discipline === 'run') return '#526E9A'; if (discipline === 'strength') return accent; return '#6E7C76'; }
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function addDays(value: string, days: number) { const date = new Date(`${value}T12:00:00`); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10); }
@@ -556,6 +680,36 @@ function makeStyles(tokens: DesignTokens) {
     noticeCopy: { flex: 1, gap: 3 },
     noticeLabel: { color: tokens.warning, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
     noticeText: { color: tokens.text, fontSize: 12, lineHeight: 17 },
+
+    developmentCard: { borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 14, gap: 8 },
+    developmentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+    developmentEyebrow: { flex: 1, color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.7 },
+    developmentLoadPill: { borderRadius: 999, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 8, paddingVertical: 4 },
+    developmentLoadText: { color: tokens.textMuted, fontSize: 8, lineHeight: 10, fontWeight: '900', letterSpacing: 0.5 },
+    developmentTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '850' as never },
+    developmentRows: { gap: 4 },
+    developmentRow: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
+    developmentRowLabel: { color: tokens.text, fontWeight: '900' },
+
+    responsePromptCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 14 },
+    responsePromptIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    responsePromptCopy: { flex: 1, minWidth: 0, gap: 2 },
+    responsePromptEyebrow: { color: '#526E9A', fontSize: 8.5, lineHeight: 11, fontWeight: '900', letterSpacing: 0.7 },
+    responsePromptTitle: { color: tokens.text, fontSize: 15, lineHeight: 20, fontWeight: '850' as never },
+    responsePromptBody: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16 },
+    adaptationCard: { borderRadius: 18, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 14, gap: 7 },
+    adaptationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+    adaptationEyebrow: { flex: 1, color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.7 },
+    adaptationPill: { borderRadius: 999, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 8, paddingVertical: 4 },
+    adaptationPillText: { color: tokens.textMuted, fontSize: 8, lineHeight: 10, fontWeight: '900', letterSpacing: 0.45 },
+    adaptationTitle: { color: tokens.text, fontSize: 16, lineHeight: 21, fontWeight: '850' as never },
+    adaptationBody: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18 },
+    adaptationStatusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
+    adaptationStatusChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 8, paddingVertical: 5 },
+    adaptationStatusLabel: { color: tokens.text, fontSize: 8, lineHeight: 10, fontWeight: '900', letterSpacing: 0.45 },
+    adaptationStatusValue: { color: tokens.textMuted, fontSize: 8, lineHeight: 10, fontWeight: '800' },
+    adaptationPending: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 2, borderRadius: 12, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 10, paddingVertical: 8 },
+    adaptationPendingText: { flex: 1, color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '650' as never },
 
     weekNavigator: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 },
     weekNavButton: { minHeight: 38, minWidth: 88, flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, backgroundColor: tokens.surface, paddingHorizontal: 11 },
@@ -592,7 +746,10 @@ function makeStyles(tokens: DesignTokens) {
     sessionCopy: { flex: 1, minWidth: 0 },
     sessionTitle: { color: tokens.text, fontSize: 14.5, lineHeight: 19, fontWeight: '800' },
     sessionTitleClosed: { textDecorationLine: 'line-through' },
-    sessionMeta: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 15, marginTop: 1 },
+    sessionMetaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 3 },
+    stimulusTag: { minHeight: 18, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3, alignItems: 'center', justifyContent: 'center' },
+    stimulusTagText: { fontSize: 8, lineHeight: 10, fontWeight: '900', letterSpacing: 0.35 },
+    sessionMeta: { flexShrink: 1, color: tokens.textMuted, fontSize: 11.5, lineHeight: 15 },
     statusDot: { width: 7, height: 7, borderRadius: 4 },
     completedIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
     openRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8 },

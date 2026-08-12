@@ -8,6 +8,8 @@ import {
 } from '@circuit/planner/training-availability';
 import type {
   TrainableDiscipline,
+  WeekdayIndex,
+  WeeklySchedulePreference,
   WholeAthletePlannedSession,
   WholeAthleteWeekPlan,
 } from '@circuit/planner/whole-athlete-week';
@@ -19,7 +21,7 @@ export interface AvailabilityClockWindow { id: string; startMinutes: number; end
 export interface WeeklyAvailabilityDay { weekday: number; windows: AvailabilityClockWindow[]; }
 export interface AvailabilityException { id: string; date: string; mode: 'unavailable' | 'replace' | 'block'; startMinutes?: number; endMinutes?: number; note?: string; }
 export interface SportTimePreference { discipline: TrainingAvailabilityDiscipline; preferredWeekdays: number[]; preferredDayPart: TrainingDayPart; }
-export interface TrainingAvailabilityProfile { version: 1; enabled: boolean; weekly: WeeklyAvailabilityDay[]; exceptions: AvailabilityException[]; preferences: SportTimePreference[]; }
+export interface TrainingAvailabilityProfile { version: 2; enabled: boolean; weekly: WeeklyAvailabilityDay[]; exceptions: AvailabilityException[]; preferences: SportTimePreference[]; restWeekday: WeekdayIndex; }
 
 export type AvailabilityScheduledSession = WholeAthletePlannedSession & {
   scheduledStartAt?: string;
@@ -30,7 +32,7 @@ export type AvailabilityScheduledSession = WholeAthletePlannedSession & {
 export type AvailabilityScheduledWeekPlan = Omit<WholeAthleteWeekPlan, 'sessions'> & { sessions: AvailabilityScheduledSession[]; };
 
 export function getDefaultTrainingAvailabilityProfile(): TrainingAvailabilityProfile {
-  return { version: 1, enabled: false, weekly: Array.from({ length: 7 }, (_, weekday) => ({ weekday, windows: [] })), exceptions: [], preferences: (['swim', 'bike', 'run', 'strength'] as const).map((discipline) => ({ discipline, preferredWeekdays: [], preferredDayPart: 'any' as const })) };
+  return { version: 2, enabled: false, weekly: Array.from({ length: 7 }, (_, weekday) => ({ weekday, windows: [] })), exceptions: [], preferences: (['swim', 'bike', 'run', 'strength'] as const).map((discipline) => ({ discipline, preferredWeekdays: [], preferredDayPart: 'any' as const })), restWeekday: 0 };
 }
 export function loadTrainingAvailabilityProfile(): TrainingAvailabilityProfile {
   const saved = Storage.getItemSync(STORAGE_KEY);
@@ -52,6 +54,41 @@ export function expandTrainingAvailability(profile: TrainingAvailabilityProfile,
   return windows;
 }
 export function plannerTimePreferences(profile: TrainingAvailabilityProfile): TrainingTimePreference[] { return profile.preferences.map((item) => ({ discipline: item.discipline, preferredWeekdays: item.preferredWeekdays, preferredDayPart: item.preferredDayPart })); }
+export function plannerWeeklySchedule(profile: TrainingAvailabilityProfile): WeeklySchedulePreference {
+  const availableDays: WeeklySchedulePreference['availableDays'] = {};
+
+  for (const preference of profile.preferences) {
+    const days = [...new Set(
+      preference.preferredWeekdays.filter((day) => day !== profile.restWeekday),
+    )].sort((left, right) => left - right) as WeekdayIndex[];
+
+    if (!days.length) continue;
+    availableDays[preference.discipline] = days;
+  }
+
+  const totalAvailableMinutesByDay: Partial<Record<WeekdayIndex, number>> = {};
+  const maxContinuousMinutesByDay: Partial<Record<WeekdayIndex, number>> = {};
+
+  if (profile.enabled) {
+    for (const weekday of [0, 1, 2, 3, 4, 5, 6] as WeekdayIndex[]) {
+      if (weekday === profile.restWeekday) {
+        totalAvailableMinutesByDay[weekday] = 0;
+        maxContinuousMinutesByDay[weekday] = 0;
+        continue;
+      }
+      const windows = profile.weekly.find((item) => item.weekday === weekday)?.windows ?? [];
+      const durations = windows.map((window) => Math.max(0, window.endMinutes - window.startMinutes));
+      totalAvailableMinutesByDay[weekday] = durations.reduce((total, minutes) => total + minutes, 0);
+      maxContinuousMinutesByDay[weekday] = durations.length ? Math.max(...durations) : 0;
+    }
+  }
+
+  return {
+    ...(Object.keys(availableDays).length ? { availableDays } : {}),
+    restDays: [profile.restWeekday],
+    ...(profile.enabled ? { totalAvailableMinutesByDay, maxContinuousMinutesByDay } : {}),
+  };
+}
 export function applyAvailabilityToWholeAthleteWeeks(weeks: WholeAthleteWeekPlan[], profile: TrainingAvailabilityProfile): AvailabilityScheduledWeekPlan[] {
   if (!profile.enabled) return weeks as AvailabilityScheduledWeekPlan[];
   const preferences = plannerTimePreferences(profile);
@@ -77,49 +114,183 @@ export function formatAvailabilityTime(iso: string | undefined): string | null {
 function scheduleWeek(week: WholeAthleteWeekPlan, profile: TrainingAvailabilityProfile, preferences: TrainingTimePreference[]): AvailabilityScheduledWeekPlan {
   const windows = expandTrainingAvailability(profile, week.weekStartDate, week.weekEndDate) ?? [];
   const locked = week.sessions.filter((session) => !isAvailabilityMovable(session)) as AvailabilityScheduledSession[];
-  const movable = week.sessions.filter(isAvailabilityMovable).sort(schedulePriority);
+  const movable = week.sessions.filter(isAvailabilityMovable).sort((left, right) => schedulePriority(left, right, preferences));
   const placed: AvailabilityScheduledSession[] = [...locked];
-  const unavailable: AvailabilityScheduledSession[] = [];
+
   for (const session of movable) {
     const preference = preferences.find((item) => item.discipline === session.discipline);
-    const candidate = bestPlacement(session, placed, windows, preference, week.weekStartDate, week.weekEndDate);
+    const sameDayWindows = windows.filter((window) => window.date === session.date);
+    const candidate = bestPlacement(
+      session,
+      placed,
+      sameDayWindows,
+      preference,
+      week.weekStartDate,
+      week.weekEndDate,
+      profile.restWeekday,
+      preferences,
+    );
     if (!candidate) {
-      unavailable.push({ ...session, availabilityStatus: 'needs_time', rationale: [...withoutAvailabilityRationale(session.rationale), 'Needs a time: no saved availability window could fit this session this week.'] });
+      // Keep an unscheduled session in the occupancy model. Otherwise a later
+      // session can silently move onto the same date and create an impossible
+      // same-discipline double in the final calendar.
+      placed.push({
+        ...session,
+        availabilityStatus: 'needs_time',
+        rationale: [
+          ...withoutAvailabilityRationale(session.rationale),
+          'Needs a time: no saved availability window could fit this session without breaking the weekly schedule.',
+        ],
+      });
       continue;
     }
+
     const moved = candidate.date !== session.date;
     const timeLabel = formatAvailabilityTime(candidate.startsAt) ?? 'the selected time';
-    placed.push({ ...session, date: candidate.date, scheduledStartAt: candidate.startsAt, scheduledEndAt: candidate.endsAt, availabilityWindowId: candidate.windowId, availabilityStatus: 'scheduled', rationale: [...withoutAvailabilityRationale(session.rationale), ...(moved ? [`Moved from ${friendlyDate(session.date)} to ${friendlyDate(candidate.date)} to fit your saved availability.`] : []), `Scheduled for ${timeLabel} inside your saved availability.`] });
+    placed.push({
+      ...session,
+      date: candidate.date,
+      scheduledStartAt: candidate.startsAt,
+      scheduledEndAt: candidate.endsAt,
+      availabilityWindowId: candidate.windowId,
+      availabilityStatus: 'scheduled',
+      rationale: [
+        ...withoutAvailabilityRationale(session.rationale),
+        ...(moved ? [`Moved from ${friendlyDate(session.date)} to ${friendlyDate(candidate.date)} using one of your saved sport weekdays.`] : []),
+        `Scheduled for ${timeLabel} inside your saved availability.`,
+      ],
+    });
   }
-  const sessions = [...placed, ...unavailable].sort((left, right) => left.date.localeCompare(right.date) || (left.scheduledStartAt ?? '').localeCompare(right.scheduledStartAt ?? '') || left.id.localeCompare(right.id));
+
+  const sessions = placed.sort((left, right) => left.date.localeCompare(right.date) || (left.scheduledStartAt ?? '').localeCompare(right.scheduledStartAt ?? '') || left.id.localeCompare(right.id));
   const plannedMinutes = sessions.reduce((sum, session) => sum + session.durationMinutes, 0);
   const generatedMinutes = sessions.filter((session) => session.planningCommitment === 'generated').reduce((sum, session) => sum + session.durationMinutes, 0);
   const disciplineSummary = week.disciplineSummary.map((summary) => { const matching = sessions.filter((session) => session.discipline === summary.discipline); return { ...summary, sessions: matching.length, minutes: matching.reduce((sum, session) => sum + session.durationMinutes, 0) }; });
-  const availabilityWarnings = unavailable.map((session) => `${session.title} still needs a time because no saved availability window could fit it.`);
+  const availabilityWarnings = sessions.filter((session) => session.availabilityStatus === 'needs_time').map((session) => `${session.title} still needs a time because no saved availability window could fit it without breaking the weekly schedule.`);
   return { ...week, sessions, plannedMinutes, generatedMinutes, disciplineSummary, doubleDays: rebuildDoubleDays(sessions.filter((session) => session.availabilityStatus !== 'needs_time')), warnings: [...new Set([...week.warnings, ...availabilityWarnings])] };
 }
 
-function bestPlacement(session: WholeAthletePlannedSession, placed: AvailabilityScheduledSession[], windows: TrainingAvailabilityWindow[], preference: TrainingTimePreference | undefined, weekStart: string, weekEnd: string): { date: string; startsAt: string; endsAt: string; windowId: string; score: number } | null {
+function bestPlacement(
+  session: WholeAthletePlannedSession,
+  placed: AvailabilityScheduledSession[],
+  windows: TrainingAvailabilityWindow[],
+  preference: TrainingTimePreference | undefined,
+  weekStart: string,
+  weekEnd: string,
+  restWeekday: WeekdayIndex,
+  preferences: TrainingTimePreference[],
+): { date: string; startsAt: string; endsAt: string; windowId: string; score: number } | null {
   const candidates: Array<{ date: string; startsAt: string; endsAt: string; windowId: string; score: number }> = [];
-  for (let date = weekStart; date <= weekEnd; date = addDays(date, 1)) {
+  const candidateDates = candidateDatesForSession(session, preference, weekStart, weekEnd, restWeekday);
+
+  for (const date of candidateDates) {
     const sameDay = placed.filter((item) => item.date === date && isTrainable(item.discipline));
     if (sameDay.length >= 2) continue;
     if (sameDay.some((item) => item.discipline === session.discipline)) continue;
     if (sameDay.length && !compatibleDouble(session, sameDay[0]!)) continue;
     if (isHard(session) && placed.some((item) => isHard(item) && Math.abs(dayDifference(item.date, date)) <= 1)) continue;
     if (session.discipline === 'run' && /return-to-run/i.test(session.title) && placed.some((item) => item.discipline === 'run' && Math.abs(dayDifference(item.date, date)) < 2)) continue;
+
     const occupied = sameDay.flatMap((item) => item.scheduledStartAt && item.scheduledEndAt ? [{ startsAt: item.scheduledStartAt, endsAt: item.scheduledEndAt }] : []);
-    const placements = findTrainingAvailabilityPlacements({ date, durationMinutes: session.durationMinutes, discipline: session.discipline as TrainingAvailabilityDiscipline, windows, occupied, preference, minimumGapMinutes: sameDay.length ? 180 : 0 });
+    const placements = findTrainingAvailabilityPlacements({
+      date,
+      durationMinutes: session.durationMinutes,
+      discipline: session.discipline as TrainingAvailabilityDiscipline,
+      windows,
+      occupied,
+      preference,
+      minimumGapMinutes: sameDay.length ? 180 : 0,
+    });
+
     for (const placement of placements) {
       let score = placement.preferenceScore;
-      if (date === session.date) score += 36;
-      if (session.keySession && date === session.date) score += 12;
+      if (date === session.date) score += 80;
+      if (session.keySession && date === session.date) score += 20;
       if ((session.discipline === 'bike' || session.discipline === 'run') && /long/i.test(session.title) && weekdayIndex(date) >= 5) score += 18;
-      if (sameDay.length) score += doubleDayGapScore(placement.startsAt, placement.endsAt, sameDay[0]!);
+      if (sameDay.length) {
+        score += doubleDayGapScore(placement.startsAt, placement.endsAt, sameDay[0]!);
+        score += swimDoubleOrderingScore(
+          session,
+          placement.startsAt,
+          placement.endsAt,
+          sameDay[0]!,
+          preference,
+          preferences.find((item) => item.discipline === sameDay[0]!.discipline),
+        );
+      }
       candidates.push({ date, startsAt: placement.startsAt, endsAt: placement.endsAt, windowId: placement.windowId, score });
     }
   }
+
   return candidates.sort((left, right) => right.score - left.score || left.startsAt.localeCompare(right.startsAt))[0] ?? null;
+}
+
+function candidateDatesForSession(
+  session: WholeAthletePlannedSession,
+  preference: TrainingTimePreference | undefined,
+  weekStart: string,
+  weekEnd: string,
+  restWeekday: WeekdayIndex,
+): string[] {
+  const values = new Set<string>();
+  if (weekdayIndex(session.date) !== restWeekday) values.add(session.date);
+
+  for (const weekday of preference?.preferredWeekdays ?? []) {
+    if (weekday === restWeekday) continue;
+    const date = addDays(weekStart, weekday);
+    if (date >= weekStart && date <= weekEnd) values.add(date);
+  }
+
+  // A stale/generated session that arrives on the protected rest day must be
+  // repaired off that day. Without explicit sport weekdays, use the remaining
+  // week as a fallback rather than training on the rest anchor.
+  if (!values.size && weekdayIndex(session.date) === restWeekday) {
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      if (weekday === restWeekday) continue;
+      values.add(addDays(weekStart, weekday));
+    }
+  }
+
+  return [...values];
+}
+
+function swimDoubleOrderingScore(
+  candidate: WholeAthletePlannedSession,
+  startsAt: string,
+  endsAt: string,
+  existing: AvailabilityScheduledSession,
+  candidatePreference: TrainingTimePreference | undefined,
+  existingPreference: TrainingTimePreference | undefined,
+): number {
+  const candidateIsSwim = candidate.discipline === 'swim';
+  const existingIsSwim = existing.discipline === 'swim';
+  if ((!candidateIsSwim && !existingIsSwim) || !existing.scheduledStartAt || !existing.scheduledEndAt) return 0;
+
+  const swimPreferredDayPart = candidateIsSwim
+    ? candidatePreference?.preferredDayPart
+    : existingPreference?.preferredDayPart;
+
+  // "Any" and midday do not impose a relative ordering. Their normal
+  // availability preference score decides the clock time.
+  if (swimPreferredDayPart !== 'morning' && swimPreferredDayPart !== 'evening') return 0;
+
+  const candidateStart = Date.parse(startsAt);
+  const candidateEnd = Date.parse(endsAt);
+  const existingStart = Date.parse(existing.scheduledStartAt);
+  const existingEnd = Date.parse(existing.scheduledEndAt);
+  if (![candidateStart, candidateEnd, existingStart, existingEnd].every(Number.isFinite)) return 0;
+
+  if (swimPreferredDayPart === 'morning') {
+    if (candidateIsSwim) return candidateEnd <= existingStart ? 28 : -18;
+    return candidateStart >= existingEnd ? 28 : -18;
+  }
+
+  if (swimPreferredDayPart === 'evening') {
+    if (candidateIsSwim) return candidateStart >= existingEnd ? 28 : -18;
+    return candidateEnd <= existingStart ? 28 : -18;
+  }
+
+  return 0;
 }
 function compatibleDouble(candidate: WholeAthletePlannedSession, existing: AvailabilityScheduledSession): boolean {
   if (!isTrainable(existing.discipline) || candidate.discipline === existing.discipline) return false;
@@ -165,11 +336,17 @@ function subtractWindow(window: AvailabilityClockWindow, blockStart: number, blo
   return values.filter((item) => item.endMinutes > item.startMinutes);
 }
 function normalizeProfile(value: unknown): TrainingAvailabilityProfile {
-  const fallback = getDefaultTrainingAvailabilityProfile(); if (!value || typeof value !== 'object') return fallback; const candidate = value as Partial<TrainingAvailabilityProfile>;
+  const fallback = getDefaultTrainingAvailabilityProfile();
+  if (!value || typeof value !== 'object') return fallback;
+  const raw = value as Record<string, unknown>;
+  const candidate = value as Partial<TrainingAvailabilityProfile>;
+  const savedVersion = typeof raw.version === 'number' ? raw.version : 1;
   const weekly = Array.from({ length: 7 }, (_, weekday) => { const found = Array.isArray(candidate.weekly) ? candidate.weekly.find((item) => item?.weekday === weekday) : undefined; return { weekday, windows: normalizeWindows(found?.windows ?? []) }; });
   const exceptions = Array.isArray(candidate.exceptions) ? candidate.exceptions.filter(isException).map((item) => ({ ...item, note: typeof item.note === 'string' ? item.note.slice(0, 120) : undefined })) : [];
-  const preferences = (['swim', 'bike', 'run', 'strength'] as const).map((discipline) => { const found = Array.isArray(candidate.preferences) ? candidate.preferences.find((item) => item?.discipline === discipline) : undefined; return { discipline, preferredWeekdays: Array.isArray(found?.preferredWeekdays) ? [...new Set(found!.preferredWeekdays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))] : [], preferredDayPart: isDayPart(found?.preferredDayPart) ? found!.preferredDayPart : 'any' as const }; });
-  return { version: 1, enabled: Boolean(candidate.enabled), weekly, exceptions, preferences };
+  const preferences = (['swim', 'bike', 'run', 'strength'] as const).map((discipline) => { const found = Array.isArray(candidate.preferences) ? candidate.preferences.find((item) => item?.discipline === discipline) : undefined; return { discipline, preferredWeekdays: Array.isArray(found?.preferredWeekdays) ? [...new Set(found!.preferredWeekdays.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((left, right) => left - right) : [], preferredDayPart: isDayPart(found?.preferredDayPart) ? found!.preferredDayPart : 'any' as const }; });
+  const savedRestWeekday = Number.isInteger(candidate.restWeekday) && candidate.restWeekday! >= 0 && candidate.restWeekday! <= 6 ? candidate.restWeekday as WeekdayIndex : 0;
+  const restWeekday = savedVersion < 2 && savedRestWeekday === 6 ? 0 : savedRestWeekday;
+  return { version: 2, enabled: Boolean(candidate.enabled), weekly, exceptions, preferences, restWeekday };
 }
 function normalizeWindows(values: AvailabilityClockWindow[]): AvailabilityClockWindow[] { return values.filter((item) => typeof item?.id === 'string').map((item) => ({ id: item.id, startMinutes: Math.round(item.startMinutes), endMinutes: Math.round(item.endMinutes) })).filter((item) => item.startMinutes >= 0 && item.endMinutes <= 24 * 60 && item.endMinutes > item.startMinutes).sort((left, right) => left.startMinutes - right.startMinutes); }
 function isException(value: unknown): value is AvailabilityException { if (!value || typeof value !== 'object') return false; const item = value as AvailabilityException; return typeof item.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date) && (item.mode === 'unavailable' || item.mode === 'replace' || item.mode === 'block'); }
@@ -179,7 +356,18 @@ function localMinuteIso(date: string, minutes: number): string { const [year, mo
 function weekdayIndex(date: string): number { const day = new Date(`${date}T12:00:00Z`).getUTCDay(); return (day + 6) % 7; }
 function addDays(date: string, days: number): string { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
 function dayDifference(left: string, right: string): number { return Math.round((Date.parse(`${right}T12:00:00Z`) - Date.parse(`${left}T12:00:00Z`)) / 86_400_000); }
-function schedulePriority(left: WholeAthletePlannedSession, right: WholeAthletePlannedSession): number { const rank = (session: WholeAthletePlannedSession) => { if (session.discipline === 'run' && /return-to-run/i.test(session.title)) return 0; if (session.keySession || isHard(session)) return 1; if (/long/i.test(session.title)) return 2; if (session.discipline === 'strength') return 3; return 4; }; return rank(left) - rank(right) || left.date.localeCompare(right.date) || left.id.localeCompare(right.id); }
+function schedulePriority(left: WholeAthletePlannedSession, right: WholeAthletePlannedSession, preferences: TrainingTimePreference[]): number {
+  const rank = (session: WholeAthletePlannedSession) => {
+    const preference = preferences.find((item) => item.discipline === session.discipline);
+    if (session.discipline === 'swim' && preference?.preferredDayPart !== 'any') return 0;
+    if (session.discipline === 'run' && /return-to-run/i.test(session.title)) return 1;
+    if (session.keySession || isHard(session)) return 2;
+    if (/long/i.test(session.title)) return 3;
+    if (session.discipline === 'strength') return 4;
+    return 5;
+  };
+  return rank(left) - rank(right) || left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
+}
 function isAvailabilityMovable(session: WholeAthletePlannedSession): boolean { return session.planningCommitment === 'generated' || (session.discipline === 'strength' && session.source === 'side_quest'); }
 function isHard(session: Pick<WholeAthletePlannedSession, 'intensity' | 'recoveryCost'>): boolean { return session.intensity === 'hard' || session.intensity === 'max' || session.recoveryCost >= 4; }
 function isTrainable(value: string): value is TrainableDiscipline { return value === 'swim' || value === 'bike' || value === 'run' || value === 'strength'; }

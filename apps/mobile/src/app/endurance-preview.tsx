@@ -22,29 +22,51 @@ import {
   loadEndurancePrescriptionPreview,
   type EndurancePrescriptionPreview,
 } from '@/services/endurance-prescription-runtime';
+import {
+  enduranceEffortBody,
+  enduranceHeroPresentation,
+  mainSetCoachCue,
+} from '@/services/endurance-detail-copy';
 import { useTheme } from '@/state/theme-context';
 import type { DesignTokens } from '@/theme';
 
 export default function EndurancePreviewScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; date?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    date?: string;
+    title?: string;
+    discipline?: string;
+    startAt?: string;
+    endAt?: string;
+  }>();
   const id = String(params.id ?? '');
   const date = String(params.date ?? '');
+  const title = String(params.title ?? '');
+  const discipline = String(params.discipline ?? '');
+  const startAt = String(params.startAt ?? '');
+  const endAt = String(params.endAt ?? '');
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
   const [preview, setPreview] = useState<EndurancePrescriptionPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let live = true;
     setLoading(true);
     setError(null);
-    void loadEndurancePrescriptionPreview(id, date)
+    void loadEndurancePrescriptionPreview(id, date, {
+      title: title || undefined,
+      discipline: discipline === 'swim' || discipline === 'bike' || discipline === 'run' ? discipline : undefined,
+      startAt: startAt || undefined,
+      endAt: endAt || undefined,
+    })
       .then((result) => {
         if (!live) return;
         setPreview(result);
-        if (!result) setError('This endurance session is no longer available in the current plan.');
+        if (!result) setError('This session changed while your plan refreshed. Try loading the current prescription again.');
       })
       .catch((cause) => {
         if (!live) return;
@@ -52,7 +74,7 @@ export default function EndurancePreviewScreen() {
       })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [date, id]);
+  }, [date, discipline, endAt, id, retryToken, startAt, title]);
 
   if (loading) {
     return <V23Screen contentStyle={styles.page}>
@@ -62,8 +84,17 @@ export default function EndurancePreviewScreen() {
 
   if (!preview) {
     return <V23Screen contentStyle={styles.page}>
-      <V23PageIntro label="ENDURANCE" title="Workout unavailable" body={error ?? 'Return to Week and refresh the plan.'} />
-      <V23OutlineButton onPress={() => router.back()}>Back</V23OutlineButton>
+      <V23PageIntro
+        label="ENDURANCE"
+        title="Workout changed"
+        body={error ?? 'The plan changed while this workout was opening. Reload the current prescription or return to Week.'}
+      />
+      <View style={styles.recoveryActions}>
+        <Pressable accessibilityRole="button" onPress={() => setRetryToken((value) => value + 1)} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Refresh workout</Text>
+        </Pressable>
+        <V23OutlineButton onPress={() => router.back()}>Back to Week</V23OutlineButton>
+      </View>
     </V23Screen>;
   }
 
@@ -72,6 +103,7 @@ export default function EndurancePreviewScreen() {
   const compatible = compatibleEnvironments(prescription);
   const isSwim = prescription.discipline === 'swim';
   const showSetup = isSwim || prescription.workoutType === 'run_return_to_run';
+  const heroPresentation = enduranceHeroPresentation(prescription);
 
   function askCoachAboutEnvironment() {
     const draft = `I want to adapt ${cleanTitle(prescription.title)} for a different surface, terrain, or setup. Can I do that without changing the purpose of the workout?`;
@@ -89,13 +121,13 @@ export default function EndurancePreviewScreen() {
         <V23Chip tone="neutral">{heroDose(prescription)}</V23Chip>
       </View>
       <Text style={styles.title}>{cleanTitle(prescription.title)}</Text>
-      <Text style={styles.objective}>{prescription.objective}</Text>
+      <Text style={styles.objective}>{heroPresentation.objective}</Text>
       <View style={styles.heroMeta}>
         <View style={styles.metaItem}><Text style={styles.metaLabel}>TYPE</Text><Text style={styles.metaValue}>{workoutTypeLabel(prescription)}</Text></View>
         <View style={styles.metaDivider} />
         <View style={styles.metaItem}>
-          <Text style={styles.metaLabel}>{isSwim ? 'SETUP' : 'EFFORT'}</Text>
-          <Text style={styles.metaValue}>{isSwim ? (prescription.environmentLabel ?? 'Flexible') : overallEffort(prescription)}</Text>
+          <Text style={styles.metaLabel}>{isSwim ? 'SETUP' : heroPresentation.effortLabel}</Text>
+          <Text style={styles.metaValue}>{isSwim ? (prescription.environmentLabel ?? 'Flexible') : heroPresentation.effortValue}</Text>
         </View>
       </View>
     </View>
@@ -135,7 +167,7 @@ export default function EndurancePreviewScreen() {
         <Text style={styles.infoTitle}>{prescription.effortGuide}</Text>
         <Text style={styles.infoBody}>{prescription.discipline === 'swim' && prescription.blocks.some((block) => block.paceTarget)
           ? 'Set-specific pace ranges are calculated from your saved CSS. RPE remains useful when fatigue, traffic in the lane, or mechanics make pace less representative.'
-          : 'Use the written RPE as the primary target. Side Quest only adds numeric pace or power targets when athlete-specific data supports them.'}</Text>
+          : enduranceEffortBody(prescription)}</Text>
       </V23Card>
     </View>
 
@@ -195,6 +227,7 @@ function WorkoutBlock({ prescription, block, index, last, styles, tokens }: {
   const coachLines = enduranceCoachLines(prescription, block);
   const headline = blockHeadline(block);
   const recovery = recoveryText(block);
+  const coachCue = mainSetCoachCue(block);
   return <View style={[styles.block, !last && styles.blockBorder]}>
     <View style={styles.blockIndex}><Text style={styles.blockIndexText}>{index}</Text></View>
     <View style={styles.blockCopy}>
@@ -215,7 +248,10 @@ function WorkoutBlock({ prescription, block, index, last, styles, tokens }: {
 
       {block.paceTarget ? <Text style={styles.paceTarget}>PACE {formatPaceTarget(block.paceTarget)}</Text> : null}
       <View style={styles.rpeRow}><Text style={styles.rpeBadge}>RPE {block.target.low}–{block.target.high}</Text><Text style={styles.rpeCue}>{block.target.cue}</Text></View>
-      {!coachLines.length ? <Text style={styles.blockInstruction}>{block.instruction}</Text> : null}
+      {coachCue ? <View style={styles.coachCue}>
+        <Text style={styles.coachCueLabel}>COACH CUE</Text>
+        <Text style={styles.blockInstruction}>{coachCue}</Text>
+      </View> : !coachLines.length ? <Text style={styles.blockInstruction}>{block.instruction}</Text> : null}
     </View>
   </View>;
 }
@@ -263,12 +299,6 @@ function heroDose(prescription: EnduranceSessionPrescription): string {
 function workoutDoseDetail(prescription: EnduranceSessionPrescription): string {
   if (prescription.totalDistance && prescription.distanceUnit) return `${prescription.totalDistance} ${prescription.distanceUnit} · ~${prescription.totalMinutes} min`;
   return `${prescription.totalMinutes} min total`;
-}
-
-function overallEffort(prescription: EnduranceSessionPrescription): string {
-  const lows = prescription.blocks.map((block) => block.target.low);
-  const highs = prescription.blocks.map((block) => block.target.high);
-  return `RPE ${Math.min(...lows)}–${Math.max(...highs)}`;
 }
 
 function compatibleEnvironments(prescription: EnduranceSessionPrescription): string[] {
@@ -322,14 +352,14 @@ function makeStyles(tokens: DesignTokens) {
     heroTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     heroCopy: { flex: 1 },
     sportLabel: { fontSize: 11, lineHeight: 14, fontWeight: '900', letterSpacing: 1.2 },
-    heroDate: { color: tokens.textMuted, fontSize: 13, lineHeight: 18, marginTop: 1 },
+    heroDate: { color: tokens.textMuted, fontSize: 14, lineHeight: 20, marginTop: 1 },
     title: { color: tokens.text, fontSize: 29, lineHeight: 34, fontWeight: '900', letterSpacing: -0.5, marginTop: 4 },
-    objective: { color: tokens.textMuted, fontSize: 16, lineHeight: 23 },
+    objective: { color: tokens.textMuted, fontSize: 17, lineHeight: 24 },
     heroMeta: { marginTop: 6, borderRadius: 15, backgroundColor: tokens.surfaceMuted, flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 14 },
     metaItem: { flex: 1, gap: 3 },
     metaDivider: { width: StyleSheet.hairlineWidth, backgroundColor: tokens.border, marginHorizontal: 12 },
     metaLabel: { color: tokens.textMuted, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.9 },
-    metaValue: { color: tokens.text, fontSize: 13.5, lineHeight: 18, fontWeight: '800' },
+    metaValue: { color: tokens.text, fontSize: 14.5, lineHeight: 20, fontWeight: '800' },
     workoutCard: { paddingHorizontal: 16, paddingVertical: 2 },
     block: { flexDirection: 'row', gap: 12, paddingVertical: 17 },
     blockBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border },
@@ -338,21 +368,23 @@ function makeStyles(tokens: DesignTokens) {
     blockCopy: { flex: 1, minWidth: 0 },
     blockTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
     blockTitle: { flex: 1, color: tokens.text, fontSize: 16.5, lineHeight: 21, fontWeight: '900' },
-    blockMinutes: { color: tokens.textMuted, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
+    blockMinutes: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
     blockHeadline: { color: tokens.text, fontSize: 21, lineHeight: 26, fontWeight: '900', marginTop: 5 },
-    blockRecovery: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18, fontWeight: '700', marginTop: 2 },
+    blockRecovery: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19, fontWeight: '700', marginTop: 2 },
     coachLines: { gap: 9, marginTop: 10 },
     coachLine: { gap: 2 },
     coachLineText: { color: tokens.text, fontSize: 16.5, lineHeight: 22, fontWeight: '800' },
-    coachLineSecondary: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '600' },
+    coachLineSecondary: { color: tokens.textMuted, fontSize: 13.5, lineHeight: 19, fontWeight: '600' },
     paceTarget: { alignSelf: 'flex-start', color: '#267BA6', backgroundColor: '#E4F2F8', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, overflow: 'hidden', fontSize: 10.5, lineHeight: 13, fontWeight: '900', marginTop: 8 },
     rpeRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 8 },
     rpeBadge: { color: tokens.accent, backgroundColor: tokens.accentSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, overflow: 'hidden', fontSize: 10.5, fontWeight: '900' },
-    rpeCue: { color: tokens.textMuted, fontSize: 11.5, fontWeight: '700' },
-    blockInstruction: { color: tokens.textMuted, fontSize: 13, lineHeight: 19, marginTop: 8 },
+    rpeCue: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
+    coachCue: { marginTop: 10, borderRadius: 12, backgroundColor: tokens.surfaceMuted, paddingHorizontal: 11, paddingVertical: 10 },
+    coachCueLabel: { color: tokens.accent, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.7 },
+    blockInstruction: { color: tokens.textMuted, fontSize: 14, lineHeight: 21, marginTop: 4 },
     infoCard: { padding: 16, gap: 9 },
     infoTitle: { color: tokens.text, fontSize: 15, lineHeight: 21, fontWeight: '800' },
-    infoBody: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
+    infoBody: { color: tokens.textMuted, fontSize: 14, lineHeight: 21 },
     flexCard: { padding: 16, gap: 11 },
     environmentChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
     environmentChip: { borderRadius: 999, backgroundColor: tokens.surfaceMuted, borderWidth: 1, borderColor: tokens.border, paddingHorizontal: 10, paddingVertical: 6 },
@@ -366,7 +398,8 @@ function makeStyles(tokens: DesignTokens) {
     setupButtonText: { color: '#FFFFFF', fontSize: 11.5, fontWeight: '900' },
     reasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
     reasonDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: tokens.accent, marginTop: 7 },
-    reasonText: { flex: 1, color: tokens.textMuted, fontSize: 13, lineHeight: 19 },
+    reasonText: { flex: 1, color: tokens.textMuted, fontSize: 14, lineHeight: 21 },
+    recoveryActions: { gap: 10 },
     actions: { gap: 10 },
     primaryButton: { minHeight: 50, borderRadius: 15, backgroundColor: tokens.accent, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
     primaryButtonText: { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' },

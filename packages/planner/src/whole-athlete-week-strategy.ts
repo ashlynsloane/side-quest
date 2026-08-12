@@ -18,6 +18,7 @@ import {
   buildWholeAthleteWeek as buildBaseWholeAthleteWeek,
   type DoubleDayPlanSummary,
   type TrainableDiscipline,
+  type WeekdayIndex,
   type WholeAthletePlannedSession,
   type WholeAthleteWeeklyPlannerInput,
   type WholeAthleteWeekPlan,
@@ -146,7 +147,11 @@ function buildImpactLocalTriathlonPlan(
   let sessions = baseline.sessions.map((session) => ({ ...session }));
   const protectedRecoveryWeekday = recoveryAnchorWeekday(sessions, input.weekStartDate);
 
-  for (const discipline of ['swim', 'bike'] as const) {
+  const nonImpactOrder: Array<'swim' | 'bike'> = policy.primaryFocus === 'bike'
+    ? ['bike', 'swim']
+    : ['swim', 'bike'];
+
+  for (const discipline of nonImpactOrder) {
     const preferred = frequency[discipline]?.preferred ?? countDiscipline(sessions, discipline);
     sessions = ensureNonImpactFrequency(
       sessions,
@@ -155,6 +160,7 @@ function buildImpactLocalTriathlonPlan(
       input.weekStartDate,
       protectedRecoveryWeekday,
       policy,
+      input,
     );
   }
 
@@ -267,6 +273,8 @@ function restoreImpactLocalFrequency(
   return next;
 }
 
+const ADAPTIVE_FREQUENCY_REFLOW_PREFIX = 'Adaptive frequency reflow:';
+
 function ensureNonImpactFrequency(
   sessions: WholeAthletePlannedSession[],
   discipline: 'swim' | 'bike',
@@ -274,10 +282,37 @@ function ensureNonImpactFrequency(
   weekStartDate: string,
   protectedRecoveryWeekday: number | null,
   policy: CoachStrategyPlanningPolicy,
+  input: WholeAthleteWeeklyPlannerInput,
 ): WholeAthletePlannedSession[] {
-  const next = sessions.map((session) => ({ ...session }));
+  let next = sessions.map((session) => ({ ...session, rationale: [...session.rationale] }));
   while (countDiscipline(next, discipline) < targetCount) {
-    const date = chooseStrategyDate(next, discipline, weekStartDate, protectedRecoveryWeekday);
+    let date = chooseStrategyDate(
+      next,
+      discipline,
+      weekStartDate,
+      protectedRecoveryWeekday,
+      input,
+    );
+
+    if (!date && discipline === 'bike') {
+      const reflowed = reflowEasySwimForBikeFrequency(
+        next,
+        weekStartDate,
+        protectedRecoveryWeekday,
+        input,
+      );
+      if (reflowed) {
+        next = reflowed;
+        date = chooseStrategyDate(
+          next,
+          discipline,
+          weekStartDate,
+          protectedRecoveryWeekday,
+          input,
+        );
+      }
+    }
+
     if (!date) break;
     next.push(createStrategySession(discipline, date, countDiscipline(next, discipline), policy));
   }
@@ -289,13 +324,15 @@ function chooseStrategyDate(
   discipline: 'swim' | 'bike',
   weekStartDate: string,
   protectedRecoveryWeekday: number | null,
+  input: WholeAthleteWeeklyPlannerInput,
 ): string | null {
   const preferredOffsets = discipline === 'bike'
-    ? [5, 6, 1, 2, 0, 4, 3]
-    : [1, 0, 4, 2, 3, 5, 6];
+    ? [1, 3, 5, 2, 0, 4, 6]
+    : [1, 3, 4, 0, 2, 5, 6];
 
   for (const offset of preferredOffsets) {
     if (offset === protectedRecoveryWeekday) continue;
+    if (!sportAvailableOnWeekday(input, discipline, offset)) continue;
     const date = addDays(weekStartDate, offset);
     const sameDay = sessions.filter((session) => session.date === date && isTrainable(session.discipline));
     if (sameDay.some((session) => session.discipline === discipline)) continue;
@@ -304,6 +341,94 @@ function chooseStrategyDate(
     return date;
   }
   return null;
+}
+
+function reflowEasySwimForBikeFrequency(
+  sessions: WholeAthletePlannedSession[],
+  weekStartDate: string,
+  protectedRecoveryWeekday: number | null,
+  input: WholeAthleteWeeklyPlannerInput,
+): WholeAthletePlannedSession[] | null {
+  const sourceCandidates = Array.from({ length: 7 }, (_, offset) => offset)
+    .filter((offset) => offset !== protectedRecoveryWeekday)
+    .filter((offset) => sportAvailableOnWeekday(input, 'bike', offset))
+    .map((offset) => {
+      const date = addDays(weekStartDate, offset);
+      const day = sessions.filter((session) => session.date === date && isTrainable(session.discipline));
+      const swim = day.find(isMovableEasySwim);
+      const run = day.find((session) =>
+        session.discipline === 'run'
+        && session.intensity === 'easy'
+        && session.recoveryCost <= 2);
+      return { offset, date, day, swim, run };
+    })
+    .filter((candidate) =>
+      candidate.day.length === 2
+      && Boolean(candidate.swim)
+      && Boolean(candidate.run))
+    .sort((left, right) => right.offset - left.offset);
+
+  for (const source of sourceCandidates) {
+    const swim = source.swim!;
+    const destinationCandidates = Array.from({ length: 7 }, (_, offset) => offset)
+      .filter((offset) => offset !== protectedRecoveryWeekday)
+      .filter((offset) => offset !== source.offset)
+      .filter((offset) => sportAvailableOnWeekday(input, 'swim', offset))
+      .map((offset) => {
+        const date = addDays(weekStartDate, offset);
+        const day = sessions.filter((session) => session.date === date && isTrainable(session.discipline));
+        const bike = day.find((session) => session.discipline === 'bike');
+        const weekend = offset >= 5 ? 1 : 0;
+        const longBikeLike = bike && (bike.keySession || /\blong\b/i.test(bike.title)) ? 1 : 0;
+        return { offset, date, day, bike, weekend, longBikeLike };
+      })
+      .filter((candidate) =>
+        candidate.day.length === 1
+        && candidate.bike
+        && !candidate.day.some((session) => session.discipline === 'swim')
+        && compatibleNonImpactPair('swim', candidate.bike))
+      .sort((left, right) =>
+        right.longBikeLike - left.longBikeLike
+        || right.weekend - left.weekend
+        || left.offset - right.offset);
+
+    const destination = destinationCandidates[0];
+    if (!destination) continue;
+
+    return sessions.map((session) => session.id === swim.id
+      ? {
+          ...session,
+          date: destination.date,
+          rationale: unique([
+            ...session.rationale,
+            `${ADAPTIVE_FREQUENCY_REFLOW_PREFIX} moved this easy swim to ${weekdayName(destination.offset)} beside the existing bike so a fourth non-impact bike ride can fit on ${weekdayName(source.offset)} without creating a triple day or reducing return-to-run frequency.`,
+          ]),
+        }
+      : { ...session, rationale: [...session.rationale] });
+  }
+
+  return null;
+}
+
+function sportAvailableOnWeekday(
+  input: WholeAthleteWeeklyPlannerInput,
+  discipline: 'swim' | 'bike',
+  weekday: number,
+): boolean {
+  const allowed = input.weeklySchedule?.availableDays?.[discipline];
+  return !allowed?.length || allowed.includes(weekday as WeekdayIndex);
+}
+
+function isMovableEasySwim(session: WholeAthletePlannedSession): boolean {
+  return session.discipline === 'swim'
+    && session.planningCommitment === 'generated'
+    && session.intensity === 'easy'
+    && !session.keySession
+    && session.recoveryCost <= 2;
+}
+
+function weekdayName(weekday: number): string {
+  return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][weekday] ?? 'another day';
 }
 
 function compatibleNonImpactPair(
@@ -353,7 +478,7 @@ function createStrategySession(
   return {
     id: `strategy_bike_${date}_${index + 1}`,
     date,
-    title: index >= 2 ? 'Long endurance ride' : 'Aerobic ride',
+    title: index === 2 ? 'Long endurance ride' : 'Aerobic ride',
     discipline: 'bike',
     durationMinutes: 75,
     intensity: 'easy',
@@ -366,7 +491,7 @@ function createStrategySession(
     recoveryCost: 1,
     priority: 'recommended',
     source: 'side_quest',
-    keySession: index >= 2,
+    keySession: index === 2,
     planningCommitment: 'generated',
     rationale: ['Added to use available non-impact training capacity while run impact remains protected.'],
     healthAdjusted: false,
