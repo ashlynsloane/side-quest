@@ -78,5 +78,33 @@
   {
     "id": "stairs",
     "label": "Stairs"
+  },
+  {
+    "id": "hack_squat_machine",
+    "label": "Hack squat machine"
+  },
+  {
+    "id": "leg_extension_machine",
+    "label": "Leg extension machine"
+  },
+  {
+    "id": "leg_curl_machine",
+    "label": "Leg curl machine"
+  },
+  {
+    "id": "calf_raise_machine",
+    "label": "Calf raise machine"
+  },
+  {
+    "id": "assisted_pullup_machine",
+    "label": "Assisted pull-up machine"
+  },
+  {
+    "id": "chest_press_machine",
+    "label": "Chest press machine"
+  },
+  {
+    "id": "row_machine",
+    "label": "Row machine"
   }
 ]
