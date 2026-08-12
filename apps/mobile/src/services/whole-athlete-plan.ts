@@ -84,7 +84,7 @@ export async function generateAndPersistWholeAthleteBlock(
 
   const weeks: WholeAthleteWeekPlan[] = [];
   const generatedEvents: TrainingCalendarEvent[] = [];
-  let previousWeek = previousWeekFromActivities(recentActivities, firstWeek.weekStartDate);
+  let previousWeek: NonNullable<Parameters<typeof buildWholeAthleteWeek>[0]['previousWeek']> = previousWeekFromActivities(recentActivities, firstWeek.weekStartDate);
 
   for (const week of input.block.weeks) {
     const weekEnd = addDays(week.weekStartDate, 6);
