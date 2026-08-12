@@ -26,7 +26,7 @@ export default function ProfileTab() {
     <V23SectionHeader>Training</V23SectionHeader>
     <V23GroupedList>
       <V23Row title="Goals and capacity" detail="Goal, availability, experience, and sport profile" onPress={() => router.push('/goal-catalog' as Href)} />
-      <V23Row title="Equipment locations" detail="Home, gym, work, and travel setups" onPress={() => router.push('/equipment-profiles' as Href)} />
+      <V23Row title="Training spaces" detail="Home, gym, and the equipment you actually have access to" onPress={() => router.push('/training-spaces' as Href)} />
       <V23Row title="Restrictions and symptoms" detail="PT context and training safeguards" onPress={() => router.push('/pt-profile' as Href)} last />
     </V23GroupedList>
 
