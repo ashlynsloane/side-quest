@@ -5,6 +5,12 @@ import {
   trainingEnvironmentScore,
   type TrainingEnvironmentProfile,
 } from './training-environment';
+import {
+  equipmentIdsForTrainingSpace,
+  toTrainingEnvironmentProfile,
+  trainingSpaceExerciseScore,
+  type TrainingSpaceProfile,
+} from './training-space';
 
 export * from './index';
 export * from './training-environment';
@@ -29,23 +35,39 @@ function inferredProfile(request: WorkoutGenerationRequest): TrainingEnvironment
   };
 }
 
+function exercisesFromResult(result: Extract<GenerationResult, { ok: true }>) {
+  return result.workout.stations.flatMap((station) =>
+    station.exercises.map((item) => item.exerciseSnapshot),
+  );
+}
+
 function workoutEnvironmentScore(
   result: Extract<GenerationResult, { ok: true }>,
   profile: TrainingEnvironmentProfile,
 ): number {
-  const exercises = result.workout.stations.flatMap((station) =>
-    station.exercises.map((item) => item.exerciseSnapshot),
-  );
-
+  const exercises = exercisesFromResult(result);
   const exerciseScore = exercises.reduce(
     (sum, exercise) => sum + trainingEnvironmentScore(exercise, profile),
     0,
   );
 
   if (profile.environment !== 'gym') return exerciseScore;
+  return exerciseScore + gymOpportunityShare(exercises, profile) * 100;
+}
 
-  // The share bonus makes a gym session use the reason the athlete went to the gym:
-  // machines, cables, racks, barbells, trap bars, and other gym-only loading options.
+export function workoutTrainingSpaceScore(
+  result: Extract<GenerationResult, { ok: true }>,
+  targetSpace: TrainingSpaceProfile,
+  homeSpace?: TrainingSpaceProfile,
+): number {
+  const exercises = exercisesFromResult(result);
+  const profile = toTrainingEnvironmentProfile(targetSpace, homeSpace);
+  const exerciseScore = exercises.reduce(
+    (sum, exercise) => sum + trainingSpaceExerciseScore(exercise, targetSpace, homeSpace),
+    0,
+  );
+
+  if (targetSpace.environment !== 'gym') return exerciseScore;
   return exerciseScore + gymOpportunityShare(exercises, profile) * 100;
 }
 
@@ -87,6 +109,47 @@ export function generateWorkoutForEnvironment(
   }
 
   return best ?? lastFailure ?? generateBaseWorkout(request, context);
+}
+
+export function generateWorkoutForTrainingSpace(
+  request: WorkoutGenerationRequest,
+  context: GenerationContext,
+  targetSpace: TrainingSpaceProfile,
+  homeSpace?: TrainingSpaceProfile,
+): GenerationResult {
+  const availableEquipment = equipmentIdsForTrainingSpace(targetSpace);
+  const baseSeed = request.randomSeed ?? `${Date.now()}-${request.workMinutes}`;
+  const attempts = targetSpace.environment === 'custom' ? 1 : 16;
+  let best: Extract<GenerationResult, { ok: true }> | undefined;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let lastFailure: GenerationResult | undefined;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = generateBaseWorkout(
+      {
+        ...request,
+        availableEquipment,
+        randomSeed: attempt === 0 ? baseSeed : `${baseSeed}:space:${targetSpace.id}:${attempt}`,
+      },
+      context,
+    );
+
+    if (!result.ok) {
+      lastFailure = result;
+      continue;
+    }
+
+    const score = workoutTrainingSpaceScore(result, targetSpace, homeSpace);
+    if (!best || score > bestScore) {
+      best = result;
+      bestScore = score;
+    }
+  }
+
+  return best ?? lastFailure ?? generateBaseWorkout(
+    { ...request, availableEquipment },
+    context,
+  );
 }
 
 // Backward-compatible public entry point. Existing callers do not need to change.
