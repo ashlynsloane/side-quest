@@ -27,4 +27,19 @@ describe('training spaces mobile default wiring', () => {
     expect(source).toContain('generateWorkoutForTrainingSpace');
     expect(source).toContain('session.trainingSpaceId');
   });
+
+  it('caches planner assignments by the planned strength session id', () => {
+    const source = read('apps/mobile/src/services/training-space-runtime.ts');
+    expect(source).toContain('trainingSpaceAssignmentForPlannedSession');
+    expect(source).toContain('plannedStrengthSpaceAssignments.set(session.id');
+  });
+
+  it('resolves the planned workout against its assigned space before preview', () => {
+    const source = read('apps/mobile/src/state/workout-context.tsx');
+    expect(source).toContain('resolvePlannedSessionForTrainingSpace');
+    expect(source).toContain('trainingSpaceAssignmentForPlannedSession(session.id)');
+    expect(source).toContain('generateWorkoutForAssignedTrainingSpace');
+    expect(source).toContain('request: session.workout.request');
+    expect(source).toContain('context: { exercises: exerciseSeed }');
+  });
 });
