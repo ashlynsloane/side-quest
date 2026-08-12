@@ -15,6 +15,7 @@
   "scripts": {
     "validate": "node ./scripts/validate-exercises.mjs",
     "typecheck": "tsc --noEmit",
-    "validate:media": "node ./scripts/validate-media-coverage.mjs"
+    "validate:media": "node ./scripts/validate-media-coverage.mjs",
+    "audit:environments": "node ./scripts/audit-training-environments.mjs"
   }
 }
