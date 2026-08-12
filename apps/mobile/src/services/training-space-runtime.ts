@@ -21,6 +21,8 @@ export interface ResolvedTrainingSpaceWeek {
   preferences: TrainingSpacePreferences;
 }
 
+const plannedStrengthSpaceAssignments = new Map<string, SpaceAwarePlannedSession>();
+
 /**
  * Applies the athlete's persisted Home/Gym configuration to a physiologically
  * finished week. No session dates, loads, or recovery decisions are moved here.
@@ -33,23 +35,42 @@ export function applyPersistedTrainingSpaces(
   const gym = gymSpace(preferences);
 
   if (!home && !gym) {
-    return { sessions: sessions.map((session) => ({ ...session })), preferences };
+    const unresolved = sessions.map((session) => ({ ...session }));
+    cacheStrengthAssignments(unresolved);
+    return { sessions: unresolved, preferences };
   }
 
   const strengthCount = sessions.filter((session) => session.discipline === 'strength').length;
   const allocation = allocationCounts(preferences, strengthCount, Boolean(home), Boolean(gym));
+  const resolved = allocateStrengthTrainingSpaces({
+    sessions,
+    homeSpace: home ? toPlannerSpace(home) : undefined,
+    gymSpace: gym ? toPlannerSpace(gym) : undefined,
+    preferredHomeSessions: allocation.home,
+    preferredGymSessions: allocation.gym,
+    preferGymOnSwimDays: preferences.preferGymOnSwimDays,
+  });
+  cacheStrengthAssignments(resolved);
 
   return {
-    sessions: allocateStrengthTrainingSpaces({
-      sessions,
-      homeSpace: home ? toPlannerSpace(home) : undefined,
-      gymSpace: gym ? toPlannerSpace(gym) : undefined,
-      preferredHomeSessions: allocation.home,
-      preferredGymSessions: allocation.gym,
-      preferGymOnSwimDays: preferences.preferGymOnSwimDays,
-    }),
+    sessions: resolved,
     preferences,
   };
+}
+
+/**
+ * Returns the most recent Home/Gym assignment for a planned strength session.
+ * Whole-athlete normalization preserves PlannedStrengthSession.id, so this key
+ * remains stable between the strength block and the unified weekly planner.
+ */
+export function trainingSpaceAssignmentForPlannedSession(
+  plannedSessionId: string,
+): SpaceAwarePlannedSession | undefined {
+  return plannedStrengthSpaceAssignments.get(plannedSessionId);
+}
+
+export function clearCachedTrainingSpaceAssignments(): void {
+  plannedStrengthSpaceAssignments.clear();
 }
 
 /**
@@ -88,6 +109,13 @@ export function trainingSpaceForSession(
 ): TrainingSpaceProfile | undefined {
   if (!trainingSpaceId) return undefined;
   return preferences.spaces.find((space) => space.id === trainingSpaceId);
+}
+
+function cacheStrengthAssignments(sessions: SpaceAwarePlannedSession[]): void {
+  for (const session of sessions) {
+    if (session.discipline !== 'strength') continue;
+    plannedStrengthSpaceAssignments.set(session.id, { ...session });
+  }
 }
 
 function allocationCounts(
