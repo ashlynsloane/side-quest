@@ -10,8 +10,9 @@ export interface StrengthTrainingSpaceRef {
 
 export interface StrengthTrainingSpaceAllocationInput {
   sessions: WholeAthletePlannedSession[];
-  homeSpace: StrengthTrainingSpaceRef;
-  gymSpace: StrengthTrainingSpaceRef;
+  homeSpace?: StrengthTrainingSpaceRef;
+  gymSpace?: StrengthTrainingSpaceRef;
+  customSpaces?: StrengthTrainingSpaceRef[];
   preferredHomeSessions?: number;
   preferredGymSessions?: number;
   preferGymOnSwimDays?: boolean;
@@ -27,12 +28,11 @@ export interface TrainingSpaceAssignment {
 export type SpaceAwarePlannedSession = WholeAthletePlannedSession & Partial<TrainingSpaceAssignment>;
 
 /**
- * Assigns scarce gym opportunities across a finished weekly plan.
+ * Assigns available training spaces across a finished weekly plan.
  *
- * This deliberately runs after physiological/session placement. Location should
- * exploit the week that the planner already decided is safe and coherent; it
- * should not move sessions or override recovery constraints merely to satisfy a
- * home/gym preference.
+ * Location never creates, removes, or moves a session. If the athlete has only
+ * one usable space, every strength session is assigned there. A mixed home/gym
+ * split is used only when both spaces actually exist.
  */
 export function allocateStrengthTrainingSpaces(
   input: StrengthTrainingSpaceAllocationInput,
@@ -40,6 +40,44 @@ export function allocateStrengthTrainingSpaces(
   const strengthSessions = input.sessions.filter((session) => session.discipline === 'strength');
   if (strengthSessions.length === 0) return input.sessions.map((session) => ({ ...session }));
 
+  const customSpaces = input.customSpaces ?? [];
+  const availableSpaces = [input.homeSpace, input.gymSpace, ...customSpaces].filter(
+    (space): space is StrengthTrainingSpaceRef => Boolean(space),
+  );
+
+  if (availableSpaces.length === 0) return input.sessions.map((session) => ({ ...session }));
+
+  if (availableSpaces.length === 1) {
+    const onlySpace = availableSpaces[0];
+    return input.sessions.map((session) => session.discipline === 'strength'
+      ? withAssignment(
+          session,
+          onlySpace,
+          `All strength is assigned to ${onlySpace.name} because it is the athlete’s available training space.`,
+        )
+      : { ...session });
+  }
+
+  // Multiple custom spaces without a Home/Gym distinction are intentionally
+  // left unassigned for now rather than inventing a preference between them.
+  if (!input.homeSpace && !input.gymSpace) {
+    return input.sessions.map((session) => ({ ...session }));
+  }
+
+  if (!input.gymSpace && input.homeSpace) {
+    return input.sessions.map((session) => session.discipline === 'strength'
+      ? withAssignment(session, input.homeSpace!, 'All strength is assigned to Home because no gym training space is configured.')
+      : { ...session });
+  }
+
+  if (!input.homeSpace && input.gymSpace) {
+    return input.sessions.map((session) => session.discipline === 'strength'
+      ? withAssignment(session, input.gymSpace!, 'All strength is assigned to Gym because no home training space is configured.')
+      : { ...session });
+  }
+
+  const homeSpace = input.homeSpace!;
+  const gymSpace = input.gymSpace!;
   const preferredGymSessions = clampCount(
     input.preferredGymSessions ?? (strengthSessions.length >= 3 ? 1 : 0),
     strengthSessions.length,
@@ -73,13 +111,13 @@ export function allocateStrengthTrainingSpaces(
       const reason = pairedWithSwim && input.preferGymOnSwimDays !== false
         ? 'Gym strength assigned here because this day already includes a swim/gym visit, while preserving the planner’s existing training-load placement.'
         : 'Gym strength assigned here to reserve a weekly session for heavier loading, machines, cables, and other gym-specific opportunities.';
-      return withAssignment(session, input.gymSpace, reason);
+      return withAssignment(session, gymSpace, reason);
     }
 
     if (homeIds.has(session.id)) {
       return withAssignment(
         session,
-        input.homeSpace,
+        homeSpace,
         'Home strength assigned here so gym time can be reserved for movements that materially benefit from heavier loading or gym-specific equipment.',
       );
     }
