@@ -1,8 +1,12 @@
 import { readFile } from 'node:fs/promises';
 
 const ROOT = new URL('..', import.meta.url);
-const exercises = JSON.parse(await readFile(new URL('./data/exercises.json', ROOT), 'utf8'));
-const equipment = JSON.parse(await readFile(new URL('./data/equipment.json', ROOT), 'utf8'));
+const [baseExercises, environmentExercises, equipment] = await Promise.all([
+  JSON.parse(await readFile(new URL('./data/exercises.json', ROOT), 'utf8')),
+  JSON.parse(await readFile(new URL('./data/environment-exercises.json', ROOT), 'utf8')),
+  JSON.parse(await readFile(new URL('./data/equipment.json', ROOT), 'utf8')),
+]);
+const exercises = [...baseExercises, ...environmentExercises];
 
 const DEFAULT_HOME = [
   'bodyweight',
@@ -88,6 +92,8 @@ const ORDER = ['home_specialty', 'home_equivalent', 'gym_advantaged', 'gym_depen
 console.log('\nSIDE QUEST TRAINING ENVIRONMENT AUDIT');
 console.log('====================================');
 console.log(`Active/default exercises: ${active.length}`);
+console.log(`Base exercises: ${baseExercises.length}`);
+console.log(`Environment additions: ${environmentExercises.length}`);
 console.log(`Home equipment: ${homeIds.join(', ')}`);
 console.log('\nClassification counts:');
 for (const bucket of ORDER) console.log(`  ${bucket}: ${(groups.get(bucket) ?? []).length}`);
