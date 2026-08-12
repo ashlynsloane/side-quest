@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises';
 
 const ROOT = new URL('..', import.meta.url);
-const [base, expansion, equipment] = await Promise.all([
+const [base, environmentExpansion, gymExpansionV2, equipment] = await Promise.all([
   readJson('./data/exercises.json'),
   readJson('./data/environment-exercises.json'),
+  readJson('./data/gym-expansion-v2.json'),
   readJson('./data/equipment.json'),
 ]);
+const expansion = [...environmentExpansion, ...gymExpansionV2];
 
 const equipmentIds = new Set(equipment.map((item) => item.id));
 const baseIds = new Set(base.map((item) => item.id));
