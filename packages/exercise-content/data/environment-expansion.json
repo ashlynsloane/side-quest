@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "purpose": "Curated exercise additions that make home equipment useful and make commercial-gym sessions worth the trip. This is content metadata for the next exercise-library expansion, not a replacement for exercises.json.",
+  "home": [
+    {"id":"ex_slider_reverse_lunge","name":"Slider Reverse Lunge","equipment":["slider"],"pattern":"lunge","role":"secondary_strength","reason":"Adds controlled unilateral leg work using equipment the athlete owns at home."},
+    {"id":"ex_slider_lateral_lunge","name":"Slider Lateral Lunge","equipment":["slider"],"pattern":"lunge","role":"secondary_strength","reason":"Adds frontal-plane strength with minimal equipment."},
+    {"id":"ex_slider_body_saw","name":"Slider Body Saw","equipment":["slider"],"pattern":"anti_extension","role":"core","reason":"Distinct anti-extension progression not duplicated by dumbbells."},
+    {"id":"ex_slider_knee_tuck","name":"Slider Knee Tuck","equipment":["slider"],"pattern":"trunk_flexion","role":"core","reason":"Dynamic anterior-core option."},
+    {"id":"ex_slider_pike","name":"Slider Pike","equipment":["slider"],"pattern":"trunk_flexion","role":"core","reason":"Higher-complexity slider core progression."},
+    {"id":"ex_slider_single_leg_hamstring_curl","name":"Single-Leg Slider Hamstring Curl","equipment":["slider"],"pattern":"hinge","role":"accessory","reason":"Unilateral posterior-chain progression from the existing bilateral slider curl."},
+    {"id":"ex_stability_ball_stir_the_pot","name":"Stability-Ball Stir-the-Pot","equipment":["stability_ball"],"pattern":"anti_extension","role":"core","reason":"Makes the stability ball useful for advanced trunk control."},
+    {"id":"ex_stability_ball_pike","name":"Stability-Ball Pike","equipment":["stability_ball"],"pattern":"trunk_flexion","role":"core","reason":"Dynamic stability-ball core progression."},
+    {"id":"ex_stability_ball_glute_bridge","name":"Stability-Ball Glute Bridge","equipment":["stability_ball"],"pattern":"hinge","role":"accessory","reason":"Posterior-chain option distinct from the curl."},
+    {"id":"ex_stability_ball_glute_bridge_march","name":"Stability-Ball Glute Bridge March","equipment":["stability_ball"],"pattern":"hinge","role":"stability","reason":"Adds unilateral pelvic-control demand."}
+  ],
+  "gym": [
+    {"id":"ex_leg_press","name":"Leg Press","equipment":["leg_press"],"pattern":"squat","role":"primary_strength","reason":"Foundational high-load knee-dominant movement unavailable in the current library."},
+    {"id":"ex_hack_squat","name":"Hack Squat","equipment":["hack_squat_machine"],"pattern":"squat","role":"primary_strength","reason":"Stable heavy squat pattern that exploits commercial-gym equipment."},
+    {"id":"ex_leg_extension","name":"Leg Extension","equipment":["leg_extension_machine"],"pattern":"squat","role":"accessory","reason":"Direct quadriceps loading not reproducible with the current home setup."},
+    {"id":"ex_seated_leg_curl","name":"Seated Leg Curl","equipment":["leg_curl_machine"],"pattern":"hinge","role":"accessory","reason":"Direct hamstring loading with easy progression."},
+    {"id":"ex_machine_calf_raise","name":"Machine Calf Raise","equipment":["calf_raise_machine"],"pattern":"squat","role":"accessory","reason":"Allows substantially heavier progressive calf loading than home equipment."},
+    {"id":"ex_lat_pulldown","name":"Lat Pulldown","equipment":["cable_machine"],"pattern":"vertical_pull","role":"primary_strength","reason":"Major vertical-pull gap in the current gym library."},
+    {"id":"ex_seated_cable_row","name":"Seated Cable Row","equipment":["cable_machine"],"pattern":"horizontal_pull","role":"primary_strength","reason":"Progressively loadable horizontal pull."},
+    {"id":"ex_single_arm_cable_row","name":"Single-Arm Cable Row","equipment":["cable_machine"],"pattern":"horizontal_pull","role":"secondary_strength","reason":"Unilateral cable pull with rotational-control demand."},
+    {"id":"ex_cable_chest_press","name":"Cable Chest Press","equipment":["cable_machine"],"pattern":"horizontal_push","role":"secondary_strength","reason":"Cable pressing option with continuous resistance."},
+    {"id":"ex_cable_fly","name":"Cable Fly","equipment":["cable_machine"],"pattern":"horizontal_push","role":"accessory","reason":"Chest accessory that meaningfully uses gym equipment."},
+    {"id":"ex_cable_triceps_pressdown","name":"Cable Triceps Pressdown","equipment":["cable_machine"],"pattern":"vertical_push","role":"accessory","reason":"Simple progressively loadable arm accessory."},
+    {"id":"ex_cable_biceps_curl","name":"Cable Biceps Curl","equipment":["cable_machine"],"pattern":"horizontal_pull","role":"accessory","reason":"Simple progressively loadable arm accessory."},
+    {"id":"ex_cable_lateral_raise","name":"Cable Lateral Raise","equipment":["cable_machine"],"pattern":"vertical_push","role":"accessory","reason":"Useful shoulder accessory with low starting load and continuous resistance."},
+    {"id":"ex_cable_chop","name":"Cable Chop","equipment":["cable_machine"],"pattern":"rotation","role":"core","reason":"Loadable rotational trunk work."},
+    {"id":"ex_cable_lift","name":"Cable Lift","equipment":["cable_machine"],"pattern":"rotation","role":"core","reason":"Complements cable chop through the opposite diagonal."},
+    {"id":"ex_assisted_pull_up","name":"Assisted Pull-Up","equipment":["assisted_pullup_machine"],"pattern":"vertical_pull","role":"primary_strength","reason":"Scalable vertical pulling for athletes not yet doing full pull-ups."},
+    {"id":"ex_machine_chest_press","name":"Machine Chest Press","equipment":["chest_press_machine"],"pattern":"horizontal_push","role":"primary_strength","reason":"Stable high-load pressing option."},
+    {"id":"ex_chest_supported_machine_row","name":"Chest-Supported Machine Row","equipment":["row_machine"],"pattern":"horizontal_pull","role":"primary_strength","reason":"Heavy pulling without making trunk endurance the limiting factor."},
+    {"id":"ex_barbell_back_squat","name":"Barbell Back Squat","equipment":["barbell","weight_plate"],"pattern":"squat","role":"primary_strength","reason":"Foundational barbell squat; current library only has the 1.5-rep variation."},
+    {"id":"ex_barbell_front_squat","name":"Barbell Front Squat","equipment":["barbell","weight_plate"],"pattern":"squat","role":"primary_strength","reason":"Foundational anterior-loaded barbell squat."},
+    {"id":"ex_barbell_hip_thrust","name":"Barbell Hip Thrust","equipment":["barbell","weight_plate","bench"],"pattern":"hinge","role":"primary_strength","reason":"High-load hip-extension movement beyond home loading capacity."},
+    {"id":"ex_trap_bar_deadlift","name":"Trap-Bar Deadlift","equipment":["trap_bar","weight_plate"],"pattern":"hinge","role":"primary_strength","reason":"Foundational trap-bar strength movement; current library only has a deadlift-to-high-pull variation."}
+  ],
+  "principles": [
+    "Do not label an exercise permanently home or gym when equipment/profile context can determine availability.",
+    "Gym sessions should preferentially spend primary-strength opportunities on movements that exploit heavier loading, machines, cables, racks, or other unavailable home equipment.",
+    "Home sessions should exploit owned specialty equipment and free-weight/bodyweight movements that do not materially benefit from a gym visit.",
+    "Bodyweight exercises remain location-neutral unless a specific apparatus is required.",
+    "Load-aware gym advantage is modeled separately from equipment availability."
+  ]
+}
