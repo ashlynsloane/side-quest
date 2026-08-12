@@ -9,11 +9,13 @@ import {
 } from './database';
 import {
   clearSideQuestGeneratedPlanEvents,
-  generateAndPersistWholeAthleteBlock,
-  type GeneratedWholeAthleteBlock,
   type WholeAthleteCapacityInput,
   type WholeAthleteHealthPreferences,
 } from './whole-athlete-plan';
+import {
+  generateAndPersistSpaceAwareWholeAthleteBlock,
+  type SpaceAwareWholeAthleteBlock,
+} from './whole-athlete-plan-training-spaces';
 
 const HEALTH_PREFERENCES_KEY = 'circuit.whole-athlete-health.v1';
 
@@ -48,7 +50,7 @@ export function saveWholeAthleteHealthPreferences(preferences: WholeAthleteHealt
   Storage.setItemSync(HEALTH_PREFERENCES_KEY, JSON.stringify(preferences));
 }
 
-export async function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAthleteBlock | null> {
+export async function refreshLatestWholeAthletePlan(): Promise<SpaceAwareWholeAthleteBlock | null> {
   const saved = await getLatestTrainingBlock();
   if (!saved?.block) {
     await clearSideQuestGeneratedPlanEvents();
@@ -61,7 +63,7 @@ export async function refreshLatestWholeAthletePlan(): Promise<GeneratedWholeAth
     getTodayReadinessCheckIn(),
   ]);
   const goal = saved.block.goal;
-  return generateAndPersistWholeAthleteBlock({
+  return generateAndPersistSpaceAwareWholeAthleteBlock({
     block: saved.block,
     goal,
     capacity: capacityFromGoal(goal),
