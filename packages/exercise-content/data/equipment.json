@@ -1,29 +1,82 @@
 [
-  { "id": "bodyweight", "label": "Bodyweight" },
-  { "id": "dumbbell", "label": "Dumbbells" },
-  { "id": "kettlebell", "label": "Kettlebells" },
-  { "id": "barbell", "label": "Barbell and plates" },
-  { "id": "weight_plate", "label": "Weight plate" },
-  { "id": "trap_bar", "label": "Trap bar" },
-  { "id": "medicine_ball", "label": "Medicine ball" },
-  { "id": "long_band", "label": "Long resistance band" },
-  { "id": "mini_band", "label": "Mini or booty band" },
-  { "id": "bosu", "label": "BOSU" },
-  { "id": "trx", "label": "TRX" },
-  { "id": "bench", "label": "Bench" },
-  { "id": "box", "label": "Box or step" },
-  { "id": "stability_ball", "label": "Stability ball" },
-  { "id": "slider", "label": "Sliders" },
-  { "id": "pullup_bar", "label": "Pull-up bar" },
-  { "id": "cable_machine", "label": "Cable machine" },
-  { "id": "leg_press", "label": "Leg press" },
-  { "id": "hack_squat_machine", "label": "Hack squat machine" },
-  { "id": "leg_extension_machine", "label": "Leg extension machine" },
-  { "id": "leg_curl_machine", "label": "Leg curl machine" },
-  { "id": "calf_raise_machine", "label": "Calf raise machine" },
-  { "id": "assisted_pullup_machine", "label": "Assisted pull-up machine" },
-  { "id": "chest_press_machine", "label": "Chest press machine" },
-  { "id": "row_machine", "label": "Row machine" },
-  { "id": "wall", "label": "Wall" },
-  { "id": "stairs", "label": "Stairs" }
+  {
+    "id": "bodyweight",
+    "label": "Bodyweight"
+  },
+  {
+    "id": "dumbbell",
+    "label": "Dumbbells"
+  },
+  {
+    "id": "kettlebell",
+    "label": "Kettlebells"
+  },
+  {
+    "id": "barbell",
+    "label": "Barbell and plates"
+  },
+  {
+    "id": "weight_plate",
+    "label": "Weight plate"
+  },
+  {
+    "id": "trap_bar",
+    "label": "Trap bar"
+  },
+  {
+    "id": "medicine_ball",
+    "label": "Medicine ball"
+  },
+  {
+    "id": "long_band",
+    "label": "Long resistance band"
+  },
+  {
+    "id": "mini_band",
+    "label": "Mini or booty band"
+  },
+  {
+    "id": "bosu",
+    "label": "BOSU"
+  },
+  {
+    "id": "trx",
+    "label": "TRX"
+  },
+  {
+    "id": "bench",
+    "label": "Bench"
+  },
+  {
+    "id": "box",
+    "label": "Box or step"
+  },
+  {
+    "id": "stability_ball",
+    "label": "Stability ball"
+  },
+  {
+    "id": "slider",
+    "label": "Sliders"
+  },
+  {
+    "id": "pullup_bar",
+    "label": "Pull-up bar"
+  },
+  {
+    "id": "cable_machine",
+    "label": "Cable machine"
+  },
+  {
+    "id": "leg_press",
+    "label": "Leg press"
+  },
+  {
+    "id": "wall",
+    "label": "Wall"
+  },
+  {
+    "id": "stairs",
+    "label": "Stairs"
+  }
 ]
