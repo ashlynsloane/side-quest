@@ -14,6 +14,7 @@ import {
   listCompletedWorkoutSummaries,
   listTrainingCalendarSources,
 } from '@/services/database';
+import { trainingSpaceAssignmentForPlannedSession } from '@/services/training-space-runtime';
 import { conciseSessionLabel } from '@/services/training-synthesis';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
@@ -165,7 +166,11 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
     const iso = date.toISOString().slice(0, 10);
     const items: DayItem[] = [
       ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline })),
-      ...strength.filter((session) => session.date === iso).map((session) => ({ id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.totalWorkSeconds / 60)} min · ${strengthStatusLabel(session.completionStatus)}`, session })),
+      ...strength.filter((session) => session.date === iso).map((session) => {
+        const assignment = trainingSpaceAssignmentForPlannedSession(session.id);
+        const location = assignment?.trainingSpaceName ? ` · ${assignment.trainingSpaceName}` : '';
+        return { id: session.id, kind: 'strength' as const, title: session.title, meta: `${Math.round(session.workout.totalWorkSeconds / 60)} min${location} · ${strengthStatusLabel(session.completionStatus)}`, session };
+      }),
     ];
     return { date: iso, label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase() + ` ${date.getDate()}`, weekday: new Intl.DateTimeFormat('en-US', { weekday: 'narrow' }).format(date), dayNumber: date.getDate(), items };
   });
