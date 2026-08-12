@@ -1,4 +1,5 @@
 import type { GeneratedWorkout, PlannedStrengthSession, WorkoutRecommendationExplanation } from '@circuit/domain';
+import { exerciseSeed } from '@circuit/exercise-content';
 import { explainPlannedStrengthSession, type RecommendationExplanationContext } from '@circuit/planner';
 import {
   createContext,
@@ -16,6 +17,10 @@ import {
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
+import {
+  generateWorkoutForAssignedTrainingSpace,
+  trainingSpaceAssignmentForPlannedSession,
+} from '@/services/training-space-runtime';
 
 type PlannedPreviewSource = {
   session: PlannedStrengthSession;
@@ -49,6 +54,26 @@ function buildPlanLink(source: PlannedPreviewSource | null): ActiveWorkoutPlanLi
     sessionDate: source.session.date,
     sessionTitle: source.session.title,
     modifiedFromPlan: source.modifiedFromPlan,
+  };
+}
+
+function resolvePlannedSessionForTrainingSpace(session: PlannedStrengthSession): PlannedStrengthSession {
+  const assignment = trainingSpaceAssignmentForPlannedSession(session.id);
+  if (!assignment?.trainingSpaceId) return session;
+
+  const result = generateWorkoutForAssignedTrainingSpace({
+    session: assignment,
+    request: session.workout.request,
+    context: { exercises: exerciseSeed },
+  });
+  if (!result?.ok) return session;
+
+  return {
+    ...session,
+    workout: {
+      ...result.workout,
+      name: session.workout.name,
+    },
   };
 }
 
@@ -101,10 +126,11 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(nextSource.session, nextSource.context));
     },
     openPlannedWorkoutPreview(session, context = {}) {
-      const source: PlannedPreviewSource = { session, context, modifiedFromPlan: false };
-      setPreviewWorkoutState(session.workout);
+      const resolvedSession = resolvePlannedSessionForTrainingSpace(session);
+      const source: PlannedPreviewSource = { session: resolvedSession, context, modifiedFromPlan: false };
+      setPreviewWorkoutState(resolvedSession.workout);
       setPlannedPreviewSource(source);
-      setPreviewExplanation(explainPlannedStrengthSession(session, context));
+      setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
     beginWorkout(workout) {
       const planLink = buildPlanLink(plannedPreviewSource);
