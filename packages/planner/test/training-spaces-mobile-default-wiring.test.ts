@@ -42,4 +42,12 @@ describe('training spaces mobile default wiring', () => {
     expect(source).toContain('request: session.workout.request');
     expect(source).toContain('context: { exercises: exerciseSeed }');
   });
+
+  it('makes the assigned space and allocation reason visible in the planned preview', () => {
+    const source = read('apps/mobile/src/state/workout-context.tsx');
+    expect(source).toContain('assignment.trainingSpaceName');
+    expect(source).toContain('assignment.trainingSpaceReason');
+    expect(source).toContain('`${session.title} · ${spaceName}`');
+    expect(source).toContain('placementNote: reason ?? session.placementNote');
+  });
 });
