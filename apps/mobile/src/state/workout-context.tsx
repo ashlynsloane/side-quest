@@ -68,11 +68,16 @@ function resolvePlannedSessionForTrainingSpace(session: PlannedStrengthSession):
   });
   if (!result?.ok) return session;
 
+  const spaceName = assignment.trainingSpaceName ?? assignment.trainingEnvironment ?? 'Training space';
+  const reason = assignment.trainingSpaceReason;
   return {
     ...session,
+    title: session.title.includes(` · ${spaceName}`) ? session.title : `${session.title} · ${spaceName}`,
+    rationale: reason ? `${session.rationale} ${reason}` : session.rationale,
+    placementNote: reason ?? session.placementNote,
     workout: {
       ...result.workout,
-      name: session.workout.name,
+      name: `${session.workout.name} · ${spaceName}`,
     },
   };
 }
