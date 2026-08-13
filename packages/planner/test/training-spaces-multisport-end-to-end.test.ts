@@ -9,8 +9,8 @@ describe('multisport training spaces end-to-end wiring', () => {
   it('applies training spaces after the normal whole-athlete and outing plan is built', () => {
     const source = read('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     expect(source).toContain('applyTrainingOutingsToGeneratedBlock');
-    expect(source).toContain('applyTrainingSpacesToGeneratedBlock(shaped)');
-    expect(source).toContain('latestReconciledPlan = { blockId: saved.block.id, generated: spaceAware }');
+    expect(source).toContain('applyTrainingSpacesToGeneratedBlock(generated)');
+    expect(source).toContain('latestReconciledPlan = { blockId: saved.block.id, generated: reconciled }');
   });
 
   it('coordinates strength roles before allocating home and gym', () => {

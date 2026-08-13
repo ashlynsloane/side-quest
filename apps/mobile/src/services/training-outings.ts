@@ -201,8 +201,15 @@ function findStackPlacement({
 
 function canStackSwimAndStrength(
   swim: TrainingOutingScheduledSession,
-  strength: TrainingOutingScheduledSession,
+  strength: TrainingOutingScheduledSession & {
+    trainingEnvironment?: 'home' | 'gym' | 'custom';
+  },
 ): boolean {
+  // Convenience cannot override the athlete's assigned training space.
+  // A Home strength session stays Home even if a same-day swim happens
+  // at a facility with a weight room.
+  if (strength.trainingEnvironment !== 'gym') return false;
+
   if (isHard(swim) && isHard(strength)) return false;
   if (strength.keySession) return false;
   if (strength.lowerBodyDemand === 'high') return false;

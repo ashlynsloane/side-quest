@@ -155,17 +155,19 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     Promise.resolve(loadTrainingAvailabilityProfile()),
     listEquipmentProfiles(),
   ]);
-  const shaped = applyTrainingOutingsToGeneratedBlock(
-    generated,
+  // Resolve strength-space intent before convenience/outings.
+  // Athlete-configured Home/Gym decisions outrank facility stacking.
+  const spaceAware = await applyTrainingSpacesToGeneratedBlock(generated);
+  const reconciled = applyTrainingOutingsToGeneratedBlock(
+    spaceAware,
     availabilityProfile,
     locationProfiles as TrainingLocationProfile[],
     capacity.runStatus,
   );
-  const spaceAware = await applyTrainingSpacesToGeneratedBlock(shaped);
-  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, spaceAware.generatedEvents);
+  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, reconciled.generatedEvents);
 
-  latestReconciledPlan = { blockId: saved.block.id, generated: spaceAware };
-  return spaceAware;
+  latestReconciledPlan = { blockId: saved.block.id, generated: reconciled };
+  return reconciled;
 }
 
 export function progressionHistoryFromTrainingHistory(
