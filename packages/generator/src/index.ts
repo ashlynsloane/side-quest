@@ -1,7 +1,14 @@
 import type { GenerationContext, GenerationResult, WorkoutGenerationRequest } from '@circuit/domain';
 import { generateWorkout as generateWorkoutCore } from './core';
+import {
+  equipmentIdsForTrainingSpace,
+  trainingSpaceExerciseScore,
+  type TrainingSpaceProfile,
+} from './training-space';
 
 export * from './core';
+export * from './training-environment';
+export * from './training-space';
 
 /**
  * Station Architecture V2.
@@ -55,4 +62,56 @@ export function generateWorkout(
   context: GenerationContext,
 ): GenerationResult {
   return generateWorkoutCore(normalizeStationDensity(request), context);
+}
+
+/**
+ * Generates several deterministic legal workouts inside one exact training
+ * space, then selects the workout that makes best use of that space.
+ *
+ * The core generator remains unchanged: safety restrictions, recovery rules,
+ * station architecture, and exercise compatibility are still authoritative.
+ * Training-space value is a workout-level selection criterion after those
+ * constraints are satisfied, which keeps location from bypassing physiology.
+ */
+export function generateWorkoutForTrainingSpace(
+  request: WorkoutGenerationRequest,
+  context: GenerationContext,
+  targetSpace: TrainingSpaceProfile,
+  homeSpace?: TrainingSpaceProfile,
+): GenerationResult {
+  const normalized = normalizeStationDensity({
+    ...request,
+    availableEquipment: equipmentIdsForTrainingSpace(targetSpace),
+  });
+  const baseSeed = request.randomSeed ?? `${targetSpace.id}-${request.workMinutes}`;
+  let best: GenerationResult | undefined;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let lastFailure: GenerationResult | undefined;
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const result = generateWorkoutCore({
+      ...normalized,
+      randomSeed: `${baseSeed}:training-space:${attempt}`,
+    }, context);
+
+    if (!result.ok) {
+      lastFailure = result;
+      continue;
+    }
+
+    const exercises = result.workout.stations.flatMap((station) =>
+      station.exercises.map((item) => item.exerciseSnapshot),
+    );
+    const score = exercises.reduce(
+      (sum, exercise) => sum + trainingSpaceExerciseScore(exercise, targetSpace, homeSpace),
+      0,
+    );
+
+    if (!best || score > bestScore) {
+      best = result;
+      bestScore = score;
+    }
+  }
+
+  return best ?? lastFailure ?? generateWorkoutCore(normalized, context);
 }
