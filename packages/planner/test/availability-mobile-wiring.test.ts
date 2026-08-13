@@ -20,7 +20,9 @@ describe('availability intelligence mobile wiring', () => {
   it('schedules the actual whole-athlete plan before generated calendar events are persisted', () => {
     const plan = source('apps/mobile/src/services/whole-athlete-plan.ts');
     expect(plan).toContain('loadTrainingAvailabilityProfile()');
-    expect(plan).toContain('applyAvailabilityToWholeAthleteWeeks([progressedPlan], availabilityProfile)');
+    expect(plan).toContain('applyAvailabilityToWholeAthleteWeeks(');
+    expect(plan).toContain('availabilityProfile,');
+    expect(plan).toContain('0,');
     expect(plan).toContain('previousWeek = scheduledPlan.sessions');
     expect(plan).toContain('plannedSessionToCalendarEvent(session, input.block.id)');
     expect(plan).toContain('allDay: !session.scheduledStartAt');

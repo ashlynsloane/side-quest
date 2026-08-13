@@ -331,7 +331,9 @@ export async function buildAndSaveGoalSetup(
 }
 
 
-function resolveConfiguredStrengthSessions(fallback: number): number {
+function resolveConfiguredStrengthSessions(
+  fallback: 2 | 3 | 4 | 5,
+): 2 | 3 | 4 | 5 {
   const preferences = loadTrainingSpacePreferences();
 
   if (preferences.strengthLocationPreference !== 'mixed') {
@@ -342,12 +344,11 @@ function resolveConfiguredStrengthSessions(fallback: number): number {
   const gym = Math.max(0, Math.floor(preferences.preferredGymSessions ?? 0));
   const configured = home + gym;
 
-  // Explicit mixed-location counts are a weekly strength-frequency request.
-  // Example: 2 Home + 1 Gym means three strength sessions, not two sessions
-  // redistributed between the two spaces.
-  return configured > 0
-    ? Math.max(1, Math.min(5, configured))
-    : fallback;
+  if (configured <= 0) return fallback;
+  if (configured <= 2) return 2;
+  if (configured === 3) return 3;
+  if (configured === 4) return 4;
+  return 5;
 }
 
 export async function removeCurrentGoalSetup(): Promise<void> {

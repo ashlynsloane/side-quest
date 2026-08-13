@@ -1,4 +1,8 @@
-import type { GenerationContext, PlannedStrengthSession } from '@circuit/domain';
+import type {
+  GenerationContext,
+  PlannedStrengthSession,
+  WorkoutGenerationRequest,
+} from '@circuit/domain';
 import { generateWorkoutForTrainingSpace, type TrainingSpaceProfile } from '@circuit/generator';
 import { allocateStrengthTrainingSpaces, type SpaceAwarePlannedSession } from '@circuit/planner/strength-training-space-allocation';
 import { coordinateWeeklyStrengthStimuli, type WeeklyStrengthPrescription } from '@circuit/planner/whole-athlete-strength-coherence';
@@ -63,9 +67,17 @@ export async function applyTrainingSpacesToGeneratedBlock(
       const targetSpace = trainingSpaceForSession(session.trainingSpaceId, preferences);
       if (!targetSpace || !('workout' in session) || !session.workout) return session;
 
-      const strengthSession = session as typeof session & Pick<PlannedStrengthSession, 'workout'>;
-      const request = applyWeeklyStrengthPrescriptionToRequest(
+      const strengthSession = session as typeof session & Pick<
+        PlannedStrengthSession,
+        'workout' | 'purpose' | 'id' | 'date'
+      >;
+      const architectureRequest = applyPlannedStrengthArchitecture(
         strengthSession.workout.request,
+        strengthSession,
+        targetSpace,
+      );
+      const request = applyWeeklyStrengthPrescriptionToRequest(
+        architectureRequest,
         session.strengthPrescription,
       );
       const generated = generateWorkoutForTrainingSpace(request, context, targetSpace, home);
@@ -78,6 +90,75 @@ export async function applyTrainingSpacesToGeneratedBlock(
 
   return { ...block, weeks };
 }
+
+
+/**
+ * Gives planned strength sessions different structural identities before
+ * exercise selection. The weekly coherence layer still controls what the
+ * session needs to train; this layer controls how the workout is shaped.
+ *
+ * We intentionally avoid making every planned session a ~40-minute work block
+ * that resolves to the same five-station circuit.
+ */
+export function applyPlannedStrengthArchitecture(
+  request: WorkoutGenerationRequest,
+  session: Pick<PlannedStrengthSession, 'purpose' | 'id' | 'date'>,
+  space: TrainingSpaceProfile,
+): WorkoutGenerationRequest {
+  const gym = space.environment === 'gym';
+
+  switch (session.purpose) {
+    case 'swim_support':
+      return {
+        ...request,
+        // Support work should feel crisp rather than like another major workout.
+        workMinutes: gym ? 28 : 24,
+        allowedStationMinutes: [4, 6, 8],
+        exercisesPerStation: 2,
+        randomSeed: `${request.randomSeed ?? session.id}:swim-support:${space.id}`,
+      };
+
+    case 'posterior_durability':
+      return {
+        ...request,
+        // Gym version gets enough room for meaningful loaded work without
+        // turning the session into five interchangeable circuits.
+        workMinutes: gym ? 36 : 32,
+        allowedStationMinutes: gym ? [6, 8] : [4, 6, 8],
+        exercisesPerStation: 2,
+        randomSeed: `${request.randomSeed ?? session.id}:posterior:${space.id}`,
+      };
+
+    case 'single_leg_durability':
+      return {
+        ...request,
+        workMinutes: gym ? 32 : 28,
+        allowedStationMinutes: [4, 6, 8],
+        exercisesPerStation: 2,
+        randomSeed: `${request.randomSeed ?? session.id}:single-leg:${space.id}`,
+      };
+
+    case 'maintenance':
+      return {
+        ...request,
+        // Maintenance should be obviously smaller than a key strength dose.
+        workMinutes: 24,
+        allowedStationMinutes: [4, 6, 8],
+        exercisesPerStation: 2,
+        randomSeed: `${request.randomSeed ?? session.id}:maintenance:${space.id}`,
+      };
+
+    default:
+      return {
+        ...request,
+        workMinutes: gym ? 36 : 32,
+        allowedStationMinutes: [4, 6, 8],
+        exercisesPerStation: 2,
+        randomSeed: `${request.randomSeed ?? session.id}:general:${space.id}`,
+      };
+  }
+}
+
 
 function allocationCounts(
   preferences: TrainingSpacePreferences,

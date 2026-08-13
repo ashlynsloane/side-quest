@@ -179,10 +179,10 @@ export async function generateAndPersistWholeAthleteBlock(
       frequencyTargets: weekFrequencyTargets,
       recentBoneStress: input.capacity.boneStressInjuryHistory === 'recent_or_current',
       returnToRun: input.capacity.runStatus === 'return_to_run',
-      // Sunday is the normal full rest day. Fixed athlete/calendar
-      // commitments can still override this, but Side Quest will not
-      // generate training onto Sunday.
-      protectedRestDayOffset: 6,
+      // Monday is the normal full rest day. Athlete-fixed/calendar
+      // commitments remain authoritative, but Side Quest-generated
+      // training may not occupy Monday.
+      protectedRestDayOffset: 0,
     });
     const progressionApplies = Boolean(
       input.progressionDate
@@ -200,7 +200,11 @@ export async function generateAndPersistWholeAthleteBlock(
           }),
         )
       : basePlan;
-    const scheduledPlan = applyAvailabilityToWholeAthleteWeeks([progressedPlan], availabilityProfile)[0]!;
+    const scheduledPlan = applyAvailabilityToWholeAthleteWeeks(
+      [progressedPlan],
+      availabilityProfile,
+      0,
+    )[0]!;
 
     weeks.push(scheduledPlan);
     previousWeek = scheduledPlan.sessions;
