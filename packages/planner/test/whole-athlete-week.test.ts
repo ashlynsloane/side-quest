@@ -90,7 +90,7 @@ describe('whole-athlete weekly planner', () => {
     ).toBe(false);
   });
 
-  it('moves the recovery day instead of overriding a fixed Monday commitment', () => {
+  it('keeps a low-cost fixed Monday commitment on the recovery anchor', () => {
     const masters = session(
       'masters-swim',
       '2026-08-10',
@@ -118,12 +118,11 @@ describe('whole-athlete weekly planner', () => {
       plan.sessions.find((item) => item.id === 'masters-swim')
         ?.planningCommitment,
     ).toBe('fixed');
-    expect(plan.recoveryDayDate).toBeDefined();
-    expect(plan.recoveryDayDate).not.toBe('2026-08-10');
+    expect(plan.recoveryDayDate).toBe('2026-08-10');
     expect(
       plan.sessions.some(
         (item) =>
-          item.date === plan.recoveryDayDate
+          item.date === '2026-08-10'
           && item.planningCommitment === 'generated',
       ),
     ).toBe(false);

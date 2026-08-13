@@ -4,10 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { applyApprovedFrequencySuppression } from '../src/frequency-suppression';
 import { allocateStrengthTrainingSpaces } from '../src/strength-training-space-allocation';
 import { resolveWeeklyFrequencyContract } from '../src/weekly-frequency-contract';
-import {
-  buildWholeAthleteWeek,
-  type WholeAthletePlannedSession,
-} from '../src/whole-athlete-week';
+import { buildWholeAthleteWeek } from '../src/whole-athlete-week-block';
+import type { WholeAthletePlannedSession } from '../src/whole-athlete-week';
 import type { UnifiedTrainingSession } from '../src/unified-training';
 
 function athleteSession(
@@ -61,7 +59,49 @@ function count(
 }
 
 describe('weekly planning priority scenarios', () => {
-  it('preserves Monday Masters, moves recovery, and keeps return-to-run and frequency contracts intact', () => {
+  it('uses the canonical triathlon rhythm for an unconstrained first week', () => {
+    const contract = resolveWeeklyFrequencyContract({
+      goalType: 'ironman_70_3',
+      runStatus: 'normal',
+      plannedStrengthSessions: 0,
+    });
+
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 1200,
+      goalType: 'ironman_70_3',
+      phase: 'base',
+      frequencyTargets: {
+        ...contract,
+        strength: { min: 0, preferred: 0, max: 0 },
+      },
+      preferredRestDayOffset: 0,
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'low',
+      },
+    });
+
+    const weekday = (date: string) => {
+      const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+      return (day + 6) % 7;
+    };
+
+    const days = (discipline: 'swim' | 'bike' | 'run') =>
+      plan.sessions
+        .filter((session) => session.discipline === discipline)
+        .map((session) => weekday(session.date))
+        .sort((a, b) => a - b);
+
+    expect(plan.recoveryDayDate).toBe('2026-08-10');
+    expect(days('swim')).toEqual([1, 3, 4]);
+    expect(days('bike')).toEqual([1, 3, 5, 6]);
+    expect(days('run')).toEqual([2, 4, 6]);
+  });
+
+
+  it('preserves Monday Masters as a low-load recovery anchor and keeps return-to-run and frequency contracts intact', () => {
     const masters = athleteSession(
       'masters-monday',
       '2026-08-10',
@@ -98,7 +138,7 @@ describe('weekly planning priority scenarios', () => {
 
     const plan = buildWholeAthleteWeek({
       weekStartDate: '2026-08-10',
-      availableMinutes: 900,
+      availableMinutes: 1200,
       goalType: 'ironman_70_3',
       phase: 'base',
       fixedSessions: [masters, groupRide],
@@ -124,21 +164,21 @@ describe('weekly planning priority scenarios', () => {
         ?.planningCommitment,
     ).toBe('fixed');
 
-    // Monday was preferred for rest, but Masters owns Monday.
-    expect(plan.recoveryDayDate).toBeDefined();
-    expect(plan.recoveryDayDate).not.toBe('2026-08-10');
+    // A single low-cost fixed Masters session can occupy the preferred
+    // recovery anchor without forcing an entirely separate blank day.
+    expect(plan.recoveryDayDate).toBe('2026-08-10');
 
-    // The selected recovery day remains free of generated work.
+    // Side Quest does not pile generated work onto that low-load anchor.
     expect(
       plan.sessions.some(
         (session) =>
-          session.date === plan.recoveryDayDate
+          session.date === '2026-08-10'
           && session.planningCommitment === 'generated',
       ),
     ).toBe(false);
 
     // Weekly frequency contract survives placement.
-    expect(count(plan.sessions, 'bike')).toBe(3);
+    expect(count(plan.sessions, 'bike')).toBe(4);
     expect(count(plan.sessions, 'run')).toBe(2);
     expect(count(plan.sessions, 'strength')).toBe(3);
 
@@ -162,7 +202,7 @@ describe('weekly planning priority scenarios', () => {
 
     const plan = buildWholeAthleteWeek({
       weekStartDate: '2026-08-10',
-      availableMinutes: 900,
+      availableMinutes: 1200,
       goalType: 'ironman_70_3',
       phase: 'base',
       frequencyTargets: contract,
@@ -216,14 +256,14 @@ describe('weekly planning priority scenarios', () => {
     const strengthSessions = [
       athleteSession(
         'strength-1',
-        '2026-08-11',
+        '2026-08-12',
         'strength',
         40,
         { title: 'Strength 1', priority: 'required' },
       ),
       athleteSession(
         'strength-2',
-        '2026-08-13',
+        '2026-08-14',
         'strength',
         40,
         { title: 'Strength 2', priority: 'required' },
@@ -250,7 +290,7 @@ describe('weekly planning priority scenarios', () => {
       contract,
       {
         swim: 2,
-        bike: 3,
+        bike: 4,
         run: 3,
         strength: 3,
       },
@@ -261,7 +301,7 @@ describe('weekly planning priority scenarios', () => {
 
     const plan = buildWholeAthleteWeek({
       weekStartDate: '2026-08-10',
-      availableMinutes: 900,
+      availableMinutes: 1200,
       goalType: 'ironman_70_3',
       phase: 'base',
       fixedSessions: strengthSessions,
@@ -278,7 +318,7 @@ describe('weekly planning priority scenarios', () => {
     expect(count(plan.sessions, 'run')).toBe(2);
 
     // Bike does not grow to compensate for the removed run.
-    expect(count(plan.sessions, 'bike')).toBe(3);
+    expect(count(plan.sessions, 'bike')).toBe(4);
 
     // Prebuilt Side Quest strength sessions are fixed planner inputs,
     // exactly as they are in the mobile production pipeline.

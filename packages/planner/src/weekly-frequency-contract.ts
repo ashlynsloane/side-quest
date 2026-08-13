@@ -88,9 +88,9 @@ function preferredFrequency(
     case 'triathlon_olympic':
       return { swim: 2, bike: 3, run: 3 };
     case 'ironman_70_3':
-      return { swim: 2, bike: 3, run: 3 };
+      return { swim: 3, bike: 4, run: 3 };
     case 'ironman_full':
-      return { swim: 2, bike: 3, run: 3 };
+      return { swim: 3, bike: 4, run: 3 };
     case 'swimrun':
       return { swim: 3, bike: 0, run: 3 };
     case 'road_10k':
