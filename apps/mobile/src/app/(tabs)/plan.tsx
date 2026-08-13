@@ -17,6 +17,7 @@ import {
   listTrainingCalendarSources,
 } from '@/services/database';
 import { loadTrainingAvailabilityProfile } from '@/services/training-availability';
+import { trainingSpaceAssignmentForPlannedSession } from '@/services/training-space-runtime';
 import type { TrainingOutingScheduledSession } from '@/services/training-outings';
 import { conciseSessionLabel, generatedEnduranceDisplayName, plannedStrengthDisplayName } from '@/services/training-synthesis';
 import { SIDE_QUEST_PLAN_SOURCE_ID, type GeneratedWholeAthleteBlock } from '@/services/whole-athlete-plan';
@@ -354,11 +355,13 @@ function weekDays(
         : null;
       const duration = Math.round(session.workout.estimatedElapsedSeconds / 60);
       const status = strengthStatusLabel(session.completionStatus);
+      const trainingSpace = trainingSpaceAssignmentForPlannedSession(session.id);
+      const trainingSpaceName = trainingSpace?.trainingSpaceName;
       return [{
         id: session.id,
         kind: 'strength' as const,
         title: plannedStrengthDisplayName(session),
-        meta: [time, formatTrainingDuration(duration), status].filter(Boolean).join(' · '),
+        meta: [time, trainingSpaceName, formatTrainingDuration(duration), status].filter(Boolean).join(' · '),
         session: displaySession,
         sortAt: planned?.scheduledStartAt ?? `${iso}T23:58:00`,
         scheduledStartAt: planned?.scheduledStartAt,

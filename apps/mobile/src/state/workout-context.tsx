@@ -16,6 +16,7 @@ import {
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
+import { trainingSpaceAssignmentForPlannedSession } from '@/services/training-space-runtime';
 import { plannedStrengthDisplayName } from '@/services/training-synthesis';
 
 type PlannedPreviewSource = {
@@ -102,10 +103,19 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(nextSource.session, nextSource.context));
     },
     openPlannedWorkoutPreview(session, context = {}) {
-      const source: PlannedPreviewSource = { session, context, modifiedFromPlan: false };
-      setPreviewWorkoutState({ ...session.workout, name: plannedStrengthDisplayName(session) });
+      const assignment = trainingSpaceAssignmentForPlannedSession(session.id);
+      const trainingSpaceName = assignment?.trainingSpaceName;
+      const displayTitle = plannedStrengthDisplayName(session);
+      const sourceSession = trainingSpaceName
+        ? { ...session, title: `${session.title} · ${trainingSpaceName}` }
+        : session;
+      const source: PlannedPreviewSource = { session: sourceSession, context, modifiedFromPlan: false };
+      setPreviewWorkoutState({
+        ...session.workout,
+        name: trainingSpaceName ? `${displayTitle} · ${trainingSpaceName}` : displayTitle,
+      });
       setPlannedPreviewSource(source);
-      setPreviewExplanation(explainPlannedStrengthSession(session, context));
+      setPreviewExplanation(explainPlannedStrengthSession(sourceSession, context));
     },
     beginWorkout(workout) {
       const planLink = buildPlanLink(plannedPreviewSource);

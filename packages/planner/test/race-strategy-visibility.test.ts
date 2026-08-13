@@ -61,7 +61,7 @@ describe('race strategy visibility', () => {
     const runtime = source('apps/mobile/src/services/whole-athlete-plan-runtime.ts');
     const weekly = source('apps/mobile/src/services/weekly-strategy-context.ts');
     expect(runtime).toContain('getLatestWholeAthletePlanSnapshot(blockId?: string)');
-    expect(runtime).toContain('latestReconciledPlan = { blockId: saved.block.id, generated: shaped }');
+    expect(runtime).toContain('latestReconciledPlan = { blockId: saved.block.id, generated: spaceAware }');
     expect(runtime).toContain('latestReconciledPlan.blockId !== blockId');
     expect(runtime).toContain('applyTrainingOutingsToGeneratedBlock');
     expect(weekly).toContain('getLatestWholeAthletePlanSnapshot(race.blockId)');
