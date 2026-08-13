@@ -23,7 +23,7 @@ describe('availability intelligence mobile wiring', () => {
     expect(plan).toContain('applyAvailabilityToWholeAthleteWeeks(');
     expect(plan).toContain('availabilityProfile,');
     expect(plan).toContain('preferredRestDayOffset: 0');
-    expect(plan).toContain('previousWeek = scheduledPlan.sessions');
+    expect(plan).toContain('previousWeek = progressedPlan.sessions');
     expect(plan).toContain('plannedSessionToCalendarEvent(session, input.block.id)');
     expect(plan).toContain('allDay: !session.scheduledStartAt');
   });
@@ -32,6 +32,8 @@ describe('availability intelligence mobile wiring', () => {
     const availability = source('apps/mobile/src/services/training-availability.ts');
     expect(availability).toContain('if (!profile.enabled) return weeks as AvailabilityScheduledWeekPlan[]');
     expect(availability).toContain('minimumGapMinutes: sameDay.length ? 180 : 0');
+    expect(availability).toContain('originalDayCandidates');
+    expect(availability).toContain('originalDayCandidates.length');
     expect(availability).toContain('if (gapMinutes >= 360) return 18');
     expect(availability).toContain('Intentional double day:');
   });

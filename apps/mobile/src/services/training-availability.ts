@@ -148,7 +148,24 @@ function bestPlacement(
       candidates.push({ date, startsAt: placement.startsAt, endsAt: placement.endsAt, windowId: placement.windowId, score });
     }
   }
-  return candidates.sort((left, right) => right.score - left.score || left.startsAt.localeCompare(right.startsAt))[0] ?? null;
+  // Availability schedules WHEN the planned session happens first.
+  // It only changes the planned WEEKDAY when that weekday has no feasible
+  // availability window at all.
+  //
+  // This preserves the whole-athlete planner's weekly rhythm while still
+  // allowing true availability constraints to override it when necessary.
+  const originalDayCandidates = candidates.filter(
+    (candidate) => candidate.date === session.date,
+  );
+  const eligibleCandidates = originalDayCandidates.length
+    ? originalDayCandidates
+    : candidates;
+
+  return eligibleCandidates.sort(
+    (left, right) =>
+      right.score - left.score
+      || left.startsAt.localeCompare(right.startsAt),
+  )[0] ?? null;
 }
 function compatibleDouble(candidate: WholeAthletePlannedSession, existing: AvailabilityScheduledSession): boolean {
   if (!isTrainable(existing.discipline) || candidate.discipline === existing.discipline) return false;

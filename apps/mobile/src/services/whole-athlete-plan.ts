@@ -229,7 +229,12 @@ export async function generateAndPersistWholeAthleteBlock(
     )[0]!;
 
     weeks.push(scheduledPlan);
-    previousWeek = scheduledPlan.sessions;
+
+    // Availability is an execution constraint, not a training-rhythm author.
+    // Preserve the planner's pre-availability weekday structure as the rhythm
+    // anchor for the following week. Otherwise one availability move in Week 1
+    // silently becomes the default schedule for every later week.
+    previousWeek = progressedPlan.sessions;
     for (const session of scheduledPlan.sessions) {
       if (session.planningCommitment !== 'generated') continue;
       if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') continue;
