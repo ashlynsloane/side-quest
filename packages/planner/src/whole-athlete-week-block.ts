@@ -2,7 +2,10 @@ import {
   buildWholeAthleteWeek as buildStrategyWholeAthleteWeek,
 } from './whole-athlete-week-strategy';
 import { applyBikeQualityAnchor } from './bike-quality-anchor';
-import { applyTrainingBlockRhythm } from './whole-athlete-week-rhythm';
+import {
+  applyTrainingBlockRhythm,
+  reconcileTrainingWeekdays,
+} from './whole-athlete-week-rhythm';
 import { applyWeekendLongRideAnchor } from './bike-long-ride-anchor';
 import { applyDisciplineDaySpread } from './discipline-day-spread';
 import type {
@@ -31,7 +34,16 @@ export type { BlockWorkoutStage, TrainingWorkoutIdentity } from './whole-athlete
 export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): WholeAthleteWeekPlan {
   const strategicPlan = buildStrategyWholeAthleteWeek(input);
   const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, input);
+
+  // Establish workout families and a provisional rhythm before long-ride
+  // shaping so downstream bike logic still sees sensible weekday structure.
   const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, input);
+
   const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, input);
-  return applyDisciplineDaySpread(longRidePlan, input);
+  const spreadPlan = applyDisciplineDaySpread(longRidePlan, input);
+
+  // Final structural reconciliation changes weekdays only. Workout identity,
+  // long-ride shaping, duration, intensity, and key-session status have already
+  // been decided upstream and must not be re-authored here.
+  return reconcileTrainingWeekdays(spreadPlan, input);
 }

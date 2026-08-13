@@ -129,6 +129,74 @@ export function applyTrainingBlockRhythm(
   };
 }
 
+
+/**
+ * Final weekday-only reconciliation.
+ *
+ * This may move sessions to preserve the intended weekly rhythm, but it must
+ * not re-author workout identity after quality, long-ride, or other shaping
+ * passes have already decided the session's stimulus.
+ */
+export function reconcileTrainingWeekdays(
+  base: WholeAthleteWeekPlan,
+  input: WholeAthleteWeeklyPlannerInput,
+): WholeAthleteWeekPlan {
+  const reconciled = applyTrainingBlockRhythm(base, input);
+  const originals = new Map(
+    base.sessions.map((session) => [session.id, session] as const),
+  );
+
+  const sessions = reconciled.sessions.map((session) => {
+    const original = originals.get(session.id);
+    if (!original) return session;
+
+    return {
+      ...original,
+
+      // The ONLY structural value we take from the final rhythm pass.
+      date: session.date,
+
+      // Keep useful placement rationale without replacing the already-shaped
+      // workout semantics.
+      rationale: unique([
+        ...original.rationale,
+        ...session.rationale.filter((line) =>
+          line.startsWith('Placed on ')
+          || line.startsWith('Kept on ')
+          || line.includes('lower-load for recovery continuity'),
+        ),
+      ]),
+    };
+  }).sort(compareSessionDate);
+
+  const datesChanged = sessions.some((session) => {
+    const original = originals.get(session.id);
+    return Boolean(original && original.date !== session.date);
+  });
+
+  return {
+    ...base,
+    sessions,
+    doubleDays: datesChanged
+      ? summarizeDoubleDays(sessions)
+      : base.doubleDays,
+
+    // Validation from the reconciled layout remains useful because date
+    // changes can affect spacing even though workout semantics are restored.
+    quality: reconciled.quality,
+
+    guardrails: unique([
+      ...base.guardrails,
+      'Final weekday reconciliation may move generated sessions without changing their prescribed workout identity or dose.',
+    ]),
+
+    warnings: unique([
+      ...base.warnings,
+      ...reconciled.warnings,
+    ]),
+  };
+}
+
 function nextBlockStage(previous: PreviousRhythmedSession[]): BlockWorkoutStage {
   const stages = previous
     .map((session) => session.trainingIdentity?.blockStage)
@@ -235,31 +303,61 @@ function applyCanonicalTriathlonScaffold(
         : { ...session };
     });
 
-    const valid = [...proposals.entries()].every(([index, date]) =>
+    /*
+     * Prefer the complete canonical discipline layout. If one target is
+     * blocked by a higher-priority commitment or safety rule, preserve every
+     * other canonical placement that remains valid rather than abandoning the
+     * entire discipline.
+     */
+    const fullyValid = [...proposals.entries()].every(([index, date]) =>
       canMove(proposed, index, date, recoveryWeekday),
     );
 
-    if (!valid) {
-      /*
-       * Fixed commitments or safety constraints outrank the canonical
-       * scaffold. Leave this discipline alone rather than forcing it.
-       */
+    if (fullyValid) {
+      next = proposed.map((session, index) => {
+        const date = proposals.get(index);
+        if (!date) return session;
+
+        const targetWeekday = weekdayIndex(date);
+        return {
+          ...session,
+          rationale: unique([
+            ...session.rationale,
+            `Placed on ${WEEKDAY_NAMES[targetWeekday]} as part of the default triathlon weekly rhythm.`,
+          ]),
+        };
+      });
       continue;
     }
 
-    next = proposed.map((session, index) => {
-      const date = proposals.get(index);
-      if (!date) return session;
+    /*
+     * Partial repair uses the proposed final discipline layout as the first
+     * feasibility test, then revalidates each accepted move against the actual
+     * evolving week. Higher-priority fixed sessions always remain untouched.
+     */
+    const orderedProposals = [...proposals.entries()]
+      .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex);
+
+    for (const [index, date] of orderedProposals) {
+      const session = next[index];
+      if (!session || session.date === date) continue;
+
+      // A target must be valid in the intended final discipline layout.
+      if (!canMove(proposed, index, date, recoveryWeekday)) continue;
+
+      // It must also remain valid after any earlier partial repairs.
+      if (!canMove(next, index, date, recoveryWeekday)) continue;
 
       const targetWeekday = weekdayIndex(date);
-      return {
+      next[index] = {
         ...session,
+        date,
         rationale: unique([
           ...session.rationale,
           `Placed on ${WEEKDAY_NAMES[targetWeekday]} as part of the default triathlon weekly rhythm.`,
         ]),
       };
-    });
+    }
   }
 
   return next.sort(compareSessionDate);

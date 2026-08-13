@@ -23,7 +23,8 @@ describe('Strategy Coach wiring', () => {
     expect(composedPlanner).toContain('const qualityShapedPlan = applyBikeQualityAnchor(strategicPlan, input)');
     expect(composedPlanner).toContain('const rhythmedPlan = applyTrainingBlockRhythm(qualityShapedPlan, input)');
     expect(composedPlanner).toContain('const longRidePlan = applyWeekendLongRideAnchor(rhythmedPlan, input)');
-    expect(composedPlanner).toContain('return applyDisciplineDaySpread(longRidePlan, input)');
+    expect(composedPlanner).toContain('const spreadPlan = applyDisciplineDaySpread(longRidePlan, input)');
+    expect(composedPlanner).toContain('return reconcileTrainingWeekdays(spreadPlan, input)');
   });
 
   it('configures Race Intent and the full approved season schedule as separate weekly layers', () => {
