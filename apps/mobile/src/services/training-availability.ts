@@ -55,12 +55,11 @@ export function plannerTimePreferences(profile: TrainingAvailabilityProfile): Tr
 export function applyAvailabilityToWholeAthleteWeeks(
   weeks: WholeAthleteWeekPlan[],
   profile: TrainingAvailabilityProfile,
-  protectedRestDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6,
 ): AvailabilityScheduledWeekPlan[] {
   if (!profile.enabled) return weeks as AvailabilityScheduledWeekPlan[];
   const preferences = plannerTimePreferences(profile);
   return weeks.map((week) =>
-    scheduleWeek(week, profile, preferences, protectedRestDayOffset),
+    scheduleWeek(week, profile, preferences),
   );
 }
 export function applyAvailabilityToGeneratedEvents(events: TrainingCalendarEvent[], weeks: AvailabilityScheduledWeekPlan[]): TrainingCalendarEvent[] {
@@ -84,7 +83,6 @@ function scheduleWeek(
   week: WholeAthleteWeekPlan,
   profile: TrainingAvailabilityProfile,
   preferences: TrainingTimePreference[],
-  protectedRestDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6,
 ): AvailabilityScheduledWeekPlan {
   const windows = expandTrainingAvailability(profile, week.weekStartDate, week.weekEndDate) ?? [];
   const locked = week.sessions.filter((session) => !isAvailabilityMovable(session)) as AvailabilityScheduledSession[];
@@ -100,7 +98,7 @@ function scheduleWeek(
       preference,
       week.weekStartDate,
       week.weekEndDate,
-      protectedRestDayOffset,
+      week.recoveryDayDate,
     );
     if (!candidate) {
       unavailable.push({ ...session, availabilityStatus: 'needs_time', rationale: [...withoutAvailabilityRationale(session.rationale), 'Needs a time: no saved availability window could fit this session this week.'] });
@@ -125,17 +123,14 @@ function bestPlacement(
   preference: TrainingTimePreference | undefined,
   weekStart: string,
   weekEnd: string,
-  protectedRestDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6,
+  recoveryDayDate?: string,
 ): { date: string; startsAt: string; endsAt: string; windowId: string; score: number } | null {
   const candidates: Array<{ date: string; startsAt: string; endsAt: string; windowId: string; score: number }> = [];
-  const protectedRestDate = protectedRestDayOffset === undefined
-    ? undefined
-    : addDays(weekStart, protectedRestDayOffset);
 
   for (let date = weekStart; date <= weekEnd; date = addDays(date, 1)) {
-    // Availability is a scheduling constraint, not permission to destroy
-    // the weekly recovery structure.
-    if (date === protectedRestDate) continue;
+    // Availability may move generated work, but it may not override the
+    // recovery day already resolved by the whole-athlete planner.
+    if (date === recoveryDayDate) continue;
     const sameDay = placed.filter((item) => item.date === date && isTrainable(item.discipline));
     if (sameDay.length >= 2) continue;
     if (sameDay.some((item) => item.discipline === session.discipline)) continue;

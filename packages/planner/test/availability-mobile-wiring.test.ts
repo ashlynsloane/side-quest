@@ -22,7 +22,7 @@ describe('availability intelligence mobile wiring', () => {
     expect(plan).toContain('loadTrainingAvailabilityProfile()');
     expect(plan).toContain('applyAvailabilityToWholeAthleteWeeks(');
     expect(plan).toContain('availabilityProfile,');
-    expect(plan).toContain('0,');
+    expect(plan).toContain('preferredRestDayOffset: 0');
     expect(plan).toContain('previousWeek = scheduledPlan.sessions');
     expect(plan).toContain('plannedSessionToCalendarEvent(session, input.block.id)');
     expect(plan).toContain('allDay: !session.scheduledStartAt');

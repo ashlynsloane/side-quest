@@ -69,8 +69,14 @@ export interface WholeAthleteWeeklyPlannerInput {
   returnToRun?: boolean;
   maxSessionsPerDay?: 1 | 2;
   /**
-   * Day offset from weekStartDate that generated training may not occupy.
-   * Athlete-fixed commitments remain authoritative.
+   * Preferred full recovery day. This is a low-priority planning default:
+   * athlete-fixed commitments may displace it, in which case the planner
+   * selects another open day.
+   */
+  preferredRestDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+  /**
+   * Legacy alias retained during migration.
    */
   protectedRestDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
@@ -116,6 +122,10 @@ export interface WholeAthleteWeekPlan {
   guardrails: string[];
   warnings: string[];
   quality: PlanQualityReport;
+  /**
+   * Final recovery day chosen after fixed athlete commitments are honored.
+   */
+  recoveryDayDate?: string;
 }
 
 interface ResolvedFrequencyTarget {
@@ -199,6 +209,23 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
   }));
   warnings.push(...fixedConflictWarnings(fixed, input));
 
+  const requestedRecoveryDayOffset =
+    input.preferredRestDayOffset ?? input.protectedRestDayOffset;
+  const recoveryDayOffset = resolveRecoveryDayOffset(
+    input.weekStartDate,
+    fixed,
+    requestedRecoveryDayOffset,
+  );
+
+  if (
+    requestedRecoveryDayOffset !== undefined
+    && recoveryDayOffset === undefined
+  ) {
+    warnings.push(
+      'Athlete-fixed commitments occupy every day this week, so Side Quest cannot preserve a full recovery day without changing one of those commitments.',
+    );
+  }
+
   const preferredCandidates = inWeek(input.preferredSessions ?? [], input.weekStartDate, weekEndDate)
     .map((session) => adjustPreferredSession(session, input, planningState))
     .filter((session): session is WholeAthletePlannedSession => session !== null);
@@ -250,6 +277,7 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
           sessions,
           input,
           maxSessionsPerDay,
+          recoveryDayOffset,
         });
         if (!date) {
           if (required) warnings.push(`Could not place another ${discipline} session without violating spacing or daily-load guardrails.`);
@@ -319,6 +347,9 @@ export function buildWholeAthleteWeek(input: WholeAthleteWeeklyPlannerInput): Wh
     guardrails,
     warnings: unique(warnings),
     quality,
+    recoveryDayDate: recoveryDayOffset === undefined
+      ? undefined
+      : addDays(input.weekStartDate, recoveryDayOffset),
   };
 }
 
@@ -691,6 +722,57 @@ function buildTemplate({
   };
 }
 
+
+function resolveRecoveryDayOffset(
+  weekStartDate: string,
+  fixedSessions: WholeAthletePlannedSession[],
+  preferredOffset: 0 | 1 | 2 | 3 | 4 | 5 | 6 | undefined,
+): 0 | 1 | 2 | 3 | 4 | 5 | 6 | undefined {
+  if (preferredOffset === undefined) return undefined;
+
+  const offsets = [0, 1, 2, 3, 4, 5, 6] as const;
+  const hasFixedTraining = (offset: number) => {
+    const date = addDays(weekStartDate, offset);
+    return fixedSessions.some(
+      (session) =>
+        session.date === date
+        && isTrainableDiscipline(session.discipline),
+    );
+  };
+
+  // Lowest-priority default wins only when the athlete has not already
+  // committed to training that day.
+  if (!hasFixedTraining(preferredOffset)) return preferredOffset;
+
+  const open = offsets.filter((offset) => !hasFixedTraining(offset));
+  if (!open.length) return undefined;
+
+  const fixedLoad = (offset: number) => {
+    const date = addDays(weekStartDate, offset);
+    return fixedSessions
+      .filter((session) => session.date === date)
+      .reduce((sum, session) => sum + session.recoveryCost, 0);
+  };
+
+  const circularDistance = (offset: number) => {
+    const raw = Math.abs(offset - preferredOffset);
+    return Math.min(raw, 7 - raw);
+  };
+
+  // When the preferred day is occupied, choose the nearest open day while
+  // slightly favoring a recovery day adjacent to larger fixed training load.
+  return [...open].sort((left, right) => {
+    const leftAdjacent =
+      fixedLoad((left + 6) % 7) + fixedLoad((left + 1) % 7);
+    const rightAdjacent =
+      fixedLoad((right + 6) % 7) + fixedLoad((right + 1) % 7);
+
+    return rightAdjacent - leftAdjacent
+      || circularDistance(left) - circularDistance(right)
+      || left - right;
+  })[0];
+}
+
 function chooseDate({
   weekStartDate,
   discipline,
@@ -698,6 +780,7 @@ function chooseDate({
   sessions,
   input,
   maxSessionsPerDay,
+  recoveryDayOffset,
 }: {
   weekStartDate: string;
   discipline: TrainableDiscipline;
@@ -705,10 +788,11 @@ function chooseDate({
   sessions: WholeAthletePlannedSession[];
   input: WholeAthleteWeeklyPlannerInput;
   maxSessionsPerDay: 1 | 2;
+  recoveryDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }): string | null {
   const candidates = Array.from({ length: 7 }, (_, offset) => addDays(weekStartDate, offset))
     .map((date, offset) => ({ date, offset, score: placementScore(date, offset, discipline, template, sessions, input, maxSessionsPerDay) }))
-    .filter((candidate) => candidate.offset !== input.protectedRestDayOffset)
+    .filter((candidate) => candidate.offset !== recoveryDayOffset)
     .filter((candidate) => Number.isFinite(candidate.score))
     .sort((left, right) => right.score - left.score || left.offset - right.offset);
   return candidates[0]?.date ?? null;

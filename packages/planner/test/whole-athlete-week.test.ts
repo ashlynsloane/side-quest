@@ -66,6 +66,69 @@ describe('whole-athlete weekly planner', () => {
     expect(plan.sessions.some((item) => item.planningCommitment === 'generated')).toBe(true);
   });
 
+  it('uses Monday as the default recovery day when it is open', () => {
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 600,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      preferredRestDayOffset: 0,
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'moderate',
+      },
+    });
+
+    expect(plan.recoveryDayDate).toBe('2026-08-10');
+    expect(
+      plan.sessions.some(
+        (item) =>
+          item.date === '2026-08-10'
+          && item.planningCommitment === 'generated',
+      ),
+    ).toBe(false);
+  });
+
+  it('moves the recovery day instead of overriding a fixed Monday commitment', () => {
+    const masters = session(
+      'masters-swim',
+      '2026-08-10',
+      'swim',
+      60,
+      'moderate',
+      'required',
+    );
+
+    const plan = buildWholeAthleteWeek({
+      weekStartDate: '2026-08-10',
+      availableMinutes: 650,
+      goalType: 'ironman_70_3',
+      phase: 'build',
+      fixedSessions: [masters],
+      preferredRestDayOffset: 0,
+      health: {
+        energyAvailability: 'adequate',
+        mentalEnergy: 'good',
+        lifeStress: 'moderate',
+      },
+    });
+
+    expect(
+      plan.sessions.find((item) => item.id === 'masters-swim')
+        ?.planningCommitment,
+    ).toBe('fixed');
+    expect(plan.recoveryDayDate).toBeDefined();
+    expect(plan.recoveryDayDate).not.toBe('2026-08-10');
+    expect(
+      plan.sessions.some(
+        (item) =>
+          item.date === plan.recoveryDayDate
+          && item.planningCommitment === 'generated',
+      ),
+    ).toBe(false);
+  });
+
   it('never creates a generated same-discipline double day', () => {
     const plan = buildWholeAthleteWeek({
       weekStartDate: '2026-08-10',
