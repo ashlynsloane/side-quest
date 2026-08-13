@@ -456,7 +456,12 @@ function weekDays(
     });
     const strengthItems: DayItem[] = strength.flatMap((session) => {
       const planned = scheduledStrength.get(session.id) as TrainingOutingScheduledSession | undefined;
-      if (availabilityEnabled && !planned) return [];
+
+      // A saved strength session remains authoritative even when the
+      // whole-athlete availability layer does not return a matching
+      // scheduled annotation. If a scheduled version exists, use its
+      // moved date/time; otherwise preserve the planned strength session
+      // instead of silently hiding it from Week.
       const displayDate = planned?.date ?? session.date;
       if (displayDate !== iso) return [];
       const displaySession = displayDate === session.date ? session : { ...session, date: displayDate };
