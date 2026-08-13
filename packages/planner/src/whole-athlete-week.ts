@@ -740,9 +740,27 @@ function resolveRecoveryDayOffset(
     );
   };
 
-  // Lowest-priority default wins only when the athlete has not already
-  // committed to training that day.
-  if (!hasFixedTraining(preferredOffset)) return preferredOffset;
+  // The preferred day remains the recovery anchor when it is either empty
+  // or contains only one low-cost fixed athlete commitment. This prevents a
+  // Masters swim / easy group commitment from forcing Side Quest to manufacture
+  // a second blank day and destroy the rest of the weekly rhythm.
+  const preferredDate = addDays(weekStartDate, preferredOffset);
+  const preferredFixed = fixedSessions.filter(
+    (session) =>
+      session.date === preferredDate
+      && isTrainableDiscipline(session.discipline),
+  );
+
+  if (!preferredFixed.length) return preferredOffset;
+
+  if (
+    preferredFixed.length === 1
+    && preferredFixed[0]!.recoveryCost <= 2
+    && preferredFixed[0]!.intensity !== 'hard'
+    && preferredFixed[0]!.intensity !== 'max'
+  ) {
+    return preferredOffset;
+  }
 
   const open = offsets.filter((offset) => !hasFixedTraining(offset));
   if (!open.length) return undefined;
@@ -822,13 +840,32 @@ function placementScore(
   if (discipline === 'bike' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 28 : 0;
   if (discipline === 'run' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 22 : 0;
   if (discipline === 'strength') {
-    const neighboringLower = sessions.filter((session) => Math.abs(dayDifference(session.date, date)) <= 1 && session.lowerBodyDemand === 'high');
+    const neighboringLower = sessions.filter(
+      (session) =>
+        Math.abs(dayDifference(session.date, date)) <= 1
+        && session.lowerBodyDemand === 'high',
+    );
     score -= neighboringLower.length * 18;
-    if (offset === 1 || offset === 4) score += 8;
+
+    // Default triathlon strength rhythm: Wed / Fri / Sat.
+    // This intentionally leaves Tue / Thu available for swim + bike.
+    if (offset === 2 || offset === 4 || offset === 5) score += 12;
   }
-  if (discipline === 'swim' && (offset === 0 || offset === 2 || offset === 4)) score += 5;
-  if (discipline === 'bike' && (offset === 2 || offset === 5)) score += 5;
-  if (discipline === 'run' && (offset === 1 || offset === 4 || offset === 6)) score += 5;
+
+  // Canonical triathlon rhythm. These are soft placement scores only:
+  // fixed athlete commitments, safety, recovery, availability, and spacing
+  // still outrank them.
+  if (discipline === 'swim' && (offset === 1 || offset === 3 || offset === 4)) {
+    score += 12;
+  }
+
+  if (discipline === 'bike' && (offset === 1 || offset === 3 || offset === 5 || offset === 6)) {
+    score += 12;
+  }
+
+  if (discipline === 'run' && (offset === 2 || offset === 4 || offset === 6)) {
+    score += 12;
+  }
 
   for (const session of sameDay) {
     if (session.recoveryCost >= 4 || template.intensity === 'hard') score -= 12;
@@ -872,12 +909,61 @@ function assessDoubleDay(
   }
 
   if (pair.has('strength') && (pair.has('bike') || pair.has('run'))) {
-    if (candidateHard || isHard(existing) || existing.lowerBodyDemand === 'high' || template.intensity !== 'easy') return null;
+    if (candidateHard || isHard(existing)) return null;
+
+    const candidateIsStrength = discipline === 'strength';
+
+    if (candidateIsStrength) {
+      /*
+       * Strength is being added to an endurance day.
+       *
+       * In protect/return-to-run weeks generated strength is intentionally
+       * easy. It may pair with controlled endurance, including Saturday bike,
+       * as long as the existing endurance session is not high lower-body load.
+       */
+      if (
+        template.intensity !== 'easy'
+        || existing.lowerBodyDemand === 'high'
+      ) {
+        return null;
+      }
+    } else {
+      /*
+       * Endurance is being added to an existing strength day.
+       * Existing strength must genuinely be low-load.
+       */
+      if (
+        existing.discipline !== 'strength'
+        || existing.intensity !== 'easy'
+        || existing.recoveryCost > 2
+        || existing.lowerBodyDemand === 'high'
+      ) {
+        return null;
+      }
+
+      if (
+        discipline === 'run'
+        && template.intensity !== 'easy'
+      ) {
+        return null;
+      }
+
+      if (
+        discipline === 'bike'
+        && template.intensity !== 'easy'
+        && template.intensity !== 'moderate'
+      ) {
+        return null;
+      }
+    }
+
     return {
       score: athleteCommitted ? -2 : -12,
       rationale: athleteCommitted
         ? `Intentional double day: low-load strength is paired with the athlete's ${label.toLowerCase()} commitment so the commitment stays intact without adding another training day.`
-        : 'Intentional double day: low-load strength is paired with easy endurance work to preserve a separate recovery day.',
+        : pair.has('bike')
+          ? 'Intentional double day: low-load strength is paired with controlled cycling to preserve the weekly recovery structure.'
+          : 'Intentional double day: low-load strength is paired with easy running to preserve the weekly recovery structure.',
     };
   }
 

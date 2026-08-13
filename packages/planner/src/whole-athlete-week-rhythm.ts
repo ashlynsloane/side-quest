@@ -53,14 +53,41 @@ export function applyTrainingBlockRhythm(
   const stage = nextBlockStage(previous);
 
   let sessions = base.sessions.map((session) => ({ ...session })) as RhythmedSession[];
-  const recoveryWeekday = chooseRecoveryWeekday(previous, sessions);
 
-  // Week one establishes the athlete's actual rhythm. We do not reshuffle an
-  // otherwise valid first week simply to manufacture our preferred template.
+  // Recovery is resolved by the governing whole-athlete planner first.
+  // Rhythm follows that decision rather than independently inventing another
+  // recovery weekday.
+  const recoveryWeekday = base.recoveryDayDate
+    ? weekdayIndex(base.recoveryDayDate)
+    : chooseRecoveryWeekday(previous, sessions);
+
   if (hasPreviousRhythm) {
-    sessions = preserveWeeklyAnchors(sessions, previous, input.weekStartDate, recoveryWeekday);
-    sessions = protectLowerLoadDay(sessions, input.weekStartDate, recoveryWeekday);
+    // Once an athlete has an established rhythm, preserve it unless a
+    // higher-priority commitment, recovery need, or safety rule prevents it.
+    sessions = preserveWeeklyAnchors(
+      sessions,
+      previous,
+      input.weekStartDate,
+      recoveryWeekday,
+    );
+    sessions = protectLowerLoadDay(
+      sessions,
+      input.weekStartDate,
+      recoveryWeekday,
+    );
+  } else {
+    // Week one needs a sensible default rhythm. Without this, arbitrary
+    // placement in the base planner becomes the anchor for every later week.
+    // This scaffold is intentionally soft: canMove() still protects fixed
+    // athlete commitments, safety, recovery, same-discipline doubles, and
+    // incompatible double days.
+    sessions = applyCanonicalTriathlonScaffold(
+      sessions,
+      input,
+      recoveryWeekday,
+    );
   }
+
   sessions = decorateWorkoutFamilies(sessions, stage);
 
   const datesChanged = sessions.some((session) => {
@@ -122,6 +149,162 @@ function chooseRecoveryWeekday(previous: PreviousRhythmedSession[], current: Rhy
   }
 
   return [...Array(7).keys()].sort((left, right) => dayLoad(source, left) - dayLoad(source, right))[0] ?? 2;
+}
+
+
+function applyCanonicalTriathlonScaffold(
+  sessions: RhythmedSession[],
+  input: WholeAthleteWeeklyPlannerInput,
+  recoveryWeekday: number,
+): RhythmedSession[] {
+  if (
+    input.goalType !== 'triathlon_sprint'
+    && input.goalType !== 'triathlon_olympic'
+    && input.goalType !== 'ironman_70_3'
+    && input.goalType !== 'ironman_full'
+  ) {
+    return sessions;
+  }
+
+  const canonical: Record<TrainableDiscipline, number[]> = {
+    swim: [1, 3, 4],
+    bike: [1, 3, 5, 6],
+    run: [2, 4, 6],
+    strength: [2, 4, 5],
+  };
+
+  let next = sessions.map((session) => ({ ...session }));
+
+  /*
+   * Apply each discipline as a batch.
+   *
+   * This matters because the old one-at-a-time algorithm could not perform:
+   *
+   *   run Thu -> Fri
+   *   run Fri -> Sun
+   *
+   * because Fri looked occupied at the instant Thu was considered.
+   *
+   * Swim goes first so its Sunday session vacates the Sunday bike/run slot.
+   * Run then establishes Wed/Fri/Sun.
+   * Bike can then establish Tue/Thu/Sat/Sun.
+   * Strength fills around the endurance scaffold last.
+   */
+  for (const discipline of ['swim', 'run', 'bike', 'strength'] as const) {
+    const slots = next
+      .map((session, index) => ({ session, index }))
+      .filter(({ session }) => session.discipline === discipline)
+      .sort((left, right) =>
+        compareSessionDate(left.session, right.session),
+      );
+
+    const targets = canonical[discipline];
+    const proposals = new Map<number, string>();
+
+    for (let ordinal = 0; ordinal < slots.length; ordinal += 1) {
+      const slot = slots[ordinal];
+      const targetWeekday = targets[ordinal];
+
+      if (!slot || targetWeekday === undefined) continue;
+      if (!isRhythmMovable(slot.session)) continue;
+
+      if (
+        targetWeekday === recoveryWeekday
+        && !isActiveRecovery(slot.session)
+      ) {
+        continue;
+      }
+
+      proposals.set(
+        slot.index,
+        addDays(input.weekStartDate, targetWeekday),
+      );
+    }
+
+    if (!proposals.size) continue;
+
+    /*
+     * Construct the proposed discipline layout first, then validate it.
+     * canMove() therefore sees the FINAL same-discipline positions rather
+     * than the stale positions from before the rearrangement.
+     */
+    const proposed = next.map((session, index) => {
+      const date = proposals.get(index);
+      return date
+        ? { ...session, date }
+        : { ...session };
+    });
+
+    const valid = [...proposals.entries()].every(([index, date]) =>
+      canMove(proposed, index, date, recoveryWeekday),
+    );
+
+    if (!valid) {
+      /*
+       * Fixed commitments or safety constraints outrank the canonical
+       * scaffold. Leave this discipline alone rather than forcing it.
+       */
+      continue;
+    }
+
+    next = proposed.map((session, index) => {
+      const date = proposals.get(index);
+      if (!date) return session;
+
+      const targetWeekday = weekdayIndex(date);
+      return {
+        ...session,
+        rationale: unique([
+          ...session.rationale,
+          `Placed on ${WEEKDAY_NAMES[targetWeekday]} as part of the default triathlon weekly rhythm.`,
+        ]),
+      };
+    });
+  }
+
+  return next.sort(compareSessionDate);
+}
+
+
+function canUseCanonicalTriathlonDoubleDay(
+  sessions: RhythmedSession[],
+  sessionIndex: number,
+  date: string,
+  recoveryWeekday: number,
+): boolean {
+  const session = sessions[sessionIndex];
+  if (!session) return false;
+
+  if (
+    weekdayIndex(date) === recoveryWeekday
+    && !isActiveRecovery(session)
+  ) {
+    return false;
+  }
+
+  if (!isRhythmMovable(session)) return false;
+
+  const others = sessions.filter((_, index) => index !== sessionIndex);
+  const sameDay = others.filter(
+    (item) => item.date === date && isTrainable(item),
+  );
+
+  // The canonical triathlon rhythm intentionally uses swim + bike
+  // double days on Tuesday and Thursday. This is a rhythm preference,
+  // not permission to create arbitrary doubles.
+  if (sameDay.length !== 1) return false;
+
+  const partner = sameDay[0]!;
+  const pair = new Set([session.discipline, partner.discipline]);
+
+  if (!(pair.has('swim') && pair.has('bike'))) return false;
+
+  // Never displace or duplicate the same discipline.
+  if (session.discipline === partner.discipline) return false;
+
+  // Fixed athlete commitments are allowed to anchor the pair; the generated
+  // session moves around them, never the reverse.
+  return true;
 }
 
 function preserveWeeklyAnchors(
