@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveWeeklyFrequencyContract } from '../src/weekly-frequency-contract';
+import {
+  applyAthleteDisciplinePriority,
+  resolveWeeklyFrequencyContract,
+} from '../src/weekly-frequency-contract';
 
 describe('weekly frequency contract', () => {
   it('uses the normal 70.3 minimum floor', () => {
@@ -106,6 +109,86 @@ describe('weekly frequency contract', () => {
       min: 0,
       preferred: 0,
       max: 0,
+    });
+  });
+});
+
+
+describe('athlete discipline priority overlay', () => {
+  it('adds one bike when bike is the athlete primary discipline', () => {
+    const base = resolveWeeklyFrequencyContract({
+      goalType: 'ironman_70_3',
+      runStatus: 'normal',
+      plannedStrengthSessions: 2,
+    });
+
+    const prioritized = applyAthleteDisciplinePriority(
+      base,
+      'bike',
+      'normal',
+    );
+
+    expect(prioritized.swim.preferred).toBe(3);
+    expect(prioritized.bike).toEqual({
+      min: 3,
+      preferred: 4,
+      max: 4,
+    });
+    expect(prioritized.run.preferred).toBe(3);
+  });
+
+  it('adds one swim when swim is the athlete primary discipline', () => {
+    const base = resolveWeeklyFrequencyContract({
+      goalType: 'ironman_70_3',
+      runStatus: 'normal',
+      plannedStrengthSessions: 2,
+    });
+
+    const prioritized = applyAthleteDisciplinePriority(
+      base,
+      'swim',
+      'normal',
+    );
+
+    expect(prioritized.swim.preferred).toBe(4);
+    expect(prioritized.bike.preferred).toBe(3);
+    expect(prioritized.run.preferred).toBe(3);
+  });
+
+  it('adds one run when run is the athlete primary discipline', () => {
+    const base = resolveWeeklyFrequencyContract({
+      goalType: 'ironman_70_3',
+      runStatus: 'normal',
+      plannedStrengthSessions: 2,
+    });
+
+    const prioritized = applyAthleteDisciplinePriority(
+      base,
+      'run',
+      'normal',
+    );
+
+    expect(prioritized.run.preferred).toBe(4);
+    expect(prioritized.run.min).toBe(3);
+  });
+
+  it('does not add another run during return-to-run', () => {
+    const base = resolveWeeklyFrequencyContract({
+      goalType: 'ironman_70_3',
+      runStatus: 'return_to_run',
+      plannedStrengthSessions: 2,
+    });
+
+    const prioritized = applyAthleteDisciplinePriority(
+      base,
+      'run',
+      'return_to_run',
+    );
+
+    expect(prioritized.run).toEqual({
+      min: 2,
+      preferred: 2,
+      max: 2,
     });
   });
 });

@@ -8,7 +8,11 @@ import type {
 } from '@circuit/domain';
 import { normalizeCalendarEvent, normalizeStrengthSession } from '@circuit/planner';
 import { applyApprovedFrequencySuppression, type DisciplineCountMap } from '@circuit/planner/frequency-suppression';
-import { resolveWeeklyFrequencyContract } from '@circuit/planner/weekly-frequency-contract';
+import {
+  applyAthleteDisciplinePriority,
+  resolveWeeklyFrequencyContract,
+} from '@circuit/planner/weekly-frequency-contract';
+import type { RaceIntentV2 } from '@circuit/planner/race-intent';
 import {
   applyProgressionToWholeAthleteWeek,
   buildWholeAthleteProgressionContextFromHistory,
@@ -76,6 +80,7 @@ export interface GenerateWholeAthleteBlockInput {
   completedHistory?: CompletedDisciplineExposure[];
   progressionDate?: string;
   progressionAsOf?: string;
+  raceIntent?: RaceIntentV2;
 }
 
 export interface GeneratedWholeAthleteBlock {
@@ -165,12 +170,18 @@ export async function generateAndPersistWholeAthleteBlock(
       strength: fixedStrength.length,
     };
 
-    const baseFrequencyContract = resolveWeeklyFrequencyContract({
+    const minimumFrequencyContract = resolveWeeklyFrequencyContract({
       goalType: input.goal.type,
       runStatus: input.capacity.runStatus,
       fixedCounts: fixedDisciplineCounts,
       plannedStrengthSessions: fixedStrength.length,
     });
+
+    const baseFrequencyContract = applyAthleteDisciplinePriority(
+      minimumFrequencyContract,
+      input.raceIntent?.primaryDiscipline,
+      input.capacity.runStatus,
+    );
 
     // Disciplines outside the athlete's goal stay at zero unless an explicit
     // athlete commitment already exists for that discipline.

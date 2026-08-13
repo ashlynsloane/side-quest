@@ -86,6 +86,64 @@ export function resolveWeeklyFrequencyContract(
   return result;
 }
 
+export function applyAthleteDisciplinePriority(
+  contract: WeeklyFrequencyContract,
+  primaryDiscipline:
+    | 'swim'
+    | 'bike'
+    | 'run'
+    | undefined,
+  runStatus:
+    | 'normal'
+    | 'reduced'
+    | 'return_to_run'
+    | 'not_running',
+): WeeklyFrequencyContract {
+  const next: WeeklyFrequencyContract = {
+    swim: { ...contract.swim },
+    bike: { ...contract.bike },
+    run: { ...contract.run },
+    strength: { ...contract.strength },
+  };
+
+  if (!primaryDiscipline) return next;
+
+  /*
+   * Safety outranks athlete priority.
+   *
+   * Return-to-run and not-running states may not use a run preference to
+   * manufacture another run exposure beyond the protected contract.
+   */
+  if (
+    primaryDiscipline === 'run'
+    && (
+      runStatus === 'return_to_run'
+      || runStatus === 'not_running'
+    )
+  ) {
+    return next;
+  }
+
+  const current = next[primaryDiscipline];
+  const currentPreferred =
+    current.preferred
+    ?? current.min
+    ?? 0;
+
+  const target = Math.min(
+    7,
+    currentPreferred + 1,
+  );
+
+  next[primaryDiscipline] = {
+    min: current.min,
+    preferred: target,
+    max: target,
+  };
+
+  return next;
+}
+
 function minimumFrequency(
   goalType: PerformanceGoalType,
 ): Record<'swim' | 'bike' | 'run', number> {

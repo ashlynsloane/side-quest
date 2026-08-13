@@ -149,6 +149,7 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     completedHistory,
     progressionDate,
     progressionAsOf,
+    raceIntent,
   });
 
   const [availabilityProfile, locationProfiles] = await Promise.all([
