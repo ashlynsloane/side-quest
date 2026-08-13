@@ -56,6 +56,7 @@ import {
   type AvailabilityScheduledWeekPlan,
 } from './training-availability';
 import { generatedWorkoutNamingMetadata } from './workout-name-context';
+import { applyPersistedTrainingSpaces } from './training-space-runtime';
 import { applyRaceHorizonStrengthDose } from './race-horizon-strength-dose';
 
 export const SIDE_QUEST_PLAN_SOURCE_ID = 'side_quest_generated_plan';
@@ -266,6 +267,10 @@ export async function generateAndPersistWholeAthleteBlock(
         })
       : progressedPlan;
     const scheduledPlan = applyAvailabilityToWholeAthleteWeeks([returnToRunPlan], availabilityProfile)[0]!;
+
+    // Training-space assignment is deliberately post-scheduling.
+    // It may annotate existing strength sessions but cannot move or create them.
+    applyPersistedTrainingSpaces(scheduledPlan.sessions);
 
     weeks.push(scheduledPlan);
     previousWeek = scheduledPlan.sessions;

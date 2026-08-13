@@ -17,6 +17,11 @@ import {
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
 import { plannedStrengthDisplayName } from '@/services/training-synthesis';
+import { exerciseSeed } from '@circuit/exercise-content';
+import {
+  generateWorkoutForAssignedTrainingSpace,
+  trainingSpaceAssignmentForPlannedSession,
+} from '@/services/training-space-runtime';
 
 type PlannedPreviewSource = {
   session: PlannedStrengthSession;
@@ -102,10 +107,44 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(nextSource.session, nextSource.context));
     },
     openPlannedWorkoutPreview(session, context = {}) {
-      const source: PlannedPreviewSource = { session, context, modifiedFromPlan: false };
-      setPreviewWorkoutState({ ...session.workout, name: plannedStrengthDisplayName(session) });
+      const assignment = trainingSpaceAssignmentForPlannedSession(session.id);
+
+      const spaceResult = assignment
+        ? generateWorkoutForAssignedTrainingSpace({
+            session: assignment,
+            request: session.workout.request,
+            context: {
+              exercises: exerciseSeed,
+            },
+          })
+        : undefined;
+
+      const workout = spaceResult?.ok
+        ? {
+            ...spaceResult.workout,
+            name: plannedStrengthDisplayName(session),
+          }
+        : {
+            ...session.workout,
+            name: plannedStrengthDisplayName(session),
+          };
+
+      const resolvedSession: PlannedStrengthSession = {
+        ...session,
+        workout,
+      };
+
+      const source: PlannedPreviewSource = {
+        session: resolvedSession,
+        context,
+        modifiedFromPlan: false,
+      };
+
+      setPreviewWorkoutState(workout);
       setPlannedPreviewSource(source);
-      setPreviewExplanation(explainPlannedStrengthSession(session, context));
+      setPreviewExplanation(
+        explainPlannedStrengthSession(resolvedSession, context),
+      );
     },
     beginWorkout(workout) {
       const planLink = buildPlanLink(plannedPreviewSource);
