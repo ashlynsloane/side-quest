@@ -93,7 +93,8 @@ export default function ProfileTab() {
       <ActionRow icon="plan" title="Goals and capacity" body="Goal, weekly hours, experience, and race priorities." onPress={() => router.push('/goal-catalog' as Href)} styles={styles} tokens={tokens} />
       <ActionRow icon="plan" title="Training availability" body="Normal weekly windows, one-off exceptions, and preferred training times." onPress={() => router.push('/availability-settings' as Href)} styles={styles} tokens={tokens} />
       <ActionRow icon="log" title="Endurance setup" body="Pool length, CSS pace, and return-to-run stage." onPress={() => router.push('/endurance-settings' as Href)} styles={styles} tokens={tokens} />
-      <ActionRow icon="equipment" title="Equipment locations" body="Home, gym, work, hotel, and travel setups." onPress={() => router.push('/equipment-profiles' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="equipment" title="Training spaces" body="Home and gym strength setups, equipment ranges, and weekly location preferences." onPress={() => router.push('/training-spaces' as Href)} styles={styles} tokens={tokens} />
+      <ActionRow icon="equipment" title="Equipment locations" body="Work, hotel, travel, and other equipment profiles." onPress={() => router.push('/equipment-profiles' as Href)} styles={styles} tokens={tokens} />
       <ActionRow icon="insights" title="Restrictions and symptoms" body="Pain, PT guidance, and training restrictions." onPress={() => router.push('/pt-profile' as Href)} styles={styles} tokens={tokens} />
       <ActionRow icon="log" title="Training preferences" body="How recent endurance training affects upcoming strength." onPress={() => router.push('/training-intelligence' as Href)} styles={styles} tokens={tokens} />
     </View>
