@@ -15,10 +15,11 @@ describe('training spaces mobile default wiring', () => {
     expect(source).not.toContain('generateAndPersistWholeAthleteBlock({');
   });
 
-  it('keeps physiology-first planning and applies spaces afterward', () => {
+  it('keeps physiology-first planning, coordinates strength against endurance, then applies spaces', () => {
     const source = read('apps/mobile/src/services/whole-athlete-plan-training-spaces.ts');
     expect(source).toContain('generateAndPersistWholeAthleteBlock(input)');
-    expect(source).toContain('applyPersistedTrainingSpaces(week.sessions)');
+    expect(source).toContain('coordinateWeeklyStrengthStimuli(week.sessions)');
+    expect(source).toContain('applyPersistedTrainingSpaces(coherentSessions)');
   });
 
   it('keeps exact training-space generation available for assigned sessions', () => {
