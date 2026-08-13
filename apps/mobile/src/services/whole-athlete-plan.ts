@@ -179,6 +179,10 @@ export async function generateAndPersistWholeAthleteBlock(
       frequencyTargets: weekFrequencyTargets,
       recentBoneStress: input.capacity.boneStressInjuryHistory === 'recent_or_current',
       returnToRun: input.capacity.runStatus === 'return_to_run',
+      // Sunday is the normal full rest day. Fixed athlete/calendar
+      // commitments can still override this, but Side Quest will not
+      // generate training onto Sunday.
+      protectedRestDayOffset: 6,
     });
     const progressionApplies = Boolean(
       input.progressionDate

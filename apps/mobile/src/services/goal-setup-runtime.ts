@@ -42,6 +42,7 @@ import { raceLocationFromGoalName } from './race-location-personality';
 import { applyRaceIntent } from './race-intent-runtime';
 import { loadRaceIntent } from './race-intent-state';
 import { refreshLatestWholeAthletePlan } from './whole-athlete-plan-runtime';
+import { loadTrainingSpacePreferences } from './training-spaces';
 
 export type GoalSetupRestriction = 'none' | 'lower_body' | 'upper_body' | 'back' | 'other';
 export type GoalSetupFocusLevel = 'primary_focus' | 'maximize';
@@ -245,6 +246,9 @@ export async function buildAndSaveGoalSetup(
   const option = goalSetupOption(draft.goalType);
   const weeks = weeksUntilEvent(draft);
   const recommendation = recommendedStrengthDoseForDraft(draft);
+  const strengthSessionsPerWeek = resolveConfiguredStrengthSessions(
+    recommendation.sessionsPerWeek,
+  );
   const now = new Date().toISOString();
   const location = draft.raceLocation?.replace(/\s+/g, ' ').trim();
   const goal: PerformanceGoal = {
@@ -258,10 +262,15 @@ export async function buildAndSaveGoalSetup(
     terrain: supportsTerrain(draft.goalType) ? draft.terrain : undefined,
     disciplines: option.disciplines,
     priority: legacyPriorityForObjective(draft.overallObjective),
-    sessionsPerWeek: recommendation.sessionsPerWeek,
+    sessionsPerWeek: strengthSessionsPerWeek,
     defaultSessionMinutes: recommendation.sessionMinutes,
     capacityProfile: capacityForDraft(draft),
-    phaseStrengthSessions: recommendation.phaseSchedule,
+    phaseStrengthSessions: {
+      ...recommendation.phaseSchedule,
+      base: strengthSessionsPerWeek,
+      build: strengthSessionsPerWeek,
+      offseason: strengthSessionsPerWeek,
+    },
     strengthDoseMetadata: {
       minutesPerWeek: recommendation.minutesPerWeek,
       minimumEffectiveMinutes: recommendation.minimumEffectiveMinutes,
@@ -319,6 +328,26 @@ export async function buildAndSaveGoalSetup(
   if (raceIntent) await applyRaceIntent(raceIntent);
   else await refreshLatestWholeAthletePlan();
   return { goal, block: blockToSave, raceIntent };
+}
+
+
+function resolveConfiguredStrengthSessions(fallback: number): number {
+  const preferences = loadTrainingSpacePreferences();
+
+  if (preferences.strengthLocationPreference !== 'mixed') {
+    return fallback;
+  }
+
+  const home = Math.max(0, Math.floor(preferences.preferredHomeSessions ?? 0));
+  const gym = Math.max(0, Math.floor(preferences.preferredGymSessions ?? 0));
+  const configured = home + gym;
+
+  // Explicit mixed-location counts are a weekly strength-frequency request.
+  // Example: 2 Home + 1 Gym means three strength sessions, not two sessions
+  // redistributed between the two spaces.
+  return configured > 0
+    ? Math.max(1, Math.min(5, configured))
+    : fallback;
 }
 
 export async function removeCurrentGoalSetup(): Promise<void> {

@@ -68,6 +68,11 @@ export interface WholeAthleteWeeklyPlannerInput {
   recentBoneStress?: boolean;
   returnToRun?: boolean;
   maxSessionsPerDay?: 1 | 2;
+  /**
+   * Day offset from weekStartDate that generated training may not occupy.
+   * Athlete-fixed commitments remain authoritative.
+   */
+  protectedRestDayOffset?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
 
 export interface WholeAthletePlannedSession extends UnifiedTrainingSession {
@@ -703,6 +708,7 @@ function chooseDate({
 }): string | null {
   const candidates = Array.from({ length: 7 }, (_, offset) => addDays(weekStartDate, offset))
     .map((date, offset) => ({ date, offset, score: placementScore(date, offset, discipline, template, sessions, input, maxSessionsPerDay) }))
+    .filter((candidate) => candidate.offset !== input.protectedRestDayOffset)
     .filter((candidate) => Number.isFinite(candidate.score))
     .sort((left, right) => right.score - left.score || left.offset - right.offset);
   return candidates[0]?.date ?? null;
