@@ -49,7 +49,23 @@ export function applyTrainingBlockRhythm(
   input: WholeAthleteWeeklyPlannerInput,
 ): WholeAthleteWeekPlan {
   const previous = (input.previousWeek ?? []) as PreviousRhythmedSession[];
-  const hasPreviousRhythm = previous.some(isTrainable);
+
+  // Completed historical activity informs load, recovery, and progression,
+  // but it is NOT automatically an athlete scheduling preference.
+  //
+  // Only a previously planned/rhythmed week is allowed to become the weekday
+  // template for the next week. Otherwise a random recent training week would
+  // silently replace the canonical triathlon scaffold.
+  const hasPreviousRhythm = previous.some(
+    (session) =>
+      TRAINABLE.has(session.discipline as TrainableDiscipline)
+      && (
+        session.source === 'side_quest'
+        || session.trainingIdentity !== undefined
+        || session.planningCommitment !== undefined
+      ),
+  );
+
   const stage = nextBlockStage(previous);
 
   let sessions = base.sessions.map((session) => ({ ...session })) as RhythmedSession[];
