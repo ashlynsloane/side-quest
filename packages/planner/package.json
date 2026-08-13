@@ -34,7 +34,8 @@
     "./athlete-context-intelligence": "./src/athlete-context-intelligence.ts",
     "./athlete-period-adapter": "./src/athlete-period-adapter.ts",
     "./coach-closed-loop": "./src/coach-closed-loop.ts",
-    "./frequency-suppression": "./src/frequency-suppression.ts"
+    "./frequency-suppression": "./src/frequency-suppression.ts",
+    "./strength-training-space-allocation": "./src/strength-training-space-allocation.ts"
   },
   "dependencies": {
     "@circuit/domain": "workspace:*",
