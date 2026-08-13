@@ -1,3 +1,4 @@
+import type { WeeklyStrengthPrescription } from './whole-athlete-strength-coherence';
 import type { WholeAthletePlannedSession } from './whole-athlete-week';
 
 export type StrengthTrainingEnvironment = 'home' | 'gym' | 'custom';
@@ -8,8 +9,12 @@ export interface StrengthTrainingSpaceRef {
   environment: StrengthTrainingEnvironment;
 }
 
+type AllocatableStrengthSession = WholeAthletePlannedSession & {
+  strengthPrescription?: WeeklyStrengthPrescription;
+};
+
 export interface StrengthTrainingSpaceAllocationInput {
-  sessions: WholeAthletePlannedSession[];
+  sessions: AllocatableStrengthSession[];
   homeSpace?: StrengthTrainingSpaceRef;
   gymSpace?: StrengthTrainingSpaceRef;
   customSpaces?: StrengthTrainingSpaceRef[];
@@ -25,7 +30,7 @@ export interface TrainingSpaceAssignment {
   trainingSpaceReason: string;
 }
 
-export type SpaceAwarePlannedSession = WholeAthletePlannedSession & Partial<TrainingSpaceAssignment>;
+export type SpaceAwarePlannedSession = AllocatableStrengthSession & Partial<TrainingSpaceAssignment>;
 
 /**
  * Assigns available training spaces across a finished weekly plan.
@@ -58,8 +63,6 @@ export function allocateStrengthTrainingSpaces(
       : { ...session });
   }
 
-  // Multiple custom spaces without a Home/Gym distinction are intentionally
-  // left unassigned for now rather than inventing a preference between them.
   if (!input.homeSpace && !input.gymSpace) {
     return input.sessions.map((session) => ({ ...session }));
   }
@@ -108,9 +111,12 @@ export function allocateStrengthTrainingSpaces(
 
     if (gymIds.has(session.id)) {
       const pairedWithSwim = swimDates.has(session.date);
-      const reason = pairedWithSwim && input.preferGymOnSwimDays !== false
-        ? 'Gym strength assigned here because this day already includes a swim/gym visit, while preserving the planner’s existing training-load placement.'
-        : 'Gym strength assigned here to reserve a weekly session for heavier loading, machines, cables, and other gym-specific opportunities.';
+      const highGymValue = session.strengthPrescription?.gymValue === 'high';
+      const reason = highGymValue
+        ? 'Gym strength assigned here because this session carries the week’s highest-value loading stimulus and benefits most from heavier or gym-specific equipment.'
+        : pairedWithSwim && input.preferGymOnSwimDays !== false
+          ? 'Gym strength assigned here because this day already includes a swim/gym visit, while preserving the planner’s existing training-load placement.'
+          : 'Gym strength assigned here to reserve a weekly session for heavier loading, machines, cables, and other gym-specific opportunities.';
       return withAssignment(session, gymSpace, reason);
     }
 
@@ -127,7 +133,7 @@ export function allocateStrengthTrainingSpaces(
 }
 
 function gymAssignmentScore(
-  session: WholeAthletePlannedSession,
+  session: AllocatableStrengthSession,
   swimDates: Set<string>,
   preferGymOnSwimDays: boolean,
 ): number {
@@ -139,12 +145,15 @@ function gymAssignmentScore(
   if (session.keySession) score += 6;
   if (session.progressionTarget === 'strength_intensity') score += 8;
   if (session.progressionTarget === 'strength_volume') score += 3;
+  if (session.strengthPrescription?.gymValue === 'high') score += 14;
+  else if (session.strengthPrescription?.gymValue === 'moderate') score += 5;
+  if (session.strengthPrescription?.lowerBodyDose === 'light') score -= 4;
   if (preferGymOnSwimDays && swimDates.has(session.date)) score += 7;
   return score;
 }
 
 function withAssignment(
-  session: WholeAthletePlannedSession,
+  session: AllocatableStrengthSession,
   space: StrengthTrainingSpaceRef,
   reason: string,
 ): SpaceAwarePlannedSession {
