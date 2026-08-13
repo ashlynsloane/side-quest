@@ -826,16 +826,52 @@ function placementScore(
   maxSessionsPerDay: 1 | 2,
 ): number {
   const sameDay = sessions.filter((session) => session.date === date);
-  if (sameDay.length >= maxSessionsPerDay) return Number.NEGATIVE_INFINITY;
-  if (sameDay.some((session) => session.discipline === discipline)) return Number.NEGATIVE_INFINITY;
-  const doubleDay = sameDay.length ? assessDoubleDay(discipline, template, sameDay) : null;
-  if (sameDay.length && !doubleDay) return Number.NEGATIVE_INFINITY;
+
+  /*
+   * Detailed Side Quest strength enters this planner as "fixed" so its exact
+   * generated workout is preserved. Its provisional WEEKDAY is still movable.
+   *
+   * Generated endurance therefore establishes the weekly skeleton without
+   * treating movable Side Quest strength as permanent occupancy. Rhythm will
+   * subsequently reconcile those strength sessions around the endurance week.
+   *
+   * Athlete/calendar commitments are never ignored here.
+   */
+  const structuralSameDay =
+    discipline === 'strength'
+      ? sameDay
+      : sameDay.filter(
+          (session) => !isMovableSideQuestStrengthPlacement(session),
+        );
+
+  if (structuralSameDay.length >= maxSessionsPerDay) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  if (
+    structuralSameDay.some(
+      (session) => session.discipline === discipline,
+    )
+  ) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const doubleDay = structuralSameDay.length
+    ? assessDoubleDay(discipline, template, structuralSameDay)
+    : null;
+
+  if (structuralSameDay.length && !doubleDay) {
+    return Number.NEGATIVE_INFINITY;
+  }
   if ((input.returnToRun || input.recentBoneStress || input.health.boneStress === 'recent') && discipline === 'run') {
     const runDates = sessions.filter((session) => session.discipline === 'run').map((session) => session.date);
     if (runDates.some((runDate) => Math.abs(dayDifference(runDate, date)) < 2)) return Number.NEGATIVE_INFINITY;
   }
 
-  let score = sameDay.length === 0 ? 18 : doubleDay!.score;
+  let score =
+    structuralSameDay.length === 0
+      ? 18
+      : doubleDay!.score;
   if ((template.intensity === 'hard' || template.intensity === 'max') && sessions.some((session) => isHard(session) && Math.abs(dayDifference(session.date, date)) <= 1)) score -= 100;
   if (discipline === 'bike' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 28 : 0;
   if (discipline === 'run' && template.title.toLowerCase().includes('long')) score += offset >= 5 ? 22 : 0;
@@ -867,11 +903,32 @@ function placementScore(
     score += 12;
   }
 
-  for (const session of sameDay) {
-    if (session.recoveryCost >= 4 || template.intensity === 'hard') score -= 12;
-    if ((discipline === 'run' || discipline === 'bike') && session.lowerBodyDemand === 'high') score -= 24;
+  for (const session of structuralSameDay) {
+    if (
+      session.recoveryCost >= 4
+      || template.intensity === 'hard'
+    ) {
+      score -= 12;
+    }
+
+    if (
+      (discipline === 'run' || discipline === 'bike')
+      && session.lowerBodyDemand === 'high'
+    ) {
+      score -= 24;
+    }
   }
+
   return score;
+}
+
+function isMovableSideQuestStrengthPlacement(
+  session: WholeAthletePlannedSession,
+): boolean {
+  return (
+    session.discipline === 'strength'
+    && session.source === 'side_quest'
+  );
 }
 
 function assessDoubleDay(

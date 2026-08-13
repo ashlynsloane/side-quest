@@ -325,8 +325,22 @@ function applyCanonicalTriathlonScaffold(
      * other canonical placement that remains valid rather than abandoning the
      * entire discipline.
      */
+    const canPlaceCanonical = (
+      candidateSessions: RhythmedSession[],
+      index: number,
+      date: string,
+    ) =>
+      discipline === 'strength'
+        ? canMove(candidateSessions, index, date, recoveryWeekday)
+        : canMoveCanonicalEndurance(
+            candidateSessions,
+            index,
+            date,
+            recoveryWeekday,
+          );
+
     const fullyValid = [...proposals.entries()].every(([index, date]) =>
-      canMove(proposed, index, date, recoveryWeekday),
+      canPlaceCanonical(proposed, index, date),
     );
 
     if (fullyValid) {
@@ -359,10 +373,10 @@ function applyCanonicalTriathlonScaffold(
       if (!session || session.date === date) continue;
 
       // A target must be valid in the intended final discipline layout.
-      if (!canMove(proposed, index, date, recoveryWeekday)) continue;
+      if (!canPlaceCanonical(proposed, index, date)) continue;
 
       // It must also remain valid after any earlier partial repairs.
-      if (!canMove(next, index, date, recoveryWeekday)) continue;
+      if (!canPlaceCanonical(next, index, date)) continue;
 
       const targetWeekday = weekdayIndex(date);
       next[index] = {
@@ -491,6 +505,100 @@ function protectLowerLoadDay(
     };
   }
   return next.sort(compareSessionDate);
+}
+
+function canMoveCanonicalEndurance(
+  sessions: RhythmedSession[],
+  sessionIndex: number,
+  date: string,
+  recoveryWeekday: number,
+): boolean {
+  const session = sessions[sessionIndex];
+  if (!session) return false;
+  if (!isRhythmMovable(session)) return false;
+
+  if (
+    weekdayIndex(date) === recoveryWeekday
+    && !isActiveRecovery(session)
+  ) {
+    return false;
+  }
+
+  /*
+   * Side Quest strength workouts are detailed upstream, which is why they
+   * enter the week as fixed sessions. Their workout CONTENT is fixed; their
+   * generated weekday is not.
+   *
+   * During canonical endurance placement, temporarily ignore those movable
+   * strength positions. Otherwise an old strength date can block the very
+   * swim/bike/run scaffold that strength is supposed to fit around.
+   *
+   * True athlete/calendar commitments remain blockers.
+   */
+  const others = sessions.filter(
+    (item, index) =>
+      index !== sessionIndex
+      && !isMovableSideQuestStrength(item),
+  );
+
+  const sameDay = others.filter(
+    (item) => item.date === date && isTrainable(item),
+  );
+
+  if (sameDay.length >= 2) return false;
+
+  if (
+    sameDay.some(
+      (item) => item.discipline === session.discipline,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    sameDay.length
+    && !compatiblePair(session, sameDay[0]!)
+  ) {
+    return false;
+  }
+
+  if (
+    isHard(session)
+    && others.some(
+      (item) =>
+        isHard(item)
+        && Math.abs(dayDifference(item.date, date)) <= 1,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    session.discipline === 'run'
+    && /return-to-run/i.test(session.title)
+  ) {
+    if (
+      others.some(
+        (item) =>
+          item.discipline === 'run'
+          && Math.abs(dayDifference(item.date, date)) < 2,
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isMovableSideQuestStrength(
+  session: RhythmedSession,
+): boolean {
+  return (
+    isTrainable(session)
+    && session.discipline === 'strength'
+    && session.source === 'side_quest'
+  );
 }
 
 function canMove(sessions: RhythmedSession[], sessionIndex: number, date: string, recoveryWeekday: number): boolean {

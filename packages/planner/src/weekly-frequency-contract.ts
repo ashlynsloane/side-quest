@@ -23,17 +23,17 @@ export interface WeeklyFrequencyContractInput {
  * Priority:
  * 1. Explicit athlete commitments are preserved.
  * 2. Safety constraints such as return-to-run constrain generated work.
- * 3. Planned strength frequency is honored exactly.
- * 4. Goal defaults fill the remaining disciplines.
+ * 3. Goal-specific minimum frequency establishes the default weekly floor.
+ * 4. Explicit fixed athlete commitments may raise that floor.
  *
- * The contract deliberately keeps max == preferred for generated endurance
- * work. A discipline may exceed that only because the athlete already has
- * explicit fixed commitments in the week.
+ * Athlete-selected discipline priority is intentionally NOT resolved here.
+ * A later priority overlay may raise swim, bike, run, or strength above this
+ * minimum contract.
  */
 export function resolveWeeklyFrequencyContract(
   input: WeeklyFrequencyContractInput,
 ): WeeklyFrequencyContract {
-  const preferred = preferredFrequency(input.goalType);
+  const minimum = minimumFrequency(input.goalType);
   const fixed = {
     swim: safeCount(input.fixedCounts?.swim),
     bike: safeCount(input.fixedCounts?.bike),
@@ -55,17 +55,24 @@ export function resolveWeeklyFrequencyContract(
       continue;
     }
 
-    const normal = preferred[discipline];
-    const target = Math.max(normal, fixed[discipline]);
+    const floor = minimum[discipline];
+    const target = Math.max(floor, fixed[discipline]);
 
     result[discipline] = {
-      min: Math.min(normal, target),
+      min: target,
       preferred: target,
       max: target,
     };
   }
 
+  const strengthFloor =
+    input.goalType === 'ironman_70_3'
+    || input.goalType === 'ironman_full'
+      ? 2
+      : 0;
+
   const strengthTarget = Math.max(
+    strengthFloor,
     safeCount(input.plannedStrengthSessions),
     fixed.strength,
   );
@@ -79,7 +86,7 @@ export function resolveWeeklyFrequencyContract(
   return result;
 }
 
-function preferredFrequency(
+function minimumFrequency(
   goalType: PerformanceGoalType,
 ): Record<'swim' | 'bike' | 'run', number> {
   switch (goalType) {
@@ -88,9 +95,9 @@ function preferredFrequency(
     case 'triathlon_olympic':
       return { swim: 2, bike: 3, run: 3 };
     case 'ironman_70_3':
-      return { swim: 3, bike: 4, run: 3 };
+      return { swim: 3, bike: 3, run: 3 };
     case 'ironman_full':
-      return { swim: 3, bike: 4, run: 3 };
+      return { swim: 3, bike: 3, run: 3 };
     case 'swimrun':
       return { swim: 3, bike: 0, run: 3 };
     case 'road_10k':

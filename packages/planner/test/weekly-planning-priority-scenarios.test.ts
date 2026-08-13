@@ -96,7 +96,7 @@ describe('weekly planning priority scenarios', () => {
 
     expect(plan.recoveryDayDate).toBe('2026-08-10');
     expect(days('swim')).toEqual([1, 3, 4]);
-    expect(days('bike')).toEqual([1, 3, 5, 6]);
+    expect(days('bike')).toEqual([1, 3, 5]);
     expect(days('run')).toEqual([2, 4, 6]);
   });
 
@@ -178,7 +178,7 @@ describe('weekly planning priority scenarios', () => {
     ).toBe(false);
 
     // Weekly frequency contract survives placement.
-    expect(count(plan.sessions, 'bike')).toBe(4);
+    expect(count(plan.sessions, 'bike')).toBe(3);
     expect(count(plan.sessions, 'run')).toBe(2);
     expect(count(plan.sessions, 'strength')).toBe(3);
 
@@ -318,7 +318,7 @@ describe('weekly planning priority scenarios', () => {
     expect(count(plan.sessions, 'run')).toBe(2);
 
     // Bike does not grow to compensate for the removed run.
-    expect(count(plan.sessions, 'bike')).toBe(4);
+    expect(count(plan.sessions, 'bike')).toBe(3);
 
     // Prebuilt Side Quest strength sessions are fixed planner inputs,
     // exactly as they are in the mobile production pipeline.
