@@ -35,6 +35,7 @@
     "./athlete-period-adapter": "./src/athlete-period-adapter.ts",
     "./coach-closed-loop": "./src/coach-closed-loop.ts",
     "./frequency-suppression": "./src/frequency-suppression.ts",
+    "./weekly-frequency-contract": "./src/weekly-frequency-contract.ts",
     "./strength-training-space-allocation": "./src/strength-training-space-allocation.ts",
     "./whole-athlete-strength-coherence": "./src/whole-athlete-strength-coherence.ts"
   },

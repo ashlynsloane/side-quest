@@ -8,6 +8,7 @@ import type {
 } from '@circuit/domain';
 import { normalizeCalendarEvent, normalizeStrengthSession } from '@circuit/planner';
 import { applyApprovedFrequencySuppression, type DisciplineCountMap } from '@circuit/planner/frequency-suppression';
+import { resolveWeeklyFrequencyContract } from '@circuit/planner/weekly-frequency-contract';
 import {
   applyProgressionToWholeAthleteWeek,
   buildWholeAthleteProgressionContextFromHistory,
@@ -112,10 +113,6 @@ export async function generateAndPersistWholeAthleteBlock(
 
   const baselines = buildDisciplineBaselines(recentActivities, input.capacity, input.goal);
   const health = buildWholeAthleteHealthContext(input);
-  const absentGoalDisciplines = (['swim', 'bike', 'run'] as const).filter((discipline) => !input.goal.disciplines.includes(discipline));
-  const frequencyTargets = Object.fromEntries(absentGoalDisciplines.map((discipline) => [discipline, { min: 0, preferred: 0, max: 0 }])) as Partial<Record<TrainableDiscipline, { min: number; preferred: number; max: number }>>;
-  if (input.capacity.runStatus === 'not_running') frequencyTargets.run = { min: 0, preferred: 0, max: 0 };
-
   const weeks: AvailabilityScheduledWeekPlan[] = [];
   const generatedEvents: TrainingCalendarEvent[] = [];
   let previousWeek: NonNullable<Parameters<typeof buildWholeAthleteWeek>[0]['previousWeek']> =
@@ -158,11 +155,37 @@ export async function generateAndPersistWholeAthleteBlock(
       bike: countSuppressed(weekOverrides, 'bike'),
       run: countSuppressed(weekOverrides, 'run'),
     };
+    const fixedDisciplineCounts: DisciplineCountMap = {
+      swim: [...fixedCalendar, ...fixedApprovedEndurance]
+        .filter((session) => session.discipline === 'swim').length,
+      bike: [...fixedCalendar, ...fixedApprovedEndurance]
+        .filter((session) => session.discipline === 'bike').length,
+      run: [...fixedCalendar, ...fixedApprovedEndurance]
+        .filter((session) => session.discipline === 'run').length,
+      strength: fixedStrength.length,
+    };
+
+    const baseFrequencyContract = resolveWeeklyFrequencyContract({
+      goalType: input.goal.type,
+      runStatus: input.capacity.runStatus,
+      fixedCounts: fixedDisciplineCounts,
+      plannedStrengthSessions: fixedStrength.length,
+    });
+
+    // Disciplines outside the athlete's goal stay at zero unless an explicit
+    // athlete commitment already exists for that discipline.
+    for (const discipline of ['swim', 'bike', 'run'] as const) {
+      if (input.goal.disciplines.includes(discipline)) continue;
+      const fixedCount = fixedDisciplineCounts[discipline] ?? 0;
+      baseFrequencyContract[discipline] = {
+        min: fixedCount,
+        preferred: fixedCount,
+        max: fixedCount,
+      };
+    }
+
     const weekFrequencyTargets = applyApprovedFrequencySuppression(
-      {
-        ...frequencyTargets,
-        strength: { min: fixedStrength.length, preferred: fixedStrength.length, max: fixedStrength.length },
-      },
+      baseFrequencyContract,
       originallyPlanned,
       suppressed,
     );
