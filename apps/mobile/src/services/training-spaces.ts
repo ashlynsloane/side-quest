@@ -88,8 +88,8 @@ export function commercialGymTemplate(): TrainingSpaceProfile {
     name: 'Gym',
     environment: 'gym',
     capabilities: [
-      { equipmentId: 'dumbbell', quantity: 2, maxLoadLb: 100 },
-      { equipmentId: 'kettlebell', quantity: 1, maxLoadLb: 80 },
+      { equipmentId: 'dumbbell', quantity: 2, minLoadLb: 5, maxLoadLb: 100, adjustable: true },
+      { equipmentId: 'kettlebell', quantity: 1, minLoadLb: 10, maxLoadLb: 80, adjustable: true },
       { equipmentId: 'barbell', quantity: 1, maxLoadLb: 315 },
       { equipmentId: 'weight_plate', quantity: 8, maxLoadLb: 45 },
       { equipmentId: 'trap_bar', quantity: 1, maxLoadLb: 315 },
