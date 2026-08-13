@@ -23,6 +23,7 @@ import { loadRaceIntent } from './race-intent-state';
 import { applyCurrentWeekStrengthProgression } from './strength-progression-persistence';
 import { loadTrainingAvailabilityProfile } from './training-availability';
 import { applyTrainingOutingsToGeneratedBlock, type TrainingLocationProfile } from './training-outings';
+import { applyTrainingSpacesToGeneratedBlock } from './training-space-runtime';
 import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
 import {
   clearSideQuestGeneratedPlanEvents,
@@ -160,10 +161,11 @@ async function runWholeAthleteReconciliation(): Promise<GeneratedWholeAthleteBlo
     locationProfiles as TrainingLocationProfile[],
     capacity.runStatus,
   );
-  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, shaped.generatedEvents);
+  const spaceAware = await applyTrainingSpacesToGeneratedBlock(shaped);
+  await replaceTrainingCalendarEvents(SIDE_QUEST_PLAN_SOURCE_ID, spaceAware.generatedEvents);
 
-  latestReconciledPlan = { blockId: saved.block.id, generated: shaped };
-  return shaped;
+  latestReconciledPlan = { blockId: saved.block.id, generated: spaceAware };
+  return spaceAware;
 }
 
 export function progressionHistoryFromTrainingHistory(
