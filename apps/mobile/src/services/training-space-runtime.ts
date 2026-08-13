@@ -7,8 +7,10 @@ import {
   allocateStrengthTrainingSpaces,
   type SpaceAwarePlannedSession,
 } from '@circuit/planner/strength-training-space-allocation';
+import type { WeeklyStrengthPrescription } from '@circuit/planner/whole-athlete-strength-coherence';
 import type { WholeAthletePlannedSession } from '@circuit/planner/whole-athlete-week';
 
+import { applyWeeklyStrengthPrescriptionToRequest } from './strength-prescription-generation';
 import {
   gymSpace,
   homeSpace,
@@ -16,12 +18,16 @@ import {
   type TrainingSpacePreferences,
 } from './training-spaces';
 
+export type CachedSpaceAwarePlannedSession = SpaceAwarePlannedSession & {
+  strengthPrescription?: WeeklyStrengthPrescription;
+};
+
 export interface ResolvedTrainingSpaceWeek {
-  sessions: SpaceAwarePlannedSession[];
+  sessions: CachedSpaceAwarePlannedSession[];
   preferences: TrainingSpacePreferences;
 }
 
-const plannedStrengthSpaceAssignments = new Map<string, SpaceAwarePlannedSession>();
+const plannedStrengthSpaceAssignments = new Map<string, CachedSpaceAwarePlannedSession>();
 
 /**
  * Applies the athlete's persisted Home/Gym configuration to a physiologically
@@ -35,7 +41,7 @@ export function applyPersistedTrainingSpaces(
   const gym = gymSpace(preferences);
 
   if (!home && !gym) {
-    const unresolved = sessions.map((session) => ({ ...session }));
+    const unresolved = sessions.map((session) => ({ ...session })) as CachedSpaceAwarePlannedSession[];
     cacheStrengthAssignments(unresolved);
     return { sessions: unresolved, preferences };
   }
@@ -49,7 +55,7 @@ export function applyPersistedTrainingSpaces(
     preferredHomeSessions: allocation.home,
     preferredGymSessions: allocation.gym,
     preferGymOnSwimDays: preferences.preferGymOnSwimDays,
-  });
+  }) as CachedSpaceAwarePlannedSession[];
   cacheStrengthAssignments(resolved);
 
   return {
@@ -65,7 +71,7 @@ export function applyPersistedTrainingSpaces(
  */
 export function trainingSpaceAssignmentForPlannedSession(
   plannedSessionId: string,
-): SpaceAwarePlannedSession | undefined {
+): CachedSpaceAwarePlannedSession | undefined {
   return plannedStrengthSpaceAssignments.get(plannedSessionId);
 }
 
@@ -75,7 +81,8 @@ export function clearCachedTrainingSpaceAssignments(): void {
 
 /**
  * Generates a workout using the exact equipment/load capabilities of the
- * training space assigned to this planned strength session.
+ * training space assigned to this planned strength session and the role given
+ * to that session by whole-athlete strength coherence.
  *
  * Falls back to undefined when no training space is assigned/configured so the
  * caller can preserve legacy workout generation rather than invent equipment.
@@ -86,7 +93,7 @@ export function generateWorkoutForAssignedTrainingSpace({
   context,
   preferences = loadTrainingSpacePreferences(),
 }: {
-  session: Pick<SpaceAwarePlannedSession, 'trainingSpaceId'>;
+  session: Pick<CachedSpaceAwarePlannedSession, 'trainingSpaceId' | 'strengthPrescription'>;
   request: Parameters<typeof generateWorkoutForTrainingSpace>[0];
   context: GenerationContext;
   preferences?: TrainingSpacePreferences;
@@ -95,8 +102,13 @@ export function generateWorkoutForAssignedTrainingSpace({
   const targetSpace = preferences.spaces.find((space) => space.id === session.trainingSpaceId);
   if (!targetSpace) return undefined;
 
-  return generateWorkoutForTrainingSpace(
+  const coherentRequest = applyWeeklyStrengthPrescriptionToRequest(
     request,
+    session.strengthPrescription,
+  );
+
+  return generateWorkoutForTrainingSpace(
+    coherentRequest,
     context,
     targetSpace,
     homeSpace(preferences),
@@ -111,7 +123,7 @@ export function trainingSpaceForSession(
   return preferences.spaces.find((space) => space.id === trainingSpaceId);
 }
 
-function cacheStrengthAssignments(sessions: SpaceAwarePlannedSession[]): void {
+function cacheStrengthAssignments(sessions: CachedSpaceAwarePlannedSession[]): void {
   for (const session of sessions) {
     if (session.discipline !== 'strength') continue;
     plannedStrengthSpaceAssignments.set(session.id, { ...session });
