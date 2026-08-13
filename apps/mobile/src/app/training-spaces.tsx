@@ -23,6 +23,9 @@ const EQUIPMENT_GROUPS: Array<{ title: string; ids: EquipmentId[] }> = [
   { title: 'Gym equipment', ids: ['cable_machine', 'leg_press'] },
 ];
 
+const RANGE_EQUIPMENT = new Set<EquipmentId>(['dumbbell', 'kettlebell']);
+const MAX_LOAD_EQUIPMENT: EquipmentId[] = ['medicine_ball', 'barbell', 'trap_bar'];
+
 export default function TrainingSpacesScreen() {
   const router = useRouter();
   const { tokens } = useTheme();
@@ -119,12 +122,18 @@ function SpaceEditor({ space, onSave, onDelete, onCancel }: { space: TrainingSpa
   function toggleEquipment(id: EquipmentId) {
     setCapabilities((current) => current.some((item) => item.equipmentId === id)
       ? current.filter((item) => item.equipmentId !== id)
-      : [...current, { equipmentId: id, quantity: id === 'dumbbell' ? 2 : 1 }]);
+      : [...current, {
+          equipmentId: id,
+          quantity: id === 'dumbbell' ? 2 : 1,
+          adjustable: RANGE_EQUIPMENT.has(id) ? true : undefined,
+        }]);
   }
 
-  function setMaxLoad(id: EquipmentId, value: string) {
+  function setLoad(id: EquipmentId, key: 'minLoadLb' | 'maxLoadLb', value: string) {
     const parsed = Number(value);
-    setCapabilities((current) => current.map((item) => item.equipmentId === id ? { ...item, maxLoadLb: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined } : item));
+    setCapabilities((current) => current.map((item) => item.equipmentId === id
+      ? { ...item, [key]: Number.isFinite(parsed) && parsed >= 0 && value.trim() !== '' ? parsed : undefined }
+      : item));
   }
 
   return <View style={styles.editorCard}>
@@ -140,10 +149,24 @@ function SpaceEditor({ space, onSave, onDelete, onCancel }: { space: TrainingSpa
       })}</View>
     </View>)}
 
-    {(['dumbbell', 'kettlebell', 'medicine_ball', 'barbell', 'trap_bar'] as EquipmentId[]).map((id) => {
+    {(['dumbbell', 'kettlebell'] as EquipmentId[]).map((id) => {
       const capability = capabilities.find((item) => item.equipmentId === id);
       if (!capability) return null;
-      return <View key={id} style={styles.loadRow}><Text style={styles.loadLabel}>{equipmentLabel(id)} max load</Text><TextInput value={capability.maxLoadLb?.toString() ?? ''} onChangeText={(value) => setMaxLoad(id, value)} keyboardType="decimal-pad" style={styles.loadInput} placeholder="lb" placeholderTextColor={tokens.textMuted} /></View>;
+      return <View key={id} style={styles.loadRow}>
+        <View style={styles.loadCopy}><Text style={styles.loadLabel}>{equipmentLabel(id)} range</Text><Text style={styles.loadHint}>Lightest to heaviest available, per weight</Text></View>
+        <View style={styles.rangeInputs}>
+          <TextInput value={capability.minLoadLb?.toString() ?? ''} onChangeText={(value) => setLoad(id, 'minLoadLb', value)} keyboardType="decimal-pad" style={styles.rangeInput} placeholder="Min" placeholderTextColor={tokens.textMuted} />
+          <Text style={styles.rangeDash}>–</Text>
+          <TextInput value={capability.maxLoadLb?.toString() ?? ''} onChangeText={(value) => setLoad(id, 'maxLoadLb', value)} keyboardType="decimal-pad" style={styles.rangeInput} placeholder="Max" placeholderTextColor={tokens.textMuted} />
+          <Text style={styles.unit}>lb</Text>
+        </View>
+      </View>;
+    })}
+
+    {MAX_LOAD_EQUIPMENT.map((id) => {
+      const capability = capabilities.find((item) => item.equipmentId === id);
+      if (!capability) return null;
+      return <View key={id} style={styles.loadRow}><Text style={styles.loadLabel}>{equipmentLabel(id)} max load</Text><View style={styles.singleLoad}><TextInput value={capability.maxLoadLb?.toString() ?? ''} onChangeText={(value) => setLoad(id, 'maxLoadLb', value)} keyboardType="decimal-pad" style={styles.loadInput} placeholder="Max" placeholderTextColor={tokens.textMuted} /><Text style={styles.unit}>lb</Text></View></View>;
     })}
 
     <Pressable onPress={() => onSave({ ...space, name: name.trim() || space.name, capabilities })} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save setup</Text></Pressable>
@@ -168,5 +191,5 @@ function makeStyles(tokens: ReturnType<typeof useTheme>['tokens']) { return Styl
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 }, headerCopy: { flex: 1, gap: 5 }, eyebrow: { color: tokens.accent, fontSize: 11, fontWeight: '900', letterSpacing: 1.1 }, title: { color: tokens.text, fontSize: 29, lineHeight: 34, fontWeight: '900' }, subtitle: { color: tokens.textMuted, fontSize: 14, lineHeight: 20 }, done: { color: tokens.accent, fontWeight: '800', fontSize: 15, paddingTop: 4 },
   preferenceCard: { backgroundColor: tokens.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 18, overflow: 'hidden' }, preferenceOption: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border }, preferenceActive: { backgroundColor: tokens.accent }, preferenceText: { color: tokens.text, fontSize: 15, fontWeight: '700' }, preferenceTextActive: { color: '#FFFFFF' }, disabled: { opacity: 0.35 },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 }, switchTitle: { color: tokens.text, fontSize: 15, fontWeight: '800' }, switchDetail: { color: tokens.textMuted, fontSize: 12, lineHeight: 16, marginTop: 2 }, countRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border }, countLabel: { flex: 1, color: tokens.text, fontSize: 14, fontWeight: '700' }, countInput: { width: 70, textAlign: 'center', color: tokens.text, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 8 },
-  editorCard: { backgroundColor: tokens.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 18, padding: 16, gap: 14 }, editorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, editorTitle: { color: tokens.text, fontSize: 19, fontWeight: '900' }, cancel: { color: tokens.accent, fontSize: 14, fontWeight: '800' }, label: { color: tokens.textMuted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 }, input: { color: tokens.text, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, group: { gap: 8 }, groupTitle: { color: tokens.text, fontSize: 14, fontWeight: '800' }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, chip: { borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 8 }, chipActive: { backgroundColor: tokens.accent, borderColor: tokens.accent }, chipText: { color: tokens.textMuted, fontSize: 12, fontWeight: '700' }, chipTextActive: { color: '#FFFFFF' }, loadRow: { flexDirection: 'row', alignItems: 'center', gap: 12 }, loadLabel: { flex: 1, color: tokens.text, fontSize: 14, fontWeight: '700' }, loadInput: { width: 84, color: tokens.text, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, textAlign: 'right' }, primaryButton: { backgroundColor: tokens.accent, borderRadius: 14, minHeight: 48, alignItems: 'center', justifyContent: 'center' }, primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' }, deleteButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' }, deleteButtonText: { color: tokens.danger, fontSize: 14, fontWeight: '800' },
+  editorCard: { backgroundColor: tokens.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 18, padding: 16, gap: 14 }, editorHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, editorTitle: { color: tokens.text, fontSize: 19, fontWeight: '900' }, cancel: { color: tokens.accent, fontSize: 14, fontWeight: '800' }, label: { color: tokens.textMuted, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 }, input: { color: tokens.text, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, group: { gap: 8 }, groupTitle: { color: tokens.text, fontSize: 14, fontWeight: '800' }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, chip: { borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 8 }, chipActive: { backgroundColor: tokens.accent, borderColor: tokens.accent }, chipText: { color: tokens.textMuted, fontSize: 12, fontWeight: '700' }, chipTextActive: { color: '#FFFFFF' }, loadRow: { flexDirection: 'row', alignItems: 'center', gap: 12 }, loadCopy: { flex: 1 }, loadLabel: { flex: 1, color: tokens.text, fontSize: 14, fontWeight: '700' }, loadHint: { color: tokens.textMuted, fontSize: 10.5, lineHeight: 14, marginTop: 2 }, rangeInputs: { flexDirection: 'row', alignItems: 'center', gap: 5 }, rangeInput: { width: 58, color: tokens.text, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 8, textAlign: 'center' }, rangeDash: { color: tokens.textMuted, fontSize: 14 }, unit: { color: tokens.textMuted, fontSize: 12, fontWeight: '700' }, singleLoad: { flexDirection: 'row', alignItems: 'center', gap: 5 }, loadInput: { width: 70, color: tokens.text, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 8, textAlign: 'right' }, primaryButton: { backgroundColor: tokens.accent, borderRadius: 14, minHeight: 48, alignItems: 'center', justifyContent: 'center' }, primaryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' }, deleteButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center' }, deleteButtonText: { color: tokens.danger, fontSize: 14, fontWeight: '800' },
 }); }
