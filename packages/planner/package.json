@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./whole-athlete-week": "./src/whole-athlete-week.ts",
-    "./strength-training-space-allocation": "./src/strength-training-space-allocation.ts"
+    "./strength-training-space-allocation": "./src/strength-training-space-allocation.ts",
+    "./whole-athlete-strength-coherence": "./src/whole-athlete-strength-coherence.ts"
   },
   "dependencies": {
     "@circuit/domain": "workspace:*",
