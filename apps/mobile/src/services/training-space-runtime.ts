@@ -1,4 +1,4 @@
-import type { GenerationContext } from '@circuit/domain';
+import type { GenerationContext, PlannedStrengthSession } from '@circuit/domain';
 import { generateWorkoutForTrainingSpace, type TrainingSpaceProfile } from '@circuit/generator';
 import { allocateStrengthTrainingSpaces, type SpaceAwarePlannedSession } from '@circuit/planner/strength-training-space-allocation';
 import { coordinateWeeklyStrengthStimuli, type WeeklyStrengthPrescription } from '@circuit/planner/whole-athlete-strength-coherence';
@@ -62,7 +62,12 @@ export async function applyTrainingSpacesToGeneratedBlock(
       assignments.set(session.id, { ...session });
       const targetSpace = trainingSpaceForSession(session.trainingSpaceId, preferences);
       if (!targetSpace || !('workout' in session) || !session.workout) return session;
-      const request = applyWeeklyStrengthPrescriptionToRequest(session.workout.request, session.strengthPrescription);
+
+      const strengthSession = session as typeof session & Pick<PlannedStrengthSession, 'workout'>;
+      const request = applyWeeklyStrengthPrescriptionToRequest(
+        strengthSession.workout.request,
+        session.strengthPrescription,
+      );
       const generated = generateWorkoutForTrainingSpace(request, context, targetSpace, home);
       if (!generated.ok) return session;
       return { ...session, workout: generated.workout };
