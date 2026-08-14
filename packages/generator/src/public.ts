@@ -22,6 +22,13 @@ const GYM_SIGNAL_EQUIPMENT = new Set<EquipmentId>([
   'trap_bar',
   'cable_machine',
   'leg_press',
+  'hack_squat_machine',
+  'leg_extension_machine',
+  'leg_curl_machine',
+  'calf_raise_machine',
+  'assisted_pullup_machine',
+  'chest_press_machine',
+  'row_machine',
 ]);
 
 function inferredProfile(request: WorkoutGenerationRequest): TrainingEnvironmentProfile | null {

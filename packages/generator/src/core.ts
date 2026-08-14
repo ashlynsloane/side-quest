@@ -1036,14 +1036,33 @@ function stationTemplatesForRequest(request: WorkoutGenerationRequest): StationT
 
 function matchesSlot(exercise: Exercise, slot: SlotRule): boolean {
   const roleMatch = slot.roles.some((role) => exercise.stationRoles.includes(role));
-  const patternMatch = !slot.patterns || slot.patterns.some((pattern) => exercise.movementPatterns.includes(pattern));
+  const patternMatch =
+    !slot.patterns
+    || slot.patterns.some((pattern) => exercise.movementPatterns.includes(pattern));
   const allowedRegionRoles = slot.regionRoles ?? ['primary', 'secondary'];
-  const regionMatch = !slot.preferredRegions || slot.preferredRegions.some((region) =>
-    exercise.bodyRegions.some((load) =>
-      load.region === region && load.load >= 2 && allowedRegionRoles.includes(load.role),
-    ),
-  );
-  return roleMatch && patternMatch && regionMatch;
+  const regionMatch =
+    !slot.preferredRegions
+    || slot.preferredRegions.some((region) =>
+      exercise.bodyRegions.some(
+        (load) =>
+          load.region === region
+          && load.load >= 2
+          && allowedRegionRoles.includes(load.role),
+      ),
+    );
+
+  if (!roleMatch || !patternMatch || !regionMatch) return false;
+
+  // Controlled strength movements do not need to be AMRAP-compatible when
+  // they are filling an explicitly strength-oriented slot. Conditioning,
+  // stability, power, and generic accessory slots retain the AMRAP guard.
+  const strengthSlot =
+    slot.roles.includes('primary_strength')
+    || slot.roles.includes('secondary_strength');
+
+  if (!strengthSlot && !exercise.suitableForAmrap) return false;
+
+  return true;
 }
 
 function isExerciseEligible(
@@ -1052,7 +1071,10 @@ function isExerciseEligible(
   available: Set<EquipmentId>,
   preference?: ExercisePreference,
 ): boolean {
-  if (!exercise.defaultEnabled || exercise.status !== 'active' || !exercise.suitableForAmrap) return false;
+  // AMRAP suitability is evaluated at the station-slot boundary.
+  // Do not globally exclude controlled strength movements such as leg press,
+  // selectorized machines, or heavier free-weight strength exercises.
+  if (!exercise.defaultEnabled || exercise.status !== 'active') return false;
   if (preference?.preference === 'hidden') return false;
   if (!request.allowUnfamiliarExercises && preference?.familiarity === 'unreviewed') return false;
   if (exercise.impactLevel > request.maximumImpact) return false;
