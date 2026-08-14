@@ -8,6 +8,10 @@ describe('machine exercise equipment integrity', () => {
     ['Seated Leg Curl', 'leg_curl_machine'],
     ['Leg Extension', 'leg_extension_machine'],
     ['Leg Press', 'leg_press'],
+    ['Hack Squat', 'hack_squat_machine'],
+    ['Machine Calf Raise', 'calf_raise_machine'],
+    ['Assisted Pull-Up', 'assisted_pullup_machine'],
+    ['Machine Row', 'row_machine'],
   ]);
 
   for (const [name, equipmentId] of expected) {
