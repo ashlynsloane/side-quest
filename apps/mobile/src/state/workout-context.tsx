@@ -20,6 +20,7 @@ import { plannedStrengthDisplayName } from '@/services/training-synthesis';
 import { exerciseSeed } from '@circuit/exercise-content';
 import {
   generateWorkoutForAssignedTrainingSpace,
+  resolveTrainingSpaceHint,
   trainingSpaceAssignmentForPlannedSession,
 } from '@/services/training-space-runtime';
 
@@ -40,7 +41,14 @@ type WorkoutContextValue = {
   restoredActiveWorkout: boolean;
   setPreviewWorkout: (workout: GeneratedWorkout | null) => void;
   updatePreviewWorkout: (workout: GeneratedWorkout) => void;
-  openPlannedWorkoutPreview: (session: PlannedStrengthSession, context?: RecommendationExplanationContext) => void;
+  openPlannedWorkoutPreview: (
+    session: PlannedStrengthSession,
+    context?: RecommendationExplanationContext,
+    trainingSpaceHint?: {
+      id?: string;
+      name?: string;
+    },
+  ) => void;
   beginWorkout: (workout: GeneratedWorkout) => void;
   updateActiveWorkout: (workout: GeneratedWorkout, options?: { modifiedFromPlan?: boolean }) => void;
   clearActiveWorkout: () => void;
@@ -106,8 +114,16 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPlannedPreviewSource(nextSource);
       setPreviewExplanation(explainPlannedStrengthSession(nextSource.session, nextSource.context));
     },
-    openPlannedWorkoutPreview(session, context = {}) {
-      const assignment = trainingSpaceAssignmentForPlannedSession(session.id);
+    openPlannedWorkoutPreview(session, context = {}, trainingSpaceHint) {
+      const explicitSpace = resolveTrainingSpaceHint(trainingSpaceHint);
+      const cachedAssignment =
+        trainingSpaceAssignmentForPlannedSession(session.id);
+
+      const assignment = explicitSpace
+        ? {
+            trainingSpaceId: explicitSpace.id,
+          }
+        : cachedAssignment;
 
       const spaceResult = assignment
         ? generateWorkoutForAssignedTrainingSpace({

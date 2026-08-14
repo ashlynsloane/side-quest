@@ -111,6 +111,45 @@ export function generateWorkoutForAssignedTrainingSpace({
   );
 }
 
+export function resolveTrainingSpaceHint(
+  hint: {
+    id?: string;
+    name?: string;
+  } | undefined,
+  preferences = loadTrainingSpacePreferences(),
+): TrainingSpaceProfile | undefined {
+  if (!hint) return undefined;
+
+  if (hint.id) {
+    const byId = preferences.spaces.find(
+      (space) => space.id === hint.id,
+    );
+    if (byId) return byId;
+  }
+
+  if (hint.name) {
+    const normalizedName = hint.name.trim().toLowerCase();
+
+    const byName = preferences.spaces.find(
+      (space) => space.name.trim().toLowerCase() === normalizedName,
+    );
+    if (byName) return byName;
+
+    // Training-outing locations and training-space profiles can come from
+    // different persistence layers. Preserve the semantic location when
+    // their IDs/names are not identical.
+    if (/gym|rec center|recreation center|fitness center/i.test(hint.name)) {
+      return gymSpace(preferences);
+    }
+
+    if (/home/i.test(hint.name)) {
+      return homeSpace(preferences);
+    }
+  }
+
+  return undefined;
+}
+
 export function trainingSpaceForSession(
   trainingSpaceId: string | undefined,
   preferences = loadTrainingSpacePreferences(),

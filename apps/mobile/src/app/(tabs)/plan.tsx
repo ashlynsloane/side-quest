@@ -148,15 +148,25 @@ export default function PlanTab() {
     void selectPlanWeek(addDays(selectedWeekStart, offset * 7));
   };
 
-  const openStrength = (session: PlannedStrengthSession) => {
-    openPlannedWorkoutPreview(session, {
-      goal: block?.goal,
-      previousSessionDate: previousStrengthDate(session, strength),
-      nextKeyEnduranceDate: nextEnduranceDate(session, events),
-      hasTrainingHistory,
-      hasConnectedTrainingData,
-      hasReadinessData,
-    });
+  const openStrength = (
+    session: PlannedStrengthSession,
+    trainingSpaceHint?: {
+      id?: string;
+      name?: string;
+    },
+  ) => {
+    openPlannedWorkoutPreview(
+      session,
+      {
+        goal: block?.goal,
+        previousSessionDate: previousStrengthDate(session, strength),
+        nextKeyEnduranceDate: nextEnduranceDate(session, events),
+        hasTrainingHistory,
+        hasConnectedTrainingData,
+        hasReadinessData,
+      },
+      trainingSpaceHint,
+    );
     router.push('/workout-preview' as Href);
   };
 
@@ -180,7 +190,10 @@ export default function PlanTab() {
     const meta = inOuting ? stripLeadingTiming(item.meta) : item.meta;
     if (item.kind === 'strength') {
       const closed = item.session.completionStatus === 'completed' || item.session.completionStatus === 'skipped';
-      return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session)} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
+      return <Pressable key={item.id} disabled={closed} onPress={() => openStrength(item.session, {
+        id: item.scheduledLocationId,
+        name: item.locationName,
+      })} style={[styles.sessionRow, closed && styles.sessionRowClosed]}>
         <V23SportPill kind="strength" />
         <View style={styles.sessionCopy}><Text style={[styles.sessionTitle, closed && styles.sessionTitleClosed]}>{item.title}</Text><View style={styles.sessionMetaRow}><StimulusTagBadge tag={item.stimulusTag} styles={styles} /><Text style={styles.sessionMeta}>{meta}</Text></View></View>
         {item.session.completionStatus === 'completed' ? <View style={styles.completedIcon}><V23Icon name="check" color={tokens.success} size={16} /></View> : <V23Icon name="chevron" color={tokens.textMuted} size={15} />}
@@ -405,6 +418,7 @@ type DayItemBase = {
   scheduledStartAt?: string;
   scheduledEndAt?: string;
   outingId?: string;
+  scheduledLocationId?: string;
   locationName?: string;
   transitionMinutes?: number;
   stimulusTag: TrainingStimulusTag;
@@ -480,6 +494,7 @@ function weekDays(
         scheduledStartAt: planned?.scheduledStartAt,
         scheduledEndAt: planned?.scheduledEndAt,
         outingId: planned?.trainingOutingId,
+        scheduledLocationId: planned?.scheduledLocationId,
         locationName: planned?.scheduledLocationName,
         transitionMinutes: planned?.transitionMinutes,
         stimulusTag: trainingStimulusTagForStrength(displaySession),
