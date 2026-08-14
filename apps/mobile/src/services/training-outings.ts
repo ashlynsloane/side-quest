@@ -18,6 +18,10 @@ export type TrainingLocationProfile = EquipmentProfile & {
 export type TrainingOutingKind = 'facility_stack';
 
 export type TrainingOutingScheduledSession = AvailabilityScheduledSession & {
+  trainingSpaceId?: string;
+  trainingSpaceName?: string;
+  trainingEnvironment?: 'home' | 'gym' | 'custom';
+  trainingSpaceReason?: string;
   trainingOutingId?: string;
   trainingOutingKind?: TrainingOutingKind;
   scheduledLocationId?: string;
@@ -77,6 +81,7 @@ function optimizeWeek(
         const eligibleStrengths = sessions
           .filter((session) =>
             session.discipline === 'strength'
+            && session.trainingEnvironment === 'gym'
             && !session.trainingOutingId
             && weekdayIndex(session.date) !== profile.restWeekday
             && canStackSwimAndStrength(swim, session))

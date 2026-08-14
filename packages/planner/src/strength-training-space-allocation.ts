@@ -100,13 +100,30 @@ export function allocateStrengthTrainingSpaces(
       .map((session) => session.date),
   );
 
-  const gymCandidates = [...strengthSessions].sort((left, right) => {
-    const leftScore = gymAssignmentScore(left, swimDates, input.preferGymOnSwimDays !== false);
-    const rightScore = gymAssignmentScore(right, swimDates, input.preferGymOnSwimDays !== false);
-    return rightScore - leftScore || left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
+  const preferGymOnSwimDays = input.preferGymOnSwimDays !== false;
+
+  const poolStackableStrengthSessions = strengthSessions.filter(
+    (session) => isPoolStackableStrength(session),
+  );
+
+  const gymCandidatePool =
+    preferGymOnSwimDays && poolStackableStrengthSessions.length > 0
+      ? poolStackableStrengthSessions
+      : strengthSessions;
+
+  const gymCandidates = [...gymCandidatePool].sort((left, right) => {
+    const leftScore = gymAssignmentScore(left, swimDates, preferGymOnSwimDays);
+    const rightScore = gymAssignmentScore(right, swimDates, preferGymOnSwimDays);
+    return rightScore - leftScore
+      || left.date.localeCompare(right.date)
+      || left.id.localeCompare(right.id);
   });
 
-  const gymIds = new Set(gymCandidates.slice(0, preferredGymSessions).map((session) => session.id));
+  const gymIds = new Set(
+    gymCandidates
+      .slice(0, preferredGymSessions)
+      .map((session) => session.id),
+  );
   const remaining = strengthSessions.filter((session) => !gymIds.has(session.id));
   const homeIds = new Set(remaining.slice(0, preferredHomeSessions).map((session) => session.id));
 
@@ -134,6 +151,15 @@ export function allocateStrengthTrainingSpaces(
 
     return { ...session };
   });
+}
+
+function isPoolStackableStrength(
+  session: AllocatableStrengthSession,
+): boolean {
+  if (session.keySession) return false;
+  if (session.lowerBodyDemand === 'high') return false;
+  if (session.recoveryCost >= 4) return false;
+  return true;
 }
 
 function gymAssignmentScore(
