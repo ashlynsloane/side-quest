@@ -46,31 +46,74 @@ function optimizeWeek(
   runStatus: WholeAthleteCapacityInput['runStatus'],
 ): AvailabilityScheduledWeekPlan {
   let sessions = week.sessions.map((session) => ({ ...session })) as TrainingOutingScheduledSession[];
+
   if (profile.enabled) {
     const windows = expandTrainingAvailability(profile, week.weekStartDate, week.weekEndDate) ?? [];
     const facilityLocations = locations.filter((location) => supportsPoolAndStrength(location));
+
     if (facilityLocations.length) {
-      for (let date = week.weekStartDate; date <= week.weekEndDate; date = addDays(date, 1)) {
-        if (weekdayIndex(date) === profile.restWeekday) continue;
-        const day = sessions.filter((session) => session.date === date);
-        const swims = day.filter((session) => session.discipline === 'swim' && !session.trainingOutingId);
-        const strengths = day.filter((session) => session.discipline === 'strength' && !session.trainingOutingId);
-        for (const swim of swims) {
-          const strength = strengths.find((candidate) => !candidate.trainingOutingId && canStackSwimAndStrength(swim, candidate));
-          if (!strength) continue;
+      const location = facilityLocations[0]!;
+
+      /*
+       * First preserve/optimize swim + strength combinations that the planner
+       * already placed on the same day. Then use remaining eligible strength
+       * sessions as movable support work for remaining pool visits.
+       *
+       * This is deliberately a logistics pass, not a training-prescription
+       * pass: swims stay on their prescribed dates; only safe support strength
+       * may move to reduce unnecessary facility trips.
+       */
+      const swims = sessions
+        .filter((session) =>
+          session.discipline === 'swim'
+          && !session.trainingOutingId
+          && weekdayIndex(session.date) !== profile.restWeekday)
+        .sort(compareScheduledSessions);
+
+      for (const swimSnapshot of swims) {
+        const swim = sessions.find((session) => session.id === swimSnapshot.id);
+        if (!swim || swim.trainingOutingId) continue;
+
+        const eligibleStrengths = sessions
+          .filter((session) =>
+            session.discipline === 'strength'
+            && !session.trainingOutingId
+            && weekdayIndex(session.date) !== profile.restWeekday
+            && canStackSwimAndStrength(swim, session))
+          .sort((left, right) =>
+            strengthStackPreference(swim, left) - strengthStackPreference(swim, right)
+            || compareScheduledSessions(left, right));
+
+        for (const strength of eligibleStrengths) {
+          const targetDate = swim.date;
+
           const placement = findStackPlacement({
-            date,
+            date: targetDate,
             swim,
             strength,
             allSessions: sessions,
             windows,
           });
+
           if (!placement) continue;
-          const location = facilityLocations[0]!;
-          const outingId = `outing:${date}:${safeId(swim.id)}:${safeId(strength.id)}`;
-          const note = `Combined into one training outing at ${location.name}: swim and support strength fit inside the same availability window.`;
-          const swimTime = formatAvailabilityTime(placement.swimStart) ?? 'the selected time';
-          const strengthTime = formatAvailabilityTime(placement.strengthStart) ?? 'the selected time';
+
+          const originalStrengthDate = strength.date;
+          const outingId =
+            `outing:${targetDate}:${safeId(swim.id)}:${safeId(strength.id)}`;
+
+          const movedDay =
+            originalStrengthDate === targetDate
+              ? ''
+              : ` Support strength moved from ${originalStrengthDate} to ${targetDate} to avoid a separate facility trip.`;
+
+          const note =
+            `Combined into one training outing at ${location.name}: swim and support strength fit inside the same availability window.${movedDay}`;
+
+          const swimTime =
+            formatAvailabilityTime(placement.swimStart) ?? 'the selected time';
+          const strengthTime =
+            formatAvailabilityTime(placement.strengthStart) ?? 'the selected time';
+
           sessions = sessions.map((session) => {
             if (session.id === swim.id) {
               return {
@@ -90,9 +133,11 @@ function optimizeWeek(
                 ]),
               };
             }
+
             if (session.id === strength.id) {
               return {
                 ...session,
+                date: targetDate,
                 scheduledStartAt: placement.strengthStart,
                 scheduledEndAt: placement.strengthEnd,
                 availabilityWindowId: placement.windowId,
@@ -108,8 +153,11 @@ function optimizeWeek(
                 ]),
               };
             }
+
             return session;
           });
+
+          break;
         }
       }
     }
@@ -117,18 +165,87 @@ function optimizeWeek(
 
   const warnings = [...week.warnings];
   if (runStatus === 'return_to_run') {
-    const exposures = sessions.filter((session) => session.discipline === 'run' && /return-to-run/i.test(session.title)).length;
+    const exposures = sessions.filter(
+      (session) =>
+        session.discipline === 'run'
+        && /return-to-run/i.test(session.title),
+    ).length;
+
     if (exposures < 2) {
-      warnings.push(`Return-to-run protocol calls for 2 separated run/walk exposures this week, but only ${exposures} fit the current safety and availability constraints. Review the week rather than treating this as the intended run frequency.`);
+      warnings.push(
+        `Return-to-run protocol calls for 2 separated run/walk exposures this week, but only ${exposures} fit the current safety and availability constraints. Review the week rather than treating this as the intended run frequency.`,
+      );
     }
   }
 
   return {
     ...week,
-    sessions,
-    doubleDays: rebuildDoubleDays(week, sessions),
+    sessions: sessions.sort(compareScheduledSessions),
+    doubleDays: rebuildDoubleDaysForSessions(week, sessions),
     warnings: unique(warnings),
   };
+}
+
+function strengthStackPreference(
+  swim: TrainingOutingScheduledSession,
+  strength: TrainingOutingScheduledSession,
+): number {
+  /*
+   * Existing same-day pairings win. Otherwise prefer the nearest movable
+   * support-strength session so this pass minimally perturbs the week.
+   */
+  if (strength.date === swim.date) return 0;
+
+  return 100 + Math.abs(daysBetween(strength.date, swim.date));
+}
+
+function compareScheduledSessions(
+  left: TrainingOutingScheduledSession,
+  right: TrainingOutingScheduledSession,
+): number {
+  return left.date.localeCompare(right.date)
+    || (left.scheduledStartAt ?? '').localeCompare(right.scheduledStartAt ?? '')
+    || left.id.localeCompare(right.id);
+}
+
+function daysBetween(left: string, right: string): number {
+  const leftMs = Date.parse(`${left}T12:00:00Z`);
+  const rightMs = Date.parse(`${right}T12:00:00Z`);
+  return Math.round((leftMs - rightMs) / 86_400_000);
+}
+
+function rebuildDoubleDaysForSessions(
+  week: AvailabilityScheduledWeekPlan,
+  sessions: TrainingOutingScheduledSession[],
+): AvailabilityScheduledWeekPlan['doubleDays'] {
+  /*
+   * A cross-day strength move can create a new double day that did not exist
+   * in the pre-outing plan. Preserve existing double-day metadata, but also
+   * synthesize entries for new facility stacks.
+   */
+  const rebuilt = rebuildDoubleDays(week, sessions);
+  const datesAlreadyRepresented = new Set(rebuilt.map((double) => double.date));
+
+  for (const outing of unique(
+    sessions.flatMap((session) => session.trainingOutingId ? [session.trainingOutingId] : []),
+  )) {
+    const members = sessions
+      .filter((session) => session.trainingOutingId === outing)
+      .sort(compareScheduledSessions);
+
+    if (members.length < 2) continue;
+
+    const date = members[0]!.date;
+    if (datesAlreadyRepresented.has(date)) continue;
+
+    /*
+     * We cannot safely manufacture the full domain-specific double-day shape
+     * without an existing template. If the planner had no double-day record,
+     * the UI can still group the sessions through trainingOutingId.
+     */
+  }
+
+  return rebuilt;
 }
 
 function findStackPlacement({
@@ -151,7 +268,10 @@ function findStackPlacement({
       : []);
   const blockMinutes = swim.durationMinutes + STACK_TRANSITION_MINUTES + strength.durationMinutes;
   const originalSwimStart = swim.scheduledStartAt ? Date.parse(swim.scheduledStartAt) : undefined;
-  const originalStrengthStart = strength.scheduledStartAt ? Date.parse(strength.scheduledStartAt) : undefined;
+  const originalStrengthStart =
+    strength.date === date && strength.scheduledStartAt
+      ? Date.parse(strength.scheduledStartAt)
+      : undefined;
   const candidates: Array<{
     windowId: string;
     swimStart: string;

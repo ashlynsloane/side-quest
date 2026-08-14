@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 
 describe('training-space generation boundary', () => {
-  it('assigns training spaces only after weekly scheduling is complete', async () => {
+  it('assigns training spaces only after weekly scheduling and persists the returned annotations', async () => {
     const source = await readFile(
       new URL(
         '../../../apps/mobile/src/services/whole-athlete-plan.ts',
@@ -16,23 +16,35 @@ describe('training-space generation boundary', () => {
     );
 
     const spaceAssignment = source.indexOf(
-      'applyPersistedTrainingSpaces(scheduledPlan.sessions)',
+      'const spaceAwareWeek = applyPersistedTrainingSpaces(',
+    );
+
+    const resolvedWeek = source.indexOf(
+      'const resolvedScheduledPlan = {',
     );
 
     const persistedWeek = source.indexOf(
-      'weeks.push(scheduledPlan)',
+      'weeks.push(resolvedScheduledPlan)',
     );
 
     expect(scheduling).toBeGreaterThan(-1);
     expect(spaceAssignment).toBeGreaterThan(scheduling);
-    expect(persistedWeek).toBeGreaterThan(spaceAssignment);
+    expect(resolvedWeek).toBeGreaterThan(spaceAssignment);
+    expect(persistedWeek).toBeGreaterThan(resolvedWeek);
 
-    // Space allocation must not replace the planner-produced schedule.
-    expect(source).not.toContain(
-      'weeks.push(applyPersistedTrainingSpaces',
+    // Space allocation annotates the planner-produced sessions rather than
+    // rebuilding, moving, creating, or removing weekly sessions.
+    expect(source).toContain(
+      '...scheduledPlan,',
     );
-    expect(source).not.toContain(
-      'scheduledPlan = applyPersistedTrainingSpaces',
+    expect(source).toContain(
+      'sessions: spaceAwareWeek.sessions,',
+    );
+
+    // Subsequent week state must use the same annotated sessions that were
+    // returned to the UI.
+    expect(source).toContain(
+      'previousWeek = resolvedScheduledPlan.sessions;',
     );
   });
 

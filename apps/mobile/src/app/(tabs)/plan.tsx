@@ -469,7 +469,13 @@ function weekDays(
       }];
     });
     const strengthItems: DayItem[] = strength.flatMap((session) => {
-      const planned = scheduledStrength.get(session.id) as TrainingOutingScheduledSession | undefined;
+      const planned = scheduledStrength.get(session.id) as
+        | (TrainingOutingScheduledSession & {
+            trainingSpaceId?: string;
+            trainingSpaceName?: string;
+            trainingEnvironment?: 'home' | 'gym' | 'custom';
+          })
+        | undefined;
 
       // A saved strength session remains authoritative even when the
       // whole-athlete availability layer does not return a matching
@@ -488,14 +494,23 @@ function weekDays(
         id: session.id,
         kind: 'strength' as const,
         title: plannedStrengthDisplayName(session),
-        meta: [time, formatTrainingDuration(duration), status].filter(Boolean).join(' · '),
+        meta: [
+          planned?.trainingOutingId
+            ? null
+            : planned?.trainingSpaceName,
+          time,
+          formatTrainingDuration(duration),
+          status,
+        ].filter(Boolean).join(' · '),
         session: displaySession,
         sortAt: planned?.scheduledStartAt ?? `${iso}T23:58:00`,
         scheduledStartAt: planned?.scheduledStartAt,
         scheduledEndAt: planned?.scheduledEndAt,
         outingId: planned?.trainingOutingId,
-        scheduledLocationId: planned?.scheduledLocationId,
-        locationName: planned?.scheduledLocationName,
+        scheduledLocationId:
+          planned?.scheduledLocationId ?? planned?.trainingSpaceId,
+        locationName:
+          planned?.scheduledLocationName ?? planned?.trainingSpaceName,
         transitionMinutes: planned?.transitionMinutes,
         stimulusTag: trainingStimulusTagForStrength(displaySession),
       }];

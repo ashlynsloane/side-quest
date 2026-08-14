@@ -42,6 +42,6 @@ describe('mobile calendar-expression wiring', () => {
 
   it('does not build a facility outing on the protected rest day', () => {
     const outings = source('../../../apps/mobile/src/services/training-outings.ts');
-    expect(outings).toContain('if (weekdayIndex(date) === profile.restWeekday) continue;');
+    expect(outings).toContain("weekdayIndex(session.date) !== profile.restWeekday");
   });
 });

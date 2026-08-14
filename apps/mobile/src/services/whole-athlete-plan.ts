@@ -270,11 +270,18 @@ export async function generateAndPersistWholeAthleteBlock(
 
     // Training-space assignment is deliberately post-scheduling.
     // It may annotate existing strength sessions but cannot move or create them.
-    applyPersistedTrainingSpaces(scheduledPlan.sessions);
+    const spaceAwareWeek = applyPersistedTrainingSpaces(
+      scheduledPlan.sessions,
+    );
 
-    weeks.push(scheduledPlan);
-    previousWeek = scheduledPlan.sessions;
-    for (const session of scheduledPlan.sessions) {
+    const resolvedScheduledPlan = {
+      ...scheduledPlan,
+      sessions: spaceAwareWeek.sessions,
+    };
+
+    weeks.push(resolvedScheduledPlan);
+    previousWeek = resolvedScheduledPlan.sessions;
+    for (const session of resolvedScheduledPlan.sessions) {
       if (session.planningCommitment !== 'generated') continue;
       if (session.discipline !== 'swim' && session.discipline !== 'bike' && session.discipline !== 'run') continue;
       const event = plannedSessionToCalendarEvent(session, input.block.id);
