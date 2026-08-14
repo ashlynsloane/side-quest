@@ -18,7 +18,16 @@ type MachineExerciseInput = {
   movementPatterns: Exercise['movementPatterns'];
   avoidanceTags?: Exercise['avoidanceTags'];
   stationRoles: Exercise['stationRoles'];
-  equipmentId: 'cable_machine' | 'leg_press';
+  equipmentId:
+    | 'cable_machine'
+    | 'leg_press'
+    | 'hack_squat_machine'
+    | 'leg_extension_machine'
+    | 'leg_curl_machine'
+    | 'calf_raise_machine'
+    | 'assisted_pullup_machine'
+    | 'chest_press_machine'
+    | 'row_machine';
   equipmentOptionId: string;
   equipmentLabel: string;
   target?: number;
@@ -183,7 +192,7 @@ export const machineExerciseSeed: Exercise[] = [
     jointLoads: [{ region: 'shoulder', load: 2, notes: 'Supported loaded pressing.' }, { region: 'elbow', load: 2 }],
     movementPatterns: ['horizontal_push'],
     stationRoles: ['primary_strength', 'secondary_strength'],
-    equipmentId: 'cable_machine',
+    equipmentId: 'chest_press_machine',
     equipmentOptionId: 'chest_press_stack',
     equipmentLabel: 'Selectorized chest-press machine',
   }),
@@ -250,7 +259,7 @@ export const machineExerciseSeed: Exercise[] = [
     jointLoads: [{ region: 'knee', load: 2, notes: 'Loaded knee flexion.' }],
     movementPatterns: ['hinge'],
     stationRoles: ['accessory', 'secondary_strength'],
-    equipmentId: 'cable_machine',
+    equipmentId: 'leg_curl_machine',
     equipmentOptionId: 'seated_leg_curl_stack',
     equipmentLabel: 'Seated leg-curl machine',
   }),
@@ -269,7 +278,7 @@ export const machineExerciseSeed: Exercise[] = [
     jointLoads: [{ region: 'knee', load: 3, notes: 'Direct loaded knee extension.' }],
     movementPatterns: ['squat'],
     stationRoles: ['accessory', 'secondary_strength'],
-    equipmentId: 'cable_machine',
+    equipmentId: 'leg_extension_machine',
     equipmentOptionId: 'leg_extension_stack',
     equipmentLabel: 'Leg-extension machine',
     target: 10,
