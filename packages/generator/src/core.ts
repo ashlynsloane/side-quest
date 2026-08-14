@@ -406,7 +406,11 @@ function generateWorkoutAttempt(
       const chosen = weightedChoice(choicePool, random);
       if (!chosen) break;
 
-      const equipmentOption = selectEquipmentOption(chosen.exercise, available);
+      const equipmentOption = selectEquipmentOption(
+        chosen.exercise,
+        available,
+        request.difficulty,
+      );
       const prescription = selectPrescription(chosen.exercise, plan[stationIndex], desiredCount);
       if (!equipmentOption || !prescription) continue;
 
@@ -692,7 +696,11 @@ export function listExerciseSwapCandidates({
 
   for (const candidate of ranked) {
     if (output.length >= 5) break;
-    const equipmentOption = selectEquipmentOption(candidate.exercise, available);
+    const equipmentOption = selectEquipmentOption(
+      candidate.exercise,
+      available,
+      workout.request.difficulty,
+    );
     const prescription = selectPrescription(candidate.exercise, station.durationSeconds / 60, station.exercises.length);
     if (!equipmentOption || !prescription) continue;
     addCandidate(
@@ -855,7 +863,11 @@ function buildDifficultyAdaptation({
 
   const candidate = candidates[0]?.exercise;
   if (candidate) {
-    const equipmentOption = selectEquipmentOption(candidate, available);
+    const equipmentOption = selectEquipmentOption(
+      candidate,
+      available,
+      workout.request.difficulty,
+    );
     const prescription = selectPrescription(candidate, station.durationSeconds / 60, station.exercises.length);
     if (equipmentOption && prescription) {
       return {
@@ -1256,6 +1268,59 @@ function exerciseFamilies(exercise: Exercise): string[] {
   return [...families];
 }
 
+export function hasExerciseRedundancyConflict(
+  exercise: Exercise,
+  existingExercises: Exercise[],
+  request: WorkoutGenerationRequest,
+): boolean {
+  const progressionFamily = exercise.progressionProfile?.family;
+
+  // Different loading/equipment versions of essentially the same task
+  // compete for one workout slot. Focus does not justify duplicates such as
+  // DB RDL + barbell RDL or forward + reverse versions of the same lunge family.
+  if (
+    progressionFamily
+    && existingExercises.some(
+      (existing) =>
+        existing.progressionProfile?.family === progressionFamily,
+    )
+  ) {
+    return true;
+  }
+
+  const trainingFamily = exercise.trainingFamily;
+  if (!trainingFamily) return false;
+
+  const sameTrainingFamily = existingExercises.filter(
+    (existing) => existing.trainingFamily === trainingFamily,
+  );
+
+  if (sameTrainingFamily.length === 0) return false;
+
+  // A deliberate moderate/strong tissue focus may justify two different
+  // progression families from the same training family. Example:
+  // bent-knee + straight-knee calf work in a lower-leg-focused session.
+  const deliberatelyFocused = sameTrainingFamily.every((existing) =>
+    request.focusTargets.some((focus) => {
+      if (focus.emphasis === 'light') return false;
+
+      const candidateLoad =
+        exercise.bodyRegions.find(
+          (load) => load.region === focus.region,
+        )?.load ?? 0;
+
+      const existingLoad =
+        existing.bodyRegions.find(
+          (load) => load.region === focus.region,
+        )?.load ?? 0;
+
+      return candidateLoad >= 2 && existingLoad >= 2;
+    }),
+  );
+
+  return !deliberatelyFocused;
+}
+
 function canAddToWorkout({
   exercise,
   selectedInStation,
@@ -1273,6 +1338,24 @@ function canAddToWorkout({
 }): boolean {
   const balanced = request.focusTargets.length === 0;
   const families = exerciseFamilies(exercise);
+
+  const existingExercises = [
+    ...priorStations.flatMap((station) =>
+      station.exercises.map((item) => item.exerciseSnapshot),
+    ),
+    ...selectedInStation.map((item) => item.exerciseSnapshot),
+  ];
+
+  if (
+    hasExerciseRedundancyConflict(
+      exercise,
+      existingExercises,
+      request,
+    )
+  ) {
+    return false;
+  }
+
   if (exercise.substitutionGroupIds.some((group) => (globalGroupCounts.get(group) ?? 0) >= 1)) return false;
   if (balanced) {
     if (families.includes('calf_ankle') && (globalFamilyCounts.get('calf_ankle') ?? 0) >= 2) return false;
@@ -1289,9 +1372,55 @@ function canAddToWorkout({
   return true;
 }
 
-function selectEquipmentOption(exercise: Exercise, available: Set<EquipmentId>) {
-  return exercise.equipmentOptions
-    .filter((option) => option.items.every((item) => item.optional || available.has(item.equipmentId)))
+const EXTERNAL_LOAD_EQUIPMENT = new Set<EquipmentId>([
+  'dumbbell',
+  'kettlebell',
+  'barbell',
+  'weight_plate',
+  'trap_bar',
+  'cable_machine',
+  'leg_press',
+  'hack_squat_machine',
+  'leg_extension_machine',
+  'leg_curl_machine',
+  'calf_raise_machine',
+  'assisted_pullup_machine',
+  'chest_press_machine',
+  'row_machine',
+]);
+
+export function selectEquipmentOption(
+  exercise: Exercise,
+  available: Set<EquipmentId>,
+  difficulty: WorkoutGenerationRequest['difficulty'] = 'beginner',
+) {
+  const eligible = exercise.equipmentOptions
+    .filter((option) =>
+      option.items.every(
+        (item) => item.optional || available.has(item.equipmentId),
+      ),
+    );
+
+  if (eligible.length === 0) return undefined;
+
+  const shouldPreferExternalLoad =
+    difficulty !== 'beginner'
+    && exercise.progressionProfile?.preferLoadForExperiencedAthlete === true
+    && exercise.progressionProfile.progressionModes.includes('external_load');
+
+  if (shouldPreferExternalLoad) {
+    const loaded = eligible
+      .filter((option) =>
+        option.items.some((item) =>
+          EXTERNAL_LOAD_EQUIPMENT.has(item.equipmentId),
+        ),
+      )
+      .sort((a, b) => a.items.length - b.items.length);
+
+    if (loaded.length > 0) return loaded[0];
+  }
+
+  return [...eligible]
     .sort((a, b) => a.items.length - b.items.length)[0];
 }
 

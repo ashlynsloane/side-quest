@@ -189,6 +189,76 @@ export interface ExerciseInstructions {
   commonMistakes: string[];
 }
 
+export type ExerciseProgressionMode =
+  | 'external_load'
+  | 'unilateral'
+  | 'impact_complexity'
+  | 'balance_complexity'
+  | 'range_of_motion'
+  | 'tempo'
+  | 'lever_length'
+  | 'skill_only';
+
+export type ExerciseProgressionRole =
+  | 'loadable_base'
+  | 'skill_regression'
+  | 'standard_variant'
+  | 'advanced_variant';
+
+export type ExerciseChallengeCeiling =
+  | 'low'
+  | 'moderate'
+  | 'high';
+
+export type ExerciseTrainingFamily =
+  | 'hip_hinge_strength'
+  | 'hip_extension_strength'
+  | 'hamstring_knee_flexion'
+  | 'unilateral_hip_hinge_strength'
+  | 'bilateral_knee_dominant_strength'
+  | 'unilateral_knee_dominant_strength'
+  | 'lateral_lower_body_strength'
+  | 'lower_body_power'
+  | 'lower_body_control_balance'
+  | 'calf_strength'
+  | 'elastic_lower_leg'
+  | 'horizontal_pull_strength'
+  | 'vertical_pull_strength'
+  | 'horizontal_push_strength'
+  | 'vertical_push_strength'
+  | 'trunk_anti_extension'
+  | 'trunk_anti_rotation'
+  | 'trunk_rotation'
+  | 'trunk_lateral'
+  | 'scapular_control'
+  | 'shoulder_rotator_cuff'
+  | 'foot_ankle_control';
+
+export interface ExerciseProgressionProfile {
+  family: string;
+  role: ExerciseProgressionRole;
+  progressionModes: ExerciseProgressionMode[];
+
+  /**
+   * How challenging the movement can reasonably become without external load.
+   * This is deliberately separate from the exercise's technical complexity.
+   */
+  bodyweightCeiling: ExerciseChallengeCeiling;
+
+  /**
+   * How challenging the same movement can become when appropriately loaded.
+   * Omit when external loading is not an appropriate progression strategy.
+   */
+  loadedCeiling?: ExerciseChallengeCeiling;
+
+  /**
+   * When true, an experienced athlete should generally receive a loaded
+   * prescription when suitable external load is available rather than having
+   * the movement disappear from the exercise pool.
+   */
+  preferLoadForExperiencedAthlete?: boolean;
+}
+
 export interface ExerciseCompatibility {
   preferredPairingPatterns?: MovementPattern[];
   avoidPairingPatterns?: MovementPattern[];
@@ -223,6 +293,8 @@ export interface Exercise {
   suitableForBeginners: boolean;
   substitutionGroupIds: string[];
   compatibility: ExerciseCompatibility;
+  trainingFamily?: ExerciseTrainingFamily;
+  progressionProfile?: ExerciseProgressionProfile;
   media: ExerciseMedia[];
   defaultEnabled: boolean;
   contentVersion: number;

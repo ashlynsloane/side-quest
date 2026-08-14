@@ -397,6 +397,26 @@
             "quantity": 1
           }
         ]
+      },
+      {
+        "id": "dumbbell",
+        "label": "Dumbbell",
+        "items": [
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "weight_plate",
+        "label": "Weight plate",
+        "items": [
+          {
+            "equipmentId": "weight_plate",
+            "quantity": 1
+          }
+        ]
       }
     ],
     "prescriptions": [
@@ -506,6 +526,26 @@
             "quantity": 1
           }
         ]
+      },
+      {
+        "id": "dumbbell",
+        "label": "Dumbbell",
+        "items": [
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "kettlebell",
+        "label": "Kettlebell",
+        "items": [
+          {
+            "equipmentId": "kettlebell",
+            "quantity": 1
+          }
+        ]
       }
     ],
     "prescriptions": [
@@ -609,6 +649,26 @@
         "items": [
           {
             "equipmentId": "bodyweight",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "dumbbells",
+        "label": "Dumbbells",
+        "items": [
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "kettlebell",
+        "label": "Kettlebell",
+        "items": [
+          {
+            "equipmentId": "kettlebell",
             "quantity": 1
           }
         ]
@@ -1058,6 +1118,26 @@
         "items": [
           {
             "equipmentId": "bodyweight",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "weight_plate",
+        "label": "Weight plate",
+        "items": [
+          {
+            "equipmentId": "weight_plate",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "dumbbell",
+        "label": "Dumbbell",
+        "items": [
+          {
+            "equipmentId": "dumbbell",
             "quantity": 1
           }
         ]
@@ -1597,6 +1677,26 @@
         "items": [
           {
             "equipmentId": "bodyweight",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "dumbbell",
+        "label": "Dumbbell",
+        "items": [
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "weight_plate",
+        "label": "Weight plate",
+        "items": [
+          {
+            "equipmentId": "weight_plate",
             "quantity": 1
           }
         ]
@@ -3440,6 +3540,34 @@
             "quantity": 1
           }
         ]
+      },
+      {
+        "id": "bench_dumbbell",
+        "label": "Bench and dumbbell",
+        "items": [
+          {
+            "equipmentId": "bench",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "bench_kettlebell",
+        "label": "Bench and kettlebell",
+        "items": [
+          {
+            "equipmentId": "bench",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "kettlebell",
+            "quantity": 1
+          }
+        ]
       }
     ],
     "prescriptions": [
@@ -3557,6 +3685,34 @@
         "items": [
           {
             "equipmentId": "box",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "box_dumbbell",
+        "label": "Box and dumbbell",
+        "items": [
+          {
+            "equipmentId": "box",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "box_kettlebell",
+        "label": "Box and kettlebell",
+        "items": [
+          {
+            "equipmentId": "box",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "kettlebell",
             "quantity": 1
           }
         ]
@@ -5512,11 +5668,15 @@
     ],
     "equipmentOptions": [
       {
-        "id": "barbell-and-bench",
-        "label": "Barbell and bench",
+        "id": "barbell_bench_press",
+        "label": "Barbell, plates, and bench",
         "items": [
           {
             "equipmentId": "barbell",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "weight_plate",
             "quantity": 1
           },
           {
@@ -11813,6 +11973,34 @@
             "quantity": 1
           }
         ]
+      },
+      {
+        "id": "box_dumbbell",
+        "label": "Box and dumbbell",
+        "items": [
+          {
+            "equipmentId": "box",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "box_kettlebell",
+        "label": "Box and kettlebell",
+        "items": [
+          {
+            "equipmentId": "box",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "kettlebell",
+            "quantity": 1
+          }
+        ]
       }
     ],
     "prescriptions": [
@@ -14332,6 +14520,34 @@
             "quantity": 1
           }
         ]
+      },
+      {
+        "id": "bench_dumbbell",
+        "label": "Bench and dumbbell",
+        "items": [
+          {
+            "equipmentId": "bench",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "dumbbell",
+            "quantity": 1
+          }
+        ]
+      },
+      {
+        "id": "bench_kettlebell",
+        "label": "Bench and kettlebell",
+        "items": [
+          {
+            "equipmentId": "bench",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "kettlebell",
+            "quantity": 1
+          }
+        ]
       }
     ],
     "prescriptions": [
@@ -16372,11 +16588,15 @@
     ],
     "equipmentOptions": [
       {
-        "id": "barbell",
-        "label": "Barbell",
+        "id": "barbell_romanian_deadlift",
+        "label": "Barbell and plates",
         "items": [
           {
             "equipmentId": "barbell",
+            "quantity": 1
+          },
+          {
+            "equipmentId": "weight_plate",
             "quantity": 1
           }
         ]
