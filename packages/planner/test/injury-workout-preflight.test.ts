@@ -11,7 +11,7 @@ const exercise=(id:string,region:'quadriceps'|'upper_back'='quadriceps',
   movementPatterns:[],
   avoidanceTags:tags,
   impactLevel:impact,
-} as Exercise);
+} as unknown as Exercise);
 const workout=(e:Exercise):GeneratedWorkout=>({
   id:'w1',
   stations:[{id:'s1',exercises:[{exerciseId:e.id,exerciseSnapshot:e}]}],
@@ -32,7 +32,7 @@ describe('read-only rehabilitation workout preflight',()=>{
     expect(result.exercises[0]!.reasonCodes).toContain('exercise_exposure_annotation_incomplete');
   });
   it('includes stabilizers and joint loading in exposure checks',()=>{
-    const e={...exercise('press'),jointLoads:[{region:'shoulder',load:2}]};
+    const e={...exercise('press'),jointLoads:[{region:'shoulder' as const,load:2 as const}]};
     expect(exerciseExposureFromCatalog(e,new Set(['press'])).affectedRegions)
       .toContain('shoulder');
   });
