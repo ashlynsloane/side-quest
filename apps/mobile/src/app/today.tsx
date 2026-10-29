@@ -3,8 +3,8 @@ import type { DailyReadinessCheckIn } from '@/services/readiness';
 import { recommendToday, workoutForRecommendation } from '@circuit/planner';
 import { createReentryWorkout } from '@circuit/generator';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -17,6 +17,7 @@ import {
 } from '@/services/database';
 import { readinessDetail, readinessHeadline, readinessScore, readinessVariant } from '@/services/readiness';
 import { useWorkoutContext } from '@/state/workout-context';
+import { checkWorkoutAgainstRecordedInjuries, type MobileInjuryPreflight } from '@/services/rehab-workout-preflight';
 
 const VARIANTS: Array<{ id: WorkoutVariantLevel; title: string; detail: string }> = [
   { id: 'full', title: 'Full', detail: 'Complete the planned stimulus.' },
@@ -32,6 +33,11 @@ export default function TodayScreen() {
   const [loading, setLoading] = useState(true);
   const [readiness, setReadiness] = useState<DailyReadinessCheckIn | null>(null);
   const [reentryMode, setReentryMode] = useState<'none' | 'interrupted' | 'returning'>('none');
+  const [rehabCheck, setRehabCheck] = useState<MobileInjuryPreflight | null>(null);
+  const [rehabLoading, setRehabLoading] = useState(
+    process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA === 'true',
+  );
+  const [rehabError, setRehabError] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
@@ -79,6 +85,23 @@ export default function TodayScreen() {
     });
   }
 
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA !== 'true') return;
+    let active=true;
+    setRehabLoading(true);
+    const currentWorkout=workoutFor(selectedVariant);
+    void checkWorkoutAgainstRecordedInjuries(currentWorkout).then(result=>{
+      if(!active)return;
+      setRehabCheck(result);
+      setRehabError(null);
+    }).catch(error=>{
+      if(!active)return;
+      setRehabCheck(null);
+      setRehabError(error instanceof Error?error.message:String(error));
+    }).finally(()=>{if(active)setRehabLoading(false);});
+    return ()=>{active=false;};
+  }, [recommendation, reentryMode, selectedVariant]);
+
   function preview() {
     const workout = workoutFor(selectedVariant);
     if (!workout) return;
@@ -87,6 +110,19 @@ export default function TodayScreen() {
   }
 
   function start() {
+    if(process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA === 'true' &&
+       (rehabLoading || rehabError ||
+       (rehabCheck?.activeInjuryCases??0)>0 &&
+       rehabCheck?.preflight?.disposition!=='no_coded_conflict')) {
+      Alert.alert('Injury review needed',
+        'Your current injury records have not been clinically reconciled with this workout. This beta cannot clear an exercise or override an existing restriction.',
+        [
+          {text:'Cancel',style:'cancel'},
+          {text:'Open injury history',onPress:()=>router.push('/rehab' as Href)},
+        ],
+      );
+      return;
+    }
     const workout = workoutFor(selectedVariant);
     if (!workout) return;
     beginWorkout(workout);
@@ -111,6 +147,24 @@ export default function TodayScreen() {
         </View>
 
         {loading ? <Text style={styles.helper}>Reviewing today’s plan…</Text> : null}
+
+        {process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA === 'true' ? (
+          <Pressable accessibilityRole="button"
+            onPress={() => router.push('/rehab' as Href)} style={styles.checkInButton}>
+            <Text style={styles.checkInTitle}>Longitudinal rehabilitation (beta)</Text>
+            <Text style={styles.helper}>
+              {rehabLoading ? 'Checking local injury records and workout exposure…'
+                : rehabError ? 'Injury preflight is unavailable. Workout start is held for review.'
+                : (rehabCheck?.activeInjuryCases??0)===0 ? 'No active longitudinal injury cases recorded.'
+                : rehabCheck?.preflight?.disposition==='blocked'
+                  ? 'A recorded safety concern or restriction blocks this workout.'
+                  : rehabCheck?.preflight?.disposition==='review_needed'
+                    ? 'This workout needs clinical and exercise-metadata review before start.'
+                    : 'No coded conflict detected. This is not medical clearance.'}
+            </Text>
+            <Text style={styles.helper}>New injury records do not automatically change your strength plan.</Text>
+          </Pressable>
+        ) : null}
 
         {recommendation ? (
           <>
