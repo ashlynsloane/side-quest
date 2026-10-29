@@ -32,6 +32,12 @@ export interface ClinicalConstraint {
 }
 export interface InjuryObservation {
   caseId:string; observedAt:string; pain:number|null; previousPain?:number|null;
+  /** Saved stable ID so exported data can point back to the original check-in. */
+  recordId?:string;
+  /** The particular task or context in which pain was rated. */
+  painContextKey?:'rest'|'walking'|'daily_movement'|'specific_activity';
+  /** Optional, not imputed when absent. */
+  morningStiffnessMinutes?:number|null;
   response24h:'better'|'stable'|'worse'|'much_worse'|'unknown';
   functionTrend:'improving'|'stable'|'worsening'|'unknown';
   consecutiveStableDays:number; dangerSigns:DangerSign[];
@@ -75,6 +81,9 @@ const unique = <T>(items:T[]):T[] => [...new Set(items)];
 function validate(o:InjuryObservation):void {
   for (const value of [o.pain,o.previousPain]) {
     if(value!=null && (!Number.isFinite(value)||value<0||value>10)) throw new Error('Pain must be 0–10 or unknown.');
+  }
+  if(o.morningStiffnessMinutes!=null && (!Number.isFinite(o.morningStiffnessMinutes)||o.morningStiffnessMinutes<0)) {
+    throw new Error('Morning stiffness minutes must be nonnegative or unknown.');
   }
   if(!Number.isInteger(o.consecutiveStableDays)||o.consecutiveStableDays<0) {
     throw new Error('consecutiveStableDays must be a nonnegative integer.');
