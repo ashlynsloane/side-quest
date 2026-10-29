@@ -7,6 +7,7 @@
  * is not automatically synchronized, exported, shared, or uploaded.
  */
 import * as SQLite from 'expo-sqlite';
+import 'expo-sqlite/localStorage/install';
 import { getActiveDatabaseName, withActiveSqliteDatabase } from './database';
 
 export interface VerifiedLocalBackup {
@@ -68,10 +69,46 @@ async function backupActiveConnection(
   }
 }
 
+const BACKUP_MANIFEST_KEY='sidequest.local-sqlite-backup-manifests.v1';
+type LocalStorageLike={
+  getItem(key:string):string|null;
+  setItem(key:string,value:string):void;
+};
+function localBackupStorage():LocalStorageLike {
+  const storage=(globalThis as typeof globalThis & {localStorage?:LocalStorageLike}).localStorage;
+  if(!storage)throw new Error('Local backup manifest storage is unavailable.');
+  return storage;
+}
+function storedManifests():VerifiedLocalBackup[] {
+  const raw=localBackupStorage().getItem(BACKUP_MANIFEST_KEY);
+  if(!raw)return [];
+  const decoded:unknown=JSON.parse(raw);
+  if(!Array.isArray(decoded))throw new Error('Local backup manifest registry is invalid.');
+  return decoded.filter((record):record is VerifiedLocalBackup=>
+    record!=null&&typeof record==='object'&&
+    typeof (record as VerifiedLocalBackup).sourceDatabaseName==='string'&&
+    typeof (record as VerifiedLocalBackup).backupDatabaseName==='string'&&
+    (record as VerifiedLocalBackup).integrityCheck==='ok');
+}
+/** Manifest contains database identifiers and counts, not clinical observations. */
+export function listVerifiedLocalDatabaseBackups():VerifiedLocalBackup[] {
+  const activeName=getActiveDatabaseName();
+  return storedManifests().filter(m=>m.sourceDatabaseName===activeName);
+}
+function rememberBackup(backup:VerifiedLocalBackup):void {
+  const existing=storedManifests();
+  const next=[...existing.filter(b=>b.backupDatabaseName!==backup.backupDatabaseName),backup];
+  localBackupStorage().setItem(BACKUP_MANIFEST_KEY,JSON.stringify(next));
+}
+
 /** User-initiated (or first-migration) local backup. Returns backup identity only. */
 export async function createVerifiedLocalDatabaseBackup():Promise<VerifiedLocalBackup> {
-  return withActiveSqliteDatabase(async db=>
-    backupActiveConnection(db,getActiveDatabaseName()));
+  return withActiveSqliteDatabase(async db=>{
+    const backup=await backupActiveConnection(db,getActiveDatabaseName());
+    await verifyBackupRestorationInSandbox(backup);
+    rememberBackup(backup);
+    return backup;
+  });
 }
 
 /**
@@ -86,7 +123,17 @@ export async function ensureBackupBeforeFirstInjuryMigration(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='injury_schema_metadata'",
   );
   if(existing) return null;
-  return backupActiveConnection(db,getActiveDatabaseName());
+  // Reuse a previously verified backup after an interrupted first migration.
+  for(const prior of listVerifiedLocalDatabaseBackups()) {
+    try {
+      await verifyBackupRestorationInSandbox(prior);
+      return prior;
+    }catch { /* This backup cannot be restored; attempt a new verified snapshot. */ }
+  }
+  const backup=await backupActiveConnection(db,getActiveDatabaseName());
+  await verifyBackupRestorationInSandbox(backup);
+  rememberBackup(backup);
+  return backup;
 }
 
 
