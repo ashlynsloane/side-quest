@@ -121,7 +121,7 @@ export function createInjuryMemoryStore(db: InjurySqlite) {
         throw new Error('Pain score must be 0–10');
       }
       await append('injury_responses',['id','case_id','observed_at','payload_json'],
-        [recordId,value.caseId,value.observedAt,JSON.stringify(value)]);
+        [recordId,value.caseId,value.observedAt,JSON.stringify({...value,recordId})]);
     },
     async appendMetric(value: RehabMetricObservation) {
       id(value.id); id(value.caseId); date(value.observedAt);
@@ -204,10 +204,32 @@ export function createInjuryMemoryStore(db: InjurySqlite) {
         source:item.source,
         sourceRecordId:item.event.id,
       }));
+      // Daily observations are the canonical pain/stiffness source for reports.
+      // Only matching tasks are grouped; missing observations remain missing.
+      const checkInMetrics:RehabMetricObservation[]=history.responses.flatMap((response,index)=>{
+        const identity=response.recordId??('legacy:'+response.observedAt+':'+index);
+        const base={
+          caseId:response.caseId,
+          observedAt:response.observedAt,
+          source:'athlete' as const,
+          sourceRecordId:identity,
+        };
+        const observations:RehabMetricObservation[]=[];
+        if(response.pain!=null) observations.push({
+          ...base,id:identity+':pain',metricKey:'pain',unit:'0-10',
+          contextKey:response.painContextKey??'unspecified',
+          value:response.pain,
+        });
+        if(response.morningStiffnessMinutes!=null) observations.push({
+          ...base,id:identity+':stiffness',metricKey:'morning_stiffness',
+          unit:'minutes',value:response.morningStiffnessMinutes,
+        });
+        return observations;
+      });
       const linked=new Map(history.training.map(record=>[record.id,record]));
       extraTraining.forEach(record=>{if(!linked.has(record.id))linked.set(record.id,record);});
       return buildRehabReportData({
-        caseId,range,observations:history.metrics,events,
+        caseId,range,observations:[...history.metrics,...checkInMetrics],events,
         training:[...linked.values()],includeUnlinkedTraining,
       });
     },
