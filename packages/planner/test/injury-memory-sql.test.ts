@@ -56,6 +56,31 @@ describe('SQLite injury-memory integration',()=>{
     expect(tables).toContain('injury_training_links');
     native.close();
   });
+  it('rolls back a partially executed schema migration and permits retry',async()=>{
+    const native=new DatabaseSync(':memory:');
+    const db:InjurySqlite={
+      execAsync:async sql=>{
+        if(sql.startsWith('BEGIN IMMEDIATE')) {
+          native.exec(sql.replace('CREATE TABLE IF NOT EXISTS injury_events',
+            'CREATE TABLE intentionally-invalid-sql injury_events'));
+        } else native.exec(sql);
+      },
+      runAsync:async(sql,...params)=>native.prepare(sql).run(...params),
+      getAllAsync:async<T>(sql:string,...params:(string|number|null)[])=>
+        native.prepare(sql).all(...params) as T[],
+    };
+    await expect(createInjuryMemoryStore(db).ensureSchema()).rejects.toThrow();
+    const remaining=native.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='injury_cases'",
+    ).all();
+    expect(remaining).toHaveLength(0);
+    db.execAsync=async sql=>{native.exec(sql);};
+    await createInjuryMemoryStore(db).ensureSchema();
+    expect(native.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='injury_cases'",
+    ).all()).toHaveLength(1);
+    native.close();
+  });
   it('is safe to initialize repeatedly',async()=>{
     const {native,store}=createTestStore();
     await store.ensureSchema();await store.ensureSchema();
