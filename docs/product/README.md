@@ -8,6 +8,7 @@
 2. [Screen Blueprints](SIDE_QUEST_SCREEN_BLUEPRINTS.md) — Text-first mobile and desktop wireframes, copy/interaction rules, and synthetic-prototype criteria.
 3. [User Journeys and Acceptance](SIDE_QUEST_USER_JOURNEYS_AND_ACCEPTANCE.md) — Eight complete workflows and explicit failure/edge cases, with testable acceptance criteria.
 4. [Delivery Plan and Gates](SIDE_QUEST_DELIVERY_PLAN_AND_GATES.md) — Audited current capabilities, milestone dependencies, independent workstreams, unresolved choices and definition of done.
+5. [Complex-Case Journey and Information Architecture](PRIMARY_COMPLEX_CASE_AND_IA_DECISIONS.md) — Our first design-test plan, primary complex athlete strategy, contrast cases and mobile/desktop navigation entry points (no private medical details).
 
 ## The four decisions that should persist
 
