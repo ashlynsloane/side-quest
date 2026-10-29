@@ -18,6 +18,25 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal"
+    },
+    "rehab-beta": {
+      "extends": "preview",
+      "distribution": "internal",
+      "env": {
+        "SIDE_QUEST_REHAB_SANDBOX": "true",
+        "EXPO_PUBLIC_ENABLE_REHAB_BETA": "true"
+      }
+    },
+    "rehab-simulator": {
+      "extends": "development-simulator",
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "SIDE_QUEST_REHAB_SANDBOX": "true",
+        "EXPO_PUBLIC_ENABLE_REHAB_BETA": "true"
+      }
     }
   },
   "submit": {

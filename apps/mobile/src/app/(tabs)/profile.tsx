@@ -27,7 +27,10 @@ export default function ProfileTab() {
     <V23GroupedList>
       <V23Row title="Goals and capacity" detail="Goal, availability, experience, and sport profile" onPress={() => router.push('/goal-catalog' as Href)} />
       <V23Row title="Training spaces" detail="Home, gym, and the equipment you actually have access to" onPress={() => router.push('/training-spaces' as Href)} />
-      <V23Row title="Restrictions and symptoms" detail="PT context and training safeguards" onPress={() => router.push('/pt-profile' as Href)} last />
+      <V23Row title="Restrictions and symptoms" detail="PT context and training safeguards" onPress={() => router.push('/pt-profile' as Href)} last={process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA !== 'true'} />
+      {process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA === 'true' ? (
+        <V23Row title="Rehabilitation history (beta)" detail="Track injuries, flares, daily symptoms, and progress" onPress={() => router.push('/rehab' as Href)} last />
+      ) : null}
     </V23GroupedList>
 
     <V23SectionHeader>Connections</V23SectionHeader>

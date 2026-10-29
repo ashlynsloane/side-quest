@@ -99,7 +99,7 @@ export default function PlanTab() {
     <V23Card elevated style={styles.weekCard}>
       <View style={styles.weekHeading}>
         <Pressable accessibilityLabel="Open full schedule" onPress={() => router.push('/schedule' as Href)} style={styles.arrowButton}><V23Icon name="plan" color={tokens.accent} size={20} /></Pressable>
-        <View style={styles.weekTitleCopy}><Text style={styles.weekTitle}>This week</Text><Text style={styles.weekRange}>{formatWeekRange(days)}</Text></View>
+        <View style={styles.weekTitleCopy}><Text style={styles.weekTitle}>{anchorDate === localDate() || (anchorDate >= weekRange(localDate()).from.slice(0,10) && anchorDate < weekRange(localDate()).to.slice(0,10)) ? 'This week' : 'Upcoming training week'}</Text><Text style={styles.weekRange}>{formatWeekRange(days)}</Text></View>
         <Pressable onPress={() => router.push('/session-adjustment' as Href)} style={styles.controlButton}><V23Icon name="adjust" color={tokens.accent} size={19} /></Pressable>
       </View>
       <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
