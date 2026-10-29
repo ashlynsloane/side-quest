@@ -35,6 +35,7 @@ export interface InjuryHistory {
 }
 type JsonRow = { payload_json: string };
 const SQL = [
+  'BEGIN IMMEDIATE TRANSACTION',
   'CREATE TABLE IF NOT EXISTS injury_cases (id TEXT PRIMARY KEY NOT NULL,updated_at TEXT NOT NULL,payload_json TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS injury_episodes (id TEXT PRIMARY KEY NOT NULL,case_id TEXT NOT NULL,started_at TEXT NOT NULL,payload_json TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS injury_events (id TEXT PRIMARY KEY NOT NULL,case_id TEXT,occurred_at TEXT NOT NULL,payload_json TEXT NOT NULL)',
@@ -49,6 +50,7 @@ const SQL = [
   'CREATE INDEX IF NOT EXISTS idx_injury_training_case_time ON injury_training_links(case_id,occurred_at)',
   'CREATE TABLE IF NOT EXISTS injury_schema_metadata (key TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL)',
   "INSERT OR IGNORE INTO injury_schema_metadata(key,value) VALUES ('version','1')",
+  'COMMIT',
 ].join(';\n') + ';';
 
 const id = (value: string): void => {
@@ -73,7 +75,11 @@ export function createInjuryMemoryStore(db: InjurySqlite) {
   let initialization: Promise<void> | null = null;
   async function ensureSchema(): Promise<void> {
     if (!initialization) {
-      initialization = db.execAsync(SQL).catch(error => { initialization = null; throw error; });
+      initialization = db.execAsync(SQL).catch(async error => {
+        try { await db.execAsync('ROLLBACK'); } catch { /* No active transaction. */ }
+        initialization = null;
+        throw error;
+      });
     }
     await initialization;
   }
