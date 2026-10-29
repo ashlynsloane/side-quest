@@ -118,6 +118,36 @@ describe('SQLite injury-memory integration',()=>{
     await expect(store.revokeConstraint('no-impact')).rejects.toThrow();
     native.close();
   });
+  it('includes daily pain and stiffness in the report without inventing missing days',async()=>{
+    const {native,store}=createTestStore();
+    await store.appendResponse('check1',{
+      caseId:'ankle',observedAt:'2026-10-10T07:00:00Z',
+      pain:5,painContextKey:'walking',morningStiffnessMinutes:12,
+      response24h:'unknown',functionTrend:'unknown',
+      consecutiveStableDays:0,dangerSigns:[],
+    });
+    await store.appendResponse('check2',{
+      caseId:'ankle',observedAt:'2026-10-13T07:00:00Z',
+      pain:2,previousPain:5,painContextKey:'walking',
+      response24h:'better',functionTrend:'improving',
+      consecutiveStableDays:0,dangerSigns:[],
+    });
+    await store.appendResponse('check3',{
+      caseId:'ankle',observedAt:'2026-10-14T07:00:00Z',
+      pain:1,painContextKey:'rest',response24h:'stable',
+      functionTrend:'stable',consecutiveStableDays:1,dangerSigns:[],
+    });
+    const report=await store.buildReport('ankle',range);
+    const walking=report.series.find(s=>s.metricKey==='pain'&&s.contextKey==='walking');
+    expect(walking?.points).toHaveLength(2);
+    expect(walking?.observedDelta).toBe(-3);
+    const resting=report.series.find(s=>s.metricKey==='pain'&&s.contextKey==='rest');
+    expect(resting?.points).toHaveLength(1);
+    expect(resting?.observedDelta).toBeNull();
+    expect(report.series.find(s=>s.metricKey==='morning_stiffness')?.points).toHaveLength(1);
+    expect(report.observationCount).toBe(4);
+    native.close();
+  });
   it('stores explicit training links for multiple injuries',async()=>{
     const {native,store}=createTestStore();
     await store.linkTraining(training('w1',['ankle','back']));
