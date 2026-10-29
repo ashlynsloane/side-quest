@@ -28,5 +28,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir packages/planner test
+      - run: node apps/mobile/scripts/validate-rehab-build-isolation.cjs
       - run: pnpm typecheck
       - run: pnpm test
