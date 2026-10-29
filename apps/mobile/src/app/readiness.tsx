@@ -58,6 +58,7 @@ export default function ReadinessScreen() {
 
     <Pressable accessibilityRole="button" onPress={() => void save()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{saved ? 'Saved for today' : 'Save readiness check-in'}</Text></Pressable>
     <Pressable accessibilityRole="button" onPress={() => router.push('/today-check-in' as never)} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Log pain, tightness, or a movement limitation</Text></Pressable>
+    {process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA === 'true' ? <Pressable accessibilityRole="button" onPress={() => router.push('/rehab' as never)} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Open longitudinal rehabilitation history (beta)</Text></Pressable> : null}
   </AppScreen>;
 }
 
