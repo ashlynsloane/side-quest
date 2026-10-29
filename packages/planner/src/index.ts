@@ -1720,3 +1720,6 @@ export * from './visible-progress-workspace';
 export * from './visible-you-workspace';
 
 export * from './recommendation-explanation';
+
+export * from './injury-management';
+export * from './rehab-progress-report';
