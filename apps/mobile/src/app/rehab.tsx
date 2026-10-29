@@ -3,7 +3,7 @@
  * Records observations and produces descriptive summaries ONLY.
  * No automatic clinical diagnosis, approval, exercise loading, or clearance.
  */
-import type { InjuryCase, InjuryEvent, InjuryObservation } from '@circuit/planner';
+import type { InjuryCase, InjuryEvent, InjuryObservation, RehabReportData } from '@circuit/planner';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -71,8 +71,7 @@ export default function RehabilitationScreen() {
   const [response,setResponse]=useState<Status>('unknown');
   const [functionTrend,setFunctionTrend]=useState<FunctionTrend>('unknown');
   const [concerning,setConcerning]=useState(false);
-  const [report,setReport]=useState<Awaited<ReturnType<Awaited<
-    ReturnType<typeof withInjuryMemoryStore>>['buildReport']>>|null>(null);
+  const [report,setReport]=useState<RehabReportData|null>(null);
   const [timeWindow,setTimeWindow]=useState<30|90|365>(30);
 
   const activeCase=cases.find(item=>item.id===activeCaseId);
