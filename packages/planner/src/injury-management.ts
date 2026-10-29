@@ -35,7 +35,7 @@ export interface InjuryObservation {
   /** Saved stable ID so exported data can point back to the original check-in. */
   recordId?:string;
   /** The particular task or context in which pain was rated. */
-  painContextKey?:'rest'|'walking'|'daily_movement'|'specific_activity';
+  painContextKey?:string;
   /** Optional, not imputed when absent. */
   morningStiffnessMinutes?:number|null;
   response24h:'better'|'stable'|'worse'|'much_worse'|'unknown';
@@ -115,7 +115,13 @@ export function assessInjuryManagement(input:InjuryAssessmentInput):InjuryAssess
   const ids=new Set(cases.map(c=>c.id));
   const observations=input.observations.filter(o=>ids.has(o.caseId));
   observations.forEach(validate);
-  const safety=triageInjuryEvents(input.unresolvedEvents,observations);
+  // Historical danger signs remain in the clinical record, but safety screening
+  // acts on unresolved events and the newest observation for each active case.
+  const latestByCase=new Map<string,InjuryObservation>();
+  for(const o of [...observations].sort((a,b)=>a.observedAt.localeCompare(b.observedAt))) {
+    latestByCase.set(o.caseId,o);
+  }
+  const safety=triageInjuryEvents(input.unresolvedEvents,[...latestByCase.values()]);
   const caseDecisions:CaseDecision[]=cases.map(c=>{
     const ep=input.episodes.filter(e=>e.caseId===c.id).sort((a,b)=>b.startedAt.localeCompare(a.startedAt))[0];
     const o=observations.filter(x=>x.caseId===c.id).sort((a,b)=>b.observedAt.localeCompare(a.observedAt))[0];
