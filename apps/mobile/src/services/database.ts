@@ -50,6 +50,18 @@ export async function activateUserDatabase(userId: string): Promise<void> {
 
 export function getActiveDatabaseName(): string { return activeDatabaseName; }
 
+/**
+ * Returns the active profile's initialized SQLite connection to feature-scoped stores.
+ * Do not retain the connection across profile switches. Call once per operation.
+ */
+export async function withActiveSqliteDatabase<T>(
+  operation: (database: SQLite.SQLiteDatabase) => Promise<T>,
+): Promise<T> {
+  await initializeDatabase();
+  return operation(db);
+}
+
+
 export interface FavoriteWorkoutRecord {
   id: string;
   name: string;
