@@ -57,7 +57,9 @@ The feature is accessible from the existing Readiness screen (and a visible read
 pnpm install --frozen-lockfile
 pnpm --dir packages/planner test
 pnpm typecheck
-pnpm check
+pnpm validate:exercises
+pnpm validate:media
+pnpm test
 \`\`\`
 
 The feature branch runs these checks automatically in \`.github/workflows/rehab-validation.yml\` and is not to be merged while any fail.
