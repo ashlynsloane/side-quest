@@ -88,3 +88,51 @@ export async function ensureBackupBeforeFirstInjuryMigration(
   if(existing) return null;
   return backupActiveConnection(db,getActiveDatabaseName());
 }
+
+
+/**
+ * Restores the backup into a disposable, separate SQLite database, validates
+ * its integrity and row counts, and deletes the disposable copy.
+ * NEVER overwrites or replaces the active athlete database.
+ *
+ * This proves logical content can be copied and read back in the current
+ * runtime; release qualification still requires a real iOS/Android restore.
+ */
+export async function verifyBackupRestorationInSandbox(
+  backup: VerifiedLocalBackup,
+): Promise<{verified:boolean;tableRowCounts:Record<string,number>}> {
+  if (!/^sidequest-backup-[a-zA-Z0-9_-]+-[0-9]+\.db$/.test(backup.backupDatabaseName)) {
+    throw new Error('Invalid local backup database identity.');
+  }
+  const check=await SQLite.openDatabaseAsync(backup.backupDatabaseName);
+  const sandboxName='sidequest-restore-test-'+
+    new Date().toISOString().replace(/[^0-9]/g,'')+'-'+
+    Math.floor(Math.random()*1000000)+'.db';
+  let sandbox:SQLite.SQLiteDatabase|null=null;
+  try {
+    const integrity=await check.getFirstAsync<{integrity_check:string}>('PRAGMA integrity_check');
+    if (integrity?.integrity_check!=='ok') throw new Error('Backup failed SQLite integrity check.');
+    sandbox=await SQLite.openDatabaseAsync(sandboxName);
+    await SQLite.backupDatabaseAsync({
+      sourceDatabase:check,sourceDatabaseName:'main',
+      destDatabase:sandbox,destDatabaseName:'main',
+    });
+    const restored=await counts(sandbox);
+    const expected=backup.tableRowCounts;
+    if (Object.keys(expected).length!==Object.keys(restored).length ||
+      Object.entries(expected).some(([name,n])=>restored[name]!==n)) {
+      throw new Error('Restored sandbox data does not match backup manifest.');
+    }
+    const restoredIntegrity=await sandbox.getFirstAsync<{integrity_check:string}>(
+      'PRAGMA integrity_check',
+    );
+    if (restoredIntegrity?.integrity_check!=='ok') {
+      throw new Error('Restored sandbox failed SQLite integrity check.');
+    }
+    return {verified:true,tableRowCounts:restored};
+  } finally {
+    await sandbox?.closeAsync();
+    await check.closeAsync();
+    if(sandbox) await SQLite.deleteDatabaseAsync(sandboxName);
+  }
+}
