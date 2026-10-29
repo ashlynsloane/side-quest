@@ -47,7 +47,7 @@ const range={startAt:'2026-10-01T00:00:00Z',endAt:'2026-10-31T23:59:59Z'};
 describe('SQLite injury-memory integration',()=>{
   it('creates additive tables without touching legacy data',async()=>{
     const {native,store}=createTestStore();
-    native.exec('CREATE TABLE legacy(x TEXT); INSERT INTO legacy VALUES (\\'keep\\');');
+    native.exec("CREATE TABLE legacy(x TEXT); INSERT INTO legacy VALUES ('keep');");
     await store.ensureSchema();
     expect(native.prepare('SELECT x FROM legacy').get()).toEqual({x:'keep'});
     const tables=native.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
