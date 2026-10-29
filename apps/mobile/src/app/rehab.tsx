@@ -25,6 +25,19 @@ const RESPONSES:Status[]=['better','stable','worse','much_worse','unknown'];
 const FUNCTION:FunctionTrend[]=['improving','stable','worsening','unknown'];
 const capitalize=(value:string)=>value.replaceAll('_',' ').replace(/\b\w/g,s=>s.toUpperCase());
 function stamp():string {return new Date().toISOString();}
+function localToday():string {
+  const d=new Date();
+  return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+}
+/** Preserve the user-entered local calendar day and a noon local timestamp. */
+function eventDateTime(localDay:string):string|null {
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(localDay))return null;
+  const [year,month,day]=localDay.split('-').map(Number);
+  const value=new Date(year,month-1,day,12,0,0,0);
+  if(value.getFullYear()!==year||value.getMonth()!==month-1||value.getDate()!==day
+    ||value.getTime()>Date.now())return null;
+  return value.toISOString();
+}
 function recordId(prefix:string):string {
   return prefix+':'+Date.now()+':'+Math.random().toString(36).slice(2,11);
 }
@@ -66,6 +79,8 @@ export default function RehabilitationScreen() {
   const [mechanism,setMechanism]=useState<InjuryEvent['mechanism']>('uncertain');
   const [course,setCourse]=useState<Course>('acute');
   const [eventDescription,setEventDescription]=useState('');
+  const [historicalDate,setHistoricalDate]=useState(localToday());
+  const [dateKnown,setDateKnown]=useState(true);
   const [newWarning,setNewWarning]=useState(false);
   const [eventKind,setEventKind]=useState<'flare'|'new_symptom'|'trauma'|'clinical_update'>('flare');
   const [pain,setPain]=useState<number|null>(null);
@@ -106,6 +121,8 @@ export default function RehabilitationScreen() {
   async function saveCase(){
     const label=name.trim(),region=area.trim();
     if(!label||!region){setError('Enter a case name and affected area.');return;}
+    const onset=dateKnown?eventDateTime(historicalDate):stamp();
+    if(dateKnown&&!onset){setError('Enter a valid past or current date (YYYY-MM-DD).');return;}
     setLoading(true);setError(null);
     const id=recordId('injury'),now=stamp();
     const item:InjuryCase={
@@ -115,7 +132,7 @@ export default function RehabilitationScreen() {
       affectedRegions:[],
     };
     const event:InjuryEvent={
-      id:recordId('event'),caseId:id,occurredAt:now,
+      id:recordId('event'),caseId:id,occurredAt:onset!,
       kind:mechanism==='traumatic'?'trauma':'onset',
       mechanism,
       dangerSigns:newWarning?['other_concerning_change']:[],
@@ -126,10 +143,10 @@ export default function RehabilitationScreen() {
         await store.upsertCase(item,now);
         await store.appendEvent({
           event,source:'athlete',
-          description:eventDescription.trim()||'New injury concern reported for clinical review',
+          description:(dateKnown?'':'Approximate/unknown original onset; date is recording time. ')+(eventDescription.trim()||'New injury concern reported for clinical review'),
         });
       });
-      setActiveCaseId(id);setName('');setArea('');setEventDescription('');setMechanism('uncertain');
+      setActiveCaseId(id);setName('');setArea('');setEventDescription('');setMechanism('uncertain');setHistoricalDate(localToday());setDateKnown(true);
       setNewWarning(false);setMode('home');await refresh();
       if(newWarning){
         Alert.alert('Clinical review recommended',
@@ -142,19 +159,20 @@ export default function RehabilitationScreen() {
   async function saveEvent(){
     if(!activeCaseId||!activeCase){setError('Select an existing injury case.');return;}
     if(!eventDescription.trim()){setError('Describe the new event or flare.');return;}
+    const onset=dateKnown?eventDateTime(historicalDate):stamp();
+    if(dateKnown&&!onset){setError('Enter a valid past or current event date (YYYY-MM-DD).');return;}
     setLoading(true);setError(null);
-    const now=stamp();
     const event:InjuryEvent={
-      id:recordId('event'),caseId:activeCaseId,occurredAt:now,
+      id:recordId('event'),caseId:activeCaseId,occurredAt:onset!,
       kind:eventKind,mechanism:eventKind==='trauma'?'traumatic':'uncertain',
       dangerSigns:newWarning?['other_concerning_change']:[],
       functionLoss:'unknown',initialSafetyScreenComplete:false,
     };
     try{
       await withInjuryMemoryStore(store=>store.appendEvent({
-        event,description:eventDescription.trim(),source:'athlete',
+        event,description:(dateKnown?'':'Approximate/unknown event date; recorded now. ')+eventDescription.trim(),source:'athlete',
       }));
-      setEventDescription('');setNewWarning(false);setEventKind('flare');
+      setEventDescription('');setNewWarning(false);setEventKind('flare');setHistoricalDate(localToday());setDateKnown(true);
       setMode('home');await refresh();
       if(newWarning)Alert.alert('Clinical review recommended',
         'This symptom change may require timely medical evaluation. No exercise clearance has been granted.');
@@ -311,6 +329,14 @@ export default function RehabilitationScreen() {
         <TextInput accessibilityLabel="Affected body region" style={styles.input}
           placeholder="e.g. left shoulder" placeholderTextColor={tokens.textMuted}
           value={area} onChangeText={setArea}/>
+        <Text style={styles.helper}>Date of onset (local calendar date, YYYY-MM-DD)</Text>
+        <Pressable accessibilityRole="checkbox" style={styles.checkbox}
+          onPress={()=>setDateKnown(!dateKnown)} accessibilityState={{checked:dateKnown}}>
+          <Text style={styles.body}>{dateKnown?'☑':'□'} Exact date known</Text>
+        </Pressable>
+        {dateKnown?<TextInput accessibilityLabel="Injury onset date" style={styles.input}
+          value={historicalDate} onChangeText={setHistoricalDate}
+          placeholder="YYYY-MM-DD" placeholderTextColor={tokens.textMuted}/>:<Text style={styles.helper}>Unknown onset is recorded as unknown; the recording time is retained without claiming it was the injury date.</Text>}
         <Text style={styles.heading}>Course of the problem</Text>
         <Options options={COURSES} value={course} onChange={setCourse} styles={styles}/>
         <Text style={styles.heading}>How did this episode begin?</Text>
@@ -342,6 +368,14 @@ export default function RehabilitationScreen() {
       <Text style={styles.helper}>What type of event happened?</Text>
       <Options options={['flare','new_symptom','trauma','clinical_update'] as const}
         value={eventKind} onChange={setEventKind} styles={styles}/>
+        <Text style={styles.helper}>Date of event (local calendar date, YYYY-MM-DD)</Text>
+        <Pressable accessibilityRole="checkbox" style={styles.checkbox}
+          onPress={()=>setDateKnown(!dateKnown)} accessibilityState={{checked:dateKnown}}>
+          <Text style={styles.body}>{dateKnown?'☑':'□'} Exact date known</Text>
+        </Pressable>
+        {dateKnown?<TextInput accessibilityLabel="Event date" style={styles.input}
+          value={historicalDate} onChangeText={setHistoricalDate}
+          placeholder="YYYY-MM-DD" placeholderTextColor={tokens.textMuted}/>:<Text style={styles.helper}>Unknown onset is recorded as unknown; the recording time is retained without claiming it was the injury date.</Text>}
       <Text style={styles.helper}>Describe what changed, including new limitations.</Text>
       <TextInput accessibilityLabel="New flare or event description"
         value={eventDescription} onChangeText={setEventDescription}
