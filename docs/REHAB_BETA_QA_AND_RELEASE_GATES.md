@@ -17,6 +17,30 @@
 - Opt-in inclusion of unrelated training history in PT summary. Existing Side Quest workout ledger is reused; no invented exercise history.
 - Read-only generated-workout preflight; unreviewed exercises and unclassified injury regions fail conservative review. No clinical auto-approval.
 
+## Safe separate app installation
+
+**Do not install a new build with the existing production bundle identifier over the athlete's current phone app.** This could overwrite the existing SQLite dataset and its app sandbox.
+
+An isolated EAS build profile is provided under `apps/mobile/eas.json`:
+
+- `rehab-beta`: internal distribution for a physical device, with `SIDE_QUEST_REHAB_SANDBOX=true` and `EXPO_PUBLIC_ENABLE_REHAB_BETA=true`.
+- `rehab-simulator`: iOS simulator development build with the same isolated identity.
+- `apps/mobile/app.config.js` changes iOS bundle identifier, Android package (when in sandbox), deep-link scheme, and display name to `Side Quest Rehab Beta`. Standard app identity is unchanged when sandbox is disabled.
+- A runtime config guard rejects `EXPO_PUBLIC_ENABLE_REHAB_BETA=true` unless the separate sandbox identity is also set.
+- CI verifies these properties with `node apps/mobile/scripts/validate-rehab-build-isolation.cjs`.
+
+Build instructions (run from `apps/mobile` after `pnpm install --frozen-lockfile` at repo root):
+
+```sh
+npx eas-cli build --profile rehab-simulator --platform ios
+# Later, after device registration / signing setup:
+npx eas-cli build --profile rehab-beta --platform ios
+# Or for Android:
+npx eas-cli build --profile rehab-beta --platform android
+```
+
+The physical-device builds may require Expo login, platform certificates, device registration, or Apple Developer provisioning. These account actions are performed by the user on their own computer; no credentials are committed to GitHub. Do not merge the draft PR or replace the existing installed app.
+
 ## Enable only for controlled local QA
 The new screen is guarded by:
 \`EXPO_PUBLIC_ENABLE_REHAB_BETA=true\`
