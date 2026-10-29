@@ -14,7 +14,7 @@ import { useTheme } from '@/state/theme-context';
 import type { DesignTokens } from '@/theme';
 
 const ENABLED = process.env.EXPO_PUBLIC_ENABLE_REHAB_BETA === 'true';
-type Mode = 'home'|'new'|'daily'|'progress';
+type Mode = 'home'|'new'|'event'|'daily'|'progress';
 type PainContext = NonNullable<InjuryObservation['painContextKey']>;
 type Course = InjuryCase['course'];
 type Status = InjuryObservation['response24h'];
@@ -67,6 +67,7 @@ export default function RehabilitationScreen() {
   const [course,setCourse]=useState<Course>('acute');
   const [eventDescription,setEventDescription]=useState('');
   const [newWarning,setNewWarning]=useState(false);
+  const [eventKind,setEventKind]=useState<'flare'|'new_symptom'|'trauma'|'clinical_update'>('flare');
   const [pain,setPain]=useState<number|null>(null);
   const [context,setContext]=useState<PainContext>('daily_movement');
   const [specificTask,setSpecificTask]=useState('');
@@ -134,6 +135,29 @@ export default function RehabilitationScreen() {
         Alert.alert('Clinical review recommended',
           'New concerning symptoms require professional assessment. This record does not establish a diagnosis or exercise clearance.');
       }
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setLoading(false);}
+  }
+
+  async function saveEvent(){
+    if(!activeCaseId||!activeCase){setError('Select an existing injury case.');return;}
+    if(!eventDescription.trim()){setError('Describe the new event or flare.');return;}
+    setLoading(true);setError(null);
+    const now=stamp();
+    const event:InjuryEvent={
+      id:recordId('event'),caseId:activeCaseId,occurredAt:now,
+      kind:eventKind,mechanism:eventKind==='trauma'?'traumatic':'uncertain',
+      dangerSigns:newWarning?['other_concerning_change']:[],
+      functionLoss:'unknown',initialSafetyScreenComplete:false,
+    };
+    try{
+      await withInjuryMemoryStore(store=>store.appendEvent({
+        event,description:eventDescription.trim(),source:'athlete',
+      }));
+      setEventDescription('');setNewWarning(false);setEventKind('flare');
+      setMode('home');await refresh();
+      if(newWarning)Alert.alert('Clinical review recommended',
+        'This symptom change may require timely medical evaluation. No exercise clearance has been granted.');
     }catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setLoading(false);}
   }
@@ -234,10 +258,11 @@ export default function RehabilitationScreen() {
     </AppScreen>;
   }
   return <AppScreen eyebrow="REHABILITATION" title={
-    mode==='new'?'Record a new injury':mode==='daily'?'Daily injury check-in':
+    mode==='new'?'Record a new injury':mode==='event'?'Record a new event or flare':mode==='daily'?'Daily injury check-in':
     mode==='progress'?'Rehabilitation progress':'Injury history'
   } subtitle={
     mode==='new'?'Record what happened. This is not a diagnosis.':
+    mode==='event'?'Link a setback or new symptom to an existing case.':
     mode==='daily'?'Separate symptoms from general training readiness.':
     mode==='progress'?'Observed history only. Missing days are not zero-pain days.':
     'Your persistent injury cases, episodes, and measurements.'
@@ -261,6 +286,10 @@ export default function RehabilitationScreen() {
             </Pressable>
             <Pressable accessibilityRole="button" style={styles.smallAction} onPress={()=>void viewProgress(item.id)}>
               <Text style={styles.smallActionText}>Progress</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" style={styles.smallAction}
+              onPress={()=>{setActiveCaseId(item.id);setMode('event');setError(null);}}>
+              <Text style={styles.smallActionText}>New flare/event</Text>
             </Pressable>
           </View>
         </View>)}
@@ -307,6 +336,29 @@ export default function RehabilitationScreen() {
         <Text style={styles.primaryText}>Save injury case</Text>
       </Pressable>
     </>:null}
+
+    {mode==='event'&&activeCase?<View style={styles.panel}>
+      <Text style={styles.heading}>{activeCase.label}</Text>
+      <Text style={styles.helper}>What type of event happened?</Text>
+      <Options options={['flare','new_symptom','trauma','clinical_update'] as const}
+        value={eventKind} onChange={setEventKind} styles={styles}/>
+      <Text style={styles.helper}>Describe what changed, including new limitations.</Text>
+      <TextInput accessibilityLabel="New flare or event description"
+        value={eventDescription} onChangeText={setEventDescription}
+        multiline style={[styles.input,styles.multiline]}
+        placeholder="New pain, recurrence, crash, clinician visit…"
+        placeholderTextColor={tokens.textMuted}/>
+      <Pressable accessibilityRole="checkbox"
+        accessibilityState={{checked:newWarning}}
+        onPress={()=>setNewWarning(!newWarning)} style={styles.checkbox}>
+        <Text style={styles.body}>{newWarning?'☑':'□'} New concerning symptoms or major functional change</Text>
+      </Pressable>
+      <Text style={styles.helper}>This adds a dated event to the case. It does not automatically diagnose a flare or clear training.</Text>
+      <Pressable disabled={loading} accessibilityRole="button" style={styles.primary}
+        onPress={()=>void saveEvent()}>
+        <Text style={styles.primaryText}>Save dated event</Text>
+      </Pressable>
+    </View>:null}
 
     {mode==='daily'&&activeCase?<View style={styles.panel}>
       <Text style={styles.heading}>{activeCase.label}</Text>
