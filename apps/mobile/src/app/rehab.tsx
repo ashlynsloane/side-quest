@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppScreen } from '@/components/v12-ui';
 import { withInjuryMemoryStore } from '@/services/injury-memory-store';
+import { loadTrainingHistory } from '@/services/training-history';
 import { useTheme } from '@/state/theme-context';
 import type { DesignTokens } from '@/theme';
 
@@ -62,17 +63,20 @@ export default function RehabilitationScreen() {
   const [error,setError]=useState<string|null>(null);
   const [name,setName]=useState('');
   const [area,setArea]=useState('');
+  const [mechanism,setMechanism]=useState<InjuryEvent['mechanism']>('uncertain');
   const [course,setCourse]=useState<Course>('acute');
   const [eventDescription,setEventDescription]=useState('');
   const [newWarning,setNewWarning]=useState(false);
   const [pain,setPain]=useState<number|null>(null);
   const [context,setContext]=useState<PainContext>('daily_movement');
+  const [specificTask,setSpecificTask]=useState('');
   const [stiffness,setStiffness]=useState('');
   const [response,setResponse]=useState<Status>('unknown');
   const [functionTrend,setFunctionTrend]=useState<FunctionTrend>('unknown');
   const [concerning,setConcerning]=useState(false);
   const [report,setReport]=useState<RehabReportData|null>(null);
   const [timeWindow,setTimeWindow]=useState<30|90|365>(30);
+  const [includeGeneralTraining,setIncludeGeneralTraining]=useState(false);
 
   const activeCase=cases.find(item=>item.id===activeCaseId);
   const refresh=useCallback(async()=>{
@@ -104,13 +108,15 @@ export default function RehabilitationScreen() {
     setLoading(true);setError(null);
     const id=recordId('injury'),now=stamp();
     const item:InjuryCase={
-      id,label,course,diagnosisState:'unknown',status:'under_assessment',
-      affectedRegions:[region.toLowerCase().replace(/\s+/g,'_')],
+      id,label:label+' ('+region+')',course,diagnosisState:'unknown',status:'under_assessment',
+      // Free text is not a reviewed exercise-loading anatomy code.
+      // Empty regions force conservative manual review by the exercise screen.
+      affectedRegions:[],
     };
     const event:InjuryEvent={
       id:recordId('event'),caseId:id,occurredAt:now,
-      kind:course==='acute'?'trauma':'onset',
-      mechanism:course==='acute'?'uncertain':course==='postoperative'?'postoperative':'uncertain',
+      kind:mechanism==='traumatic'?'trauma':'onset',
+      mechanism,
       dangerSigns:newWarning?['other_concerning_change']:[],
       functionLoss:'unknown',initialSafetyScreenComplete:false,
     };
@@ -122,7 +128,7 @@ export default function RehabilitationScreen() {
           description:eventDescription.trim()||'New injury concern reported for clinical review',
         });
       });
-      setActiveCaseId(id);setName('');setArea('');setEventDescription('');
+      setActiveCaseId(id);setName('');setArea('');setEventDescription('');setMechanism('uncertain');
       setNewWarning(false);setMode('home');await refresh();
       if(newWarning){
         Alert.alert('Clinical review recommended',
@@ -135,6 +141,12 @@ export default function RehabilitationScreen() {
   async function saveResponse(){
     if(!activeCaseId){setError('Select an injury case.');return;}
     if(pain==null){setError('Select a pain score, including zero if appropriate.');return;}
+    if(context==='specific_activity'&&!specificTask.trim()){
+      setError('Name the specific activity so later pain readings remain comparable.');return;
+    }
+    const contextKey=context==='specific_activity'
+      ? 'specific_activity:'+specificTask.trim().toLowerCase().replace(/\s+/g,'_')
+      : context;
     const minutes=stiffness.trim()?Number(stiffness):undefined;
     if(minutes!=null&&(!Number.isFinite(minutes)||minutes<0||minutes>1440)){
       setError('Morning stiffness must be a valid number of minutes, or left blank.');return;
@@ -144,18 +156,19 @@ export default function RehabilitationScreen() {
     try{
       await withInjuryMemoryStore(async store=>{
         const history=await store.getHistory(activeCaseId);
-        const previous=history.responses.at(-1);
+        // Compare like-for-like pain tasks, never resting vs walking pain.
+        const previous=history.responses.filter(r=>r.painContextKey===contextKey).at(-1);
         const stableDays=response==='stable' && functionTrend!=='worsening'
           ? Math.min(365,(previous?.consecutiveStableDays??0)+1):0;
         await store.appendResponse(id,{
           caseId:activeCaseId,recordId:id,observedAt:now,
-          pain,previousPain:previous?.pain??null,painContextKey:context,
+          pain,previousPain:previous?.pain??null,painContextKey:contextKey,
           morningStiffnessMinutes:minutes,response24h:response,functionTrend,
           consecutiveStableDays:stableDays,
           dangerSigns:concerning?['other_concerning_change']:[],
         });
       });
-      setPain(null);setStiffness('');setResponse('unknown');
+      setPain(null);setStiffness('');setSpecificTask('');setResponse('unknown');
       setFunctionTrend('unknown');setConcerning(false);setMode('home');
       await refresh();
       if(concerning) Alert.alert('Assessment needed',
@@ -164,10 +177,21 @@ export default function RehabilitationScreen() {
     finally{setLoading(false);}
   }
 
-  async function viewProgress(caseId:string,days:30|90|365=timeWindow){
+  async function viewProgress(caseId:string,days:30|90|365=timeWindow,
+    includeTraining:boolean=includeGeneralTraining){
     setActiveCaseId(caseId);setTimeWindow(days);setLoading(true);setError(null);
     try{
-      const value=await withInjuryMemoryStore(store=>store.buildReport(caseId,dateRange(days)));
+      // Unrelated training remains excluded unless the athlete opts in.
+      const generalTraining=includeTraining?await loadTrainingHistory(500):[];
+      const training=generalTraining.map(item=>item.kind==='strength'
+        ? {id:'strength:'+item.workout.id,occurredAt:item.workout.completedAt,
+            sourceRecordId:item.workout.id,kind:'strength' as const,
+            relatedCaseIds:[],source:'athlete' as const}
+        : {id:'activity:'+item.activity.id,occurredAt:item.activity.startAt,
+            sourceRecordId:item.activity.id,kind:'endurance' as const,
+            relatedCaseIds:[],source:'imported' as const});
+      const value=await withInjuryMemoryStore(store=>
+        store.buildReport(caseId,dateRange(days),training,includeTraining));
       setReport(value);setMode('progress');
     }catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setLoading(false);}
@@ -181,7 +205,7 @@ export default function RehabilitationScreen() {
       'Range: '+report.range.startAt+' to '+report.range.endAt,
       'Recorded observations: '+report.observationCount,
       'Recorded events: '+report.eventCount,
-      'Explicitly linked training sessions: '+report.trainingRecordCount,
+      'Training records included: '+report.trainingRecordCount,
       '',
       ...report.series.flatMap(series=>[
         series.metricKey+(series.contextKey?' ('+series.contextKey+')':'')+' ['+series.unit+']:',
@@ -191,6 +215,10 @@ export default function RehabilitationScreen() {
       ]),
       'Events:',
       ...report.events.map(e=>e.occurredAt+' | '+e.kind+' | '+e.description+' | '+e.source),
+      '',
+      'Training records:',
+      ...report.training.map(t=>t.occurredAt+' | '+t.kind+' | source: '+t.source+
+        ' | record: '+t.sourceRecordId),
       '',
       ...report.warnings,
       'Not a diagnosis, medical clearance, or evidence of causation.',
@@ -254,8 +282,11 @@ export default function RehabilitationScreen() {
         <TextInput accessibilityLabel="Affected body region" style={styles.input}
           placeholder="e.g. left shoulder" placeholderTextColor={tokens.textMuted}
           value={area} onChangeText={setArea}/>
-        <Text style={styles.heading}>Course or onset</Text>
+        <Text style={styles.heading}>Course of the problem</Text>
         <Options options={COURSES} value={course} onChange={setCourse} styles={styles}/>
+        <Text style={styles.heading}>How did this episode begin?</Text>
+        <Options options={['traumatic','sudden_nontraumatic','gradual','postoperative','uncertain'] as const}
+          value={mechanism} onChange={setMechanism} styles={styles}/>
         <Text style={styles.helper}>What happened? (optional)</Text>
         <TextInput accessibilityLabel="Injury event description" multiline
           style={[styles.input,styles.multiline]} value={eventDescription}
@@ -288,6 +319,11 @@ export default function RehabilitationScreen() {
         </Pressable>)}</View>
       <Text style={styles.heading}>Where was pain rated?</Text>
       <Options options={PAIN_CONTEXTS} value={context} onChange={setContext} styles={styles}/>
+      {context==='specific_activity'?<TextInput style={styles.input}
+        accessibilityLabel="Specific painful activity"
+        placeholder="e.g. overhead reaching or stairs"
+        placeholderTextColor={tokens.textMuted}
+        value={specificTask} onChangeText={setSpecificTask}/>:null}
       <Text style={styles.heading}>Morning stiffness (minutes; optional)</Text>
       <TextInput style={styles.input} accessibilityLabel="Morning stiffness minutes"
         keyboardType="numeric" placeholder="Unknown / not measured" value={stiffness}
@@ -318,7 +354,16 @@ export default function RehabilitationScreen() {
           onPress={()=>void viewProgress(activeCase.id,days)}>
           <Text style={styles.smallActionText}>{days} days</Text>
         </Pressable>)}</View>
-      <Text style={styles.helper}>Observed measurements: {report.observationCount}. Events: {report.eventCount}. Linked training records: {report.trainingRecordCount}.</Text>
+      <Pressable accessibilityRole="checkbox"
+        accessibilityState={{checked:includeGeneralTraining}}
+        style={styles.checkbox} onPress={()=>{
+          const next=!includeGeneralTraining;
+          setIncludeGeneralTraining(next);
+          void viewProgress(activeCase.id,timeWindow,next);
+        }}>
+        <Text style={styles.body}>{includeGeneralTraining?'☑':'□'} Include unrelated general training history in this report</Text>
+      </Pressable>
+      <Text style={styles.helper}>Observed measurements: {report.observationCount}. Events: {report.eventCount}. Included training records: {report.trainingRecordCount}.</Text>
       {!report.series.length?<Text style={styles.helper}>No symptom measurements in this interval.</Text>:null}
       {report.series.map(series=><View key={series.metricKey+'_'+series.contextKey+'_'+series.unit}
         style={styles.series}>
