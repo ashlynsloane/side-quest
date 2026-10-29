@@ -57,8 +57,6 @@ The feature is accessible from the existing Readiness screen (and a visible read
 pnpm install --frozen-lockfile
 pnpm --dir packages/planner test
 pnpm typecheck
-pnpm validate:exercises
-pnpm validate:media
 pnpm test
 \`\`\`
 
