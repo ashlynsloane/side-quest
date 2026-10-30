@@ -97,6 +97,7 @@ export function assessWeekForBaseline(
   planningWeekStart: string,
   nowLocalDate: string,
   attestation: CoverageReviewAttestation,
+  targetWeekCompletedCount = 0,
 ): BaselineReviewAssessment {
   const issues: BaselineReviewIssue[] = [];
   const add = (code: string, detail: string) => issues.push({ code, detail });
@@ -109,6 +110,9 @@ export function assessWeekForBaseline(
   }
   if (ordinal(nowLocalDate) > ordinal(planningWeekStart) + 6) {
     add('stale_week', 'Do not use an older week to reauthorize a later ramp.');
+  }
+  if (targetWeekCompletedCount > 0) {
+    add('retroactive_freeze', 'The target week already contains completed training. Do not freeze a new progression ceiling retrospectively.');
   }
   if (evidence.completed.count === 0) {
     add('no_completed_evidence', 'No completed sessions were found. A zero-load week is not evidence of progression tolerance.');
@@ -157,11 +161,13 @@ export function approveWeekBaseline(input: {
   reviewedAt: string;
   nowLocalDate: string;
   attestation: CoverageReviewAttestation;
+  targetWeekCompletedCount?: number;
 }): { status: 'approved'; snapshot: ApprovedWeekSnapshot } | {
   status: 'rejected'; issues: BaselineReviewIssue[];
 } {
   const assessment = assessWeekForBaseline(
     input.evidence, input.planningWeekStart, input.nowLocalDate, input.attestation,
+    input.targetWeekCompletedCount ?? 0,
   );
   if (!assessment.canApprove) return { status: 'rejected', issues: assessment.issues };
   const baseline: ApprovedCompletedBaseline = {
