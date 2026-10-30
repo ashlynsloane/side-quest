@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/core-training-evidence-review-v1
+      - feat/training-week-baseline-approval-v1
   pull_request:
     branches:
       - feat/experimental-training-ramp-guardrails
