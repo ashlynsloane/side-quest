@@ -159,6 +159,10 @@ export async function approveAndSaveTrainingBaseline(input: {
     code: 'active_restriction',
     detail: 'A PT profile or active pain restriction requires a separate clinical review.',
   });
+  if (state.proposedWeek.evidence.completed.count > 0) issues.push({
+    code: 'retroactive_freeze',
+    detail: 'Target week already has completed training. A new frozen ceiling cannot be applied retrospectively.',
+  });
   if (state.currentPlanningState !== 'ordinary_progression') issues.push({
     code: 'interruption',
     detail: 'An active inability-to-train check-in suspends ordinary progression.',
@@ -166,7 +170,9 @@ export async function approveAndSaveTrainingBaseline(input: {
   if (issues.length) return { status: 'rejected', issues };
   const result = approveWeekBaseline({
     evidence: state.previousWeek.evidence, planningWeekStart: input.planningWeekStart,
-    reviewedAt: input.now.toISOString(), nowLocalDate: today, attestation: input.attestation,
+    reviewedAt: input.now.toISOString(), nowLocalDate: today,
+    attestation: input.attestation,
+    targetWeekCompletedCount: state.proposedWeek.evidence.completed.count,
   });
   if (result.status === 'rejected') return result;
   if (dbBefore !== getActiveDatabaseName()) return {
