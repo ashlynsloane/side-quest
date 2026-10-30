@@ -286,9 +286,19 @@ export default function TrainingBaselineReviewScreen() {
               Frozen at {state.saved?.reviewedAt}. No unused allowance is carried forward.</Text>
             <Text style={styles.warning}>Planned/recorded subtotal for {targetWeek}:
               {' '}{fmtMin(proposed?.plannedOrCompleted.combinedMinutes ?? null)}.
-              Individual days and rolling seven-day windows still need source
-              coverage and separate checking. Being below this subtotal ceiling
-              does not establish training safety.</Text>
+              Source coverage is not verified. Being under these experimental
+              ceilings does not establish safety.</Text>
+            {state.detectedWindowOverages.length ? <View style={styles.issueList}>
+              <Text style={styles.warning}>The available records already exceed
+                a ceiling in these windows:</Text>
+              {state.detectedWindowOverages.slice(0, 10).map((issue, i) =>
+                <Text key={issue.window + issue.dimension + i} style={styles.warning}>
+                  • {issue.window}: {issue.dimension} {Math.round(issue.proposed * 10) / 10}
+                  {' '}vs {Math.round(issue.ceiling * 10) / 10} ceiling
+                </Text>)}
+            </View> : <Text style={styles.helper}>No overage detected in available
+              records. Rolling seven-day compliance remains unverified because
+              individual-day source coverage and future-week allowances may be missing.</Text>}
           </> : <Text style={styles.helper}>No currently usable approved baseline.
             A proposed training week cannot be called within-policy yet.</Text>}
           {state.savedReasons.map((reason, i) =>
