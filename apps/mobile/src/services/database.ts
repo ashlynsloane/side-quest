@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -386,15 +386,7 @@ export async function initializeDatabase(): Promise<void> {
 
     -- Append-only per-profile decisions. An approval is never updated in place;
     -- a later revocation or new approval is an additional event.
-    CREATE TABLE IF NOT EXISTS training_plan_adjustment_events (
-      id TEXT PRIMARY KEY NOT NULL,
-      source_event_id TEXT NOT NULL,
-      decision_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_plan_adjustments_source
-      ON training_plan_adjustment_events(source_event_id, created_at DESC);
+    ${PLAN_ADJUSTMENT_TABLE_SQL}
 
     CREATE TABLE IF NOT EXISTS training_baseline_review_events (
       id TEXT PRIMARY KEY NOT NULL,
