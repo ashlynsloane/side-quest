@@ -214,8 +214,16 @@ export default function TrainingBaselineReviewScreen() {
             ? <Text style={styles.warning}>{(previous?.unresolvedRecords.length ?? 0)
               + (previous?.sourceConflicts.length ?? 0)} incomplete measurements
               or reconciliation issues require review.</Text> : null}
+          <Text style={styles.helper}>Scoped source audit:
+            {' '}{state.previousWeek.rowsRead.strength}/{state.previousWeek.rowsExpected.strength}
+            {' '}strength rows and
+            {' '}{state.previousWeek.rowsRead.endurance}/{state.previousWeek.rowsExpected.endurance}
+            {' '}endurance rows decoded.</Text>
           {state.previousWeek.historyPossiblyTruncated
-            ? <Text style={styles.warning}>Full activity history may be truncated.</Text> : null}
+            ? <Text style={styles.warning}>Activity source audit incomplete. A baseline
+              cannot be approved until every stored record is readable.</Text> : null}
+          {state.previousWeek.historyAuditIssues.map((issue, i) =>
+            <Text key={i} style={styles.warning}>{issue}</Text>)}
           <Pressable accessibilityRole="button" style={styles.secondaryButton}
             onPress={() => router.push('/training-history' as never)}>
             <Text style={styles.link}>Inspect or reconcile activity records</Text>
@@ -297,6 +305,25 @@ export default function TrainingBaselineReviewScreen() {
               {' '}{fmtMin(proposed?.plannedOrCompleted.combinedMinutes ?? null)}.
               Source coverage is not verified. Being under these experimental
               ceilings does not establish safety.</Text>
+            {state.planningComparison ? <View style={styles.issueList}>
+              <Text style={styles.subheading}>How this proposed week compares</Text>
+              {state.planningComparison.comparisons.map(check =>
+                <View key={check.dimension} style={styles.issueList}>
+                  <Text style={styles.body}>{
+                    check.dimension === 'running_distance' ? 'Running distance'
+                      : check.dimension === 'cycling_duration' ? 'Cycling time'
+                        : 'All training time'
+                  }: {check.unit === 'km'
+                    ? (check.proposedKnownSubtotal / 1.609344).toFixed(1) + ' known mi'
+                    : Math.round(check.proposedKnownSubtotal) + ' known min'}
+                    {' '}· {check.status.replaceAll('_', ' ')}</Text>
+                  {check.reasons.slice(0, 2).map((reason, i) =>
+                    <Text key={i} style={styles.helper}>• {reason}</Text>)}
+                </View>)}
+              <Text style={styles.helper}>The difference from a ceiling is not an amount
+                to fill. Planned strength durations may be estimates and
+                planned running distances may be unknown.</Text>
+            </View> : null}
             {state.detectedWindowOverages.length ? <View style={styles.issueList}>
               <Text style={styles.warning}>The available records already exceed
                 a ceiling in these windows:</Text>
