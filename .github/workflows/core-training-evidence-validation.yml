@@ -7,6 +7,8 @@ on:
       - feat/training-week-baseline-approval-v1
       - feat/training-source-window-audit-v1
       - feat/explicit-training-plan-adjustments-v1
+      - test/training-adjustment-persistence-release-gate-v1
+      - test/training-adjustment-persistence-release-gate-v1
   pull_request:
     branches:
       - feat/experimental-training-ramp-guardrails
@@ -40,3 +42,5 @@ jobs:
         run: pnpm --dir apps/mobile typecheck
       - name: Planner regression tests
         run: pnpm --dir packages/planner test
+      - name: Verify iOS JavaScript bundle
+        run: pnpm --dir apps/mobile exec expo export --platform ios --output-dir /tmp/side-quest-qa-ios-export

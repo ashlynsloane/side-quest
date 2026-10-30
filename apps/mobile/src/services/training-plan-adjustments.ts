@@ -1,5 +1,5 @@
 import {
-  buildPlanAdjustmentPreview, rawGeneratedEventSignature,
+  buildPlanAdjustmentPreview, rawGeneratedEventSignature, planAdjustmentDecisionsForLocalWeek,
   type PlanAdjustmentCandidate, type PlanAdjustmentEvent, type PlanAdjustmentPreview,
 } from '@circuit/planner';
 import {
@@ -16,6 +16,7 @@ export interface PlanAdjustmentReviewState {
   explanations: string[];
   preview: PlanAdjustmentPreview | null;
   latestDecisions: PlanAdjustmentEvent[];
+  staleDecisionIds: string[];
 }
 function latestDecisions(events: PlanAdjustmentEvent[]): PlanAdjustmentEvent[] {
   const latest = new Map<string, PlanAdjustmentEvent>();
@@ -30,15 +31,15 @@ export async function loadPlanAdjustmentReview(input: {
   const dbBefore = getActiveDatabaseName();
   const weekEnd = new Date(Date.parse(input.weekStartDate + 'T00:00:00Z') + 7 * 86400000)
     .toISOString().slice(0, 10);
-  const [review, stored] = await Promise.all([
+  const [review, allStored] = await Promise.all([
     loadTrainingBaselineReviewState({
       planningWeekStart: input.weekStartDate, timezone: input.timezone,
     }),
-    listTrainingPlanAdjustmentEvents({
-      from: input.weekStartDate + 'T00:00:00.000Z',
-      to: weekEnd + 'T00:00:00.000Z',
-    }),
+    listTrainingPlanAdjustmentEvents(),
   ]);
+  const stored = planAdjustmentDecisionsForLocalWeek(allStored,
+    input.weekStartDate,
+    new Date(Date.parse(weekEnd + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10));
   if (dbBefore !== getActiveDatabaseName()) {
     throw new Error('Athlete profile changed during plan review.');
   }
@@ -63,11 +64,23 @@ export async function loadPlanAdjustmentReview(input: {
     todayLocalDate: localTrainingDate((input.now ?? new Date()).toISOString(), input.timezone),
     eligible: approved,
   }) : null;
+  const latest = latestDecisions(stored);
+  const staleDecisionIds: string[] = [];
+  for (const decision of latest.filter(item => item.decision === 'accepted')) {
+    const raw = await getRawTrainingCalendarEvent(decision.sourceEventId);
+    if (!raw || rawGeneratedEventSignature(raw) !== decision.sourceSignature) {
+      staleDecisionIds.push(decision.sourceEventId);
+    }
+  }
+  if (dbBefore !== getActiveDatabaseName()) {
+    throw new Error('Athlete profile changed while checking accepted plan revisions.');
+  }
   return {
     weekStartDate: input.weekStartDate, timezone: input.timezone,
     ready: Boolean(preview?.eligibleForProposal),
     explanations: [...explanations, ...(preview?.explanations ?? [])],
-    preview, latestDecisions: latestDecisions(stored),
+    preview, latestDecisions: latest,
+    staleDecisionIds,
   };
 }
 export async function decideProposedPlanAdjustment(input: {

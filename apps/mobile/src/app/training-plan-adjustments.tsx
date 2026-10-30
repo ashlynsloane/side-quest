@@ -149,6 +149,13 @@ export default function TrainingPlanAdjustmentsScreen() {
             </Text>)}
           {state.explanations.map((reason, i) =>
             <Text key={i} style={styles.warning}>• {reason}</Text>)}
+          {state.staleDecisionIds.length ? <View style={styles.comparison}>
+            <Text style={styles.warning}>Some earlier accepted changes no longer match
+              their generated source workout. Those changes are not being replayed.
+              Review the new plan before making another decision.</Text>
+            {state.staleDecisionIds.map(id =>
+              <Text key={id} style={styles.hint}>• Changed or removed session: {id}</Text>)}
+          </View> : null}
           <Text style={styles.hint}>Unknown durations, possible imported duplicates and
             incomplete future rolling coverage prevent a confirmed green result.</Text>
           <Pressable accessibilityRole="button" onPress={() =>
@@ -195,10 +202,13 @@ export default function TrainingPlanAdjustmentsScreen() {
               <View key={event.id} style={styles.candidate}>
                 <Text style={styles.body}>{event.sourceEventId} · {event.action.replaceAll('_', ' ')}</Text>
                 <Text style={styles.hint}>Accepted {event.createdAt}. Original plan retained.</Text>
-                <Pressable accessibilityRole="button" disabled={busy}
-                  onPress={() => void restore(event.sourceEventId)}>
-                  <Text style={styles.link}>Restore original generated session</Text>
-                </Pressable>
+                {state.staleDecisionIds.includes(event.sourceEventId)
+                  ? <Text style={styles.warning}>No longer matches the current generated plan;
+                    this historical decision cannot be restored here.</Text>
+                  : <Pressable accessibilityRole="button" disabled={busy}
+                      onPress={() => void restore(event.sourceEventId)}>
+                    <Text style={styles.link}>Restore original generated session</Text>
+                  </Pressable>}
               </View>)}
           </View> : null}
       </>}
