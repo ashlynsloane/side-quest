@@ -61,6 +61,8 @@ export interface TrainingExposureRecord {
   sport: TrainingSport;
   status: 'planned' | 'completed';
   durationMinutes: number | null;
+  /** If true, an athlete must confirm the estimate before baseline approval. */
+  durationEstimate?: boolean;
   runDistanceKm?: number | null;
   source: string;
   sourceIds?: string[];
