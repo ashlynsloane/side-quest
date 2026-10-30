@@ -339,6 +339,10 @@ export default function TrainingBaselineReviewScreen() {
             A proposed training week cannot be called within-policy yet.</Text>}
           {state.savedReasons.map((reason, i) =>
             <Text key={i} style={styles.warning}>{reason}</Text>)}
+          <Pressable accessibilityRole="button" style={styles.secondaryButton}
+            onPress={() => router.push('/training-plan-adjustments' as never)}>
+            <Text style={styles.link}>Preview and review training-plan changes</Text>
+          </Pressable>
           {state.saved ? <Pressable onPress={() => void withdraw()}
             accessibilityRole="button" style={styles.secondaryButton}>
             <Text style={styles.link}>Withdraw saved approval</Text>

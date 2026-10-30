@@ -31,6 +31,8 @@ export { evaluateStrengthLoad } from './strength-load-management';
 export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
 export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
 export { comparePlannedWeekWithFrozenLimits } from './training-week-comparison';
+export { buildPlanAdjustmentPreview, applyAcceptedPlanAdjustments, rawGeneratedEventSignature, planExposureSignature } from './training-plan-adjustments';
+export type { PlanAdjustmentEvent, PlanAdjustmentCandidate, PlanAdjustmentPreview, PlanAdjustmentAction, PlanAdjustmentDecision } from './training-plan-adjustments';
 export { trainingSourceQueryEnvelope } from './training-source-window';
 export type { TrainingSourceQueryEnvelope } from './training-source-window';
 export type { PlanningWeekComparison, TrainingDimensionComparison } from './training-week-comparison';
