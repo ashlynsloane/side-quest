@@ -29,6 +29,17 @@ export interface TrainingWeekEvidence {
   /** Individual completed records and source IDs retained for a baseline audit. */
   completedRecordIds: string[];
   completedSourceIds: string[];
+  /** Per-session details make it impossible to hide redistributed load behind equal totals. */
+  completedRecordRows: Array<{
+    recordId: string;
+    localDate: string;
+    sport: TrainingSport;
+    durationMinutes: number | null;
+    runDistanceKm: number | null;
+    durationEstimate: boolean;
+    source: string;
+    sourceIds: string[];
+  }>;
   remainingPlanned: WeekExposureSummary;
   plannedOrCompleted: WeekExposureSummary;
   unresolvedRecords: Array<{ recordId: string; reason: string }>;
@@ -124,6 +135,14 @@ export function buildTrainingWeekEvidence(input: TrainingWeekEvidenceInput): Tra
     completedRecordIds: reconciled.records.filter(r => r.status === 'completed').map(r => r.recordId),
     completedSourceIds: [...new Set(reconciled.records.filter(r => r.status === 'completed')
       .flatMap(r => r.sourceIds?.length ? r.sourceIds : [r.recordId]))],
+    completedRecordRows: reconciled.records.filter(r => r.status === 'completed').map(r => ({
+      recordId: r.recordId, localDate: r.localDate, sport: r.sport,
+      durationMinutes: r.durationMinutes,
+      runDistanceKm: r.runDistanceKm ?? null,
+      durationEstimate: Boolean(r.durationEstimate),
+      source: r.source,
+      sourceIds: [...(r.sourceIds ?? [])].sort(),
+    })).sort((a, b) => a.recordId.localeCompare(b.recordId)),
     remainingPlanned, plannedOrCompleted,
     unresolvedRecords, sourceConflicts: conflicts,
     missingCoverage: input.coverage !== 'verified',
