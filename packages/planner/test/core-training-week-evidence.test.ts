@@ -51,6 +51,17 @@ describe('core training week evidence', () => {
     expect(r.remainingPlanned.count).toBe(0);
     expect(r.plannedOrCompleted.combinedMinutes).toBe(42);
   });
+  it('flags likely duplicate planned and completed sessions without confirmed linkage', () => {
+    const result = review([
+      row('unlinked-plan', '2026-08-04', 'bike', 60),
+      row('unlinked-actual', '2026-08-04', 'bike', 62, 'completed'),
+    ], 'verified');
+    expect(result.planningEvidenceStatus).toBe('incomplete');
+    expect(result.sourceConflicts.join(' ')).toContain('unlinked planned/completed bike');
+    expect(result.completed.count).toBe(1);
+    expect(result.remainingPlanned.count).toBe(1);
+  });
+
   it('duplicate provider views with linked canonical ID count once', () => {
     const r = review([
       row('garmin', '2026-08-06', 'bike', 75, 'completed', {
