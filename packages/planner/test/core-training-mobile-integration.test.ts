@@ -24,7 +24,7 @@ describe('core training journey integration contract', () => {
     }
     const provider = mobile('state/workout-context.tsx');
     expect(provider).toContain('sessionId: source.session.id');
-    expect(provider).toContain('planLink: buildPlanLink(plannedPreviewSource)');
+    expect(provider).toContain('const planLink = buildPlanLink(plannedPreviewSource);');
   });
   it('a completed planned workout reaches the canonical ledger and repairs plan status', () => {
     const completion = mobile('app/active-workout.tsx');
