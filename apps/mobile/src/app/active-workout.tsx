@@ -320,6 +320,9 @@ export default function ActiveWorkoutScreen() {
       exerciseSets: completedSets,
       plannedSessionId: activePlanLink?.sessionId,
       relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
+      // Persisted in the active checkpoint: a restart retry must use the
+      // same canonical workout identity, not a fresh completion timestamp.
+      idempotencyKey: `${activeWorkout.id}_${startedAt.current}`,
       });
       // Show "Saved" only after the local workout ledger and plan update
       // have succeeded. Recovery/retry uses the same completion timestamp.
@@ -338,7 +341,7 @@ export default function ActiveWorkoutScreen() {
       setCompletionSaveError('Workout saved, but the active checkpoint could not be cleared.');
     }
     if (cloudEnabled && user?.mode === 'cloud') {
-      const ledgerId = `${activeWorkout.id}_${timestamp}`;
+      const ledgerId = `${activeWorkout.id}_${startedAt.current}`;
       try {
         const [entry, preferences, weekEntries] = await Promise.all([getWorkoutLedgerEntry(ledgerId), getSocialPreferences(), listWorkoutLedgerEntries({ from: startOfWeekIso(), limit: 100 })]);
         if (entry) await publishWorkoutActivity({ userId: user.id, ledgerId: entry.id, workoutType: activeWorkout.source === 'manual' ? 'Custom strength' : 'Side Quest strength', title: entry.name, durationMinutes: Math.max(1, Math.round(activeWorkout.estimatedElapsedSeconds * completionFraction / 60)), weeklyCount: weekEntries.length, completedAt: timestamp, exercises: entry.exercises, preferences });
@@ -439,7 +442,7 @@ export default function ActiveWorkoutScreen() {
     }
     const completed = completedAt.current;
     if (completed && (sessionRpe !== null || energyAfter !== null || reflectionNotes.trim())) {
-      const instanceId = `${activeWorkout.id}_${completed}`;
+      const instanceId = `${activeWorkout.id}_${startedAt.current}`;
       await saveWorkoutReflection({ workoutInstanceId: instanceId, workoutId: activeWorkout.id, workoutName: activeWorkout.name, rpe: sessionRpe ?? undefined, energyAfter: energyAfter ?? undefined, notes: reflectionNotes.trim() || undefined, completedAt: completed, createdAt: new Date().toISOString() });
       setReflectionSaved(true);
     }
@@ -447,7 +450,7 @@ export default function ActiveWorkoutScreen() {
   }
 
   async function saveFavorite() { await saveFavoriteWorkout(activeWorkout); setSaved(true); }
-  async function recordFeedback(value: WorkoutDifficultyFeedback) { await saveWorkoutFeedback({ workoutInstanceId: `${activeWorkout.id}_${completedAt.current ?? startedAt.current}`, workoutId: activeWorkout.id, difficulty: value }); setFeedback(value); if (cuePreferences.hapticsEnabled) void Haptics.selectionAsync(); }
+  async function recordFeedback(value: WorkoutDifficultyFeedback) { await saveWorkoutFeedback({ workoutInstanceId: `${activeWorkout.id}_${startedAt.current}`, workoutId: activeWorkout.id, difficulty: value }); setFeedback(value); if (cuePreferences.hapticsEnabled) void Haptics.selectionAsync(); }
 
   async function loadSwapCandidates(reason: ExerciseSwapReason): Promise<ExerciseSwapCandidate[]> {
     if (!swapTarget) return [];
