@@ -2093,6 +2093,28 @@ export async function listWorkoutLedgerEntries({
   });
 }
 
+/**
+ * Raw row counts include malformed JSON records. Compare against paged,
+ * successfully decoded rows to fail closed on unreadable stored evidence.
+ */
+export async function countTrainingHistorySourceRows(input: {
+  from: string;
+  to: string;
+}): Promise<{ workoutLedgerRows: number; enduranceActivityRows: number }> {
+  await initializeDatabase();
+  const [workouts, endurance] = await Promise.all([
+    db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM workout_ledger WHERE completed_at >= ? AND completed_at <= ?',
+      input.from, input.to,
+    ),
+    db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM endurance_activities WHERE start_at >= ? AND start_at <= ?',
+      input.from, input.to,
+    ),
+  ]);
+  return { workoutLedgerRows: workouts?.n ?? 0, enduranceActivityRows: endurance?.n ?? 0 };
+}
+
 export async function getWorkoutLedgerEntry(id: string): Promise<WorkoutLedgerEntry | null> {
   const entries = await listWorkoutLedgerEntries({ limit: 500 });
   return entries.find((entry) => entry.id === id) ?? null;
