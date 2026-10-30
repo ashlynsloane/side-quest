@@ -1,5 +1,5 @@
 import type { BodyRegion, EnduranceDiscipline, EnduranceSchedule, EquipmentId, PerformanceGoal, PerformanceGoalType, TrainingBlockPlan, Weekday } from '@circuit/domain';
-import { buildFirstWeekTrainingSummary, generateTrainingBlock, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
+import { addLocalCalendarDays, buildFirstWeekTrainingSummary, generateTrainingBlock, nextLocalMonday, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -116,7 +116,7 @@ async function buildFirstWeek(params: Params, exercises: Parameters<typeof gener
   const profiles = await ensureDefaultEquipmentProfiles();
   const equipment = equipmentFor(params.equipment, profiles);
   const [recentRegionExposures, previousExerciseIds] = await Promise.all([getRecentRegionExposures(), getPreviousExerciseIds()]);
-  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: nextMonday(), availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: `onboarding-${Date.now()}` }, { exercises, recentRegionExposures, previousExerciseIds });
+  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: nextLocalMonday(), availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: `onboarding-${Date.now()}` }, { exercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
   return { goal, block };
@@ -127,12 +127,12 @@ function normalizeBlockSchedule(block: TrainingBlockPlan, preferredDays: Weekday
   return {
     ...block,
     weeks: block.weeks.map((week) => {
-      const weekStart = new Date(`${week.weekStartDate}T12:00:00`);
       const sessions = week.sessions.slice(0, sessionsPerWeek).map((session, index) => {
         const weekday = preferredDays[index % preferredDays.length] ?? 'monday';
-        const date = new Date(weekStart);
-        date.setDate(weekStart.getDate() + WEEKDAYS.indexOf(weekday));
-        return { ...session, date: date.toISOString().slice(0, 10) };
+        return {
+          ...session,
+          date: addLocalCalendarDays(week.weekStartDate, WEEKDAYS.indexOf(weekday)),
+        };
       });
       return { ...week, sessions };
     }),
@@ -182,7 +182,6 @@ function disciplinesFor(goal: PerformanceGoalType): EnduranceDiscipline[] { if (
 function enduranceScheduleFor(goal: PerformanceGoalType): EnduranceSchedule { return disciplinesFor(goal).includes('swim') ? { keySwim:'tuesday', keyBike:'saturday', keyRun:'sunday' } : disciplinesFor(goal).includes('run') ? { keyRun:'sunday' } : {}; }
 function goalLabel(goal: PerformanceGoalType): string { const labels: Record<PerformanceGoalType, string> = { triathlon_sprint:'Sprint triathlon', triathlon_olympic:'Olympic triathlon', ironman_70_3:'Ironman 70.3', ironman_full:'Ironman distance', swimrun:'Swimrun', road_10k:'Road 10K', road_half_marathon:'Half marathon', road_marathon:'Marathon', trail_50k:'Trail 50K', trail_100k:'Trail 100K', swim_speed:'Swim faster', general_offseason:'General strength' }; return labels[goal]; }
 function addWeeks(weeks: number): string { const date = new Date(); date.setDate(date.getDate() + weeks * 7); return date.toISOString().slice(0,10); }
-function nextMonday(): string { const date = new Date(); const day = date.getDay(); const add = day === 0 ? 1 : 8 - day; date.setDate(date.getDate() + add); return date.toISOString().slice(0,10); }
 function shortDate(value: string): string { const date = new Date(`${value}T12:00:00`); return date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
 function profileSummary(params: Params): string { const background = params.background === 'swim' ? 'swim-strong' : params.background === 'bike' ? 'bike-strong' : params.background === 'run' ? 'run-strong' : params.background === 'triathlon' ? 'triathlon background' : 'mixed / newer background'; const run = params.runStatus === 'not_running' ? 'not currently running' : params.runStatus === 'return_to_run' ? 'returning to run' : params.runStatus === 'reduced' ? 'reduced running' : 'running normally'; return `${background} · ${run}`; }
 function rationaleFor(params: Params): string { if (params.injury === 'recent_bone_stress') return 'The starting dose preserves direct strength while using conservative lower-body progression because you reported a recent bone-stress concern.'; if (params.injury === 'recurring_run' || params.runStatus === 'return_to_run' || params.runStatus === 'not_running') return 'The starting dose treats running durability and impact tolerance as developing, rather than assuming endurance experience transfers evenly across sports.'; if (params.background === 'swim') return 'Your swim background is treated as real experience, while run and impact progression remain separate planning dimensions.'; if (params.background === 'triathlon') return 'Your multisport background is treated as experience across swim, bike, and run, while current run status and injury history still control progression.'; return 'The first draft uses your available time and current context without pretending it already knows your full training history.'; }
