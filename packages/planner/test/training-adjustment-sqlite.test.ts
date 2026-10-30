@@ -11,6 +11,7 @@ import type { TrainingCalendarEvent } from '@circuit/domain';
 import {
   PLAN_ADJUSTMENT_TABLE_SQL, appendTrainingAdjustmentDecision,
   readTrainingAdjustmentDecisions, effectiveTrainingCalendarEvents,
+  planAdjustmentDecisionsForLocalWeek,
   type TrainingAdjustmentSqlDriver,
 } from '../src/training-adjustment-sqlite';
 import {
@@ -211,6 +212,17 @@ describe('real-file SQLite training adjustment release gate', () => {
     await expect(readTrainingAdjustmentDecisions(driver)).rejects.toThrow(/unreadable JSON/);
     await expect(effectiveTrainingCalendarEvents(driver, [rawGet(db)]))
       .rejects.toThrow(/unreadable JSON/);
+  });
+  it('keeps the original week audit visible when regeneration removes the source event', async () => {
+    const { db, driver } = setup();
+    rawWrite(db, generated);
+    await appendTrainingAdjustmentDecision(driver, decide('accepted', 'accepted'));
+    db.prepare('DELETE FROM training_calendar_events WHERE id = ?').run(generated.id);
+    const allDecisions = await readTrainingAdjustmentDecisions(driver);
+    expect(planAdjustmentDecisionsForLocalWeek(allDecisions,
+      '2026-11-02', '2026-11-08')).toHaveLength(1);
+    expect(planAdjustmentDecisionsForLocalWeek(allDecisions,
+      '2026-11-09', '2026-11-15')).toHaveLength(0);
   });
   it('filters decisions by the raw event week without deleting older audit records', async () => {
     const { db, driver } = setup();
