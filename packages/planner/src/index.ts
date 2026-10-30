@@ -28,8 +28,12 @@ import type {
 import { createWorkoutVariant, generateWorkout } from '@circuit/generator';
 import { evaluateStrengthLoad, scaleWorkMinutes } from './strength-load-management';
 export { evaluateStrengthLoad } from './strength-load-management';
-export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, proposeCompletedWeekBaseline } from './core-training-week-evidence';
+export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
 export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
+export { comparePlannedWeekWithFrozenLimits } from './training-week-comparison';
+export { trainingSourceQueryEnvelope } from './training-source-window';
+export type { TrainingSourceQueryEnvelope } from './training-source-window';
+export type { PlanningWeekComparison, TrainingDimensionComparison } from './training-week-comparison';
 export type { CoverageReviewAttestation, ApprovedWeekSnapshot, BaselineReviewIssue } from './training-baseline-review';
 export type { TrainingWeekEvidence, TrainingWeekEvidenceInput } from './core-training-week-evidence';
 export { EXPERIMENTAL_TRAINING_POLICY_V1, freezeExperimentalTrainingAllowance, reconcileGuardrailExposure, evaluateExperimentalTrainingGuardrails } from './experimental-training-guardrails';

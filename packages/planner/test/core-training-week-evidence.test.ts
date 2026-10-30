@@ -86,6 +86,30 @@ describe('core training week evidence', () => {
     expect(r.planningEvidenceStatus).toBe('incomplete');
     expect(r.sourceConflicts).toHaveLength(1);
   });
+  it('flags plausible cross-provider duplicate completions for review, never silently merges', () => {
+    const result = review([
+      row('strava-ride', '2026-08-04', 'bike', 61, 'completed', {
+        source: 'Completed activity: strava',
+      }),
+      row('manual-ride', '2026-08-04', 'bike', 60, 'completed', {
+        source: 'Completed activity: manual',
+      }),
+    ], 'verified');
+    expect(result.completed.count).toBe(2);
+    expect(result.sourceConflicts.join(' ')).toContain('Possible duplicate completed bike');
+    expect(result.planningEvidenceStatus).toBe('incomplete');
+  });
+  it('does not auto-flag distinct cross-provider sessions with different durations', () => {
+    const result = review([
+      row('short-ride', '2026-08-04', 'bike', 30, 'completed', {
+        source: 'Completed activity: strava',
+      }),
+      row('long-ride', '2026-08-04', 'bike', 120, 'completed', {
+        source: 'Completed activity: manual',
+      }),
+    ], 'verified');
+    expect(result.sourceConflicts).toHaveLength(0);
+  });
   it('unknown run distance and duration remain unresolved, never implied zero', () => {
     const r = review([
       row('r', '2026-08-04', 'run', 30, 'completed'),

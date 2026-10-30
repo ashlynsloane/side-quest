@@ -1,11 +1,12 @@
 import type { TrainingExposureRecord, TrainingWeekEvidence } from '@circuit/planner';
 import {
   buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport,
+  trainingSourceQueryEnvelope, crossesLocalTrainingMidnight,
 } from '@circuit/planner';
 import type { TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 
 import { getTrainingCalendarEvents, getLatestTrainingBlock, listTrainingCalendarSources } from './database';
-import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
+import { loadTrainingHistoryForRange, type TrainingHistoryItem } from './training-history';
 
 /**
  * Read-only translation from existing Side Quest sources into canonical week
@@ -17,8 +18,11 @@ import { loadTrainingHistory, type TrainingHistoryItem } from './training-histor
 export interface CoreTrainingWeekAudit {
   evidence: TrainingWeekEvidence;
   plannedAndCompleted: TrainingExposureRecord[];
-  /** A capped query cannot prove full historical coverage. */
+  /** Unreadable, incomplete or concurrently changed source rows block approval. */
   historyPossiblyTruncated: boolean;
+  historyAuditIssues: string[];
+  rowsRead: { strength: number; endurance: number };
+  rowsExpected: { strength: number; endurance: number };
   activitySources: string[];
   sourceDiagnostics: Array<{ name: string; status: string; lastSuccessfulAt: string | null }>;
 }
@@ -28,20 +32,16 @@ export async function loadCoreTrainingWeekAudit(
   weekStartDate: string,
   timezone: string,
 ): Promise<CoreTrainingWeekAudit> {
-  const end = new Date(weekStartDate + 'T00:00:00Z');
-  end.setUTCDate(end.getUTCDate() + 7);
-  const first = new Date(weekStartDate + 'T00:00:00Z');
-  first.setUTCDate(first.getUTCDate() - 1);
-  const limit = 2000;
-  const [saved, events, history, sources] = await Promise.all([
+  const envelope = trainingSourceQueryEnvelope(weekStartDate);
+  const [saved, events, historyAudit, sources] = await Promise.all([
     getLatestTrainingBlock(),
-    getTrainingCalendarEvents({ from: first.toISOString(), to: end.toISOString() }),
-    loadTrainingHistory(limit),
+    getTrainingCalendarEvents({ from: envelope.from, to: envelope.to }),
+    loadTrainingHistoryForRange({ from: envelope.from, to: envelope.to }),
     listTrainingCalendarSources(),
   ]);
+  const history = historyAudit.history;
   const records = [
-    ...plannedStrengthRecords(saved?.block ?? null, weekStartDate,
-      new Date(end.getTime() - 1).toISOString().slice(0, 10)),
+    ...plannedStrengthRecords(saved?.block ?? null, weekStartDate, envelope.localWeekEnd),
     ...plannedCalendarRecords(events, timezone),
     ...completedHistoryRecords(history, timezone),
   ];
@@ -51,7 +51,10 @@ export async function loadCoreTrainingWeekAudit(
   });
   return {
     evidence, plannedAndCompleted: records,
-    historyPossiblyTruncated: history.length >= limit,
+    historyPossiblyTruncated: !historyAudit.complete,
+    historyAuditIssues: historyAudit.issues,
+    rowsRead: historyAudit.rowsRead,
+    rowsExpected: historyAudit.rowsExpected,
     activitySources: [...new Set(records.map(record => record.source))].sort(),
     sourceDiagnostics: sources.filter(source => source.active && source.sourceType !== 'manual')
       .map(source => ({
@@ -65,6 +68,12 @@ export async function loadCoreTrainingWeekEvidence(
   weekStartDate: string, timezone: string,
 ): Promise<TrainingWeekEvidence> {
   return (await loadCoreTrainingWeekAudit(weekStartDate, timezone)).evidence;
+}
+
+/** Fail closed on invalid or mismatched elapsed-time metadata. */
+function crossesMidnightOrNeedsReview(start: string, end: string, timezone: string): boolean {
+  try { return crossesLocalTrainingMidnight(start, end, timezone); }
+  catch { return true; }
 }
 
 function plannedStrengthRecords(
@@ -111,7 +120,9 @@ function plannedCalendarRecords(
         localDate: date,
         sport: normalizeTrainingSport(event.discipline),
         status: 'planned' as const,
-        durationMinutes, durationEstimate: false,
+        durationMinutes, durationEstimate: Boolean(event.allDay && durationMinutes !== null),
+        crossesLocalMidnight: Boolean(!event.allDay && event.endAt
+          && crossesMidnightOrNeedsReview(event.startAt, event.endAt, timezone)),
         // Calendar sources rarely provide planned run distance in a canonical unit.
         runDistanceKm: event.discipline === 'run' ? null : undefined,
         source: 'Calendar: ' + event.sourceId,
@@ -144,6 +155,8 @@ function completedHistoryRecords(
         status: 'completed' as const,
         durationMinutes,
         durationEstimate: durationMinutes !== null,
+        crossesLocalMidnight: crossesMidnightOrNeedsReview(
+          workout.startedAt, workout.completedAt, timezone),
         source: 'Side Quest workout ledger',
         sourceIds: [workout.id, ...(item.sensorActivity ? [item.sensorActivity.id] : [])],
       }];
@@ -162,6 +175,12 @@ function completedHistoryRecords(
       sport: normalizeTrainingSport(activity.discipline),
       status: 'completed' as const,
       durationMinutes: minutes,
+      crossesLocalMidnight: Number.isFinite(activity.elapsedTimeSeconds)
+        && activity.elapsedTimeSeconds > 0
+        ? crossesMidnightOrNeedsReview(activity.startAt,
+          new Date(Date.parse(activity.startAt) + activity.elapsedTimeSeconds * 1000)
+            .toISOString(), timezone)
+        : true,
       runDistanceKm: activity.discipline === 'run'
         ? typeof activity.distanceMeters === 'number' && Number.isFinite(activity.distanceMeters)
           ? activity.distanceMeters / 1000 : null
