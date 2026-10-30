@@ -442,6 +442,8 @@ export function evaluateExperimentalTrainingGuardrails(input: {
       ...input.activities.filter(a => a.newModality).map(a => 'New training modality: ' + a.recordId),
       ...input.activities.filter(a => a.symptomDrivenSubstitution)
         .map(a => 'Symptom-driven substitution: ' + a.recordId),
+      ...input.activities.filter(a => a.durationEstimate)
+        .map(a => 'Duration estimated, verify before baseline approval: ' + a.recordId),
       ...longDayReviews.map(a => 'Adjacent days >=120 minutes: ' + a.firstDate + ' / ' + a.secondDate),
     ]),
   ];
