@@ -26,7 +26,7 @@ This increment uses the existing Side Quest iPhone **first-week generator**, **t
 - Unknown running distance, missing duration, possible duplicate and limited source coverage are **unknown**, not zero or a pass.
 - The current mobile queries and source roster cannot prove completeness across TrainingPeaks/Garmin and historic offline workouts. All evidence from this adapter therefore has **unverified coverage**.
 - Calendar events classified as generic `other` are not silently included as training; they may represent ordinary living or work commitments.
-- Approved baseline is **not assessed** by this module. The 10%-and-60-minute planning ceilings are dormant until a separate eligibility and freeze workflow exists.
+- The new `proposeCompletedWeekBaseline` helper can construct an auditable **unapproved** candidate from the recorded week, retaining original completed activity IDs. If source coverage or recorded duration is incomplete, missing totals stay `null`, not zero. Its eligibility is always `needs_review`, and symptom context is never silently approved. The 10%-and-60-minute planning ceilings remain dormant until a separate eligibility and freeze workflow exists.
 
 ### First-week generator disclosure
 
