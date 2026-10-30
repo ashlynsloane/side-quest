@@ -1,5 +1,5 @@
 import type { BodyRegion, EnduranceDiscipline, EnduranceSchedule, EquipmentId, PerformanceGoal, PerformanceGoalType, TrainingBlockPlan, Weekday } from '@circuit/domain';
-import { generateTrainingBlock, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
+import { buildFirstWeekTrainingSummary, generateTrainingBlock, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -8,6 +8,8 @@ import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegion
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { useOnboarding } from '@/state/onboarding-context';
 import { useTheme } from '@/state/theme-context';
+import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
+import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
 
 type Params = { goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; background?: string; runStatus?: string; injury?: string; strength?: string };
@@ -25,6 +27,8 @@ export default function OnboardingFirstWeekScreen() {
   const [state, setState] = useState<BuildState>('building');
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [enduranceEvents, setEnduranceEvents] = useState<TrainingCalendarEvent[]>([]);
+  const [enduranceWarning, setEnduranceWarning] = useState<string | null>(null);
   const started = useRef(false);
 
   useEffect(() => {
@@ -33,8 +37,17 @@ export default function OnboardingFirstWeekScreen() {
     void buildFirstWeek(params, exercises).then(async (result) => {
       await savePerformanceGoal(result.goal);
       await saveTrainingBlock(result.block);
-      await complete();
       setBlock(result.block);
+      // The athlete should see the whole proposed training week, not only
+      // strength sessions while endurance silently generates later on Plan focus.
+      try {
+        const wholeAthlete = await refreshLatestWholeAthletePlan();
+        setEnduranceEvents(wholeAthlete?.generatedEvents ?? []);
+      } catch (planningError) {
+        setEnduranceWarning(planningError instanceof Error ? planningError.message
+          : 'Endurance planning is not available; strength draft was saved.');
+      }
+      await complete();
       setState('ready');
     }).catch((caught: unknown) => {
       setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
@@ -47,10 +60,26 @@ export default function OnboardingFirstWeekScreen() {
   if (state === 'error' || !block) return <AppScreen eyebrow="FIRST DRAFT" title="The week needs one more review." subtitle={error ?? 'The draft could not be generated.'}><Surface style={styles.errorCard}><Text style={styles.errorTitle}>Nothing was saved.</Text><Text style={styles.body}>Open the advanced planner to review the detailed inputs, or return and change the fast-start answers.</Text></Surface><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
 
   const week = block.weeks[0];
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const firstWeek = week ? buildFirstWeekTrainingSummary({
+    weekStartDate: week.weekStartDate,
+    strengthSessions: week.sessions, generatedEvents: enduranceEvents, timezone,
+  }) : null;
   return <AppScreen eyebrow="YOUR FIRST DRAFT" title="Your first week is ready." subtitle="Start here, then let completed training and check-ins improve the next recommendation.">
-    <Surface style={styles.summary}><Text style={styles.summaryTitle}>{block.goal.name}</Text><Text style={styles.summaryMeta}>{week?.sessions.length ?? 0} strength sessions · {block.goal.defaultSessionMinutes} min each</Text><Text style={styles.profileLine}>{profileSummary(params)}</Text></Surface>
+    <Surface style={styles.summary}><Text style={styles.summaryTitle}>{block.goal.name}</Text><Text style={styles.summaryMeta}>{firstWeek ? `${firstWeek.sessions.length} proposed sessions · ${firstWeek.counts.strength} strength · ${firstWeek.counts.swim} swim · ${firstWeek.counts.bike} bike · ${firstWeek.counts.run} run` : 'Training week unavailable'}</Text><Text style={styles.profileLine}>{profileSummary(params)}</Text><Text style={styles.body}>This is a generated proposal using availability and self-reported context, not an approved increase from measured training history.</Text></Surface>
     <Text style={styles.sectionLabel}>WEEK 1</Text>
-    <Surface style={styles.weekCard}>{week?.sessions.map((session) => <View key={session.id} style={styles.sessionRow}><View style={styles.dateBadge}><Text style={styles.dateText}>{shortDate(session.date)}</Text></View><View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{session.title}</Text><Text style={styles.sessionMeta}>{session.intendedLoad} · {Math.round(session.workout.estimatedElapsedSeconds / 60)} min</Text></View></View>)}</Surface>
+    <Surface style={styles.weekCard}>{firstWeek?.days.map((day) => <View key={day.date} style={styles.sessionRow}>
+      <View style={styles.dateBadge}><Text style={styles.dateText}>{shortDate(day.date)}</Text></View>
+      <View style={styles.sessionCopy}>
+        {day.sessions.length ? day.sessions.map((session) =>
+          <View key={session.id} style={{ marginBottom: 7 }}>
+            <Text style={styles.sessionTitle}>{session.title}</Text>
+            <Text style={styles.sessionMeta}>{session.sport} · {session.plannedMinutes === null
+              ? 'time not available' : session.plannedMinutes + ' min estimated'} · {session.status}</Text>
+          </View>) : <Text style={styles.sessionMeta}>No scheduled workout</Text>}
+      </View>
+    </View>)}</Surface>
+    {enduranceWarning ? <Surface style={styles.errorCard}><Text style={styles.errorTitle}>Endurance calendar needs review</Text><Text style={styles.body}>{enduranceWarning}</Text><Text style={styles.body}>Your strength block was saved. The Week screen can retry the wider plan.</Text></Surface> : null}
     <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{params.restriction && params.restriction !== 'none' ? <Text style={styles.body}>A reported limitation still requires review of specific exercises and clinical restrictions before training.</Text> : null}</View>
     <Pressable onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
     <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
