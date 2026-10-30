@@ -108,6 +108,7 @@ export default function ActiveWorkoutScreen() {
   const startedAt = useRef(new Date().toISOString());
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
+  const completionFractionRef = useRef(1);
   const [completionSaveStatus, setCompletionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [completionSaveError, setCompletionSaveError] = useState<string | null>(null);
   const cueKey = useRef<string | null>(null);
@@ -300,6 +301,7 @@ export default function ActiveWorkoutScreen() {
   async function persistCompletion(completionFraction: number, override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> }) {
     if (savedCompletion.current) return;
     savedCompletion.current = true;
+    completionFractionRef.current = completionFraction;
     setCompletionSaveStatus('saving');
     setCompletionSaveError(null);
     const timestamp = completedAt.current ?? new Date().toISOString();
@@ -432,8 +434,7 @@ export default function ActiveWorkoutScreen() {
     if (completionSaveStatus === 'saving') return;
     if (!savedCompletion.current) {
       // A failed save must not discard the active session on exit.
-      await persistCompletion(phase === 'complete' ? 1 : Math.min(1,
-        totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0));
+      await persistCompletion(completionFractionRef.current);
       if (!savedCompletion.current) return;
     }
     const completed = completedAt.current;
@@ -481,7 +482,7 @@ export default function ActiveWorkoutScreen() {
           {completionSaveError ? <Text style={styles.helper}>{completionSaveError}</Text> : null}
           {completionSaveStatus === 'error' ? <Pressable
             accessibilityRole="button"
-            onPress={() => void persistCompletion(1)}
+            onPress={() => void persistCompletion(completionFractionRef.current)}
             style={styles.outlineButton}>
             <Text style={styles.outlineButtonText}>Retry saving workout</Text>
           </Pressable> : null}
