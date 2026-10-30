@@ -34,6 +34,9 @@ describe('core training journey integration contract', () => {
     expect(completion).toContain('completionSaveStatus === \'error\'');
     expect(completion).toContain('Retry saving workout');
     expect(completion).toContain('completionFractionRef.current');
+    expect(completion).toContain('idempotencyKey: `${activeWorkout.id}_${startedAt.current}`');
+    expect(completion).toContain('const ledgerId = `${activeWorkout.id}_${startedAt.current}`');
+    expect(completion).toContain('const instanceId = `${activeWorkout.id}_${startedAt.current}`');
     expect(db).toContain('if (existing) {\n    // A prior attempt can commit');
     expect(db).toContain('markPlannedSessionCompletedForWorkout(');
     expect(db).toContain('rebuildDerivedTrainingMemory()');
