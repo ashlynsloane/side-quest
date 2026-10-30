@@ -2,7 +2,7 @@ import {
   approveWeekBaseline, assessSavedBaseline, assessWeekForBaseline,
   type ApprovedWeekSnapshot, type CoverageReviewAttestation,
   type BaselineReviewIssue, type PlanningInterruptionState,
-  evaluateExperimentalTrainingGuardrails,
+  evaluateExperimentalTrainingGuardrails, localTrainingDate,
 } from '@circuit/planner';
 
 import {
@@ -133,14 +133,7 @@ export async function approveAndSaveTrainingBaseline(input: {
   now: Date;
 }): Promise<SaveTrainingBaselineReviewResult> {
   const dbBefore = getActiveDatabaseName();
-  const today = (() => {
-    const localNow = new Intl.DateTimeFormat('en-US', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      timeZone: input.timezone,
-    }).formatToParts(input.now);
-    const vals = Object.fromEntries(localNow.map(p => [p.type, p.value]));
-    return vals.year + '-' + vals.month + '-' + vals.day;
-  })();
+  const today = localTrainingDate(input.now.toISOString(), input.timezone);
   const state = await loadTrainingBaselineReviewState({
     planningWeekStart: input.planningWeekStart, timezone: input.timezone,
   });
