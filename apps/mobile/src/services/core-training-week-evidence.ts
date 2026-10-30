@@ -1,7 +1,7 @@
 import type { TrainingExposureRecord, TrainingWeekEvidence } from '@circuit/planner';
 import {
   buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport,
-  trainingSourceQueryEnvelope,
+  trainingSourceQueryEnvelope, crossesLocalTrainingMidnight,
 } from '@circuit/planner';
 import type { TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 
@@ -70,6 +70,12 @@ export async function loadCoreTrainingWeekEvidence(
   return (await loadCoreTrainingWeekAudit(weekStartDate, timezone)).evidence;
 }
 
+/** Fail closed on invalid or mismatched elapsed-time metadata. */
+function crossesMidnightOrNeedsReview(start: string, end: string, timezone: string): boolean {
+  try { return crossesLocalTrainingMidnight(start, end, timezone); }
+  catch { return true; }
+}
+
 function plannedStrengthRecords(
   block: TrainingBlockPlan | null, from: string, to: string,
 ): TrainingExposureRecord[] {
@@ -114,7 +120,9 @@ function plannedCalendarRecords(
         localDate: date,
         sport: normalizeTrainingSport(event.discipline),
         status: 'planned' as const,
-        durationMinutes, durationEstimate: false,
+        durationMinutes, durationEstimate: Boolean(event.allDay && durationMinutes !== null),
+        crossesLocalMidnight: Boolean(!event.allDay && event.endAt
+          && crossesMidnightOrNeedsReview(event.startAt, event.endAt, timezone)),
         // Calendar sources rarely provide planned run distance in a canonical unit.
         runDistanceKm: event.discipline === 'run' ? null : undefined,
         source: 'Calendar: ' + event.sourceId,
@@ -147,6 +155,8 @@ function completedHistoryRecords(
         status: 'completed' as const,
         durationMinutes,
         durationEstimate: durationMinutes !== null,
+        crossesLocalMidnight: crossesMidnightOrNeedsReview(
+          workout.startedAt, workout.completedAt, timezone),
         source: 'Side Quest workout ledger',
         sourceIds: [workout.id, ...(item.sensorActivity ? [item.sensorActivity.id] : [])],
       }];
@@ -165,6 +175,12 @@ function completedHistoryRecords(
       sport: normalizeTrainingSport(activity.discipline),
       status: 'completed' as const,
       durationMinutes: minutes,
+      crossesLocalMidnight: Number.isFinite(activity.elapsedTimeSeconds)
+        && activity.elapsedTimeSeconds > 0
+        ? crossesMidnightOrNeedsReview(activity.startAt,
+          new Date(Date.parse(activity.startAt) + activity.elapsedTimeSeconds * 1000)
+            .toISOString(), timezone)
+        : true,
       runDistanceKm: activity.discipline === 'run'
         ? typeof activity.distanceMeters === 'number' && Number.isFinite(activity.distanceMeters)
           ? activity.distanceMeters / 1000 : null
