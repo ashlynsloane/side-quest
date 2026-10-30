@@ -92,7 +92,7 @@ function plannedCalendarRecords(
 function completedHistoryRecords(
   items: TrainingHistoryItem[], timezone: string,
 ): TrainingExposureRecord[] {
-  return items.flatMap(item => {
+  return items.flatMap((item): TrainingExposureRecord[] => {
     if (item.kind === 'strength') {
       const workout = item.workout;
       const sensorMinutes = item.sensorActivity?.movingTimeSeconds
