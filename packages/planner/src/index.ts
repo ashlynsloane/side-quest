@@ -31,6 +31,7 @@ export { evaluateStrengthLoad } from './strength-load-management';
 export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
 export { buildFirstWeekTrainingSummary } from './first-week-training-summary';
 export { resolveFirstWeekCapacity } from './first-week-capacity';
+export { addLocalCalendarDays, localCalendarDate, nextLocalMonday, localMondayOf } from './first-week-dates';
 export type { ResolvedFirstWeekCapacity } from './first-week-capacity';
 export type { FirstWeekTrainingSummary, FirstWeekTrainingItem } from './first-week-training-summary';
 export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
