@@ -17,7 +17,7 @@ export default function Home() {
   const { user } = useAuth();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { setPreviewWorkout } = useWorkoutContext();
+  const { openPlannedWorkoutPreview } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [readiness, setReadiness] = useState<DailyReadinessCheckIn | null>(null);
   const [events, setEvents] = useState<TrainingCalendarEvent[]>([]);
@@ -59,7 +59,7 @@ export default function Home() {
 
   const startWorkout = () => {
     if (recommendation) {
-      setPreviewWorkout(recommendation.workout);
+      openPlannedWorkoutPreview(recommendation);
       router.push('/workout-preview' as Href);
       return;
     }
