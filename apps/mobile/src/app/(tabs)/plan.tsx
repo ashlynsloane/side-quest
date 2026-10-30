@@ -162,6 +162,7 @@ export default function PlanTab() {
         {weekEvidence.unresolvedRecords.length || weekEvidence.sourceConflicts.length ? <Text style={styles.evidenceWarning}>{weekEvidence.unresolvedRecords.length + weekEvidence.sourceConflicts.length} record fields or source conflicts need review before calculating reliable weekly volume.</Text> : null}
       </> : <Text style={styles.evidenceWarning}>{evidenceWarning ?? 'Loading completed training evidence…'}</Text>}
       <Pressable accessibilityRole="button" onPress={() => router.push('/weekly-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review recorded training and the week</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/training-baseline-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review source coverage and weekly limits</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Inspect full training history</Text></Pressable>
     </V23Card>
 
