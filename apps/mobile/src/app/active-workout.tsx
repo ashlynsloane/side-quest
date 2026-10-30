@@ -108,6 +108,8 @@ export default function ActiveWorkoutScreen() {
   const startedAt = useRef(new Date().toISOString());
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
+  const [completionSaveStatus, setCompletionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [completionSaveError, setCompletionSaveError] = useState<string | null>(null);
   const cueKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -298,12 +300,15 @@ export default function ActiveWorkoutScreen() {
   async function persistCompletion(completionFraction: number, override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> }) {
     if (savedCompletion.current) return;
     savedCompletion.current = true;
-    const timestamp = new Date().toISOString();
+    setCompletionSaveStatus('saving');
+    setCompletionSaveError(null);
+    const timestamp = completedAt.current ?? new Date().toISOString();
     completedAt.current = timestamp;
     const completedRounds = override?.stationRounds ?? stationRounds;
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
-    await saveCompletedWorkout({
+    try {
+      await saveCompletedWorkout({
       workout: activeWorkout,
       startedAt: startedAt.current,
       completedAt: timestamp,
@@ -313,8 +318,23 @@ export default function ActiveWorkoutScreen() {
       exerciseSets: completedSets,
       plannedSessionId: activePlanLink?.sessionId,
       relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
-    });
-    await clearLiveWorkoutSession();
+      });
+      // Show "Saved" only after the local workout ledger and plan update
+      // have succeeded. Recovery/retry uses the same completion timestamp.
+      setCompletionSaveStatus('saved');
+    } catch (error) {
+      savedCompletion.current = false;
+      setCompletionSaveStatus('error');
+      setCompletionSaveError(error instanceof Error
+        ? error.message : 'Local workout save failed. Retry before leaving.');
+      return;
+    }
+    try {
+      await clearLiveWorkoutSession();
+    } catch {
+      // The canonical workout is saved, but the old checkpoint might reappear.
+      setCompletionSaveError('Workout saved, but the active checkpoint could not be cleared.');
+    }
     if (cloudEnabled && user?.mode === 'cloud') {
       const ledgerId = `${activeWorkout.id}_${timestamp}`;
       try {
@@ -409,6 +429,13 @@ export default function ActiveWorkoutScreen() {
   }
 
   async function finishAndExit() {
+    if (completionSaveStatus === 'saving') return;
+    if (!savedCompletion.current) {
+      // A failed save must not discard the active session on exit.
+      await persistCompletion(phase === 'complete' ? 1 : Math.min(1,
+        totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0));
+      if (!savedCompletion.current) return;
+    }
     const completed = completedAt.current;
     if (completed && (sessionRpe !== null || energyAfter !== null || reflectionNotes.trim())) {
       const instanceId = `${activeWorkout.id}_${completed}`;
@@ -447,7 +474,17 @@ export default function ActiveWorkoutScreen() {
         <KeyboardSafeScreen contentContainerStyle={styles.completeContainer}>
           <Text style={styles.eyebrow}>WORKOUT COMPLETE</Text>
           <Text style={styles.completeTitle}>{activeWorkout.name}</Text>
-          <Text style={styles.helper}>{activePlanLink ? `${activePlanLink.sessionTitle} is now marked complete in your plan.` : 'Saved to training history.'} Review the work, add a private note, or share only the details you choose.</Text>
+          <Text style={styles.helper}>{completionSaveStatus === 'saved'
+            ? (activePlanLink ? `${activePlanLink.sessionTitle} was saved and marked complete in your plan.` : 'Saved to training history.')
+            : completionSaveStatus === 'saving' ? 'Saving completed workout locally…'
+              : 'Workout finished. Local save needs confirmation before leaving.'}</Text>
+          {completionSaveError ? <Text style={styles.helper}>{completionSaveError}</Text> : null}
+          {completionSaveStatus === 'error' ? <Pressable
+            accessibilityRole="button"
+            onPress={() => void persistCompletion(1)}
+            style={styles.outlineButton}>
+            <Text style={styles.outlineButtonText}>Retry saving workout</Text>
+          </Pressable> : null}
           <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
 
           <CompletedWorkoutBodyMap regionLoads={completedSummary.regionLoads} />
@@ -474,7 +511,14 @@ export default function ActiveWorkoutScreen() {
 
           <Pressable onPress={() => router.push('/today-check-in' as Href)} style={styles.symptomButton}><Text style={styles.cardTitle}>Something hurt or tightened up?</Text><Text style={styles.helper}>Log the exact area separately so the next workout can adapt.</Text></Pressable>
           <Pressable onPress={() => void saveFavorite()} style={styles.outlineButton}><Text style={styles.outlineButtonText}>{saved ? '♥ Saved to favorites' : '♡ Save to favorites'}</Text></Pressable>
-          <Pressable onPress={() => void finishAndExit()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save workout and return to Today</Text></Pressable>
+          <Pressable accessibilityRole="button"
+            disabled={completionSaveStatus === 'saving'}
+            onPress={() => void finishAndExit()}
+            style={[styles.primaryButton, completionSaveStatus === 'saving' && { opacity: 0.5 }]}>
+            <Text style={styles.primaryButtonText}>{completionSaveStatus === 'saving'
+              ? 'Saving locally…' : completionSaveStatus === 'error'
+                ? 'Retry save before leaving' : 'Return to Today'}</Text>
+          </Pressable>
         </KeyboardSafeScreen>
         <WorkoutShareModal summary={completedSummary} visible={shareOpen} onClose={() => setShareOpen(false)} />
       </SafeAreaView>
