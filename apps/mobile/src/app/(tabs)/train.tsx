@@ -48,6 +48,7 @@ export default function TrainTab() {
     <V23SectionHeader>Other options</V23SectionHeader>
     <V23GroupedList>
       <V23Row title="Exercise library" detail="Browse movements and demonstrations" onPress={() => router.push('/exercise-library' as Href)} icon={<V23Icon name="search" color={tokens.accent} size={20} />} />
+      <V23Row title="Log a completed run, ride or swim" detail="Manually record actual training when no watch import is available" onPress={() => router.push('/log-endurance' as Href)} icon={<V23Icon name="log" color={tokens.accent} size={20} />} />
       <V23Row title="Log a completed session" detail="Record strength you did elsewhere" onPress={() => router.push('/log-workout' as Href)} icon={<V23Icon name="log" color={tokens.accent} size={20} />} />
       <V23Row title="Need a shorter option?" detail="Keep the intent with less volume" onPress={() => router.push('/session-rescue' as Href)} icon={<V23Icon name="adjust" color={tokens.accent} size={20} />} last />
     </V23GroupedList>
