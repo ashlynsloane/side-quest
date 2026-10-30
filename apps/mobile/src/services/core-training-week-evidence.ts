@@ -1,6 +1,7 @@
 import type { TrainingExposureRecord, TrainingWeekEvidence } from '@circuit/planner';
 import {
   buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport,
+  trainingSourceQueryEnvelope,
 } from '@circuit/planner';
 import type { TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 
@@ -31,23 +32,16 @@ export async function loadCoreTrainingWeekAudit(
   weekStartDate: string,
   timezone: string,
 ): Promise<CoreTrainingWeekAudit> {
-  // Widen UTC query around athlete-local dates to cover timezone extremes.
-  const fromDate = new Date(weekStartDate + 'T00:00:00Z');
-  fromDate.setUTCDate(fromDate.getUTCDate() - 2);
-  const untilDate = new Date(weekStartDate + 'T00:00:00Z');
-  untilDate.setUTCDate(untilDate.getUTCDate() + 9);
-  const end = new Date(weekStartDate + 'T00:00:00Z');
-  end.setUTCDate(end.getUTCDate() + 7);
+  const envelope = trainingSourceQueryEnvelope(weekStartDate);
   const [saved, events, historyAudit, sources] = await Promise.all([
     getLatestTrainingBlock(),
-    getTrainingCalendarEvents({ from: fromDate.toISOString(), to: untilDate.toISOString() }),
-    loadTrainingHistoryForRange({ from: fromDate.toISOString(), to: untilDate.toISOString() }),
+    getTrainingCalendarEvents({ from: envelope.from, to: envelope.to }),
+    loadTrainingHistoryForRange({ from: envelope.from, to: envelope.to }),
     listTrainingCalendarSources(),
   ]);
   const history = historyAudit.history;
   const records = [
-    ...plannedStrengthRecords(saved?.block ?? null, weekStartDate,
-      new Date(end.getTime() - 1).toISOString().slice(0, 10)),
+    ...plannedStrengthRecords(saved?.block ?? null, weekStartDate, envelope.localWeekEnd),
     ...plannedCalendarRecords(events, timezone),
     ...completedHistoryRecords(history, timezone),
   ];
