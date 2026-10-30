@@ -1,0 +1,31 @@
+name: Experimental training guardrail validation
+
+on:
+  push:
+    branches:
+      - feat/experimental-training-ramp-guardrails
+  pull_request:
+    branches:
+      - sq2-experience-rebuild
+    paths:
+      - 'packages/planner/**'
+      - '.github/workflows/experimental-training-guardrails.yml'
+  workflow_dispatch:
+
+jobs:
+  test-guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck planner
+        run: pnpm --dir packages/planner typecheck
+      - name: Planner regression tests
+        run: pnpm --dir packages/planner test
