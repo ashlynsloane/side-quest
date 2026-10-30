@@ -23,6 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
+import type { ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -382,6 +383,19 @@ export async function initializeDatabase(): Promise<void> {
       updated_at TEXT NOT NULL
     );
 
+
+    -- Append-only per-profile decisions. An approval is never updated in place;
+    -- a later revocation or new approval is an additional event.
+    CREATE TABLE IF NOT EXISTS training_baseline_review_events (
+      id TEXT PRIMARY KEY NOT NULL,
+      planning_week_start TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('approval', 'revocation')),
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_baseline_reviews_week
+      ON training_baseline_review_events(planning_week_start, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS training_intelligence_state (
       id TEXT PRIMARY KEY NOT NULL,
@@ -2898,4 +2912,51 @@ export async function getEnduranceTrainingBalanceBetween({
     from,
     to,
   );
+}
+
+/**
+ * Append-only athlete baseline decisions in the ACTIVE profile's SQLite DB.
+ * Do not store these in unscoped global settings or re-use data across users.
+ */
+export type TrainingBaselineReviewEvent =
+  | { kind: 'approval'; snapshot: ApprovedWeekSnapshot; createdAt: string }
+  | { kind: 'revocation'; planningWeekStart: string; reason: string; createdAt: string };
+
+export async function appendTrainingBaselineReviewEvent(
+  event: TrainingBaselineReviewEvent,
+): Promise<void> {
+  await initializeDatabase();
+  const week = event.kind === 'approval'
+    ? event.snapshot.planningWeekStart : event.planningWeekStart;
+  const id = event.kind + ':' + week + ':' + event.createdAt + ':'
+    + Math.random().toString(36).slice(2, 10);
+  await db.runAsync(
+    `INSERT INTO training_baseline_review_events
+     (id, planning_week_start, kind, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    id, week, event.kind, JSON.stringify(event), event.createdAt,
+  );
+}
+
+export async function getLatestTrainingBaselineReviewEvent(
+  planningWeekStart: string,
+): Promise<TrainingBaselineReviewEvent | null> {
+  await initializeDatabase();
+  const row = await db.getFirstAsync<{ payload_json: string }>(
+    `SELECT payload_json FROM training_baseline_review_events
+     WHERE planning_week_start = ?
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    planningWeekStart,
+  );
+  if (!row) return null;
+  try {
+    const event = JSON.parse(row.payload_json) as TrainingBaselineReviewEvent;
+    if (event.kind === 'approval' && event.snapshot?.schemaVersion === 1
+        && event.snapshot.planningWeekStart === planningWeekStart) return event;
+    if (event.kind === 'revocation' && event.planningWeekStart === planningWeekStart) {
+      return event;
+    }
+  } catch {}
+  // Corrupt/incompatible stored data must not be interpreted as approval.
+  return null;
 }

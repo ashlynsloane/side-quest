@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/core-training-evidence-review-v1
+      - feat/training-week-baseline-approval-v1
   pull_request:
     branches:
       - feat/experimental-training-ramp-guardrails
@@ -13,6 +14,10 @@ on:
       - 'apps/mobile/src/app/(tabs)/plan.tsx'
       - '.github/workflows/core-training-evidence-validation.yml'
   workflow_dispatch:
+
+concurrency:
+  group: training-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-training-evidence:
