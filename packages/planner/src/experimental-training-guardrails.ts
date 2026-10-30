@@ -202,8 +202,13 @@ export function freezeExperimentalTrainingAllowance(input: {
       'Running, cycling and combined baseline measurements must be explicitly known, including zeros.',
     ] };
   }
-  if (dayNumber(b.endDate) >= dayNumber(input.planningWeekStart)) {
-    return { status: 'baseline_required', reasons: ['Baseline must precede the planning week.'] };
+  // A routine progression week is compared with the immediately preceding
+  // completed seven local days; older high-load weeks cannot authorize a rebound.
+  const start = dayNumber(input.planningWeekStart);
+  if (dayNumber(b.startDate) !== start - 7 || dayNumber(b.endDate) !== start - 1) {
+    return { status: 'baseline_required', reasons: [
+      'Routine progression requires the previous completed seven-day period, explicitly reviewed for eligibility.',
+    ] };
   }
   const r = b.runDistanceKm!;
   const c = b.cyclingMinutes!;
