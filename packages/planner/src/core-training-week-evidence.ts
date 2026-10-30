@@ -120,6 +120,25 @@ export function buildTrainingWeekEvidence(input: TrainingWeekEvidenceInput): Tra
   // separate sessions, or the same workout without explicit linkage. Do not
   // guess, merge, or call the combined total complete.
   const conflicts = [...reconciled.issues];
+  // Different provider IDs are not automatically proof of different workouts.
+  // Flag close same-day cross-source completions for human reconciliation;
+  // never automatically merge them or call their summed dose trustworthy.
+  const completedRows = reconciled.records.filter(r => r.status === 'completed');
+  for (let i = 0; i < completedRows.length; i += 1) {
+    const left = completedRows[i]!;
+    for (let j = i + 1; j < completedRows.length; j += 1) {
+      const right = completedRows[j]!;
+      if (left.localDate !== right.localDate || left.sport !== right.sport
+        || left.source === right.source
+        || left.durationMinutes === null || right.durationMinutes === null
+        || Math.abs(left.durationMinutes - right.durationMinutes) > 5) continue;
+      if (left.sport === 'run'
+        && left.runDistanceKm != null && right.runDistanceKm != null
+        && Math.abs(left.runDistanceKm - right.runDistanceKm) > 0.2) continue;
+      conflicts.push('Possible duplicate completed ' + left.sport + ' activity on '
+        + left.localDate + ': ' + left.recordId + ' / ' + right.recordId);
+    }
+  }
   for (const planned of reconciled.records.filter(r => r.status === 'planned')) {
     if (reconciled.records.some(actual => actual.status === 'completed'
       && actual.localDate === planned.localDate && actual.sport === planned.sport)) {
