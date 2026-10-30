@@ -4,7 +4,7 @@ import {
 } from '@circuit/planner';
 import type { TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 
-import { getTrainingCalendarEvents, getLatestTrainingBlock } from './database';
+import { getTrainingCalendarEvents, getLatestTrainingBlock, listTrainingCalendarSources } from './database';
 import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
 
 /**
@@ -20,6 +20,7 @@ export interface CoreTrainingWeekAudit {
   /** A capped query cannot prove full historical coverage. */
   historyPossiblyTruncated: boolean;
   activitySources: string[];
+  sourceDiagnostics: Array<{ name: string; status: string; lastSuccessfulAt: string | null }>;
 }
 
 /** Read-only full audit of activity sources and the selected local week. */
@@ -32,10 +33,11 @@ export async function loadCoreTrainingWeekAudit(
   const first = new Date(weekStartDate + 'T00:00:00Z');
   first.setUTCDate(first.getUTCDate() - 1);
   const limit = 2000;
-  const [saved, events, history] = await Promise.all([
+  const [saved, events, history, sources] = await Promise.all([
     getLatestTrainingBlock(),
     getTrainingCalendarEvents({ from: first.toISOString(), to: end.toISOString() }),
     loadTrainingHistory(limit),
+    listTrainingCalendarSources(),
   ]);
   const records = [
     ...plannedStrengthRecords(saved?.block ?? null, weekStartDate,
@@ -51,6 +53,12 @@ export async function loadCoreTrainingWeekAudit(
     evidence, plannedAndCompleted: records,
     historyPossiblyTruncated: history.length >= limit,
     activitySources: [...new Set(records.map(record => record.source))].sort(),
+    sourceDiagnostics: sources.filter(source => source.active && source.sourceType !== 'manual')
+      .map(source => ({
+        name: source.name,
+        status: source.syncStatus ?? 'unknown',
+        lastSuccessfulAt: source.lastSuccessfulAt ?? source.lastSyncedAt ?? null,
+      })),
   };
 }
 export async function loadCoreTrainingWeekEvidence(
