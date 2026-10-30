@@ -1,6 +1,7 @@
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import {
   type FrozenTrainingAllowance, type TrainingExposureRecord,
+  reconcileGuardrailExposure,
 } from './experimental-training-guardrails';
 import { buildTrainingWeekEvidence } from './core-training-week-evidence';
 import {
@@ -121,7 +122,10 @@ export function buildPlanAdjustmentPreview(input: {
     && current.anyOverage;
   const candidates: PlanAdjustmentCandidate[] = [];
   if (eligibleForProposal) {
-    for (const record of input.records) {
+    // Never offer to adjust a plan already superseded by a linked completed
+    // activity. The same reconciled exposure basis powers the preview totals.
+    const remaining = reconcileGuardrailExposure(input.records).records;
+    for (const record of remaining) {
       if (record.source !== SOURCE || record.status !== 'planned'
         || record.localDate < input.todayLocalDate
         || !['run', 'bike', 'swim'].includes(record.sport)
