@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { applyAcceptedPlanAdjustments, rawGeneratedEventSignature, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -1228,71 +1228,39 @@ export async function getRawTrainingCalendarEvent(
   try { return JSON.parse(row.event_json) as TrainingCalendarEvent; }
   catch { return null; }
 }
+/**
+ * Explicit driver ensures integration tests exercise the same SQL and
+ * validation logic used by Expo SQLite. Each athlete profile owns its DB.
+ */
+const trainingAdjustmentDriver: TrainingAdjustmentSqlDriver = {
+  getFirst: async <T>(sql: string, params: Array<string | number | null>) =>
+    (await db.getFirstAsync(sql, ...params)) as T | null,
+  getAll: async <T>(sql: string, params: Array<string | number | null>) =>
+    (await db.getAllAsync(sql, ...params)) as T[],
+  run: async (sql: string, params: Array<string | number | null>) => {
+    await db.runAsync(sql, ...params);
+  },
+  transaction: async (fn: () => Promise<void>) => {
+    await db.withTransactionAsync(fn);
+  },
+};
 export async function listTrainingPlanAdjustmentEvents(
   window?: { from: string; to: string },
 ): Promise<PlanAdjustmentEvent[]> {
   await initializeDatabase();
-  const rows = window
-    ? await db.getAllAsync<{ decision_json: string }>(
-      `SELECT a.decision_json
-       FROM training_plan_adjustment_events a
-       JOIN training_calendar_events c ON c.id = a.source_event_id
-       WHERE c.start_at >= ? AND c.start_at <= ?
-       ORDER BY a.created_at ASC, a.rowid ASC`,
-      window.from, window.to,
-    )
-    : await db.getAllAsync<{ decision_json: string }>(
-      'SELECT decision_json FROM training_plan_adjustment_events ORDER BY created_at ASC, rowid ASC',
-    );
-  return rows.flatMap(row => {
-    try {
-      const decision = JSON.parse(row.decision_json) as PlanAdjustmentEvent;
-      return decision?.sourceEventId && decision?.decision ? [decision] : [];
-    } catch { return []; }
-  });
+  return readTrainingAdjustmentDecisions(trainingAdjustmentDriver, window);
 }
 export async function appendTrainingPlanAdjustmentEvent(
   decision: PlanAdjustmentEvent,
 ): Promise<void> {
   await initializeDatabase();
-  if (!decision.id || !decision.sourceEventId
-      || !['accepted', 'declined', 'restored'].includes(decision.decision)
-      || !['shorten_20_percent', 'defer'].includes(decision.action)) {
-    throw new Error('Invalid training plan adjustment decision.');
-  }
-  await db.withTransactionAsync(async () => {
-    const current = await db.getFirstAsync<{ event_json: string }>(
-      'SELECT event_json FROM training_calendar_events WHERE id = ?',
-      decision.sourceEventId,
-    );
-    if (!current) throw new Error('Generated workout no longer exists.');
-    let event: TrainingCalendarEvent;
-    try { event = JSON.parse(current.event_json) as TrainingCalendarEvent; }
-    catch { throw new Error('Source workout is unreadable.'); }
-    if (event.sourceId !== 'side_quest_generated_plan'
-      || rawGeneratedEventSignature(event) !== decision.sourceSignature) {
-      throw new Error('Generated workout changed. Reopen plan review before deciding.');
-    }
-    if (decision.decision === 'accepted' &&
-      (decision.action === 'shorten_20_percent'
-        ? decision.proposedMinutes == null || decision.proposedMinutes <= 0
-        : decision.proposedMinutes !== null)) {
-      throw new Error('Invalid planned workout dose.');
-    }
-    await db.runAsync(
-      `INSERT INTO training_plan_adjustment_events
-        (id, source_event_id, decision_json, created_at) VALUES (?, ?, ?, ?)`,
-      decision.id, decision.sourceEventId, JSON.stringify(decision), decision.createdAt,
-    );
-  });
+  await appendTrainingAdjustmentDecision(trainingAdjustmentDriver, decision);
 }
 export async function resolveSavedTrainingPlanAdjustments(
   raw: TrainingCalendarEvent[],
 ): Promise<{ events: TrainingCalendarEvent[]; staleEventIds: string[] }> {
-  if (!raw.some(event => event.sourceId === 'side_quest_generated_plan')) {
-    return { events: raw, staleEventIds: [] };
-  }
-  return applyAcceptedPlanAdjustments(raw, await listTrainingPlanAdjustmentEvents());
+  await initializeDatabase();
+  return effectiveTrainingCalendarEvents(trainingAdjustmentDriver, raw);
 }
 
 export async function saveCustomExercise(exercise: Exercise): Promise<void> {
