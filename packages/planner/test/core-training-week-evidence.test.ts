@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport,
+  buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, proposeCompletedWeekBaseline,
 } from '../src/core-training-week-evidence';
 import type { TrainingExposureRecord } from '../src/experimental-training-guardrails';
 
@@ -106,6 +106,35 @@ describe('core training week evidence', () => {
     const r = review([row('b', '2026-08-04', 'bike', 60, 'completed')], 'verified');
     expect(r.planningEvidenceStatus).toBe('source_verified');
     expect(r.baselineApproval).toBe('not_assessed');
+  });
+  it('never approves a baseline from a seemingly empty unverified week', () => {
+    const candidate = proposeCompletedWeekBaseline(review([]));
+    expect(candidate.runDistanceKm).toBeNull();
+    expect(candidate.cyclingMinutes).toBeNull();
+    expect(candidate.combinedMinutes).toBeNull();
+    expect(candidate.eligibility).toBe('needs_review');
+    expect(candidate.evidenceStatus).toBe('incomplete');
+    expect(candidate.symptomContextReviewed).toBe(false);
+  });
+  it('a verified completed week remains a candidate, not permission to ramp', () => {
+    const candidate = proposeCompletedWeekBaseline(review([
+      row('run-record', '2026-08-05', 'run', 30, 'completed', {
+        runDistanceKm: 5, sourceIds: ['verified-source-run'],
+      }),
+    ], 'verified'));
+    expect(candidate.runDistanceKm).toBe(5);
+    expect(candidate.cyclingMinutes).toBe(0);
+    expect(candidate.evidenceStatus).toBe('complete');
+    expect(candidate.sourceActivityIds).toEqual(['verified-source-run']);
+    expect(candidate.approvedAt).toBeUndefined();
+    expect(candidate.eligibility).toBe('needs_review');
+  });
+  it('unknown completed strength duration is never converted into a valid candidate', () => {
+    const candidate = proposeCompletedWeekBaseline(review([
+      row('logged-strength', '2026-08-04', 'strength', null, 'completed'),
+    ], 'verified'));
+    expect(candidate.combinedMinutes).toBeNull();
+    expect(candidate.evidenceStatus).toBe('incomplete');
   });
   it('rejects non-Monday weeks and invalid time zones', () => {
     expect(() => buildTrainingWeekEvidence({
