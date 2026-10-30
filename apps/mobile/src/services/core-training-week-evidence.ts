@@ -14,29 +14,49 @@ import { loadTrainingHistory, type TrainingHistoryItem } from './training-histor
  * The current data services do not guarantee cross-provider coverage;
  * therefore the caller ALWAYS uses unverified coverage.
  */
-export async function loadCoreTrainingWeekEvidence(
+export interface CoreTrainingWeekAudit {
+  evidence: TrainingWeekEvidence;
+  plannedAndCompleted: TrainingExposureRecord[];
+  /** A capped query cannot prove full historical coverage. */
+  historyPossiblyTruncated: boolean;
+  activitySources: string[];
+}
+
+/** Read-only full audit of activity sources and the selected local week. */
+export async function loadCoreTrainingWeekAudit(
   weekStartDate: string,
   timezone: string,
-): Promise<TrainingWeekEvidence> {
+): Promise<CoreTrainingWeekAudit> {
   const end = new Date(weekStartDate + 'T00:00:00Z');
   end.setUTCDate(end.getUTCDate() + 7);
   const first = new Date(weekStartDate + 'T00:00:00Z');
   first.setUTCDate(first.getUTCDate() - 1);
+  const limit = 2000;
   const [saved, events, history] = await Promise.all([
     getLatestTrainingBlock(),
     getTrainingCalendarEvents({ from: first.toISOString(), to: end.toISOString() }),
-    loadTrainingHistory(2000),
+    loadTrainingHistory(limit),
   ]);
   const records = [
-    ...plannedStrengthRecords(saved?.block ?? null, weekStartDate, new Date(end.getTime() - 1)
-      .toISOString().slice(0, 10)),
+    ...plannedStrengthRecords(saved?.block ?? null, weekStartDate,
+      new Date(end.getTime() - 1).toISOString().slice(0, 10)),
     ...plannedCalendarRecords(events, timezone),
     ...completedHistoryRecords(history, timezone),
   ];
-  return buildTrainingWeekEvidence({
+  const evidence = buildTrainingWeekEvidence({
     weekStartDate, timezone, plannedAndCompleted: records,
     coverage: 'unverified',
   });
+  return {
+    evidence, plannedAndCompleted: records,
+    historyPossiblyTruncated: history.length >= limit,
+    activitySources: [...new Set(records.map(record => record.source))].sort(),
+  };
+}
+export async function loadCoreTrainingWeekEvidence(
+  weekStartDate: string, timezone: string,
+): Promise<TrainingWeekEvidence> {
+  return (await loadCoreTrainingWeekAudit(weekStartDate, timezone)).evidence;
 }
 
 function plannedStrengthRecords(
