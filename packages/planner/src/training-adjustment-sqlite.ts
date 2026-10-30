@@ -26,6 +26,26 @@ CREATE INDEX IF NOT EXISTS idx_plan_adjustments_source
   ON training_plan_adjustment_events(source_event_id, created_at DESC);
 `;
 
+/**
+ * Stored decisions remain inspectable even after a generated source event is
+ * removed or replaced. Querying via an INNER JOIN would hide orphaned history.
+ */
+export function planAdjustmentDecisionsForLocalWeek(
+  decisions: PlanAdjustmentEvent[], weekStartDate: string, weekEndDate: string,
+): PlanAdjustmentEvent[] {
+  return decisions.filter(decision => {
+    try {
+      const signature = JSON.parse(decision.sourceSignature) as unknown[];
+      const timestamp = signature[4];
+      if (typeof timestamp !== 'string') return false;
+      const date = timestamp.slice(0, 10);
+      return date >= weekStartDate && date <= weekEndDate;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export async function readTrainingAdjustmentDecisions(
   sql: TrainingAdjustmentSqlDriver,
   window?: { from: string; to: string },
