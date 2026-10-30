@@ -51,8 +51,8 @@ export default function OnboardingFirstWeekScreen() {
     <Surface style={styles.summary}><Text style={styles.summaryTitle}>{block.goal.name}</Text><Text style={styles.summaryMeta}>{week?.sessions.length ?? 0} strength sessions · {block.goal.defaultSessionMinutes} min each</Text><Text style={styles.profileLine}>{profileSummary(params)}</Text></Surface>
     <Text style={styles.sectionLabel}>WEEK 1</Text>
     <Surface style={styles.weekCard}>{week?.sessions.map((session) => <View key={session.id} style={styles.sessionRow}><View style={styles.dateBadge}><Text style={styles.dateText}>{shortDate(session.date)}</Text></View><View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{session.title}</Text><Text style={styles.sessionMeta}>{session.intendedLoad} · {Math.round(session.workout.estimatedElapsedSeconds / 60)} min</Text></View></View>)}</Surface>
-    <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text></View>
-    <Pressable onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Use this first week</Text><Text style={styles.arrow}>›</Text></Pressable>
+    <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{params.restriction && params.restriction !== 'none' ? <Text style={styles.body}>A reported limitation still requires review of specific exercises and clinical restrictions before training.</Text> : null}</View>
+    <Pressable onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
     <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
 }
@@ -113,9 +113,37 @@ function normalizeBlockSchedule(block: TrainingBlockPlan, preferredDays: Weekday
 function buildCapacity(params: Params, totalHours: number): AthleteCapacityProfile {
   const background = params.background ?? 'balanced';
   const injury = params.injury ?? 'none';
-  const runStatus = params.runStatus === 'reduced' || params.runStatus === 'return_to_run' || params.runStatus === 'not_running' ? params.runStatus : 'normal';
-  return { totalWeeklyHours: totalHours, currentEnduranceHours: Math.max(0, totalHours - 3), runStatus, maxRunMilesLast12Weeks: runStatus === 'not_running' ? 0 : runStatus === 'return_to_run' ? 5 : background === 'run' ? 30 : background === 'triathlon' ? 20 : 15, boneStressInjuryHistory: injury === 'recent_bone_stress' ? 'recent_or_current' : injury === 'remote_bone_stress' ? 'remote' : 'none', swimProficiency: background === 'swim' ? 'strong' : background === 'triathlon' ? 'average' : 'developing', bikeProficiency: background === 'bike' ? 'strong' : background === 'triathlon' ? 'average' : 'developing', runProficiency: background === 'run' ? 'strong' : injury === 'recurring_run' || runStatus !== 'normal' ? 'developing' : background === 'triathlon' ? 'average' : 'developing', strengthExperience: params.strength === 'beginner' || params.strength === 'advanced' ? params.strength : 'intermediate' };
+  const runStatus = params.runStatus === 'reduced' || params.runStatus === 'return_to_run'
+    || params.runStatus === 'not_running' ? params.runStatus : 'normal';
+
+  // Fast-start asks about AVAILABLE training hours, not actual completed volume.
+  // Reserving some hours for the goal-specific endurance calendar is a SCHEDULING
+  // assumption, not a measured baseline and never eligibility for progression.
+  const assumedEnduranceAllocation = Math.max(0, totalHours - 3);
+  return {
+    totalWeeklyHours: totalHours,
+    currentEnduranceHours: assumedEnduranceAllocation,
+    enduranceHoursEvidence: 'unverified_planning_assumption',
+    runStatus,
+    // No retrospective running mileage was collected. Previously the code
+    // fabricated 15/20/30 mi from background; zero is a conservative legacy
+    // numeric placeholder with explicit UNKNOWN evidence, not a zero-mile fact.
+    maxRunMilesLast12Weeks: 0,
+    runMileageEvidence: 'unknown',
+    boneStressInjuryHistory: injury === 'recent_bone_stress'
+      ? 'recent_or_current' : injury === 'remote_bone_stress' ? 'remote' : 'none',
+    swimProficiency: background === 'swim' ? 'strong'
+      : background === 'triathlon' ? 'average' : 'developing',
+    bikeProficiency: background === 'bike' ? 'strong'
+      : background === 'triathlon' ? 'average' : 'developing',
+    runProficiency: background === 'run' ? 'strong'
+      : injury === 'recurring_run' || runStatus !== 'normal' ? 'developing'
+        : background === 'triathlon' ? 'average' : 'developing',
+    strengthExperience: params.strength === 'beginner' || params.strength === 'advanced'
+      ? params.strength : 'intermediate',
+  };
 }
+
 function equipmentFor(value: string | undefined, profiles: Awaited<ReturnType<typeof ensureDefaultEquipmentProfiles>>): EquipmentId[] { if (value === 'bodyweight') return ['bodyweight']; const kind = value === 'full_gym' ? 'full_gym' : value === 'travel' ? 'travel' : 'home'; return profiles.find((profile) => profile.kind === kind)?.equipment ?? profiles.find((profile) => profile.isDefault)?.equipment ?? ['bodyweight']; }
 function excludedRegionsFor(value: string | undefined): BodyRegion[] { if (value === 'lower_body') return ['quadriceps','hamstrings','glutes','gastrocnemius','soleus','feet_ankles']; if (value === 'upper_body') return ['chest','shoulders','upper_back','lats','biceps','triceps']; if (value === 'back') return ['lower_back','core_rotation']; return []; }
 function parseDays(value: string | undefined): Weekday[] { const values = (value ?? '1,3,5').split(',').map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < 7).map((index) => WEEKDAYS[index]); return [...new Set(values)].length >= 2 ? [...new Set(values)] : ['tuesday','thursday','saturday']; }
