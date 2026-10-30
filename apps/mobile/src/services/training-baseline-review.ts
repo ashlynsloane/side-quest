@@ -3,6 +3,7 @@ import {
   type ApprovedWeekSnapshot, type CoverageReviewAttestation,
   type BaselineReviewIssue, type PlanningInterruptionState,
   evaluateExperimentalTrainingGuardrails, localTrainingDate,
+  comparePlannedWeekWithFrozenLimits, type PlanningWeekComparison,
 } from '@circuit/planner';
 
 import {
@@ -33,6 +34,7 @@ export interface TrainingBaselineReviewState {
   /** Known overages only; missing daily source coverage prevents a green status. */
   detectedWindowOverages: Array<{ window: string; dimension: string; proposed: number; ceiling: number }>;
   rollingCoverageVerified: false;
+  planningComparison: PlanningWeekComparison | null;
 }
 
 /**
@@ -114,6 +116,8 @@ export async function loadTrainingBaselineReviewState(input: {
     currentPlanningState: hard.planningState,
     detectedWindowOverages,
     rollingCoverageVerified: false,
+    planningComparison: ceilingForWeek
+      ? comparePlannedWeekWithFrozenLimits(proposedWeek.evidence, ceilingForWeek) : null,
   };
 }
 
