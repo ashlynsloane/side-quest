@@ -9,6 +9,10 @@ export interface AthleteCapacityProfile {
   currentEnduranceHours: number;
   runStatus: RunStatus;
   maxRunMilesLast12Weeks: number;
+    /** Data provenance: a conservative zero placeholder is NOT a recorded zero-mile week. */
+    runMileageEvidence?: 'unknown' | 'athlete_reported' | 'source_observed';
+    /** Reserved scheduling hours are NOT completed endurance hours. */
+    enduranceHoursEvidence?: 'unverified_planning_assumption' | 'athlete_reported' | 'source_observed';
   boneStressInjuryHistory: 'none' | 'remote' | 'recent_or_current';
   swimProficiency: Proficiency;
   bikeProficiency: Proficiency;

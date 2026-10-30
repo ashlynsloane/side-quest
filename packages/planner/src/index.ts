@@ -28,6 +28,8 @@ import type {
 import { createWorkoutVariant, generateWorkout } from '@circuit/generator';
 import { evaluateStrengthLoad, scaleWorkMinutes } from './strength-load-management';
 export { evaluateStrengthLoad } from './strength-load-management';
+export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, proposeCompletedWeekBaseline } from './core-training-week-evidence';
+export type { TrainingWeekEvidence, TrainingWeekEvidenceInput } from './core-training-week-evidence';
 export { EXPERIMENTAL_TRAINING_POLICY_V1, freezeExperimentalTrainingAllowance, reconcileGuardrailExposure, evaluateExperimentalTrainingGuardrails } from './experimental-training-guardrails';
 export type { ApprovedCompletedBaseline, FrozenTrainingAllowance, TrainingExposureRecord, TrainingGuardrailEvaluation, PlanningInterruptionState, GuardrailStatus } from './experimental-training-guardrails';
 export { buildExerciseNoveltyDecision, classifyExerciseFamiliarity, profileExerciseNovelty } from './exercise-novelty';

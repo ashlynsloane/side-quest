@@ -1,5 +1,6 @@
 // Legacy validation compatibility: THIS WEEK’S FOCUS; Strength priority; <DisclosureGroup; Current block; metricRow; More planning tools; This week; FOCUS THIS WEEK; Why this week?.
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
+import { localTrainingDate, type TrainingWeekEvidence } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -16,6 +17,7 @@ import {
 } from '@/services/database';
 import { trainingSpaceAssignmentForPlannedSession } from '@/services/training-space-runtime';
 import { conciseSessionLabel } from '@/services/training-synthesis';
+import { loadCoreTrainingWeekEvidence } from '@/services/core-training-week-evidence';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
@@ -35,6 +37,8 @@ export default function PlanTab() {
   const [hasConnectedTrainingData, setHasConnectedTrainingData] = useState(false);
   const [planningState, setPlanningState] = useState<'build' | 'hold' | 'protect' | 'recover' | null>(null);
   const [planningWarning, setPlanningWarning] = useState<string | null>(null);
+  const [weekEvidence, setWeekEvidence] = useState<TrainingWeekEvidence | null>(null);
+  const [evidenceWarning, setEvidenceWarning] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -72,6 +76,13 @@ export default function PlanTab() {
       setHasTrainingHistory(history.length > 0);
       setHasReadinessData(Boolean(readiness));
       setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
+      try {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const result = await loadCoreTrainingWeekEvidence(localTrainingDate(from, timezone), timezone);
+        if (live) { setWeekEvidence(result); setEvidenceWarning(null); }
+      } catch (error) {
+        if (live) { setWeekEvidence(null); setEvidenceWarning(error instanceof Error ? error.message : 'Training evidence is unavailable.'); }
+      }
     })();
     return () => { live = false; };
   }, []));
@@ -81,6 +92,7 @@ export default function PlanTab() {
   const today = localDate();
   const selectedIndex = days.findIndex((day) => day.date === today);
   const counts = weeklyCounts(days);
+  const upcomingWeek = Boolean(days[0]?.date && days[0].date > today);
 
   const openStrength = (session: PlannedStrengthSession) => {
     openPlannedWorkoutPreview(session, {
@@ -99,7 +111,7 @@ export default function PlanTab() {
     <V23Card elevated style={styles.weekCard}>
       <View style={styles.weekHeading}>
         <Pressable accessibilityLabel="Open full schedule" onPress={() => router.push('/schedule' as Href)} style={styles.arrowButton}><V23Icon name="plan" color={tokens.accent} size={20} /></Pressable>
-        <View style={styles.weekTitleCopy}><Text style={styles.weekTitle}>This week</Text><Text style={styles.weekRange}>{formatWeekRange(days)}</Text></View>
+        <View style={styles.weekTitleCopy}><Text style={styles.weekTitle}>{upcomingWeek ? 'Upcoming training week' : 'This week'}</Text><Text style={styles.weekRange}>{formatWeekRange(days)}</Text></View>
         <Pressable onPress={() => router.push('/session-adjustment' as Href)} style={styles.controlButton}><V23Icon name="adjust" color={tokens.accent} size={19} /></Pressable>
       </View>
       <View style={styles.calendarStrip}>{days.map((day, index) => <View key={day.date} style={styles.calendarDay}>
@@ -125,7 +137,7 @@ export default function PlanTab() {
           </Pressable>) : <View style={styles.sessionRow}>
             <SportIcon kind="recovery" color={tokens.textMuted} backgroundColor={tokens.surfaceMuted} size={18} />
             <View style={styles.sessionCopy}><Text style={styles.sessionTitle}>Open day</Text><Text style={styles.sessionMeta}>Recovery or flexible training</Text></View>
-            <View style={[styles.statusDot, { backgroundColor: tokens.success }]} />
+            <View style={[styles.statusDot, { backgroundColor: tokens.border }]} />
           </View>}</View>
         </View>;
       })}</View>
@@ -139,6 +151,19 @@ export default function PlanTab() {
       featured
       onPress={() => router.push('/training-guardrails' as Href)}
     />
+
+    <V23Card style={styles.evidenceCard}>
+      <Text style={styles.blockLabel}>ACTUAL VERSUS PLANNED</Text>
+      <Text style={styles.blockTitle}>Training evidence this week</Text>
+      {weekEvidence ? <>
+        <Text style={styles.evidenceText}>{weekEvidence.completed.count === 0 ? 'No completed training recorded in this week.' : `${weekEvidence.completed.count} completed records · ${weekEvidence.completed.combinedMinutes > 0 ? `${Math.round(weekEvidence.completed.combinedMinutes)} min with available duration data` : 'durations currently unknown'}`}</Text>
+        <Text style={styles.evidenceText}>{weekEvidence.remainingPlanned.count} planned sessions not verified completed · {weekEvidence.remainingPlanned.combinedMinutes > 0 ? `${Math.round(weekEvidence.remainingPlanned.combinedMinutes)} min from available planning estimates` : 'duration unavailable or no scheduled sessions'}</Text>
+        <Text style={styles.evidenceWarning}>Source coverage and baseline eligibility are not yet verified. This is not an approved training progression allowance.</Text>
+        {weekEvidence.unresolvedRecords.length || weekEvidence.sourceConflicts.length ? <Text style={styles.evidenceWarning}>{weekEvidence.unresolvedRecords.length + weekEvidence.sourceConflicts.length} record fields or source conflicts need review before calculating reliable weekly volume.</Text> : null}
+      </> : <Text style={styles.evidenceWarning}>{evidenceWarning ?? 'Loading completed training evidence…'}</Text>}
+      <Pressable accessibilityRole="button" onPress={() => router.push('/weekly-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review recorded training and the week</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Inspect full training history</Text></Pressable>
+    </V23Card>
 
     {block ? <V23Card style={styles.blockSummary}>
       <Text style={styles.blockLabel}>Current block</Text>
@@ -215,5 +240,6 @@ function makeStyles(tokens: DesignTokens) { return StyleSheet.create({
   weekCard: { paddingHorizontal: 14, paddingTop: 11, paddingBottom: 5 }, weekHeading: { flexDirection: 'row', alignItems: 'center', minHeight: 50 }, arrowButton: { width: 34, height: 38, alignItems: 'flex-start', justifyContent: 'center' }, weekTitleCopy: { flex: 1 }, weekTitle: { color: tokens.text, fontSize: 22, lineHeight: 27, fontWeight: '800' }, weekRange: { color: tokens.textMuted, fontSize: 14, lineHeight: 18, marginTop: 1 }, controlButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: tokens.surfaceMuted, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' },
   calendarStrip: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 6, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: tokens.border }, calendarDay: { width: 38, alignItems: 'center', gap: 5 }, dayInitial: { color: tokens.textMuted, fontSize: 11, lineHeight: 14, fontWeight: '700' }, dayNumberWrap: { width: 31, height: 31, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, dayNumberSelected: { backgroundColor: tokens.header }, dayNumber: { color: tokens.text, fontSize: 14, fontWeight: '700' }, dayNumberSelectedText: { color: '#FFFFFF' },
   schedule: { paddingTop: 7 }, dayRow: { position: 'relative', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 68, paddingHorizontal: 7, paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: tokens.border, borderRadius: 15 }, dayRowToday: { backgroundColor: tokens.accentSoft }, dayRowLast: { borderBottomWidth: 0 }, todayMarker: { width: 4, alignSelf: 'stretch', borderRadius: 3, backgroundColor: 'transparent' }, todayMarkerActive: { backgroundColor: tokens.accent }, dayLabel: { width: 59, color: tokens.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '800' }, dayLabelToday: { color: tokens.accent }, sessions: { flex: 1 }, sessionRow: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 9 }, sessionRowClosed: { opacity: 0.66 }, sessionCopy: { flex: 1, minWidth: 0 }, sessionTitle: { color: tokens.text, fontSize: 16, lineHeight: 20, fontWeight: '700' }, sessionTitleClosed: { textDecorationLine: 'line-through' }, sessionMeta: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, marginTop: 1 }, statusDot: { width: 7, height: 7, borderRadius: 4 }, completedIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: tokens.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+  evidenceCard: { gap: 7 }, evidenceText: { color: tokens.text, fontSize: 14, lineHeight: 20 }, evidenceWarning: { color: tokens.textMuted, fontSize: 13, lineHeight: 19 }, evidenceLink: { alignSelf: 'flex-start', paddingVertical: 8, marginTop: 2 }, evidenceLinkText: { color: tokens.accent, fontSize: 14, fontWeight: '700' },
   blockSummary: { gap: 5 }, blockLabel: { color: tokens.accent, fontSize: 11, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05, textTransform: 'uppercase' }, blockTitle: { color: tokens.text, fontSize: 18, lineHeight: 23, fontWeight: '700' }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 4 },
 }); }
