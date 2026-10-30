@@ -216,6 +216,10 @@ export default function TrainingBaselineReviewScreen() {
               or reconciliation issues require review.</Text> : null}
           {state.previousWeek.historyPossiblyTruncated
             ? <Text style={styles.warning}>Full activity history may be truncated.</Text> : null}
+          <Pressable accessibilityRole="button" style={styles.secondaryButton}
+            onPress={() => router.push('/training-history' as never)}>
+            <Text style={styles.link}>Inspect or reconcile activity records</Text>
+          </Pressable>
         </View>
 
         <View style={styles.card}>
