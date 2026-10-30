@@ -4,6 +4,7 @@
  */
 import {
   reconcileGuardrailExposure,
+  type ApprovedCompletedBaseline,
   type TrainingExposureRecord,
   type TrainingSport,
 } from './experimental-training-guardrails';
@@ -151,4 +152,35 @@ export function normalizeTrainingSport(discipline: string | undefined): Training
   if (discipline === 'run' || discipline === 'bike' ||
       discipline === 'swim' || discipline === 'strength') return discipline;
   return 'other';
+}
+
+/**
+ * Create a NON-APPROVED review candidate only. No input combination may
+ * silently turn recorded exposure into an athlete-tolerance baseline.
+ * A separate human-confirmed eligibility and source-coverage workflow is needed.
+ */
+export function proposeCompletedWeekBaseline(
+  evidence: TrainingWeekEvidence,
+): ApprovedCompletedBaseline {
+  const completedIds = new Set(evidence.completedRecordIds);
+  const incompleteCompleted = evidence.unresolvedRecords
+    .some(issue => completedIds.has(issue.recordId));
+  const complete = !evidence.missingCoverage && !incompleteCompleted
+    && evidence.sourceConflicts.length === 0;
+  return {
+    id: 'baseline-candidate-' + evidence.weekStartDate,
+    startDate: evidence.weekStartDate,
+    endDate: evidence.weekEndDate,
+    timezone: evidence.timezone,
+    // If coverage is unknown, a zero observable subtotal is not a genuine
+    // zero-completed-exposure baseline. Preserve unknown as null.
+    runDistanceKm: complete ? evidence.completed.runDistanceKm : null,
+    cyclingMinutes: complete ? evidence.completed.cyclingMinutes : null,
+    combinedMinutes: complete ? evidence.completed.combinedMinutes : null,
+    sourceActivityIds: [...evidence.completedSourceIds],
+    evidenceStatus: evidence.sourceConflicts.length ? 'conflicted'
+      : complete ? 'complete' : 'incomplete',
+    eligibility: 'needs_review',
+    symptomContextReviewed: false,
+  };
 }
