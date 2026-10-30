@@ -62,7 +62,10 @@ function plannedStrengthRecords(
 function plannedCalendarRecords(
   events: TrainingCalendarEvent[], timezone: string,
 ): TrainingExposureRecord[] {
-  return events.filter(event => event.discipline && event.discipline !== 'rest')
+  // Only explicitly classified training goes into the shared budget.
+  // Generic 'other' calendar events may be ordinary life or work commitments.
+  return events.filter(event => event.discipline === 'run' || event.discipline === 'bike'
+    || event.discipline === 'swim' || event.discipline === 'strength')
     .map(event => {
       const date = event.allDay
         ? event.startAt.slice(0, 10)
