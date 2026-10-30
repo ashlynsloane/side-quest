@@ -118,6 +118,9 @@ export async function restoreAcceptedPlanAdjustment(input: {
   const state = await loadPlanAdjustmentReview({
     weekStartDate: input.weekStartDate, timezone: input.timezone, now: input.now,
   });
+  if (!state.ready && !state.preview?.eligibleForProposal) {
+    throw new Error('The planning baseline or clinical state needs review before increasing a session.');
+  }
   const latest = state.latestDecisions.find(item => item.sourceEventId === input.eventId);
   if (latest?.decision !== 'accepted') throw new Error('No current approved change to restore.');
   const raw = await getRawTrainingCalendarEvent(input.eventId);
