@@ -33,6 +33,13 @@ export function createManualEnduranceActivity(input: ManualEnduranceInput): Endu
   if (!Number.isFinite(Date.parse(input.recordedAt))) {
     throw new Error('Invalid recording time.');
   }
+  const recorded = new Date(input.recordedAt);
+  const recordedCalendarDay = new Date(recorded.getFullYear(), recorded.getMonth(),
+    recorded.getDate());
+  const chosenCalendarDay = new Date(year!, month! - 1, day!);
+  if (chosenCalendarDay.getTime() > recordedCalendarDay.getTime()) {
+    throw new Error('A completed workout cannot be recorded on a future date.');
+  }
   const seconds = Math.round(input.durationMinutes * 60);
   return {
     id: input.id.trim(),
