@@ -25,6 +25,9 @@ export interface TrainingWeekEvidence {
   weekEndDate: string;
   timezone: string;
   completed: WeekExposureSummary;
+  /** Individual completed records and source IDs retained for a baseline audit. */
+  completedRecordIds: string[];
+  completedSourceIds: string[];
   remainingPlanned: WeekExposureSummary;
   plannedOrCompleted: WeekExposureSummary;
   unresolvedRecords: Array<{ recordId: string; reason: string }>;
@@ -116,7 +119,11 @@ export function buildTrainingWeekEvidence(input: TrainingWeekEvidenceInput): Tra
   const sourceVerified = input.coverage === 'verified' && clean;
   return {
     weekStartDate: input.weekStartDate, weekEndDate, timezone: input.timezone,
-    completed, remainingPlanned, plannedOrCompleted,
+    completed,
+    completedRecordIds: reconciled.records.filter(r => r.status === 'completed').map(r => r.recordId),
+    completedSourceIds: [...new Set(reconciled.records.filter(r => r.status === 'completed')
+      .flatMap(r => r.sourceIds?.length ? r.sourceIds : [r.recordId]))],
+    remainingPlanned, plannedOrCompleted,
     unresolvedRecords, sourceConflicts: conflicts,
     missingCoverage: input.coverage !== 'verified',
     planningEvidenceStatus: !clean ? 'incomplete'
