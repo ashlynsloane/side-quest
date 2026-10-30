@@ -163,6 +163,7 @@ export default function PlanTab() {
       </> : <Text style={styles.evidenceWarning}>{evidenceWarning ?? 'Loading completed training evidence…'}</Text>}
       <Pressable accessibilityRole="button" onPress={() => router.push('/weekly-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review recorded training and the week</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-baseline-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review source coverage and weekly limits</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/training-plan-adjustments' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Preview training-plan changes</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Inspect full training history</Text></Pressable>
     </V23Card>
 
