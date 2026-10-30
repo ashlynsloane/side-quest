@@ -13,7 +13,7 @@ export interface TrainingAdjustmentSqlDriver {
   getFirst<T>(sql: string, params: Array<string | number | null>): Promise<T | null>;
   getAll<T>(sql: string, params: Array<string | number | null>): Promise<T[]>;
   run(sql: string, params: Array<string | number | null>): Promise<void>;
-  transaction<T>(fn: () => Promise<T>): Promise<T>;
+  transaction(fn: () => Promise<void>): Promise<void>;
 }
 export const PLAN_ADJUSTMENT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS training_plan_adjustment_events (
