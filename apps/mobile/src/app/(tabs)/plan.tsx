@@ -170,6 +170,12 @@ export default function PlanTab() {
     {block ? <V23Card style={styles.blockSummary}>
       <Text style={styles.blockLabel}>Current block</Text>
       <Text style={styles.blockTitle}>{block.goal.name}</Text>
+      {block.goal.capacityProfile?.enduranceHoursEvidence !== 'source_observed'
+        ? <Text style={styles.evidenceWarning}>The proposed endurance schedule uses
+          {block.goal.capacityProfile?.enduranceHoursEvidence === 'athlete_reported'
+            ? ' athlete-reported context' : ' unverified availability or missing recent training history'}.
+          It is not a measured training-tolerance baseline or an approved progression.</Text>
+        : null}
       <View style={styles.chips}>
         <V23Chip>{block.weeks.find((week) => anchorDate >= week.weekStartDate && anchorDate <= addDays(week.weekStartDate, 6))?.phase.replaceAll('_', ' ') ?? block.weeks[0]?.phase.replaceAll('_', ' ') ?? 'training'}</V23Chip>
         {counts.swim ? <V23Chip tone="info">{counts.swim} swim</V23Chip> : null}
