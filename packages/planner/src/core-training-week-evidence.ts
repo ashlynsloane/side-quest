@@ -167,6 +167,19 @@ export function localTrainingDate(timestamp: string, timezone: string): string {
   }).formatToParts(date).map(part => [part.type, part.value]));
   return parts.year + '-' + parts.month + '-' + parts.day;
 }
+/** Activity spanning a local midnight cannot be assigned to one day for spacing checks. */
+export function crossesLocalTrainingMidnight(
+  startTimestamp: string, endTimestamp: string, timezone: string,
+): boolean {
+  const start = Date.parse(startTimestamp);
+  const end = Date.parse(endTimestamp);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    throw new Error('Invalid training activity start or end timestamps.');
+  }
+  return localTrainingDate(startTimestamp, timezone)
+    !== localTrainingDate(endTimestamp, timezone);
+}
+
 export function normalizeTrainingSport(discipline: string | undefined): TrainingSport {
   if (discipline === 'run' || discipline === 'bike' ||
       discipline === 'swim' || discipline === 'strength') return discipline;
