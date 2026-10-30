@@ -1,5 +1,5 @@
 import {
-  buildPlanAdjustmentPreview, planExposureSignature, rawGeneratedEventSignature,
+  buildPlanAdjustmentPreview, rawGeneratedEventSignature,
   type PlanAdjustmentCandidate, type PlanAdjustmentEvent, type PlanAdjustmentPreview,
 } from '@circuit/planner';
 import {
