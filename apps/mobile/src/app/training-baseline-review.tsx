@@ -4,7 +4,7 @@ import {
   type PlanningInterruptionState,
 } from '@circuit/planner';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
@@ -69,20 +69,22 @@ export default function TrainingBaselineReviewScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const latestRequest = useRef(0);
 
   const load = useCallback(async (week: string) => {
+    const request = ++latestRequest.current;
     setError(null);
     const next = await loadTrainingBaselineReviewState({
       planningWeekStart: week, timezone,
     });
-    setState(next);
+    if (latestRequest.current === request) setState(next);
   }, [timezone]);
   useFocusEffect(useCallback(() => {
     let active = true;
     void load(targetWeek).catch(e => {
       if (active) setError(e instanceof Error ? e.message : 'Could not load the training audit.');
     });
-    return () => { active = false; };
+    return () => { active = false; latestRequest.current += 1; };
   }, [load, targetWeek]));
 
   const today = localTrainingDate(new Date().toISOString(), timezone);
@@ -99,12 +101,14 @@ export default function TrainingBaselineReviewScreen() {
       code: 'clinical', detail: 'An active PT or pain restriction is on file. Use a reviewed return plan.',
     }] : []),
   ];
-  const canApprove = Boolean(state && blocks.length === 0 && !busy);
+  const canApprove = Boolean(state?.planningWeekStart === targetWeek
+    && blocks.length === 0 && !busy);
   const updateCheck = (key: 'allTrainingRecorded' | 'providersAndManualLogsReviewed'
     | 'duplicateRecordsReconciled' | 'estimatedDurationsReviewed'
     | 'symptomContextReviewed') =>
     setReview(current => ({ ...current, [key]: !current[key] }));
   function switchWeek(next: string) {
+    latestRequest.current += 1;
     setTargetWeek(next);
     setReview({ ...NO_REVIEW });
     setState(null);
