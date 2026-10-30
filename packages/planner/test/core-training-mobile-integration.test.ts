@@ -43,6 +43,14 @@ describe('core training journey integration contract', () => {
     expect(runtime).toContain('capacity: resolveFirstWeekCapacity(goal)');
     expect(runtime).not.toContain('currentEnduranceHours: goal.disciplines.length ? 5 : 0');
   });
+  it('offers native manual completed endurance logging and manual planned-session matching', () => {
+    const logger = mobile('app/log-endurance.tsx');
+    expect(logger).toContain('createManualEnduranceActivity(');
+    expect(logger).toContain('await upsertEnduranceActivities([entry])');
+    expect(logger).toContain('/activity-review?id=');
+    expect(mobile('app/(tabs)/train.tsx')).toContain('/log-endurance');
+    expect(mobile('app/(tabs)/plan.tsx')).toContain('/log-endurance');
+  });
   it('onboarding drafts are keyed to a user rather than shared between profiles', () => {
     const onboarding = mobile('app/onboarding.tsx');
     expect(onboarding).toContain('const draftKey =');
