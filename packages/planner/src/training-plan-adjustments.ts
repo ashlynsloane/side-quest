@@ -159,7 +159,7 @@ export function buildPlanAdjustmentPreview(input: {
           eventId: record.recordId.slice('calendar:'.length),
           localDate: record.localDate,
           sport: record.sport as PlanAdjustmentCandidate['sport'],
-          title: record.recordId,
+          title: record.sport.toUpperCase() + ' · ' + record.localDate,
           currentMinutes: record.durationMinutes,
           proposedMinutes: minutes, action, current, preview,
           summary: minutes === null
