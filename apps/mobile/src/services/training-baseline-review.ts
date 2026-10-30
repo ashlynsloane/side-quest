@@ -2,6 +2,7 @@ import {
   approveWeekBaseline, assessSavedBaseline, assessWeekForBaseline,
   type ApprovedWeekSnapshot, type CoverageReviewAttestation,
   type BaselineReviewIssue, type PlanningInterruptionState,
+  evaluateExperimentalTrainingGuardrails,
 } from '@circuit/planner';
 
 import {
@@ -29,6 +30,9 @@ export interface TrainingBaselineReviewState {
   savedReasons: string[];
   forcedClinicalContext: 'none_reported' | 'active';
   currentPlanningState: PlanningInterruptionState;
+  /** Known overages only; missing daily source coverage prevents a green status. */
+  detectedWindowOverages: Array<{ window: string; dimension: string; proposed: number; ceiling: number }>;
+  rollingCoverageVerified: false;
 }
 
 /**
@@ -72,6 +76,29 @@ export async function loadTrainingBaselineReviewState(input: {
   }) : null;
   const truncated = previousWeek.historyPossiblyTruncated
     || proposedWeek.historyPossiblyTruncated;
+  const ceilingForWeek = saved && assessment?.usableForPolicyComparison && !truncated
+    ? saved.frozenAllowance : null;
+  // Only report *confirmed arithmetic overages*. All days are intentionally
+  // marked uncovered until canonical per-day coverage has been audited.
+  const evaluation = ceilingForWeek ? evaluateExperimentalTrainingGuardrails({
+    planningWeekStart: input.planningWeekStart,
+    timezone: input.timezone,
+    planningState: 'ordinary_progression',
+    frozenAllowances: [ceilingForWeek],
+    activities: [...previousWeek.plannedAndCompleted, ...proposedWeek.plannedAndCompleted]
+      .filter(record => record.localDate >= completedWeekStart
+        && record.localDate <= addLocalDays(input.planningWeekStart, 6)),
+    coveredLocalDates: [],
+    clinicalConstraintState: hard.context,
+  }) : null;
+  const detectedWindowOverages = (evaluation?.windows ?? [])
+    .flatMap(window => window.checks.filter(check => check.status === 'exceeds'
+      && check.ceiling !== null).map(check => ({
+      window: window.kind + ': ' + window.startDate + ' – ' + window.endDate,
+      dimension: check.dimension,
+      proposed: check.proposed,
+      ceiling: check.ceiling!,
+    })));
   return {
     planningWeekStart: input.planningWeekStart,
     completedWeekStart, timezone: input.timezone, previousWeek, proposedWeek,
@@ -85,6 +112,8 @@ export async function loadTrainingBaselineReviewState(input: {
     ],
     forcedClinicalContext: hard.context,
     currentPlanningState: hard.planningState,
+    detectedWindowOverages,
+    rollingCoverageVerified: false,
   };
 }
 
