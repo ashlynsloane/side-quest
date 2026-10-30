@@ -1228,11 +1228,22 @@ export async function getRawTrainingCalendarEvent(
   try { return JSON.parse(row.event_json) as TrainingCalendarEvent; }
   catch { return null; }
 }
-export async function listTrainingPlanAdjustmentEvents(): Promise<PlanAdjustmentEvent[]> {
+export async function listTrainingPlanAdjustmentEvents(
+  window?: { from: string; to: string },
+): Promise<PlanAdjustmentEvent[]> {
   await initializeDatabase();
-  const rows = await db.getAllAsync<{ decision_json: string }>(
-    'SELECT decision_json FROM training_plan_adjustment_events ORDER BY created_at ASC, rowid ASC',
-  );
+  const rows = window
+    ? await db.getAllAsync<{ decision_json: string }>(
+      `SELECT a.decision_json
+       FROM training_plan_adjustment_events a
+       JOIN training_calendar_events c ON c.id = a.source_event_id
+       WHERE c.start_at >= ? AND c.start_at <= ?
+       ORDER BY a.created_at ASC, a.rowid ASC`,
+      window.from, window.to,
+    )
+    : await db.getAllAsync<{ decision_json: string }>(
+      'SELECT decision_json FROM training_plan_adjustment_events ORDER BY created_at ASC, rowid ASC',
+    );
   return rows.flatMap(row => {
     try {
       const decision = JSON.parse(row.decision_json) as PlanAdjustmentEvent;
