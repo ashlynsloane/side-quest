@@ -118,8 +118,14 @@ export async function restoreAcceptedPlanAdjustment(input: {
   const state = await loadPlanAdjustmentReview({
     weekStartDate: input.weekStartDate, timezone: input.timezone, now: input.now,
   });
-  if (!state.ready && !state.preview?.eligibleForProposal) {
-    throw new Error('The planning baseline or clinical state needs review before increasing a session.');
+  const baseline = await loadTrainingBaselineReviewState({
+    planningWeekStart: input.weekStartDate, timezone: input.timezone,
+  });
+  if (baseline.savedStatus !== 'active'
+      || baseline.forcedClinicalContext !== 'none_reported'
+      || baseline.currentPlanningState !== 'ordinary_progression'
+      || baseline.proposedWeek.historyPossiblyTruncated) {
+    throw new Error('The planning baseline or clinical state needs review before restoring training time.');
   }
   const latest = state.latestDecisions.find(item => item.sourceEventId === input.eventId);
   if (latest?.decision !== 'accepted') throw new Error('No current approved change to restore.');
