@@ -143,6 +143,11 @@ export default function WeeklyReviewScreen() {
             style={styles.inlineButton}>
             <Text style={styles.inlineButtonText}>Review training baseline and frozen limits</Text>
           </Pressable>
+          <Pressable accessibilityRole="button"
+            onPress={() => router.push('/training-plan-adjustments' as never)}
+            style={styles.inlineButton}>
+            <Text style={styles.inlineButtonText}>Preview training-plan changes</Text>
+          </Pressable>
         </View>
 
         {loading ? <Text style={styles.helper}>Building your weekly review…</Text> : null}
