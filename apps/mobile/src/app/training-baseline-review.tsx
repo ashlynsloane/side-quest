@@ -325,8 +325,8 @@ export default function TrainingBaselineReviewScreen() {
                 planned running distances may be unknown.</Text>
             </View> : null}
             {state.detectedWindowOverages.length ? <View style={styles.issueList}>
-              <Text style={styles.warning}>The available records already exceed
-                a ceiling in these windows:</Text>
+              <Text style={styles.warning}>The apparent subtotals exceed a ceiling in these windows.
+                Source overlap may change these totals:</Text>
               {state.detectedWindowOverages.slice(0, 10).map((issue, i) =>
                 <Text key={issue.window + issue.dimension + i} style={styles.warning}>
                   • {issue.window}: {issue.dimension} {Math.round(issue.proposed * 10) / 10}
