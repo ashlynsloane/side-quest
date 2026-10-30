@@ -195,6 +195,16 @@ export default function TrainingBaselineReviewScreen() {
             total training. Days with no records are not automatically rest days.</Text>
           <Text style={styles.helper}>Sources present: {state.previousWeek.activitySources.join(', ')
             || 'none recorded'}.</Text>
+          {state.previousWeek.sourceDiagnostics.length ? <View style={styles.issueList}>
+            <Text style={styles.helper}>Connected calendar feed status (calendar plans
+              are not proof of completed workouts):</Text>
+            {state.previousWeek.sourceDiagnostics.map((source, i) =>
+              <Text key={source.name + i} style={styles.helper}>
+                • {source.name}: {source.status}; last successful sync:
+                {' '}{source.lastSuccessfulAt ?? 'not recorded'}
+              </Text>)}
+          </View> : <Text style={styles.helper}>No active external calendar
+            sources are recorded. This does not prove all training is captured.</Text>}
           {previous?.unresolvedRecords.length || previous?.sourceConflicts.length
             ? <Text style={styles.warning}>{(previous?.unresolvedRecords.length ?? 0)
               + (previous?.sourceConflicts.length ?? 0)} incomplete measurements
