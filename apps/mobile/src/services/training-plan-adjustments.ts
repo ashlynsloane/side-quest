@@ -28,11 +28,16 @@ export async function loadPlanAdjustmentReview(input: {
   now?: Date;
 }): Promise<PlanAdjustmentReviewState> {
   const dbBefore = getActiveDatabaseName();
+  const weekEnd = new Date(Date.parse(input.weekStartDate + 'T00:00:00Z') + 7 * 86400000)
+    .toISOString().slice(0, 10);
   const [review, stored] = await Promise.all([
     loadTrainingBaselineReviewState({
       planningWeekStart: input.weekStartDate, timezone: input.timezone,
     }),
-    listTrainingPlanAdjustmentEvents(),
+    listTrainingPlanAdjustmentEvents({
+      from: input.weekStartDate + 'T00:00:00.000Z',
+      to: weekEnd + 'T00:00:00.000Z',
+    }),
   ]);
   if (dbBefore !== getActiveDatabaseName()) {
     throw new Error('Athlete profile changed during plan review.');
@@ -126,6 +131,12 @@ export async function restoreAcceptedPlanAdjustment(input: {
       || baseline.currentPlanningState !== 'ordinary_progression'
       || baseline.proposedWeek.historyPossiblyTruncated) {
     throw new Error('The planning baseline or clinical state needs review before restoring training time.');
+  }
+  if (baseline.proposedWeek.evidence.sourceConflicts.length
+      || baseline.proposedWeek.historyAuditIssues.length
+      || baseline.proposedWeek.plannedAndCompleted.some(record => record.status === 'completed'
+        && record.linkedPlanRecordId === 'calendar:' + input.eventId)) {
+    throw new Error('Completed training or unresolved overlaps need review before restoring the plan.');
   }
   const latest = state.latestDecisions.find(item => item.sourceEventId === input.eventId);
   if (latest?.decision !== 'accepted') throw new Error('No current approved change to restore.');
