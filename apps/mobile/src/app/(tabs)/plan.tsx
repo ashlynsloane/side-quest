@@ -156,12 +156,13 @@ export default function PlanTab() {
       <Text style={styles.blockLabel}>ACTUAL VERSUS PLANNED</Text>
       <Text style={styles.blockTitle}>Training evidence this week</Text>
       {weekEvidence ? <>
-        <Text style={styles.evidenceText}>{weekEvidence.completed.count} completed activity records · {Math.round(weekEvidence.completed.combinedMinutes)} minutes recorded or estimated</Text>
-        <Text style={styles.evidenceText}>{weekEvidence.remainingPlanned.count} planned sessions not verified completed · {Math.round(weekEvidence.remainingPlanned.combinedMinutes)} minutes with known or estimated duration</Text>
+        <Text style={styles.evidenceText}>{weekEvidence.completed.count === 0 ? 'No completed training recorded in this week.' : `${weekEvidence.completed.count} completed records · ${weekEvidence.completed.combinedMinutes > 0 ? `${Math.round(weekEvidence.completed.combinedMinutes)} min with available duration data` : 'durations currently unknown'}`}</Text>
+        <Text style={styles.evidenceText}>{weekEvidence.remainingPlanned.count} planned sessions not verified completed · {weekEvidence.remainingPlanned.combinedMinutes > 0 ? `${Math.round(weekEvidence.remainingPlanned.combinedMinutes)} min from available planning estimates` : 'duration unavailable or no scheduled sessions'}</Text>
         <Text style={styles.evidenceWarning}>Source coverage and baseline eligibility are not yet verified. This is not an approved training progression allowance.</Text>
         {weekEvidence.unresolvedRecords.length || weekEvidence.sourceConflicts.length ? <Text style={styles.evidenceWarning}>{weekEvidence.unresolvedRecords.length + weekEvidence.sourceConflicts.length} record fields or source conflicts need review before calculating reliable weekly volume.</Text> : null}
       </> : <Text style={styles.evidenceWarning}>{evidenceWarning ?? 'Loading completed training evidence…'}</Text>}
-      <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Inspect completed training history</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/weekly-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review recorded training and the week</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Inspect full training history</Text></Pressable>
     </V23Card>
 
     {block ? <V23Card style={styles.blockSummary}>
