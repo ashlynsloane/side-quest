@@ -33,6 +33,7 @@ Previously the Today and Train buttons opened `setPreviewWorkout(next.workout)`,
 - It no longer claims calendar completion before the local persistence promise succeeds.
 - A failed save leaves the live workout checkpoint available and offers retry.
 - The original partial/full completion fraction and timestamp are retained across retries, preventing a partial workout from being silently transformed into full completion.
+- A stable start-time-based workout idempotency key is persisted in the active checkpoint and reused after app restart; the ledger, social lookup, feedback and reflection reference that same identity. A restart retry repairs the previous completion instead of creating a second entry.
 - Existing completed-workout idempotency now repairs derived training memory and planned-session status after a previous attempt committed the workout but failed during its post-commit updates.
 
 The main workout ledger remains authoritative; optional cloud social publishing cannot revoke a successful local completion.
