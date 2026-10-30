@@ -1,6 +1,6 @@
 // Legacy validation compatibility: THIS WEEK’S FOCUS; Strength priority; <DisclosureGroup; Current block; metricRow; More planning tools; This week; FOCUS THIS WEEK; Why this week?.
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
-import { localTrainingDate, type TrainingWeekEvidence } from '@circuit/planner';
+import { localCalendarDate, localTrainingDate, type TrainingWeekEvidence } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -190,7 +190,7 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
-    const iso = date.toISOString().slice(0, 10);
+    const iso = localCalendarDate(date);
     const items: DayItem[] = [
       ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline })),
       ...strength.filter((session) => session.date === iso).map((session) => {
