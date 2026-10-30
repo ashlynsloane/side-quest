@@ -56,7 +56,11 @@ function activity(
     ...extra,
   };
 }
-const nextWeek = frozen('2026-08-10');
+const nextWeek = frozen('2026-08-10', {
+  ...approved, id: 'approved-2026-08-03',
+  startDate: '2026-08-03', endDate: '2026-08-09',
+  approvedAt: '2026-08-09T23:00:00Z',
+});
 const thisWeek = frozen('2026-08-03');
 function evaluate(
   activities: TrainingExposureRecord[],
@@ -214,7 +218,7 @@ describe('experimental athlete-selected planning policy', () => {
   it('zero running baseline does not authorize a return to running', () => {
     const baseline = frozen('2026-08-03', { ...approved, runDistanceKm: 0 });
     const result = evaluate([activity('new-run', '2026-08-04', 'run', 20, 2)], {
-      frozenAllowances: [baseline, { ...baseline, planningWeekStart: '2026-08-10' }],
+      frozenAllowances: [baseline, { ...nextWeek, runDistanceCapKm: null }],
     });
     expect(result.status).toBe('baseline_required');
     expect(result.windows[0]!.checks.find(c => c.dimension === 'runDistanceKm')?.status)
@@ -226,6 +230,15 @@ describe('experimental athlete-selected planning policy', () => {
       baseline: { ...approved, eligibility: 'needs_review' },
       planningWeekStart: '2026-08-03', planningState: 'ordinary_progression',
       frozenAt: '2026-08-03T08:00:00Z',
+    });
+    expect(result.status).toBe('baseline_required');
+  });
+
+  it('does not reactivate a historical peak week as an ordinary baseline', () => {
+    const result = freezeExperimentalTrainingAllowance({
+      baseline: approved, planningWeekStart: '2026-08-10',
+      planningState: 'ordinary_progression',
+      frozenAt: '2026-08-10T08:00:00Z',
     });
     expect(result.status).toBe('baseline_required');
   });
