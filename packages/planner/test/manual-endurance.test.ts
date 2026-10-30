@@ -42,6 +42,11 @@ describe('manual completed endurance workouts', () => {
       ...input, distanceKm: -2,
     })).toThrow(/Distance/);
   });
+  it('does not allow an actual completed workout to be entered for tomorrow', () => {
+    expect(() => createManualEnduranceActivity({
+      ...input, localDate: '2026-11-03',
+    })).toThrow(/future date/);
+  });
   it('gives each entry an explicit stable identity suitable for local idempotency', () => {
     const row = createManualEnduranceActivity(input);
     expect(row.id).toBe('manual-test-1');
