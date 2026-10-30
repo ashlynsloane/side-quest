@@ -5,7 +5,7 @@ import {
 import type { TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
 
 import { getTrainingCalendarEvents, getLatestTrainingBlock, listTrainingCalendarSources } from './database';
-import { loadTrainingHistory, type TrainingHistoryItem } from './training-history';
+import { loadTrainingHistoryForRange, type TrainingHistoryItem } from './training-history';
 
 /**
  * Read-only translation from existing Side Quest sources into canonical week
@@ -17,8 +17,11 @@ import { loadTrainingHistory, type TrainingHistoryItem } from './training-histor
 export interface CoreTrainingWeekAudit {
   evidence: TrainingWeekEvidence;
   plannedAndCompleted: TrainingExposureRecord[];
-  /** A capped query cannot prove full historical coverage. */
+  /** Unreadable, incomplete or concurrently changed source rows block approval. */
   historyPossiblyTruncated: boolean;
+  historyAuditIssues: string[];
+  rowsRead: { strength: number; endurance: number };
+  rowsExpected: { strength: number; endurance: number };
   activitySources: string[];
   sourceDiagnostics: Array<{ name: string; status: string; lastSuccessfulAt: string | null }>;
 }
@@ -28,17 +31,20 @@ export async function loadCoreTrainingWeekAudit(
   weekStartDate: string,
   timezone: string,
 ): Promise<CoreTrainingWeekAudit> {
+  // Widen UTC query around athlete-local dates to cover timezone extremes.
+  const fromDate = new Date(weekStartDate + 'T00:00:00Z');
+  fromDate.setUTCDate(fromDate.getUTCDate() - 2);
+  const untilDate = new Date(weekStartDate + 'T00:00:00Z');
+  untilDate.setUTCDate(untilDate.getUTCDate() + 9);
   const end = new Date(weekStartDate + 'T00:00:00Z');
   end.setUTCDate(end.getUTCDate() + 7);
-  const first = new Date(weekStartDate + 'T00:00:00Z');
-  first.setUTCDate(first.getUTCDate() - 1);
-  const limit = 2000;
-  const [saved, events, history, sources] = await Promise.all([
+  const [saved, events, historyAudit, sources] = await Promise.all([
     getLatestTrainingBlock(),
-    getTrainingCalendarEvents({ from: first.toISOString(), to: end.toISOString() }),
-    loadTrainingHistory(limit),
+    getTrainingCalendarEvents({ from: fromDate.toISOString(), to: untilDate.toISOString() }),
+    loadTrainingHistoryForRange({ from: fromDate.toISOString(), to: untilDate.toISOString() }),
     listTrainingCalendarSources(),
   ]);
+  const history = historyAudit.history;
   const records = [
     ...plannedStrengthRecords(saved?.block ?? null, weekStartDate,
       new Date(end.getTime() - 1).toISOString().slice(0, 10)),
@@ -51,7 +57,10 @@ export async function loadCoreTrainingWeekAudit(
   });
   return {
     evidence, plannedAndCompleted: records,
-    historyPossiblyTruncated: history.length >= limit,
+    historyPossiblyTruncated: !historyAudit.complete,
+    historyAuditIssues: historyAudit.issues,
+    rowsRead: historyAudit.rowsRead,
+    rowsExpected: historyAudit.rowsExpected,
     activitySources: [...new Set(records.map(record => record.source))].sort(),
     sourceDiagnostics: sources.filter(source => source.active && source.sourceType !== 'manual')
       .map(source => ({
