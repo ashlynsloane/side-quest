@@ -108,6 +108,18 @@ export default function WeeklyReviewScreen() {
           </Text>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Next-week planning limits</Text>
+          <Text style={styles.helper}>Review the prior completed week before any ordinary
+            progression. Source coverage, missing training and interruption context must
+            be confirmed explicitly. These ceilings are not training targets or medical clearance.</Text>
+          <Pressable accessibilityRole="button"
+            onPress={() => router.push('/training-baseline-review' as never)}
+            style={styles.inlineButton}>
+            <Text style={styles.inlineButtonText}>Review training baseline and frozen limits</Text>
+          </Pressable>
+        </View>
+
         {loading ? <Text style={styles.helper}>Building your weekly review…</Text> : null}
 
         <View style={styles.metricGrid}>
