@@ -2053,20 +2053,24 @@ export async function listWorkoutLedgerEntries({
   from,
   to,
   limit = 100,
-}: { from?: string; to?: string; limit?: number } = {}): Promise<WorkoutLedgerEntry[]> {
+  offset = 0,
+}: { from?: string; to?: string; limit?: number; offset?: number } = {}): Promise<WorkoutLedgerEntry[]> {
   await initializeDatabase();
   const clauses: string[] = [];
   const args: Array<string | number> = [];
   if (from) { clauses.push('completed_at >= ?'); args.push(from); }
   if (to) { clauses.push('completed_at <= ?'); args.push(to); }
-  args.push(limit);
+  if (!Number.isInteger(limit) || limit < 1 || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid workout pagination.');
+  }
+  args.push(limit, offset);
   const rows = await db.getAllAsync<{
     id: string; source: WorkoutLedgerSource; name: string; workout_json: string | null;
     exercises_json: string; started_at: string; completed_at: string; completion_fraction: number;
     station_rounds_json: string; notes: string | null; planned_session_id: string | null;
     relation_to_plan: WorkoutPlanRelation; created_at: string; updated_at: string;
   }>(`SELECT * FROM workout_ledger ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
-      ORDER BY completed_at DESC LIMIT ?`, ...args);
+      ORDER BY completed_at DESC, id DESC LIMIT ? OFFSET ?`, ...args);
   return rows.flatMap((row) => {
     try {
       return [{
@@ -2341,17 +2345,21 @@ export async function listEnduranceActivities({
   to,
   includeDeleted = false,
   limit = 500,
-}: { from?: string; to?: string; includeDeleted?: boolean; limit?: number } = {}): Promise<EnduranceActivity[]> {
+  offset = 0,
+}: { from?: string; to?: string; includeDeleted?: boolean; limit?: number; offset?: number } = {}): Promise<EnduranceActivity[]> {
   await initializeDatabase();
   const clauses: string[] = [];
   const args: Array<string | number> = [];
   if (from) { clauses.push('start_at >= ?'); args.push(from); }
   if (to) { clauses.push('start_at <= ?'); args.push(to); }
   if (!includeDeleted) clauses.push('deleted_at IS NULL');
-  args.push(limit);
+  if (!Number.isInteger(limit) || limit < 1 || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid endurance pagination.');
+  }
+  args.push(limit, offset);
   const rows = await db.getAllAsync<{ activity_json: string }>(
     `SELECT activity_json FROM endurance_activities ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
-     ORDER BY start_at DESC LIMIT ?`, ...args,
+     ORDER BY start_at DESC, id DESC LIMIT ? OFFSET ?`, ...args,
   );
   return rows.flatMap((row) => {
     try { return [JSON.parse(row.activity_json) as EnduranceActivity]; } catch { return []; }
