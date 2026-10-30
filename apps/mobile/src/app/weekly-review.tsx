@@ -16,6 +16,7 @@ import {
   type WorkoutReflection,
 } from '@/services/database';
 import { buildWeeklyCoachNotes, readinessSummary, type WeeklyReadinessSummary } from '@/services/readiness';
+import { loadTrainingBaselineReviewState, type TrainingBaselineReviewState } from '@/services/training-baseline-review';
 
 type ReviewData = {
   sessions: PlannedStrengthSession[];
@@ -39,11 +40,19 @@ export default function WeeklyReviewScreen() {
   const router = useRouter();
   const [data, setData] = useState<ReviewData>(EMPTY);
   const [loading, setLoading] = useState(true);
+  const [baseline, setBaseline] = useState<TrainingBaselineReviewState | null>(null);
+  const [baselineError, setBaselineError] = useState<string | null>(null);
   const range = useMemo(() => weekRange(new Date()), []);
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
     setLoading(true);
+    setBaseline(null);
+    setBaselineError(null);
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    void loadTrainingBaselineReviewState({ planningWeekStart: range.start, timezone })
+      .then(state => { if (!cancelled) setBaseline(state); })
+      .catch(e => { if (!cancelled) setBaselineError(e instanceof Error ? e.message : 'Review could not load.'); });
     const fromTimestamp = `${range.start}T00:00:00.000`;
     const toTimestamp = `${range.end}T23:59:59.999`;
     void Promise.all([
@@ -113,6 +122,22 @@ export default function WeeklyReviewScreen() {
           <Text style={styles.helper}>Review the prior completed week before any ordinary
             progression. Source coverage, missing training and interruption context must
             be confirmed explicitly. These ceilings are not training targets or medical clearance.</Text>
+          <Text style={styles.helper}>Baseline review status: {baselineError
+            ? 'Unavailable — review the source audit'
+            : !baseline ? 'Loading review…'
+              : baseline.savedStatus.replaceAll('_', ' ')}.</Text>
+          {baseline?.savedStatus === 'active' && baseline.saved ? <>
+            <Text style={styles.helper}>Frozen experiment: Running {
+              baseline.saved.frozenAllowance.runDistanceCapKm === null
+                ? 'no increase from zero baseline'
+                : (baseline.saved.frozenAllowance.runDistanceCapKm / 1.609344).toFixed(1) + ' mi'
+            } · Cycling {baseline.saved.frozenAllowance.cyclingMinutesCap ?? 'unavailable'} min
+              · All training {baseline.saved.frozenAllowance.combinedMinutesCap ?? 'unavailable'} min.</Text>
+            <Text style={styles.helper}>Athlete-attested source coverage, not provider verified.
+              {baseline.detectedWindowOverages.length
+                ? ' Some available weekly/rolling-window records already exceed a ceiling.'
+                : ' Rolling compliance remains unverified.'}</Text>
+          </> : null}
           <Pressable accessibilityRole="button"
             onPress={() => router.push('/training-baseline-review' as never)}
             style={styles.inlineButton}>
