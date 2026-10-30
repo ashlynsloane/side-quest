@@ -32,6 +32,8 @@ export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, c
 export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
 export { comparePlannedWeekWithFrozenLimits } from './training-week-comparison';
 export { buildPlanAdjustmentPreview, applyAcceptedPlanAdjustments, rawGeneratedEventSignature, planExposureSignature } from './training-plan-adjustments';
+export { PLAN_ADJUSTMENT_TABLE_SQL, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, effectiveTrainingCalendarEvents } from './training-adjustment-sqlite';
+export type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
 export type { PlanAdjustmentEvent, PlanAdjustmentCandidate, PlanAdjustmentPreview, PlanAdjustmentAction, PlanAdjustmentDecision } from './training-plan-adjustments';
 export { trainingSourceQueryEnvelope } from './training-source-window';
 export type { TrainingSourceQueryEnvelope } from './training-source-window';
