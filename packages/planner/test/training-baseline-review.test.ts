@@ -101,6 +101,15 @@ describe('explicit previous-week baseline review', () => {
     expect(unreviewed.issues.map(x => x.code)).toContain('estimated_duration');
     expect(approveWeekBaseline(params(rows)).status).toBe('approved');
   });
+  it('blocks a new frozen allowance if the target week already has completed work', () => {
+    const result = approveWeekBaseline({
+      ...params(), targetWeekCompletedCount: 1,
+    });
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') {
+      expect(result.issues.map(i => i.code)).toContain('retroactive_freeze');
+    }
+  });
   it('does not approve a zero-training week or missing note', () => {
     const result = approveWeekBaseline(params([]));
     expect(result.status).toBe('rejected');
