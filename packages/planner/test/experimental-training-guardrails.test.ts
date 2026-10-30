@@ -263,6 +263,13 @@ describe('experimental athlete-selected planning policy', () => {
     expect(evaluate([], { clinicalConstraintState: 'unknown' }).status).toBe('review_required');
   });
 
+  it('does not greenlight a ceiling check based on an estimated duration', () => {
+    const r = evaluate([activity('strength-timer-estimate', '2026-08-04', 'strength', 30,
+      undefined, { durationEstimate: true })]);
+    expect(r.status).toBe('review_required');
+    expect(r.reviewItems.join(' ')).toContain('Duration estimated');
+  });
+
   it('flags intensity, hills, novelty and pain-related substitutions separately', () => {
     const result = evaluate([
       activity('hill-run', '2026-08-05', 'run', 20, 2, {
