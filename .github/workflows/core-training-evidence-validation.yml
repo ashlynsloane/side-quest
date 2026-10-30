@@ -6,6 +6,7 @@ on:
       - feat/core-training-evidence-review-v1
       - feat/training-week-baseline-approval-v1
       - feat/training-source-window-audit-v1
+      - feat/explicit-training-plan-adjustments-v1
   pull_request:
     branches:
       - feat/experimental-training-ramp-guardrails
