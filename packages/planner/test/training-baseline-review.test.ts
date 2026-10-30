@@ -123,6 +123,19 @@ describe('explicit previous-week baseline review', () => {
     expect(changed.usableForPolicyComparison).toBe(false);
     expect(changed.reasons.join(' ')).toContain('history changed');
   });
+  it('invalidates a saved baseline if sessions move to different days with same weekly total', () => {
+    const first = week([
+      activity('a', '2026-10-27', 70),
+      activity('b', '2026-10-29', 30),
+    ]);
+    const shifted = week([
+      activity('a', '2026-10-28', 70),
+      activity('b', '2026-10-28', 30),
+    ]);
+    expect(first.completed.combinedMinutes).toBe(100);
+    expect(shifted.completed.combinedMinutes).toBe(100);
+    expect(baselineSourceSignature(first)).not.toEqual(baselineSourceSignature(shifted));
+  });
   it('prevents an approved old snapshot from overriding new clinical uncertainty', () => {
     const result = approveWeekBaseline(params());
     if (result.status !== 'approved') throw new Error('fixture failure');
