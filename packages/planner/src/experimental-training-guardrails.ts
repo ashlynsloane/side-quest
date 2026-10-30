@@ -377,7 +377,8 @@ export function evaluateExperimentalTrainingGuardrails(input: {
    * or an intentionally complete future plan. Missing dates cannot yield a green pass.
    */
   coveredLocalDates: string[];
-  clinicalConstraintActive?: boolean;
+  /** The caller must explicitly report this; absence is not clinical clearance. */
+  clinicalConstraintState: 'none_reported' | 'active' | 'unknown';
 }): TrainingGuardrailEvaluation {
   validateTimezone(input.timezone);
   if (monday(input.planningWeekStart) !== input.planningWeekStart) {
@@ -449,7 +450,8 @@ export function evaluateExperimentalTrainingGuardrails(input: {
   let status: GuardrailStatus;
   if (requiresReturnPlan(input.planningState)) status = 'return_plan_required';
   else if (input.planningState === 'uninitialized') status = 'baseline_required';
-  else if (input.clinicalConstraintActive || input.planningState !== 'ordinary_progression') {
+  else if (input.clinicalConstraintState !== 'none_reported'
+    || input.planningState !== 'ordinary_progression') {
     status = 'review_required';
   } else if (allChecks.some(c => c.status === 'exceeds')) status = 'exceeds_policy';
   else if (allChecks.some(c => c.status === 'baseline_required')) status = 'baseline_required';
@@ -473,8 +475,8 @@ export function evaluateExperimentalTrainingGuardrails(input: {
       ...(status === 'insufficient_data'
         ? ['Data or future frozen ceilings are incomplete. Compliance cannot be confirmed.']
         : []),
-      ...(input.clinicalConstraintActive
-        ? ['Clinical constraints take precedence over experimental progression allowances.']
+      ...(input.clinicalConstraintState !== 'none_reported'
+        ? ['Clinical constraints or uncertainty take precedence over experimental progression allowances.']
         : []),
     ],
   };
