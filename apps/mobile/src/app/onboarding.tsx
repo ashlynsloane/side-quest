@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen, Surface } from '@/components/v12-ui';
 import { useOnboarding } from '@/state/onboarding-context';
+import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 import { type AppPalette } from '@/theme';
 
@@ -31,15 +32,17 @@ type OnboardingDraft = { step: Step; goal: GoalChoice; priority: PriorityChoice;
 const DRAFT_KEY = 'sidequest.onboarding.first-week-draft.v1';
 type DraftStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
 const draftStorage = (globalThis as typeof globalThis & { localStorage?: DraftStorage }).localStorage;
-function loadDraft(): Partial<OnboardingDraft> { try { const raw = draftStorage?.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) as Partial<OnboardingDraft> : {}; } catch { return {}; } }
-function saveDraft(draft: OnboardingDraft): void { try { draftStorage?.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* setup can still continue without persistence */ } }
+function loadDraft(key: string): Partial<OnboardingDraft> { try { const raw = draftStorage?.getItem(key); return raw ? JSON.parse(raw) as Partial<OnboardingDraft> : {}; } catch { return {}; } }
+function saveDraft(key: string, draft: OnboardingDraft): void { try { draftStorage?.setItem(key, JSON.stringify(draft)); } catch { /* setup can still continue without persistence */ } }
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { acknowledgeStrengthModel, acknowledgePrivacyModel } = useOnboarding();
+  const { user } = useAuth();
+  const draftKey = `${DRAFT_KEY}.${user?.id ?? 'guest'}`;
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
-  const initialDraft = useMemo(loadDraft, []);
+  const initialDraft = useMemo(() => loadDraft(draftKey), [draftKey]);
   const [step, setStep] = useState<Step>(initialDraft.step ?? 'welcome');
   const [goal, setGoal] = useState<GoalChoice>(initialDraft.goal ?? 'ironman_70_3');
   const [priority, setPriority] = useState<PriorityChoice>(initialDraft.priority ?? 'perform');
@@ -52,7 +55,7 @@ export default function OnboardingScreen() {
   const [injury, setInjury] = useState<InjuryChoice>(initialDraft.injury ?? 'none');
   const [strength, setStrength] = useState<StrengthChoice>(initialDraft.strength ?? 'intermediate');
 
-  useEffect(() => { saveDraft({ step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength }); }, [step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength]);
+  useEffect(() => { saveDraft(draftKey, { step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength }); }, [draftKey, step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength]);
 
   const stepIndex = STEPS.indexOf(step);
   const progress = Math.max(0, stepIndex) / (STEPS.length - 1);

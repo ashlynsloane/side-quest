@@ -1,6 +1,7 @@
 // V23ScenicBanner variant="strength" is intentionally retired from the visible Train layout.
 // Legacy validation compatibility: Generate a strength session; <DisclosureGroup; MOST RECENT; More workout tools; Goal-plan strength; SUGGESTED ACTION.
 import type { PlannedStrengthSession, TrainingBlockPlan } from '@circuit/domain';
+import { localCalendarDate } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -14,7 +15,7 @@ export default function TrainTab() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { setPreviewWorkout } = useWorkoutContext();
+  const { openPlannedWorkoutPreview } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [lastWorkout, setLastWorkout] = useState<WorkoutLedgerEntry | null>(null);
 
@@ -27,7 +28,7 @@ export default function TrainTab() {
   }, []));
 
   const next = useMemo(() => nextSession(block), [block]);
-  const openNext = () => { if (next) { setPreviewWorkout(next.workout); router.push('/workout-preview' as Href); return; } router.push('/generate' as Href); };
+  const openNext = () => { if (next) { openPlannedWorkoutPreview(next); router.push('/workout-preview' as Href); return; } router.push('/generate' as Href); };
 
   return <V23Screen>
     <View style={styles.intro}><Text style={styles.pageTitle}>Train</Text><Text style={styles.pageBody}>Strength that fits the rest of your training.</Text></View>
@@ -47,6 +48,7 @@ export default function TrainTab() {
     <V23SectionHeader>Other options</V23SectionHeader>
     <V23GroupedList>
       <V23Row title="Exercise library" detail="Browse movements and demonstrations" onPress={() => router.push('/exercise-library' as Href)} icon={<V23Icon name="search" color={tokens.accent} size={20} />} />
+      <V23Row title="Log a completed run, ride or swim" detail="Manually record actual training when no watch import is available" onPress={() => router.push('/log-endurance' as Href)} icon={<V23Icon name="log" color={tokens.accent} size={20} />} />
       <V23Row title="Log a completed session" detail="Record strength you did elsewhere" onPress={() => router.push('/log-workout' as Href)} icon={<V23Icon name="log" color={tokens.accent} size={20} />} />
       <V23Row title="Need a shorter option?" detail="Keep the intent with less volume" onPress={() => router.push('/session-rescue' as Href)} icon={<V23Icon name="adjust" color={tokens.accent} size={20} />} last />
     </V23GroupedList>
@@ -54,7 +56,7 @@ export default function TrainTab() {
 }
 
 function Bullet({ children, tokens }: { children: string; tokens: DesignTokens }) { return <View style={stylesStatic.bulletRow}><View style={[stylesStatic.bulletDot, { backgroundColor: tokens.accent }]} /><Text style={[stylesStatic.bulletText, { color: tokens.text }]}>{children}</Text></View>; }
-function nextSession(block: TrainingBlockPlan | null): PlannedStrengthSession | null { if (!block) return null; const today = new Date().toISOString().slice(0, 10); return block.weeks.flatMap((week) => week.sessions).filter((session) => session.date >= today && !['completed', 'skipped'].includes(session.completionStatus)).sort((a, b) => a.date.localeCompare(b.date))[0] ?? null; }
+function nextSession(block: TrainingBlockPlan | null): PlannedStrengthSession | null { if (!block) return null; const today = localCalendarDate(new Date()); return block.weeks.flatMap((week) => week.sessions).filter((session) => session.date >= today && !['completed', 'skipped'].includes(session.completionStatus)).sort((a, b) => a.date.localeCompare(b.date))[0] ?? null; }
 function capitalize(value: string) { return value.charAt(0).toUpperCase() + value.slice(1).replaceAll('_', ' '); }
 
 const stylesStatic = StyleSheet.create({ bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 9 }, bulletDot: { width: 5, height: 5, borderRadius: 3 }, bulletText: { fontSize: 15, lineHeight: 21 } });

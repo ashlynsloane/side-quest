@@ -527,7 +527,17 @@ export async function saveCompletedWorkout({
     'SELECT id FROM completed_workouts WHERE id = ? LIMIT 1',
     workoutInstanceId,
   );
-  if (existing) return;
+  if (existing) {
+    // A prior attempt can commit the workout ledger and fail before updating
+    // derived memory or the planned-session status. A retry must repair those
+    // derived views rather than silently returning with a stale plan.
+    await rebuildDerivedTrainingMemory();
+    await markPlannedSessionCompletedForWorkout(
+      workout.id, plannedSessionId,
+      friendSubstitution ? { ...friendSubstitution, completedAt } : undefined,
+    );
+    return;
+  }
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(

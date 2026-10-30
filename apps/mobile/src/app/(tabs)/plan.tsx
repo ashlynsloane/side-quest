@@ -1,6 +1,6 @@
 // Legacy validation compatibility: THIS WEEK’S FOCUS; Strength priority; <DisclosureGroup; Current block; metricRow; More planning tools; This week; FOCUS THIS WEEK; Why this week?.
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
-import { localTrainingDate, type TrainingWeekEvidence } from '@circuit/planner';
+import { localCalendarDate, localTrainingDate, type TrainingWeekEvidence } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -164,12 +164,19 @@ export default function PlanTab() {
       <Pressable accessibilityRole="button" onPress={() => router.push('/weekly-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review recorded training and the week</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-baseline-review' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Review source coverage and weekly limits</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-plan-adjustments' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Preview training-plan changes</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/log-endurance' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Record a completed run, ride or swim</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => router.push('/training-history' as Href)} style={styles.evidenceLink}><Text style={styles.evidenceLinkText}>Inspect full training history</Text></Pressable>
     </V23Card>
 
     {block ? <V23Card style={styles.blockSummary}>
       <Text style={styles.blockLabel}>Current block</Text>
       <Text style={styles.blockTitle}>{block.goal.name}</Text>
+      {block.goal.capacityProfile?.enduranceHoursEvidence !== 'source_observed'
+        ? <Text style={styles.evidenceWarning}>The proposed endurance schedule uses
+          {block.goal.capacityProfile?.enduranceHoursEvidence === 'athlete_reported'
+            ? ' athlete-reported context' : ' unverified availability or missing recent training history'}.
+          It is not a measured training-tolerance baseline or an approved progression.</Text>
+        : null}
       <View style={styles.chips}>
         <V23Chip>{block.weeks.find((week) => anchorDate >= week.weekStartDate && anchorDate <= addDays(week.weekStartDate, 6))?.phase.replaceAll('_', ' ') ?? block.weeks[0]?.phase.replaceAll('_', ' ') ?? 'training'}</V23Chip>
         {counts.swim ? <V23Chip tone="info">{counts.swim} swim</V23Chip> : null}
@@ -190,7 +197,7 @@ function weekDays(events: TrainingCalendarEvent[], strength: PlannedStrengthSess
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
-    const iso = date.toISOString().slice(0, 10);
+    const iso = localCalendarDate(date);
     const items: DayItem[] = [
       ...events.filter((event) => event.startAt.slice(0, 10) === iso).map((event) => ({ id: event.id, kind: 'event' as const, title: conciseSessionLabel({ discipline: event.discipline, title: event.title }), meta: eventMeta(event), discipline: event.discipline })),
       ...strength.filter((session) => session.date === iso).map((session) => {
