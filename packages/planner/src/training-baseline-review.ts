@@ -66,6 +66,7 @@ export function baselineSourceSignature(evidence: TrainingWeekEvidence): string 
     recordIds: uniqueSorted(evidence.completedRecordIds),
     sources: uniqueSorted(evidence.completedSourceIds),
     completed: evidence.completed,
+    completedRecordRows: evidence.completedRecordRows,
     completedUnresolved: uniqueSorted(evidence.unresolvedRecords
       .filter(issue => evidence.completedRecordIds.includes(issue.recordId))
       .map(issue => issue.recordId + ':' + issue.reason)),
