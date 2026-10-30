@@ -8,6 +8,7 @@ on:
       - feat/training-source-window-audit-v1
       - feat/explicit-training-plan-adjustments-v1
       - test/training-adjustment-persistence-release-gate-v1
+      - test/training-adjustment-persistence-release-gate-v1
   pull_request:
     branches:
       - feat/experimental-training-ramp-guardrails
