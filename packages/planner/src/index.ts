@@ -28,7 +28,7 @@ import type {
 import { createWorkoutVariant, generateWorkout } from '@circuit/generator';
 import { evaluateStrengthLoad, scaleWorkMinutes } from './strength-load-management';
 export { evaluateStrengthLoad } from './strength-load-management';
-export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, proposeCompletedWeekBaseline } from './core-training-week-evidence';
+export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
 export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
 export { comparePlannedWeekWithFrozenLimits } from './training-week-comparison';
 export { trainingSourceQueryEnvelope } from './training-source-window';
