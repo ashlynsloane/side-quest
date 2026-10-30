@@ -10,7 +10,7 @@ import {
   getActiveTrainingCheckIn, getLatestPTProfile,
   getLatestTrainingBaselineReviewEvent,
 } from './database';
-import { currentLocalWeekStart, loadCoreTrainingWeekAudit,
+import { loadCoreTrainingWeekAudit,
   type CoreTrainingWeekAudit } from './core-training-week-evidence';
 
 function addLocalDays(localDate: string, days: number): string {
@@ -133,10 +133,7 @@ export async function approveAndSaveTrainingBaseline(input: {
   now: Date;
 }): Promise<SaveTrainingBaselineReviewResult> {
   const dbBefore = getActiveDatabaseName();
-  const currentLocal = currentLocalWeekStart(input.timezone, input.now);
   const today = (() => {
-    const day = currentLocal;
-    const date = new Date(day + 'T00:00:00Z');
     const localNow = new Intl.DateTimeFormat('en-US', {
       year: 'numeric', month: '2-digit', day: '2-digit',
       timeZone: input.timezone,
