@@ -37,7 +37,13 @@ Previously the Today and Train buttons opened `setPreviewWorkout(next.workout)`,
 
 The main workout ledger remains authoritative; optional cloud social publishing cannot revoke a successful local completion.
 
-### 5. Athlete-local dates and profile scope
+### 5. Manual completed endurance logging
+
+The Train and Week screens now offer an explicit native path to record a **completed** run, ride or swim when no connected data are available. The form validates sport, athlete-local date, actual duration, optional distance and reported intensity. It persists to the same canonical `endurance_activities` table used by the source auditor. Unknown distance stays **unknown**, never inferred from pace or duration, and future-dated completed activities are rejected.
+
+After saving, the athlete is routed to the existing activity-review screen to explicitly match the record with a planned event if appropriate. It does not treat a plan as proof of completion, automatically change next week's limits, or prescribe a new session.
+
+### 6. Athlete-local dates and profile scope
 
 - Shared `first-week-dates` helpers avoid shifting planned sessions across weekdays due to `toISOString()` conversion, including DST/year boundaries.
 - The Week list renders local calendar days rather than UTC date portions of local timestamps.
@@ -47,7 +53,8 @@ The main workout ledger remains authoritative; optional cloud social publishing 
 
 Dedicated planner tests:
 - `core-first-week-journey.test.ts`: seven-day combined training preview, synthetic swim/bike/run/strength sessions, missing durations, source exclusion, legacy and current capacity provenance, date boundaries.
-- `core-training-mobile-integration.test.ts`: verifies the actual mobile route handoffs and completion-status integrity wiring; this is a **source-wiring regression test**, not a substitute for native interaction testing.
+- `core-training-mobile-integration.test.ts`: verifies actual mobile route handoffs, manual endurance logging and completion-status integrity wiring; this is a **source-wiring regression test**, not a substitute for native interaction testing.
+- `manual-endurance.test.ts`: validates actual completed endurance data, unknown running distance, date/duration bounds, future-completion rejection and stable record IDs.
 
 Existing comprehensive planner tests and real-SQLite plan-decision tests remain in the suite. CI adds mobile/planner typecheck, planner tests, and Expo iOS JavaScript bundle export.
 
