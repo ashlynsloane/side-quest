@@ -101,7 +101,17 @@ export function buildTrainingWeekEvidence(input: TrainingWeekEvidenceInput): Tra
     add(row.status === 'completed' ? completed : remainingPlanned, row);
     unresolvedRecords.push(...unresolved(row));
   }
-  const conflicts = reconciled.issues;
+  // A same-sport planned and completed record on the same date may be two
+  // separate sessions, or the same workout without explicit linkage. Do not
+  // guess, merge, or call the combined total complete.
+  const conflicts = [...reconciled.issues];
+  for (const planned of reconciled.records.filter(r => r.status === 'planned')) {
+    if (reconciled.records.some(actual => actual.status === 'completed'
+      && actual.localDate === planned.localDate && actual.sport === planned.sport)) {
+      conflicts.push('Review unlinked planned/completed ' + planned.sport
+        + ' sessions on ' + planned.localDate);
+    }
+  }
   const clean = unresolvedRecords.length === 0 && conflicts.length === 0;
   const sourceVerified = input.coverage === 'verified' && clean;
   return {
