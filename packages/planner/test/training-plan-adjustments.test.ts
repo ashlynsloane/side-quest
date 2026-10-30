@@ -72,6 +72,16 @@ describe('explicit athlete-reviewed plan changes', () => {
     expect(p.eligibleForProposal).toBe(false);
     expect(p.explanations.join(' ')).toContain('duplicate or unlinked');
   });
+  it('does not offer to modify a planned session already superseded by completed training', () => {
+    const plan = row('bike-1', 'bike', 250);
+    const actual: TrainingExposureRecord = {
+      ...row('actual-bike', 'bike', 400), status: 'completed',
+      source: 'Completed activity: strava',
+      linkedPlanRecordId: plan.recordId,
+    };
+    const p = preview([plan, actual]);
+    expect(p.candidates.some(c => c.eventId === 'bike-1')).toBe(false);
+  });
   it('blocks previews without approved policy eligibility', () => {
     const p = preview([row('bike-1', 'bike', 240)], false);
     expect(p.candidates).toEqual([]);
