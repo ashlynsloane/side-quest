@@ -71,6 +71,7 @@ function evaluate(
     planningState: 'ordinary_progression',
     frozenAllowances: [thisWeek, nextWeek],
     coveredLocalDates: dates(), activities,
+    clinicalConstraintState: 'none_reported',
     ...overrides,
   });
 }
@@ -258,7 +259,8 @@ describe('experimental athlete-selected planning policy', () => {
   it('high stress and an active clinician restriction prevent ordinary status', () => {
     expect(evaluate([], { planningState: 'high_contextual_stress_interruption' }).status)
       .toBe('review_required');
-    expect(evaluate([], { clinicalConstraintActive: true }).status).toBe('review_required');
+    expect(evaluate([], { clinicalConstraintState: 'active' }).status).toBe('review_required');
+    expect(evaluate([], { clinicalConstraintState: 'unknown' }).status).toBe('review_required');
   });
 
   it('flags intensity, hills, novelty and pain-related substitutions separately', () => {
