@@ -90,6 +90,7 @@ export default function TrainingBaselineReviewScreen() {
   const today = localTrainingDate(new Date().toISOString(), timezone);
   const assessment = state ? assessWeekForBaseline(
     state.previousWeek.evidence, targetWeek, today, review,
+    state.proposedWeek.evidence.completed.count,
   ) : null;
   const blocks = [
     ...(assessment?.issues ?? []),
