@@ -229,6 +229,28 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await recovered.loadLiveWorkoutSession()).toBeNull();
   });
 
+  it('prevents two different athlete IDs that normalize to the same filename sharing data', async () => {
+    // A dot and underscore both map to underscore under the original filename
+    // sanitizer. Without ownership tracking, their SQLite databases collide.
+    const firstId = 'local_a.b@example.invalid';
+    const secondId = 'local_a_b@example.invalid';
+    await service.activateUserDatabase(firstId);
+    const firstName = service.getActiveDatabaseName();
+    await service.saveTrainingBlock(weeklyBlock());
+    await save(0.6);
+    await service.activateUserDatabase(secondId);
+    const secondName = service.getActiveDatabaseName();
+    expect(secondName).not.toBe(firstName);
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+    expect(await ledger()).toHaveLength(0);
+    await service.activateUserDatabase(firstId);
+    expect(service.getActiveDatabaseName()).toBe(firstName);
+    expect((await ledger())).toHaveLength(1);
+    await service.activateUserDatabase(secondId);
+    expect(service.getActiveDatabaseName()).toBe(secondName);
+    expect(await ledger()).toHaveLength(0);
+  });
+
   it('does not expose athlete A ledger or plan within athlete B profile', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     await save();
