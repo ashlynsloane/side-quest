@@ -1,0 +1,107 @@
+name: Native iOS UI-only acceptance (reuse verified binary)
+on:
+  # UI-only changes should not spend 30+ minutes recompiling unchanged app code.
+  push:
+    branches: [test/automated-athlete-acceptance-v1]
+    paths:
+      - 'e2e/maestro/**'
+      - 'scripts/qa/run-native-maestro.sh'
+  workflow_dispatch:
+    inputs:
+      native_build_run_id:
+        description: 'Native build run ID containing sidequest-synthetic-ios-app (optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: native-ui-only-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-ui:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QA_BUNDLE_ID: com.sidequest.synthetic.qa
+      MAESTRO_CLI_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Identify a compatible native app artifact
+        id: source
+        run: |
+          mkdir -p native-binary
+          RUN_ID="${{ inputs.native_build_run_id }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=sidequest-synthetic-ios-app&per_page=50" \
+              --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "test/automated-athlete-acceptance-v1")] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty')
+          fi
+          if [ -z "$RUN_ID" ]; then
+            echo "No previous native app artifact. Trigger the full native simulator workflow first." >&2
+            exit 2
+          fi
+          echo "native_build_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name sidequest-synthetic-ios-app --dir native-binary
+          test -s native-binary/native-source.sha256
+          test -s native-binary/simulator-app.tar.gz
+          node scripts/qa/native-source-fingerprint.mjs > current-native-source.sha256
+          diff -u native-binary/native-source.sha256 current-native-source.sha256 || {
+            echo "Native sources changed; refusing to test an old binary against new code." >&2
+            exit 3
+          }
+      - name: Boot a clean iPhone simulator
+        id: simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e '
+            let input = "";
+            process.stdin.on("data", c => input += c).on("end", () => {
+              const devices = Object.entries(JSON.parse(input).devices)
+                .filter(([runtime]) => /iOS/i.test(runtime))
+                .flatMap(([, values]) => values)
+                .filter(device => device.isAvailable && /iPhone/i.test(device.name));
+              if (!devices.length) process.exit(2);
+              process.stdout.write(devices[0].udid);
+            });')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Install previously built synthetic Release app
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-qa-app"
+          tar -xzf native-binary/simulator-app.tar.gz -C "$RUNNER_TEMP/native-qa-app"
+          APP=$(find "$RUNNER_TEMP/native-qa-app" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP"
+          xcrun simctl install "${{ steps.simulator.outputs.udid }}" "$APP"
+          xcrun simctl launch "${{ steps.simulator.outputs.udid }}" "$QA_BUNDLE_ID"
+          sleep 5
+          xcrun simctl io "${{ steps.simulator.outputs.udid }}" screenshot native-reused-app-first-launch.png
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Maestro CLI
+        run: |
+          curl -fsSL https://get.maestro.mobile.dev | bash
+          "$HOME/.maestro/bin/maestro" --version
+      - name: Run all staged native athlete journeys
+        env:
+          MAESTRO_UDID: ${{ steps.simulator.outputs.udid }}
+        run: bash scripts/qa/run-native-maestro.sh
+      - name: Upload all native failure and success evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-ui-reused-binary-evidence
+          if-no-files-found: warn
+          path: |
+            native-reused-app-first-launch.png
+            current-native-source.sha256
+            maestro-evidence/
