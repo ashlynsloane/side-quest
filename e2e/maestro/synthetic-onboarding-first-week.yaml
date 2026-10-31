@@ -58,8 +58,9 @@ appId: com.sidequest.synthetic.qa
     direction: DOWN
     visibilityPercentage: 50
     timeout: 20000
-- tapOn:
-    id: "sidequest-qa-onboarding-next"
+# The final CTA was visible in native screenshots, but an ID tap did not
+# navigate. Tap the full CTA text directly on this final review step.
+- tapOn: "Build my first week"
 - extendedWaitUntil:
     visible: "Your first week is ready."
     timeout: 120000
