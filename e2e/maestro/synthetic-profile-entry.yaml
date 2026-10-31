@@ -1,0 +1,24 @@
+# Minimal native sign-in contract, independent of week generation.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Create your beta profile"
+# The lower email input is covered by the keyboard if Name was entered first.
+# Enter Email while both inputs are unobscured, then switch UP to Name.
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-athlete@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic QA Athlete"
+# Dismiss focus with a non-interactive header, not iOS hideKeyboard.
+- tapOn: "Create your beta profile"
+- assertVisible:
+    id: "sidequest-qa-enter-beta"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "synthetic-account-onboarding-entry"

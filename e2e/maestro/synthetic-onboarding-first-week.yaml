@@ -1,0 +1,76 @@
+# Synthetic-only scenario: fresh local profile -> proposed multisport week.
+# This is designed for the isolated simulator bundle identifier, never the beta.
+# Requires EXPO_PUBLIC_BETA_INVITE_CODE and Supabase cloud auth to be unset.
+appId: com.sidequest.synthetic.qa
+---
+- runFlow: synthetic-profile-entry.yaml
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Choose the goal."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Use the time you actually have."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "What is available now?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Anything to protect?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "How do you respond to training?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Ready to build."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+# The final CTA was visible in native screenshots, but an ID tap did not
+# navigate. Tap the full CTA text directly on this final review step.
+- tapOn: "Build my first week"
+- extendedWaitUntil:
+    visible: "Your first week is ready."
+    timeout: 120000
+- assertVisible: "Your first week is ready."
+- takeScreenshot: "synthetic-first-week"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-review-first-week"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-review-first-week"

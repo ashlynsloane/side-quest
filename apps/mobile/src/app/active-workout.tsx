@@ -120,18 +120,18 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     let live = true;
-    void loadLiveWorkoutSession().then((snapshot) => {
+    void loadLiveWorkoutSession(user?.id ?? null).then((snapshot) => {
       if (!live) return;
       if (snapshot?.workout.id === workout.id) {
         const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
         const safeStation = workout.stations[safeIndex];
         setStationIndex(safeIndex);
-        setPhase(snapshot.phase);
+        setPhase(snapshot.pendingCompletion ? 'complete' : snapshot.phase);
         setRemainingSeconds(Math.min(
           Math.max(0, snapshot.remainingSeconds),
           snapshot.phase === 'work' ? (safeStation?.durationSeconds ?? snapshot.remainingSeconds) : Math.max(15, workout.request.restSeconds),
         ));
-        setRunning(restoredActiveWorkout ? false : snapshot.running);
+        setRunning(snapshot.pendingCompletion ? false : restoredActiveWorkout ? false : snapshot.running);
         setStationRounds(snapshot.stationRounds);
         setExerciseLoads(snapshot.exerciseLoads);
         setExerciseSets(snapshot.exerciseSets);
@@ -139,12 +139,20 @@ export default function ActiveWorkoutScreen() {
         setRestRounds(snapshot.restRounds);
         setRestLoadUnit(snapshot.restLoadUnit);
         startedAt.current = snapshot.startedAt;
+        if (snapshot.pendingCompletion) {
+          completedAt.current = snapshot.pendingCompletion.completedAt;
+          completionFractionRef.current = snapshot.pendingCompletion.completionFraction;
+          setCompletionSaveStatus('error');
+          setCompletionSaveError('Completion was interrupted. Retry saving the original workout dose.');
+        }
         const progressed = safeIndex > 0
           || snapshot.phase === 'rest'
           || snapshot.remainingSeconds < (safeStation?.durationSeconds ?? snapshot.remainingSeconds)
           || Object.keys(snapshot.stationRounds).length > 0;
-        if (restoredActiveWorkout || progressed) {
-          setResumeNotice(restoredActiveWorkout
+        if (restoredActiveWorkout || progressed || snapshot.pendingCompletion) {
+          setResumeNotice(snapshot.pendingCompletion
+            ? 'Unfinished completion restored; retry saving before leaving.'
+            : restoredActiveWorkout
             ? 'Workout restored. The timer is paused so nothing advances without you.'
             : 'Workout resumed from your last saved point.');
         }
@@ -154,7 +162,7 @@ export default function ActiveWorkoutScreen() {
       setSessionHydrated(true);
     });
     return () => { live = false; };
-  }, [restoredActiveWorkout, workout?.id, workoutSessionReady]);
+  }, [restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -179,7 +187,7 @@ export default function ActiveWorkoutScreen() {
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!user || !workout || !sessionHydrated || phase === 'complete') return;
     const timer = setTimeout(() => {
       void saveLiveWorkoutSession({
         schemaVersion: 1,
@@ -197,13 +205,13 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      });
+      }, user?.id ?? null);
     }, 250);
     return () => clearTimeout(timer);
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!user || !workout || !sessionHydrated || phase === 'complete') return;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       setRunning(false);
@@ -223,10 +231,10 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      });
+      }, user?.id ?? null);
     });
     return () => subscription.remove();
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
     if (!resumeNotice) return;
@@ -310,6 +318,27 @@ export default function ActiveWorkoutScreen() {
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
     try {
+      // Journal the *original* completed dose and timestamp before the SQL
+      // transaction. A force quit following a failed save must not silently
+      // convert a partial completion into a full one on the next launch.
+      await saveLiveWorkoutSession({
+        schemaVersion: 1,
+        savedAt: new Date().toISOString(),
+        workout: activeWorkout,
+        startedAt: startedAt.current,
+        stationIndex,
+        phase: 'rest',
+        remainingSeconds,
+        running: false,
+        stationRounds: completedRounds,
+        exerciseLoads: completedLoads,
+        exerciseSets: completedSets,
+        restEntries,
+        restRounds,
+        restLoadUnit,
+        planLink: activePlanLink ?? undefined,
+        pendingCompletion: { completedAt: timestamp, completionFraction },
+      }, user?.id ?? null);
       await saveCompletedWorkout({
       workout: activeWorkout,
       startedAt: startedAt.current,
@@ -335,7 +364,7 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     try {
-      await clearLiveWorkoutSession();
+      await clearLiveWorkoutSession(user?.id ?? null);
     } catch {
       // The canonical workout is saved, but the old checkpoint might reappear.
       setCompletionSaveError('Workout saved, but the active checkpoint could not be cleared.');
@@ -405,6 +434,8 @@ export default function ActiveWorkoutScreen() {
   function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
 
   function pauseAndLeave() {
+    // Do not replace a pending-completion journal with an ordinary rest state.
+    if (phase === 'complete') return;
     setRunning(false);
     void saveLiveWorkoutSession({
       schemaVersion: 1,
@@ -412,7 +443,7 @@ export default function ActiveWorkoutScreen() {
       workout: activeWorkout,
       startedAt: startedAt.current,
       stationIndex,
-      phase: phase === 'complete' ? 'rest' : phase,
+      phase,
       remainingSeconds,
       running: false,
       stationRounds,
@@ -422,7 +453,7 @@ export default function ActiveWorkoutScreen() {
       restRounds,
       restLoadUnit,
       planLink: activePlanLink ?? undefined,
-    }).then(() => router.replace('/' as Href));
+    }, user?.id ?? null).then(() => router.replace('/' as Href));
   }
 
   function endEarly() {

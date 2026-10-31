@@ -1,0 +1,27 @@
+# Synthetic athlete logs a completed ride without inventing distance.
+# Runs onboarding flow first in the isolated, credential-free QA simulator.
+appId: com.sidequest.synthetic.qa
+---
+- runFlow: synthetic-onboarding-first-week.yaml
+- scrollUntilVisible:
+    element: "Record a completed run, ride or swim"
+    direction: DOWN
+    timeout: 25000
+- tapOn: "Record a completed run, ride or swim"
+- assertVisible: "Log what you actually did"
+- tapOn: "Completed duration in minutes"
+- inputText: "75"
+# iOS has no stable hideKeyboard operation for this numeric keypad.
+# Tap the noninteractive duration heading, then scroll the native form.
+- tapOn: "Duration (completed minutes)"
+- scrollUntilVisible:
+    element: "Save completed activity"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-save-endurance"
+- extendedWaitUntil:
+    visible: "Completed bike"
+    timeout: 30000
+- assertVisible: "75 minutes"
+- takeScreenshot: "synthetic-completed-ride-review"

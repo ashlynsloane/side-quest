@@ -1,0 +1,22 @@
+# Exercise completed-activity persistence over a genuine iOS application restart.
+# Never uses real athlete data or credentials.
+appId: com.sidequest.synthetic.qa
+---
+- runFlow: synthetic-completed-ride.yaml
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: "Today"
+    timeout: 30000
+- tapOn: "Week"
+- scrollUntilVisible:
+    element: "Inspect full training history"
+    direction: DOWN
+    timeout: 25000
+- tapOn: "Inspect full training history"
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000
+- assertVisible: "Completed bike"
+- assertVisible: "75 min"
+- takeScreenshot: "synthetic-ride-recovered-after-relaunch"

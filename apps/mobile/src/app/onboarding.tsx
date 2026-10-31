@@ -93,7 +93,7 @@ export default function OnboardingScreen() {
     {step === 'review' ? <Review goal={goal} priority={priority} hours={hours} days={days} equipment={equipment} restriction={restriction} background={background} runStatus={runStatus} injury={injury} strength={strength} styles={styles} /> : null}
     <View style={styles.actions}>
       <Pressable onPress={back} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}><Text style={styles.secondaryText}>{step === 'welcome' ? 'Not now' : 'Back'}</Text></Pressable>
-      <Pressable disabled={step === 'schedule' && days.length < 2} onPress={step === 'review' ? finish : next} style={({ pressed }) => [styles.primary, step === 'schedule' && days.length < 2 && styles.disabled, pressed && styles.pressed]}>
+      <Pressable testID="sidequest-qa-onboarding-next" accessibilityRole="button" disabled={step === 'schedule' && days.length < 2} onPress={step === 'review' ? finish : next} style={({ pressed }) => [styles.primary, step === 'schedule' && days.length < 2 && styles.disabled, pressed && styles.pressed]}>
         <Text style={styles.primaryText}>{step === 'review' ? 'Build my first week' : step === 'welcome' ? 'Start setup' : 'Continue'}</Text><Text style={styles.arrow}>›</Text>
       </Pressable>
     </View>

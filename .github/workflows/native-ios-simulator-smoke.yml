@@ -1,0 +1,156 @@
+name: Native iOS simulator acceptance
+on:
+  # A full native compilation is needed only when the app or its build inputs
+  # change. Maestro YAML-only changes use native-ios-ui-only.yml instead.
+  push:
+    branches: [test/automated-athlete-acceptance-v1]
+    paths:
+      - '.github/workflows/native-ios-simulator-smoke.yml'
+      - 'apps/mobile/src/**'
+      - 'apps/mobile/assets/**'
+      - 'apps/mobile/app.json'
+      - 'apps/mobile/package.json'
+      - 'packages/domain/src/**'
+      - 'packages/planner/src/**'
+      - 'packages/generator/src/**'
+      - 'packages/design-system/src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not spend macOS/Xcode build time on superseded QA revisions.
+concurrency:
+  group: native-ios-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-ios-smoke:
+    name: Build, launch, and exercise isolated synthetic iOS app
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_GIT_STATUS: '1'
+      CI: '1'
+      QA_BUNDLE_ID: com.sidequest.synthetic.qa
+      MAESTRO_CLI_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Fingerprint the exact checked-out native source before QA app rewriting
+        run: node scripts/qa/native-source-fingerprint.mjs > native-source.sha256
+      - name: Isolate app identity in ephemeral runner only
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'apps/mobile/app.json';
+          const app = JSON.parse(readFileSync(path, 'utf8'));
+          app.expo.name = 'Side Quest Synthetic QA';
+          app.expo.ios.bundleIdentifier = process.env.QA_BUNDLE_ID;
+          app.expo.scheme = 'sidequest-synthetic-qa';
+          writeFileSync(path, JSON.stringify(app, null, 2) + '\n');
+          NODE
+          echo "Synthetic bundle ID: $QA_BUNDLE_ID"
+      - name: Select available iOS simulator
+        id: simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e '
+            let input = "";
+            process.stdin.on("data", c => input += c).on("end", () => {
+              const devices = Object.entries(JSON.parse(input).devices)
+                .filter(([runtime]) => /iOS/i.test(runtime))
+                .flatMap(([, values]) => values)
+                .filter(device => device.isAvailable && /iPhone/i.test(device.name));
+              if (!devices.length) process.exit(2);
+              process.stdout.write(devices[0].udid);
+            });')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Selected simulator: $UDID"
+      - name: Generate ephemeral native project
+        run: pnpm --dir apps/mobile exec expo prebuild --platform ios --clean --no-install
+      - name: Resolve CocoaPods
+        run: |
+          cd apps/mobile/ios
+          pod install
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot "${{ steps.simulator.outputs.udid }}"
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
+      - name: Build native iOS simulator Release app
+        run: |
+          set -o pipefail
+          WORKSPACE=$(find apps/mobile/ios -maxdepth 2 -name '*.xcworkspace' -print -quit)
+          test -n "$WORKSPACE"
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release \
+            -sdk iphonesimulator -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/sidequest-synthetic-build" \
+            CODE_SIGNING_ALLOWED=NO build \
+            > "$RUNNER_TEMP/sidequest-xcodebuild.log" 2>&1 || {
+              tail -n 150 "$RUNNER_TEMP/sidequest-xcodebuild.log"
+              exit 1
+            }
+      - name: Install, launch and capture native screen
+        run: |
+          set -e
+          APP=$(find "$RUNNER_TEMP/sidequest-synthetic-build/Build/Products/Release-iphonesimulator" \
+            -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP"
+          xcrun simctl install "${{ steps.simulator.outputs.udid }}" "$APP"
+          xcrun simctl launch "${{ steps.simulator.outputs.udid }}" "$QA_BUNDLE_ID" | tee synthetic-ios-launch.txt
+          sleep 8
+          xcrun simctl io "${{ steps.simulator.outputs.udid }}" screenshot synthetic-ios-first-launch.png
+          test -s synthetic-ios-first-launch.png
+      - name: Package an isolated simulator binary for verified UI-only reruns
+        run: |
+          APP=$(find "$RUNNER_TEMP/sidequest-synthetic-build/Build/Products/Release-iphonesimulator" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP"
+          mkdir -p native-binary
+          tar -czf native-binary/simulator-app.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
+          cp native-source.sha256 native-binary/native-source.sha256
+          test -s native-binary/simulator-app.tar.gz
+      - name: Archive source-matched synthetic iOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidequest-synthetic-ios-app
+          path: native-binary/
+          if-no-files-found: error
+          retention-days: 5
+      - name: Install Java for native UI automation
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Maestro CLI
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
+      - name: Run staged synthetic native UI journeys
+        id: maestro_ui
+        timeout-minutes: 30
+        env:
+          MAESTRO_UDID: ${{ steps.simulator.outputs.udid }}
+        run: bash scripts/qa/run-native-maestro.sh
+      - name: Save screenshot and diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-synthetic-ios-smoke
+          path: |
+            synthetic-ios-first-launch.png
+            synthetic-ios-launch.txt
+            maestro-evidence/
+            ${{ runner.temp }}/sidequest-xcodebuild.log
+          if-no-files-found: warn

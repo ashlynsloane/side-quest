@@ -83,7 +83,7 @@ export default function OnboardingFirstWeekScreen() {
     </View>)}</Surface>
     {enduranceWarning ? <Surface style={styles.errorCard}><Text style={styles.errorTitle}>Endurance calendar needs review</Text><Text style={styles.body}>{enduranceWarning}</Text><Text style={styles.body}>Your strength block was saved. The Week screen can retry the wider plan.</Text></Surface> : null}
     <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{params.restriction && params.restriction !== 'none' ? <Text style={styles.body}>A reported limitation still requires review of specific exercises and clinical restrictions before training.</Text> : null}</View>
-    <Pressable onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
+    <Pressable testID="sidequest-qa-review-first-week" accessibilityRole="button" onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
     <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
 }
