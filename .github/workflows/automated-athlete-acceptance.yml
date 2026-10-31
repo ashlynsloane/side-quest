@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# A branch push and its PR can both fire on the same commit. Keep the latest
+# complete QA evidence rather than burning CI time on stale duplicate runs.
+concurrency:
+  group: athlete-qa-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   athlete-acceptance:
     name: Planner and synthetic athlete QA
