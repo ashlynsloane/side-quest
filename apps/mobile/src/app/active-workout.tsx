@@ -120,7 +120,7 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     let live = true;
-    void loadLiveWorkoutSession(user?.id).then((snapshot) => {
+    void loadLiveWorkoutSession(user?.id ?? null).then((snapshot) => {
       if (!live) return;
       if (snapshot?.workout.id === workout.id) {
         const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
@@ -205,7 +205,7 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      }, user?.id);
+      }, user?.id ?? null);
     }, 250);
     return () => clearTimeout(timer);
   }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
@@ -231,7 +231,7 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      }, user?.id);
+      }, user?.id ?? null);
     });
     return () => subscription.remove();
   }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
@@ -338,7 +338,7 @@ export default function ActiveWorkoutScreen() {
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
         pendingCompletion: { completedAt: timestamp, completionFraction },
-      }, user?.id);
+      }, user?.id ?? null);
       await saveCompletedWorkout({
       workout: activeWorkout,
       startedAt: startedAt.current,
@@ -364,7 +364,7 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     try {
-      await clearLiveWorkoutSession(user?.id);
+      await clearLiveWorkoutSession(user?.id ?? null);
     } catch {
       // The canonical workout is saved, but the old checkpoint might reappear.
       setCompletionSaveError('Workout saved, but the active checkpoint could not be cleared.');
@@ -453,7 +453,7 @@ export default function ActiveWorkoutScreen() {
       restRounds,
       restLoadUnit,
       planLink: activePlanLink ?? undefined,
-    }, user?.id).then(() => router.replace('/' as Href));
+    }, user?.id ?? null).then(() => router.replace('/' as Href));
   }
 
   function endEarly() {
