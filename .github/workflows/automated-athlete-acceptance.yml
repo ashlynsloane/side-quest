@@ -40,6 +40,9 @@ jobs:
         run: pnpm --dir packages/planner test
       - name: Validate iOS JavaScript export (not native launch)
         run: pnpm --dir apps/mobile exec expo export --platform ios --output-dir /tmp/sq-acceptance-ios
+      - name: Summarize synthetic and mobile SQLite evidence
+        if: always()
+        run: node scripts/qa/summarize-junit.mjs athlete-acceptance-junit.xml mobile-workout-qa-junit.xml
       - name: Upload acceptance report
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,4 +51,5 @@ jobs:
           path: |
             athlete-acceptance-junit.xml
             mobile-workout-qa-junit.xml
+            qa-summary.json
           if-no-files-found: warn
