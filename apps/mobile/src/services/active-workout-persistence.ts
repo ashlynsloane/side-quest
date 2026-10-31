@@ -182,6 +182,10 @@ export async function saveLiveWorkoutSession(
           || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
           throw new Error('Conflicting pending workout completion; original dose retained.');
         }
+        // The complete original set log and all recovery fields are immutable
+        // while the canonical completion is pending. Retrying an identical
+        // journal is a no-op rather than a destructive second write.
+        return;
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('Conflicting pending workout completion')) {
