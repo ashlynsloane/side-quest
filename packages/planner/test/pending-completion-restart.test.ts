@@ -78,6 +78,24 @@ describe('durable pending partial-workout completion contract', () => {
     expect((await loadLiveWorkoutSession())?.pendingCompletion?.completionFraction).toBe(0.37);
   });
 
+  it('protects a pending completion from an unrelated new workout session', async () => {
+    const a = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
+    const pending = { completionFraction: 0.25, completedAt: '2026-10-20T10:15:00.000Z' };
+    await saveLiveWorkoutSession({ ...a, pendingCompletion: pending });
+    const b = createInitialLiveWorkoutSession(
+      { ...workout, id: 'second-workout' },
+      '2026-10-20T11:00:00.000Z',
+    );
+    await saveLiveWorkoutSession(b);
+    expect((await loadLiveWorkoutSession())?.workout.id).toBe(workout.id);
+    expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
+    await expect(saveLiveWorkoutSession({
+      ...b,
+      pendingCompletion: { completionFraction: 0.5, completedAt: '2026-10-20T11:30:00.000Z' },
+    })).rejects.toThrow(/Conflicting pending workout completion/);
+    expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
+  });
+
   it('remains backward compatible with pre-journal checkpoints', async () => {
     const legacy = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
     await saveLiveWorkoutSession(legacy);
