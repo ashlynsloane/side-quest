@@ -1,4 +1,4 @@
-name: Native iOS simulator smoke
+name: Native iOS simulator acceptance
 on:
   # Temporary QA-branch trigger to perform the first real simulator run.
   push:
@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   synthetic-ios-smoke:
-    name: Build and launch isolated synthetic iOS app
+    name: Build, launch, and exercise isolated synthetic iOS app
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       EXPO_NO_TELEMETRY: '1'
       EXPO_NO_GIT_STATUS: '1'
@@ -92,6 +92,44 @@ jobs:
           sleep 8
           xcrun simctl io "${{ steps.simulator.outputs.udid }}" screenshot synthetic-ios-first-launch.png
           test -s synthetic-ios-first-launch.png
+      - name: Install Java for native UI automation
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Maestro CLI
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
+      - name: Run synthetic onboarding and completed-ride UI journeys
+        id: maestro_ui
+        timeout-minutes: 18
+        run: |
+          set +e
+          mkdir -p maestro-evidence
+          export PATH="$HOME/.maestro/bin:$PATH"
+          UDID="${{ steps.simulator.outputs.udid }}"
+          maestro --udid="$UDID" test \
+            --format junit --output maestro-evidence/onboarding-junit.xml \
+            --test-output-dir=maestro-evidence/onboarding \
+            e2e/maestro/synthetic-onboarding-first-week.yaml \
+            > maestro-evidence/onboarding-console.log 2>&1
+          ONBOARDING_STATUS=$?
+          tail -n 90 maestro-evidence/onboarding-console.log
+          maestro --udid="$UDID" test \
+            --format junit --output maestro-evidence/ride-junit.xml \
+            --test-output-dir=maestro-evidence/ride \
+            e2e/maestro/synthetic-completed-ride.yaml \
+            > maestro-evidence/ride-console.log 2>&1
+          RIDE_STATUS=$?
+          tail -n 90 maestro-evidence/ride-console.log
+          xcrun simctl io "$UDID" screenshot maestro-evidence/final-simulator-screen.png || true
+          echo "onboarding=$ONBOARDING_STATUS" >> "$GITHUB_OUTPUT"
+          echo "ride=$RIDE_STATUS" >> "$GITHUB_OUTPUT"
+          if [ "$ONBOARDING_STATUS" -ne 0 ] || [ "$RIDE_STATUS" -ne 0 ]; then
+            echo "At least one native UI journey failed. Inspect the uploaded JUnit XML and screenshots."
+            exit 1
+          fi
       - name: Save screenshot and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -100,5 +138,6 @@ jobs:
           path: |
             synthetic-ios-first-launch.png
             synthetic-ios-launch.txt
+            maestro-evidence/
             ${{ runner.temp }}/sidequest-xcodebuild.log
           if-no-files-found: warn
