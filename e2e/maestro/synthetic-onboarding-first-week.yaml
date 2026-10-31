@@ -6,17 +6,21 @@ appId: com.sidequest.synthetic.qa
 - launchApp:
     clearState: true
 - assertVisible: "Create your beta profile"
-- tapOn: "Name"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
 - inputText: "Synthetic QA Athlete"
-- tapOn: "Email"
+- tapOn:
+    id: "sidequest-qa-athlete-email"
 - inputText: "synthetic-athlete@example.invalid"
 - hideKeyboard
-- tapOn: "Enter beta"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
 - extendedWaitUntil:
     visible: "Build your first week."
     timeout: 30000
 - assertVisible: "Build your first week."
-- tapOn: "Start setup"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - assertVisible: "Choose the goal."
 - scrollUntilVisible:
     element: "Continue"
@@ -48,7 +52,8 @@ appId: com.sidequest.synthetic.qa
     element: "Build my first week"
     direction: DOWN
     timeout: 20000
-- tapOn: "Build my first week"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - extendedWaitUntil:
     visible: "Your first week is ready."
     timeout: 120000
@@ -58,4 +63,5 @@ appId: com.sidequest.synthetic.qa
     element: "Review provisional first week"
     direction: DOWN
     timeout: 25000
-- tapOn: "Review provisional first week"
+- tapOn:
+    id: "sidequest-qa-review-first-week"
