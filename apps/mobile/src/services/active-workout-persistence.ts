@@ -86,7 +86,11 @@ export const ACTIVE_WORKOUT_PROFILE_KEY = 'sidequest.active-workout.profile-id';
 const ORIGINAL_DATABASE_OWNER_KEY = 'circuit.original-database-owner';
 
 function scopedLiveSessionKey(storage: StorageLike, profileId?: string | null): string | null {
-  const owner = profileId ?? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY);
+  // Explicit null means unauthenticated. Never fall back to a prior account
+  // simply because an asynchronous callback is still finishing sign-out.
+  if (profileId === null) return null;
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
   if (!owner) return null;
   return LIVE_SESSION_KEY + ':' + encodeURIComponent(owner);
 }
@@ -209,7 +213,8 @@ export async function loadLiveWorkoutSession(
     // Only the original database owner may adopt the single-profile legacy
     // checkpoint. This is a copy-before-delete migration; failed writes leave
     // the historical checkpoint untouched for explicit recovery.
-    const owner = profileId ?? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY);
+    const owner = profileId === undefined
+      ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
     if (owner && storage.getItem(ORIGINAL_DATABASE_OWNER_KEY) === owner) {
       const legacy = storage.getItem(LIVE_SESSION_KEY);
       if (legacy) {
