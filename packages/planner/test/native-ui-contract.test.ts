@@ -36,6 +36,15 @@ describe('native synthetic UI automation contract', () => {
     }
   });
 
+  it('reuses the same manual endurance record identity on a failed save retry', () => {
+    const sourceText = source('apps/mobile/src/app/log-endurance.tsx');
+    expect(sourceText).toContain('const submissionRef = useRef<');
+    expect(sourceText).toContain('submissionRef.current = submission;');
+    expect(sourceText).toContain('id: submission.id');
+    expect(sourceText).toContain('recordedAt: submission.recordedAt');
+    expect(sourceText).not.toContain("id: 'manual-' + now.getTime() + '-' + Math.random().toString(36).slice(2, 10),\\n        name:");
+  });
+
   it('requires nested journeys to point at committed sibling flows', () => {
     const flowNames = [
       'synthetic-onboarding-first-week.yaml',
