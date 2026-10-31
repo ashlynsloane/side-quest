@@ -1,5 +1,9 @@
-name: Native iOS simulator smoke (manual)
+name: Native iOS simulator smoke
 on:
+  # Temporary QA-branch trigger to perform the first real simulator run.
+  push:
+    branches: [test/automated-athlete-acceptance-v1]
+    paths: ['.github/workflows/native-ios-simulator-smoke.yml']
   workflow_dispatch:
 
 permissions:
@@ -12,6 +16,7 @@ jobs:
     timeout-minutes: 60
     env:
       EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_GIT_STATUS: '1'
       CI: '1'
       QA_BUNDLE_ID: com.sidequest.synthetic.qa
     steps:
@@ -53,7 +58,7 @@ jobs:
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           echo "Selected simulator: $UDID"
       - name: Generate ephemeral native project
-        run: pnpm --dir apps/mobile exec expo prebuild --platform ios --clean --no-install --non-interactive
+        run: pnpm --dir apps/mobile exec expo prebuild --platform ios --clean --no-install
       - name: Resolve CocoaPods
         run: |
           cd apps/mobile/ios
