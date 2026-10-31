@@ -120,7 +120,7 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     let live = true;
-    void loadLiveWorkoutSession().then((snapshot) => {
+    void loadLiveWorkoutSession(user?.id).then((snapshot) => {
       if (!live) return;
       if (snapshot?.workout.id === workout.id) {
         const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
@@ -162,7 +162,7 @@ export default function ActiveWorkoutScreen() {
       setSessionHydrated(true);
     });
     return () => { live = false; };
-  }, [restoredActiveWorkout, workout?.id, workoutSessionReady]);
+  }, [restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -205,7 +205,7 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      });
+      }, user?.id);
     }, 250);
     return () => clearTimeout(timer);
   }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
@@ -231,7 +231,7 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      });
+      }, user?.id);
     });
     return () => subscription.remove();
   }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
@@ -338,7 +338,7 @@ export default function ActiveWorkoutScreen() {
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
         pendingCompletion: { completedAt: timestamp, completionFraction },
-      });
+      }, user?.id);
       await saveCompletedWorkout({
       workout: activeWorkout,
       startedAt: startedAt.current,
@@ -364,7 +364,7 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     try {
-      await clearLiveWorkoutSession();
+      await clearLiveWorkoutSession(user?.id);
     } catch {
       // The canonical workout is saved, but the old checkpoint might reappear.
       setCompletionSaveError('Workout saved, but the active checkpoint could not be cleared.');
@@ -663,4 +663,4 @@ function makeStyles(tokens: DesignTokens) { return StyleSheet.create({
   restPanel: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: 22, overflow: 'hidden' }, roundHeader: { padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: tokens.surfaceMuted }, cardTitle: { color: tokens.text, fontSize: 17, lineHeight: 22, fontWeight: '800' }, roundControls: { flexDirection: 'row', alignItems: 'center', gap: 10 }, roundButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.borderStrong, alignItems: 'center', justifyContent: 'center' }, roundButtonText: { color: tokens.accent, fontSize: 21, fontWeight: '800' }, roundValue: { color: tokens.text, fontSize: 22, fontWeight: '900', minWidth: 24, textAlign: 'center' }, globalUnitRow: { minHeight: 48, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border }, globalUnitToggle: { flexDirection: 'row', backgroundColor: tokens.surface, borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: tokens.border }, globalUnitButton: { minWidth: 48, height: 34, alignItems: 'center', justifyContent: 'center' }, globalUnitButtonSelected: { backgroundColor: tokens.accent }, globalUnitText: { color: tokens.textMuted, fontSize: 12, fontWeight: '800' }, globalUnitTextSelected: { color: '#FFFFFF' }, logExercise: { padding: 15, gap: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border }, skippedExercise: { opacity: 0.58 }, logTitleLine: { flexDirection: 'row', alignItems: 'center', gap: 10 }, skipPill: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: tokens.surfaceMuted }, skipPillSelected: { backgroundColor: tokens.accentSoft }, skipPillText: { color: tokens.textMuted, fontSize: 10.5, fontWeight: '800' }, skipPillTextSelected: { color: tokens.accent }, logFields: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 }, logField: { flex: 1, gap: 5 }, fieldLabel: { color: tokens.textMuted, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.6 }, logInput: { minHeight: 46, borderWidth: 1, borderColor: tokens.borderStrong, borderRadius: 12, backgroundColor: tokens.surfaceRaised, color: tokens.text, textAlign: 'center', fontSize: 17, fontWeight: '800' }, 
   completeContainer: { padding: 20, paddingBottom: 130, gap: 15 }, coachAcknowledgment: { backgroundColor: tokens.accentSoft, borderRadius: 20, padding: 16, gap: 5 }, coachLabel: { color: tokens.accent, fontSize: 10.5, fontWeight: '900', letterSpacing: 1 }, completeTitle: { color: tokens.text, fontSize: 32, lineHeight: 38, fontWeight: '800' }, summaryRow: { flexDirection: 'row', gap: 8 }, summaryMetric: { flex: 1, minHeight: 78, borderRadius: 17, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' }, summaryMetricValue: { color: tokens.text, fontSize: 19, fontWeight: '900' }, summaryMetricLabel: { color: tokens.textMuted, fontSize: 11.5, marginTop: 3 }, card: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: 20, padding: 16, gap: 11 }, feedbackRow: { flexDirection: 'row', gap: 6 }, choiceButton: { flex: 1, minHeight: 45, borderRadius: 13, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' }, choiceButtonSelected: { backgroundColor: tokens.accentSoft, borderColor: tokens.accent }, choiceText: { color: tokens.textMuted, fontSize: 11.5, fontWeight: '800' }, choiceTextSelected: { color: tokens.accent }, numberScale: { flexDirection: 'row', gap: 6 }, numberScaleCompact: { flexWrap: 'wrap' }, numberButton: { flex: 1, minWidth: 42, height: 43, borderRadius: 12, borderWidth: 1, borderColor: tokens.border, alignItems: 'center', justifyContent: 'center' }, numberButtonCompact: { flex: 0, width: 43 }, numberButtonSelected: { backgroundColor: tokens.accentSoft, borderColor: tokens.accent }, numberButtonText: { color: tokens.text, fontSize: 13, fontWeight: '800' }, numberButtonTextSelected: { color: tokens.accent }, reflectionInput: { minHeight: 112, borderWidth: 1, borderColor: tokens.borderStrong, borderRadius: 14, padding: 13, color: tokens.text, backgroundColor: tokens.surfaceRaised, fontSize: 14.5, lineHeight: 20, textAlignVertical: 'top' }, savedNote: { color: tokens.success, fontSize: 12.5, fontWeight: '800' }, shareButton: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1, borderColor: tokens.border, borderRadius: 20, backgroundColor: tokens.surface, paddingHorizontal: 14, paddingVertical: 12 }, shareChevron: { color: tokens.textMuted, fontSize: 26, fontWeight: '300' }, symptomButton: { backgroundColor: tokens.surfaceMuted, borderRadius: 20, padding: 16, gap: 4 }, disclosureRow: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: tokens.border, backgroundColor: tokens.surface, padding: 16 }, disclosureChevron: { color: tokens.textMuted, fontSize: 22, fontWeight: '700' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', padding: 20 }, settingsModal: { backgroundColor: tokens.surface, borderRadius: 22, padding: 18, gap: 3 }, settingsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10 }, settingsTitle: { color: tokens.text, fontSize: 22, fontWeight: '800', marginTop: 2 }, closeButton: { padding: 8 }, closeText: { color: tokens.accent, fontWeight: '800' }, settingRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: tokens.border }, settingTitle: { color: tokens.text, fontSize: 15, fontWeight: '800' }, settingDetail: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 17, marginTop: 2 }, settingsNote: { color: tokens.textMuted, fontSize: 12.5, lineHeight: 18, paddingTop: 10 }, missingCard: { flex: 1, justifyContent: 'center', padding: 24, gap: 18 },
-}); }
+}, user?.id); }
