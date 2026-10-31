@@ -25,6 +25,10 @@ vi.mock('@circuit/planner', async () => {
     effectiveTrainingCalendarEvents: sql.effectiveTrainingCalendarEvents,
   };
 });
+vi.mock('react-native', () => ({
+  Platform: { OS: 'ios', select: (choices: Record<string, unknown>) => choices.ios },
+  NativeModules: {},
+}));
 vi.mock('expo-sqlite/localStorage/install', () => ({}));
 vi.mock('expo-sqlite', async () => {
   const { DatabaseSync } = await import('node:sqlite');
