@@ -1,0 +1,22 @@
+# Minimal native sign-in contract, independent of week generation.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic QA Athlete"
+# Switch input focus directly. Maestro hideKeyboard does not work reliably
+# with the current iOS keyboard configuration.
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-athlete@example.invalid"
+- assertVisible:
+    id: "sidequest-qa-enter-beta"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "synthetic-account-onboarding-entry"
