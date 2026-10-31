@@ -45,6 +45,16 @@ describe('native synthetic UI automation contract', () => {
     expect(sourceText).not.toContain("id: 'manual-' + now.getTime() + '-' + Math.random().toString(36).slice(2, 10),\\n        name:");
   });
 
+  it('prevents signed-out screen effects from writing the previous athlete checkpoint', () => {
+    const screen = source('apps/mobile/src/app/active-workout.tsx');
+    expect(screen.split("if (!user || !workout || !sessionHydrated || phase === 'complete') return;"))
+      .toHaveLength(3);
+    expect(screen).toContain("loadLiveWorkoutSession(user?.id ?? null)");
+    expect(screen).toContain("clearLiveWorkoutSession(user?.id ?? null)");
+    expect(source('apps/mobile/src/services/active-workout-persistence.ts'))
+      .toContain("if (profileId === null) return null;");
+  });
+
   it('requires nested journeys to point at committed sibling flows', () => {
     const flowNames = [
       'synthetic-onboarding-first-week.yaml',
