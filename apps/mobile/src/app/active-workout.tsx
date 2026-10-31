@@ -187,7 +187,7 @@ export default function ActiveWorkoutScreen() {
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!user || !workout || !sessionHydrated || phase === 'complete') return;
     const timer = setTimeout(() => {
       void saveLiveWorkoutSession({
         schemaVersion: 1,
@@ -208,10 +208,10 @@ export default function ActiveWorkoutScreen() {
       }, user?.id ?? null);
     }, 250);
     return () => clearTimeout(timer);
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!user || !workout || !sessionHydrated || phase === 'complete') return;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       setRunning(false);
@@ -234,7 +234,7 @@ export default function ActiveWorkoutScreen() {
       }, user?.id ?? null);
     });
     return () => subscription.remove();
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
     if (!resumeNotice) return;
