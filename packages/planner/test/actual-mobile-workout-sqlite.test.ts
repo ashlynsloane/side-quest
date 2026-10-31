@@ -14,6 +14,17 @@ const state = vi.hoisted(() => ({
   handles: [] as Array<{ close: () => void }>,
   failNextContaining: null as string | null,
 }));
+// The mobile service only needs four SQL exports from the planner package.
+// Use their real implementations without loading unrelated React Native UI exports.
+vi.mock('@circuit/planner', async () => {
+  const sql = await import('../src/training-adjustment-sqlite');
+  return {
+    PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
+    appendTrainingAdjustmentDecision: sql.appendTrainingAdjustmentDecision,
+    readTrainingAdjustmentDecisions: sql.readTrainingAdjustmentDecisions,
+    effectiveTrainingCalendarEvents: sql.effectiveTrainingCalendarEvents,
+  };
+});
 vi.mock('expo-sqlite/localStorage/install', () => ({}));
 vi.mock('expo-sqlite', async () => {
   const { DatabaseSync } = await import('node:sqlite');
