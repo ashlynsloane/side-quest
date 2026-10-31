@@ -163,6 +163,31 @@ export async function saveLiveWorkoutSession(
   if (!storage) throw new Error('Live workout storage is unavailable.');
   const key = scopedLiveSessionKey(storage, profileId);
   if (!key) throw new Error('Cannot save an unowned live workout.');
+  const oldValue = storage.getItem(key);
+  if (oldValue) {
+    try {
+      const previous: unknown = JSON.parse(oldValue);
+      if (isLiveWorkoutSession(previous)
+        && previous.pendingCompletion
+        && previous.workout.id === snapshot.workout.id
+        && previous.startedAt === snapshot.startedAt) {
+        if (!snapshot.pendingCompletion) {
+          // A late timer / background checkpoint must never erase the
+          // original completion journal before the canonical ledger commits.
+          return;
+        }
+        if (previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
+          || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
+          throw new Error('Conflicting pending workout completion; original dose retained.');
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Conflicting pending workout completion')) {
+        throw error;
+      }
+      // An invalid previous checkpoint is not evidence of a valid pending dose.
+    }
+  }
   storage.setItem(key, JSON.stringify(snapshot));
 }
 
