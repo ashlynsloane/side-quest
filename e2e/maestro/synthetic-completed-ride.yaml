@@ -11,7 +11,9 @@ appId: com.sidequest.synthetic.qa
 - assertVisible: "Log what you actually did"
 - tapOn: "Completed duration in minutes"
 - inputText: "75"
-- hideKeyboard
+# iOS has no stable hideKeyboard operation for this numeric keypad.
+# Tap the noninteractive duration heading, then scroll the native form.
+- tapOn: "Duration (completed minutes)"
 - scrollUntilVisible:
     element: "Save completed activity"
     direction: DOWN
