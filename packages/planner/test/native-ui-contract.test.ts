@@ -24,6 +24,18 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).not.toContain('EXPO_PUBLIC_SUPABASE_');
   });
 
+  it('enters Email before Name to avoid the iOS keyboard occluding lower controls', () => {
+    const profile = source('e2e/maestro/synthetic-profile-entry.yaml');
+    const emailIndex = profile.indexOf('id: "sidequest-qa-athlete-email"');
+    const nameIndex = profile.indexOf('id: "sidequest-qa-athlete-name"');
+    expect(emailIndex).toBeGreaterThan(0);
+    expect(nameIndex).toBeGreaterThan(emailIndex);
+    expect(profile).not.toMatch(/^- hideKeyboard/m);
+    // The numeric activity keyboard must also avoid the unreliable dismiss API.
+    expect(source('e2e/maestro/synthetic-completed-ride.yaml'))
+      .not.toMatch(/^- hideKeyboard/m);
+  });
+
   it('keeps the recorded flow targets backed by live accessible controls', () => {
     const cases: Array<[string, string]> = [
       ['apps/mobile/src/app/sign-in.tsx', 'sidequest-qa-athlete-name'],
