@@ -146,7 +146,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setActiveWorkout(workout);
       setActivePlanLink(planLink);
       setRestoredActiveWorkout(false);
-      void saveLiveWorkoutSession(snapshot, user?.id);
+      void saveLiveWorkoutSession(snapshot, user?.id ?? null);
     },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
@@ -155,7 +155,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setActiveWorkout(null);
       setActivePlanLink(null);
       setRestoredActiveWorkout(false);
-      void clearLiveWorkoutSession(user?.id);
+      void clearLiveWorkoutSession(user?.id ?? null);
     },
   }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady, user?.id]);
 
