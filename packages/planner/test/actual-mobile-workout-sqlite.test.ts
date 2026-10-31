@@ -229,6 +229,75 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await recovered.loadLiveWorkoutSession()).toBeNull();
   });
 
+  it('records its verified athlete owner inside each SQLite file', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const firstName = service.getActiveDatabaseName();
+    const first = new DatabaseSync(join(state.directory, firstName));
+    expect(first.prepare(
+      'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1',
+    ).get()).toMatchObject({ user_id: 'synthetic-athlete-one' });
+    first.close();
+    await service.activateUserDatabase('synthetic-athlete-two');
+    const second = new DatabaseSync(join(state.directory, service.getActiveDatabaseName()));
+    expect(second.prepare(
+      'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1',
+    ).get()).toMatchObject({ user_id: 'synthetic-athlete-two' });
+    second.close();
+  });
+
+  it('refuses a forged local filename claim when the SQLite file belongs to another athlete', async () => {
+    const first = 'collision_a.b';
+    const other = 'collision_a_b';
+    await service.activateUserDatabase(first);
+    const protectedName = service.getActiveDatabaseName();
+    await service.saveTrainingBlock(weeklyBlock());
+    await save();
+    globalThis.localStorage.setItem('circuit.database-file-owner.v1:' + protectedName, other);
+    await expect(service.activateUserDatabase(other)).rejects.toThrow(/ownership mismatch/);
+    expect(service.getActiveDatabaseName()).toBe(protectedName);
+    expect((await ledger())).toHaveLength(1);
+  });
+
+  it('does not reassign a populated original file when localStorage ownership is lost', async () => {
+    await service.saveTrainingBlock(weeklyBlock());
+    await save();
+    globalThis.localStorage.removeItem('circuit.original-database-owner');
+    await expect(service.activateUserDatabase('synthetic-different-owner'))
+      .rejects.toThrow(/ownership mismatch/);
+    expect((await ledger())).toHaveLength(1);
+    expect(service.getActiveDatabaseName()).toBe('circuit-generator.db');
+  });
+
+  it('does not adopt a populated legacy side-profile database without independent provenance', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const athlete = 'historical-side-profile';
+    await service.activateUserDatabase(athlete);
+    const protectedName = service.getActiveDatabaseName();
+    await service.saveTrainingBlock(weeklyBlock());
+    await save();
+    const raw = new DatabaseSync(join(state.directory, protectedName));
+    raw.prepare('DELETE FROM sidequest_athlete_database_owner').run();
+    raw.close();
+    globalThis.localStorage.removeItem('circuit.database-file-owner.v1:' + protectedName);
+    await expect(service.activateUserDatabase(athlete))
+      .rejects.toThrow(/no verifiable owner/);
+    expect(service.getActiveDatabaseName()).toBe(protectedName);
+    // The database remains intact for a manual owner-provenance migration.
+    expect((await ledger())).toHaveLength(1);
+  });
+
+  it('keeps the previous active profile selected when new owner verification fails', async () => {
+    await service.saveTrainingBlock(weeklyBlock());
+    const priorName = service.getActiveDatabaseName();
+    state.failNextContaining = 'INSERT INTO sidequest_athlete_database_owner';
+    await expect(service.activateUserDatabase('fresh-athlete')).rejects
+      .toThrow(/synthetic SQLite write interruption/);
+    expect(service.getActiveDatabaseName()).toBe(priorName);
+    expect(await sessionStatus()).toBe('planned');
+    expect(globalThis.localStorage.getItem('sidequest.active-workout.profile-id'))
+      .toBe('synthetic-athlete-one');
+  });
+
   it('prevents two different athlete IDs that normalize to the same filename sharing data', async () => {
     // A dot and underscore both map to underscore under the original filename
     // sanitizer. Without ownership tracking, their SQLite databases collide.
