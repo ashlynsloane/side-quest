@@ -1,9 +1,28 @@
 # Native iOS scripted acceptance
 
-This directory contains **unexecuted** Maestro scenarios until a green native simulator run supplies evidence. The isolated app ID is `com.sidequest.synthetic.qa`, set by the synthetic simulator workflow's ephemeral `app.json` edit.
+This directory contains Maestro journeys for the **isolated synthetic iOS app**, bundle ID `com.sidequest.synthetic.qa`. The CI workflow rewrites `apps/mobile/app.json` only inside an ephemeral macOS runner. It never deploys to an installed beta, uses fictional accounts, and does not access real athlete records.
 
-`synthetic-onboarding-first-week.yaml`: fresh local synthetic athlete -> complete fast-start questionnaire -> automatically generate Week 1 -> open the provisional week. It avoids provider credentials and real training data.
+## Journeys
 
-Run only against a fresh synthetic simulator install and with cloud/invite environment variables unset. Future scenarios should include Today/Week/Train start, save partial, cold launch, recovery after interrupted save, plan regeneration, duplicate provider imports, accessibility, and profile isolation. Do not call a scenario 'passing' based solely on a successful iOS JS export or generated YAML.
+- `synthetic-onboarding-first-week.yaml`: fresh synthetic local account, fast-start questionnaire, saved first-week preview and Week screen.
+- `synthetic-completed-ride.yaml`: onboard a fresh synthetic athlete, record a 75-minute bike activity with deliberately **unknown** distance, inspect actual activity review.
+- `synthetic-ride-restart.yaml`: record the synthetic ride, terminate and relaunch the native app, then verify the record remains in history.
+
+## Evidence chronology
+
+1. **Native build and launch passed** in [run 41161358738](https://github.com/ashlynsloane/side-quest/actions/runs/41161358738): native Release build, simulator install, launch and initial screenshot.
+2. **First interactive run failed** in [run 41163888023](https://github.com/ashlynsloane/side-quest/actions/runs/41163888023). Simulator screenshot and accessibility hierarchy confirmed the original test typed both the name and email in the **Name** field, leaving the Email field blank and the Enter beta button disabled. Both journeys failed at the same initial first-week assertion. This was a test-input targeting error, not evidence of an app crash.
+3. Corrected the test with explicit Name/Email/Enter-beta accessibility IDs and a keyboard dismissal between fields. Added stable IDs for the onboarding and activity-save actions. A subsequent full native run must be completed before these interactions are called passing.
+4. The restart journey remains a separate acceptance gate. When a prerequisite fails, its status must be reported as **blocked / not executed**, not passed.
+
+## Required evidence to call the native release gate passing
+
+- All three Maestro scenarios execute successfully against a native iPhone simulator with non-empty JUnit reports.
+- Screenshots and the accessibility hierarchy match the expected states, and no error/blank screen is mistaken for successful navigation.
+- A completed ride appears in training history **after cold relaunch**, with actual 75-minute duration and absent/unknown distance rather than an invented mileage.
+- Athlete profile isolation and pending-partial-workout force-quit recovery still require additional native scenarios beyond the first three.
+- Do not infer clinical safety, data-source coverage, or actual hardware correctness from simulator success.
+
+Run through `.github/workflows/native-ios-simulator-smoke.yml`. Inspect GitHub Actions artifacts, including the `maestro-evidence/` directory, for any failure. The planner/SQLite suite is a separate gate; both must pass before promoting PR #12.
 
 Maestro CLI documentation: https://docs.maestro.dev/maestro-cli
