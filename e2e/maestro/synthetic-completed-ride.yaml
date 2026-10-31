@@ -1,0 +1,24 @@
+# Synthetic athlete logs a completed ride without inventing distance.
+# Runs onboarding flow first in the isolated, credential-free QA simulator.
+appId: com.sidequest.synthetic.qa
+---
+- runFlow: synthetic-onboarding-first-week.yaml
+- scrollUntilVisible:
+    element: "Record a completed run, ride or swim"
+    direction: DOWN
+    timeout: 25000
+- tapOn: "Record a completed run, ride or swim"
+- assertVisible: "Log what you actually did"
+- tapOn: "Completed duration in minutes"
+- inputText: "75"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Save completed activity"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Save completed activity"
+- extendedWaitUntil:
+    visible: "Completed bike"
+    timeout: 30000
+- assertVisible: "75 minutes"
+- takeScreenshot: "synthetic-completed-ride-review"
