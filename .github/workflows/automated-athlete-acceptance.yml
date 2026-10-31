@@ -1,0 +1,47 @@
+name: Automated athlete acceptance
+on:
+  push:
+    branches:
+      - test/automated-athlete-acceptance-v1
+  pull_request:
+    paths:
+      - 'packages/planner/**'
+      - 'apps/mobile/**'
+      - '.github/workflows/automated-athlete-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  athlete-acceptance:
+    name: Planner and synthetic athlete QA
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck planner
+        run: pnpm --dir packages/planner typecheck
+      - name: Typecheck mobile
+        run: pnpm --dir apps/mobile typecheck
+      - name: Synthetic athlete acceptance
+        run: pnpm --dir packages/planner exec vitest run test/automated-athlete-acceptance.test.ts --reporter=default --reporter=junit --outputFile.junit=../../athlete-acceptance-junit.xml
+      - name: Full planner regression suite including SQLite
+        run: pnpm --dir packages/planner test
+      - name: Validate iOS JavaScript export (not native launch)
+        run: pnpm --dir apps/mobile exec expo export --platform ios --output-dir /tmp/sq-acceptance-ios
+      - name: Upload acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-athlete-qa-results
+          path: athlete-acceptance-junit.xml
+          if-no-files-found: warn
