@@ -55,6 +55,29 @@ describe('durable pending partial-workout completion contract', () => {
     expect(restored?.running).toBe(false);
   });
 
+  it('does not let delayed periodic autosave erase pending partial completion', async () => {
+    const original = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
+    const pending = {
+      completionFraction: 0.37,
+      completedAt: '2026-10-20T10:37:00.000Z',
+    };
+    await saveLiveWorkoutSession({ ...original, running: false, pendingCompletion: pending });
+    await saveLiveWorkoutSession({ ...original, savedAt: '2026-10-20T10:38:00.000Z' });
+    expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
+  });
+
+  it('rejects conflicting completion fractions while keeping original durable record', async () => {
+    const original = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
+    const completedAt = '2026-10-20T10:37:00.000Z';
+    await saveLiveWorkoutSession({
+      ...original, pendingCompletion: { completionFraction: 0.37, completedAt },
+    });
+    await expect(saveLiveWorkoutSession({
+      ...original, pendingCompletion: { completionFraction: 1, completedAt },
+    })).rejects.toThrow(/Conflicting pending workout completion/);
+    expect((await loadLiveWorkoutSession())?.pendingCompletion?.completionFraction).toBe(0.37);
+  });
+
   it('remains backward compatible with pre-journal checkpoints', async () => {
     const legacy = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
     await saveLiveWorkoutSession(legacy);
