@@ -3,25 +3,7 @@
 # Requires EXPO_PUBLIC_BETA_INVITE_CODE and Supabase cloud auth to be unset.
 appId: com.sidequest.synthetic.qa
 ---
-- launchApp:
-    clearState: true
-- assertVisible: "Create your beta profile"
-- tapOn:
-    id: "sidequest-qa-athlete-name"
-- inputText: "Synthetic QA Athlete"
-# A keyboard dismissal gesture failed under iOS Maestro. Tap the email
-# accessibility ID directly to switch focus between two text fields.
-- tapOn:
-    id: "sidequest-qa-athlete-email"
-- inputText: "synthetic-athlete@example.invalid"
-- assertVisible:
-    id: "sidequest-qa-enter-beta"
-- tapOn:
-    id: "sidequest-qa-enter-beta"
-- extendedWaitUntil:
-    visible: "Build your first week."
-    timeout: 30000
-- assertVisible: "Build your first week."
+- runFlow: synthetic-profile-entry.yaml
 - tapOn:
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "Choose the goal."
