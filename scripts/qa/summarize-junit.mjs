@@ -99,3 +99,8 @@ if (process.env.GITHUB_STEP_SUMMARY) {
 } else {
   process.stdout.write(markdown);
 }
+
+if (report.status !== 'PASS') {
+  console.error('QA gate is not passing: ' + report.status);
+  process.exitCode = 1;
+}
