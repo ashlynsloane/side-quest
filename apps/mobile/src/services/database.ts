@@ -58,10 +58,10 @@ function chooseProfileDatabaseName(userId: string): string {
 }
 
 export async function activateUserDatabase(userId: string): Promise<void> {
+  if (!userId.trim()) throw new Error('Athlete database identity is required.');
   const ownerKey = 'circuit.original-database-owner';
   let originalOwner = profileStorage.getItem(ownerKey);
   if (!originalOwner) { originalOwner = userId; profileStorage.setItem(ownerKey, userId); }
-  if (!userId.trim()) throw new Error('Athlete database identity is required.');
   const nextName = originalOwner === userId
     ? 'circuit-generator.db' : chooseProfileDatabaseName(userId);
   if (nextName === activeDatabaseName) {
