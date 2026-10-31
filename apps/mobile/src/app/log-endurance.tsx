@@ -1,7 +1,7 @@
 import { createManualEnduranceActivity, localCalendarDate } from '@circuit/planner';
 import type { EnduranceIntensity } from '@circuit/domain';
 import { useRouter, type Href } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
@@ -26,6 +26,7 @@ export default function LogEnduranceScreen() {
   const [distance, setDistance] = useState('');
   const [name, setName] = useState('');
   const [intensity, setIntensity] = useState<EnduranceIntensity>('unknown');
+  const submissionRef = useRef<{ id: string; recordedAt: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function save() {
@@ -33,14 +34,21 @@ export default function LogEnduranceScreen() {
     setBusy(true); setError(null);
     try {
       const now = new Date();
-      const entry = createManualEnduranceActivity({
+      // A failed save or navigation retry must reuse the same canonical identity.
+      // Otherwise an already-committed activity could be counted twice.
+      const submission = submissionRef.current ?? {
         id: 'manual-' + now.getTime() + '-' + Math.random().toString(36).slice(2, 10),
+        recordedAt: now.toISOString(),
+      };
+      submissionRef.current = submission;
+      const entry = createManualEnduranceActivity({
+        id: submission.id,
         name: name.trim() || 'Completed ' + sport,
         discipline: sport,
         localDate: date.trim(),
         durationMinutes: Number(minutes),
         distanceKm: distance.trim() ? Number(distance) : null,
-        intensity, recordedAt: now.toISOString(),
+        intensity, recordedAt: submission.recordedAt,
       });
       await upsertEnduranceActivities([entry]);
       // Matching an actual workout to a planned calendar event is an explicit
