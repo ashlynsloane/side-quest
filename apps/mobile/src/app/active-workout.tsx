@@ -126,12 +126,12 @@ export default function ActiveWorkoutScreen() {
         const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
         const safeStation = workout.stations[safeIndex];
         setStationIndex(safeIndex);
-        setPhase(snapshot.phase);
+        setPhase(snapshot.pendingCompletion ? 'complete' : snapshot.phase);
         setRemainingSeconds(Math.min(
           Math.max(0, snapshot.remainingSeconds),
           snapshot.phase === 'work' ? (safeStation?.durationSeconds ?? snapshot.remainingSeconds) : Math.max(15, workout.request.restSeconds),
         ));
-        setRunning(restoredActiveWorkout ? false : snapshot.running);
+        setRunning(snapshot.pendingCompletion ? false : restoredActiveWorkout ? false : snapshot.running);
         setStationRounds(snapshot.stationRounds);
         setExerciseLoads(snapshot.exerciseLoads);
         setExerciseSets(snapshot.exerciseSets);
@@ -139,12 +139,20 @@ export default function ActiveWorkoutScreen() {
         setRestRounds(snapshot.restRounds);
         setRestLoadUnit(snapshot.restLoadUnit);
         startedAt.current = snapshot.startedAt;
+        if (snapshot.pendingCompletion) {
+          completedAt.current = snapshot.pendingCompletion.completedAt;
+          completionFractionRef.current = snapshot.pendingCompletion.completionFraction;
+          setCompletionSaveStatus('error');
+          setCompletionSaveError('Completion was interrupted. Retry saving the original workout dose.');
+        }
         const progressed = safeIndex > 0
           || snapshot.phase === 'rest'
           || snapshot.remainingSeconds < (safeStation?.durationSeconds ?? snapshot.remainingSeconds)
           || Object.keys(snapshot.stationRounds).length > 0;
-        if (restoredActiveWorkout || progressed) {
-          setResumeNotice(restoredActiveWorkout
+        if (restoredActiveWorkout || progressed || snapshot.pendingCompletion) {
+          setResumeNotice(snapshot.pendingCompletion
+            ? 'Unfinished completion restored; retry saving before leaving.'
+            : restoredActiveWorkout
             ? 'Workout restored. The timer is paused so nothing advances without you.'
             : 'Workout resumed from your last saved point.');
         }
@@ -310,6 +318,27 @@ export default function ActiveWorkoutScreen() {
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
     try {
+      // Journal the *original* completed dose and timestamp before the SQL
+      // transaction. A force quit following a failed save must not silently
+      // convert a partial completion into a full one on the next launch.
+      await saveLiveWorkoutSession({
+        schemaVersion: 1,
+        savedAt: new Date().toISOString(),
+        workout: activeWorkout,
+        startedAt: startedAt.current,
+        stationIndex,
+        phase: 'rest',
+        remainingSeconds,
+        running: false,
+        stationRounds: completedRounds,
+        exerciseLoads: completedLoads,
+        exerciseSets: completedSets,
+        restEntries,
+        restRounds,
+        restLoadUnit,
+        planLink: activePlanLink ?? undefined,
+        pendingCompletion: { completedAt: timestamp, completionFraction },
+      });
       await saveCompletedWorkout({
       workout: activeWorkout,
       startedAt: startedAt.current,
@@ -405,6 +434,8 @@ export default function ActiveWorkoutScreen() {
   function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
 
   function pauseAndLeave() {
+    // Do not replace a pending-completion journal with an ordinary rest state.
+    if (phase === 'complete') return;
     setRunning(false);
     void saveLiveWorkoutSession({
       schemaVersion: 1,
