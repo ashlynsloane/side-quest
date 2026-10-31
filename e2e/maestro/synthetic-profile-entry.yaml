@@ -4,14 +4,16 @@ appId: com.sidequest.synthetic.qa
 - launchApp:
     clearState: true
 - assertVisible: "Create your beta profile"
-- tapOn:
-    id: "sidequest-qa-athlete-name"
-- inputText: "Synthetic QA Athlete"
-# Switch input focus directly. Maestro hideKeyboard does not work reliably
-# with the current iOS keyboard configuration.
+# The lower email input is covered by the keyboard if Name was entered first.
+# Enter Email while both inputs are unobscured, then switch UP to Name.
 - tapOn:
     id: "sidequest-qa-athlete-email"
 - inputText: "synthetic-athlete@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic QA Athlete"
+# Dismiss focus with a non-interactive header, not iOS hideKeyboard.
+- tapOn: "Create your beta profile"
 - assertVisible:
     id: "sidequest-qa-enter-beta"
 - tapOn:
