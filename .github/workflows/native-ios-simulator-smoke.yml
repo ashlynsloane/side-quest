@@ -1,13 +1,20 @@
 name: Native iOS simulator acceptance
 on:
-  # Temporary QA-branch trigger to perform the first real simulator run.
+  # Native tests rerun only for the workflow or scenario definitions.
   push:
     branches: [test/automated-athlete-acceptance-v1]
-    paths: ['.github/workflows/native-ios-simulator-smoke.yml']
+    paths:
+      - '.github/workflows/native-ios-simulator-smoke.yml'
+      - 'e2e/maestro/**'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Do not spend macOS/Xcode build time on superseded QA revisions.
+concurrency:
+  group: native-ios-acceptance-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   synthetic-ios-smoke:
@@ -102,7 +109,7 @@ jobs:
         run: |
           curl -fsSL "https://get.maestro.mobile.dev" | bash
           "$HOME/.maestro/bin/maestro" --version
-      - name: Run synthetic onboarding and completed-ride UI journeys
+      - name: Run staged synthetic native UI journeys
         id: maestro_ui
         timeout-minutes: 30
         run: |
@@ -110,42 +117,57 @@ jobs:
           mkdir -p maestro-evidence
           export PATH="$HOME/.maestro/bin:$PATH"
           UDID="${{ steps.simulator.outputs.udid }}"
-          maestro --udid="$UDID" test \
-            --format junit --output maestro-evidence/onboarding-junit.xml \
-            --test-output-dir=maestro-evidence/onboarding \
-            e2e/maestro/synthetic-onboarding-first-week.yaml \
-            > maestro-evidence/onboarding-console.log 2>&1
-          ONBOARDING_STATUS=$?
-          tail -n 90 maestro-evidence/onboarding-console.log
-          maestro --udid="$UDID" test \
-            --format junit --output maestro-evidence/ride-junit.xml \
-            --test-output-dir=maestro-evidence/ride \
-            e2e/maestro/synthetic-completed-ride.yaml \
-            > maestro-evidence/ride-console.log 2>&1
-          RIDE_STATUS=$?
-          tail -n 90 maestro-evidence/ride-console.log
-          # Run cold-restart persistence only if its prerequisite journeys pass.
-          # The composed scenario deliberately creates a fresh synthetic athlete.
-          RESTART_STATUS=0
-          if [ "$ONBOARDING_STATUS" -eq 0 ] && [ "$RIDE_STATUS" -eq 0 ]; then
+          # Each scenario starts with a new fictional local profile. Never
+          # execute downstream assertions when an upstream prerequisite fails.
+          run_flow() {
+            LABEL="$1"
+            FILE="$2"
             maestro --udid="$UDID" test \
-              --format junit --output maestro-evidence/restart-junit.xml \
-              --test-output-dir=maestro-evidence/restart \
-              e2e/maestro/synthetic-ride-restart.yaml \
-              > maestro-evidence/restart-console.log 2>&1
-            RESTART_STATUS=$?
-            tail -n 90 maestro-evidence/restart-console.log
+              --format junit --output "maestro-evidence/${LABEL}-junit.xml" \
+              --test-output-dir="maestro-evidence/${LABEL}" \
+              "$FILE" > "maestro-evidence/${LABEL}-console.log" 2>&1
+            RESULT=$?
+            tail -n 70 "maestro-evidence/${LABEL}-console.log"
+            return "$RESULT"
+          }
+          PROFILE_STATUS=99
+          ONBOARDING_STATUS=99
+          RIDE_STATUS=99
+          RESTART_STATUS=99
+          run_flow profile e2e/maestro/synthetic-profile-entry.yaml
+          PROFILE_STATUS=$?
+          if [ "$PROFILE_STATUS" -eq 0 ]; then
+            run_flow onboarding e2e/maestro/synthetic-onboarding-first-week.yaml
+            ONBOARDING_STATUS=$?
           else
-            RESTART_STATUS=99
-            echo "Restart scenario blocked by prerequisite UI journey; not executed." \
-              | tee maestro-evidence/restart-console.log
+            echo "Onboarding blocked by failed profile entry." | tee maestro-evidence/onboarding-console.log
+          fi
+          if [ "$ONBOARDING_STATUS" -eq 0 ]; then
+            run_flow ride e2e/maestro/synthetic-completed-ride.yaml
+            RIDE_STATUS=$?
+          else
+            echo "Completed ride blocked by failed onboarding." | tee maestro-evidence/ride-console.log
+          fi
+          if [ "$RIDE_STATUS" -eq 0 ]; then
+            run_flow restart e2e/maestro/synthetic-ride-restart.yaml
+            RESTART_STATUS=$?
+          else
+            echo "Cold restart blocked by failed completed-ride journey." | tee maestro-evidence/restart-console.log
           fi
           xcrun simctl io "$UDID" screenshot maestro-evidence/final-simulator-screen.png || true
+          echo "profile=$PROFILE_STATUS" >> "$GITHUB_OUTPUT"
           echo "onboarding=$ONBOARDING_STATUS" >> "$GITHUB_OUTPUT"
           echo "ride=$RIDE_STATUS" >> "$GITHUB_OUTPUT"
           echo "restart=$RESTART_STATUS" >> "$GITHUB_OUTPUT"
-          if [ "$ONBOARDING_STATUS" -ne 0 ] || [ "$RIDE_STATUS" -ne 0 ] || [ "$RESTART_STATUS" -ne 0 ]; then
-            echo "A native UI journey failed or was blocked. Inspect attached JUnit, logs, screenshots and hierarchy."
+          {
+            echo "## Native iOS acceptance"
+            for RESULT in profile:$PROFILE_STATUS onboarding:$ONBOARDING_STATUS ride:$RIDE_STATUS restart:$RESTART_STATUS; do
+              echo "- $RESULT"
+            done
+            echo "0=passed; 99=blocked/not executed; other nonzero=failed."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PROFILE_STATUS" -ne 0 ] || [ "$ONBOARDING_STATUS" -ne 0 ] || [ "$RIDE_STATUS" -ne 0 ] || [ "$RESTART_STATUS" -ne 0 ]; then
+            echo "Native journey failed or was blocked; inspect artifacts."
             exit 1
           fi
       - name: Save screenshot and diagnostic evidence
