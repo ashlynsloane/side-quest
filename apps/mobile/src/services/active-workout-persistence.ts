@@ -82,6 +82,14 @@ export interface LiveWorkoutSessionSnapshot {
 }
 
 const LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
+export const ACTIVE_WORKOUT_PROFILE_KEY = 'sidequest.active-workout.profile-id';
+const ORIGINAL_DATABASE_OWNER_KEY = 'circuit.original-database-owner';
+
+function scopedLiveSessionKey(storage: StorageLike, profileId?: string | null): string | null {
+  const owner = profileId ?? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY);
+  if (!owner) return null;
+  return LIVE_SESSION_KEY + ':' + encodeURIComponent(owner);
+}
 
 type StorageLike = {
   getItem(key: string): string | null;
@@ -148,18 +156,49 @@ export function createInitialLiveWorkoutSession(
   };
 }
 
-export async function saveLiveWorkoutSession(snapshot: LiveWorkoutSessionSnapshot): Promise<void> {
-  getLocalStorage()?.setItem(LIVE_SESSION_KEY, JSON.stringify(snapshot));
+export async function saveLiveWorkoutSession(
+  snapshot: LiveWorkoutSessionSnapshot, profileId?: string | null,
+): Promise<void> {
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) throw new Error('Cannot save an unowned live workout.');
+  storage.setItem(key, JSON.stringify(snapshot));
 }
 
-export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapshot | null> {
+export async function loadLiveWorkoutSession(
+  profileId?: string | null,
+): Promise<LiveWorkoutSessionSnapshot | null> {
   const storage = getLocalStorage();
-  const serialized = storage?.getItem(LIVE_SESSION_KEY);
+  if (!storage) return null;
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) return null;
+  let serialized = storage.getItem(key);
+  if (!serialized) {
+    // Only the original database owner may adopt the single-profile legacy
+    // checkpoint. This is a copy-before-delete migration; failed writes leave
+    // the historical checkpoint untouched for explicit recovery.
+    const owner = profileId ?? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY);
+    if (owner && storage.getItem(ORIGINAL_DATABASE_OWNER_KEY) === owner) {
+      const legacy = storage.getItem(LIVE_SESSION_KEY);
+      if (legacy) {
+        try {
+          const candidate: unknown = JSON.parse(legacy);
+          if (!isLiveWorkoutSession(candidate)) return null;
+          storage.setItem(key, legacy);
+          storage.removeItem(LIVE_SESSION_KEY);
+          serialized = legacy;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
   if (!serialized) return null;
   try {
     const parsed: unknown = JSON.parse(serialized);
     if (!isLiveWorkoutSession(parsed)) {
-      storage?.removeItem(LIVE_SESSION_KEY);
+      // Do not silently remove an invalid persisted recovery journal.
       return null;
     }
     return {
@@ -169,11 +208,13 @@ export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapsh
       planLink: isActiveWorkoutPlanLink(parsed.planLink) ? parsed.planLink : undefined,
     };
   } catch {
-    storage?.removeItem(LIVE_SESSION_KEY);
     return null;
   }
 }
 
-export async function clearLiveWorkoutSession(): Promise<void> {
-  getLocalStorage()?.removeItem(LIVE_SESSION_KEY);
+export async function clearLiveWorkoutSession(profileId?: string | null): Promise<void> {
+  const storage = getLocalStorage();
+  if (!storage) return;
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (key) storage.removeItem(key);
 }
