@@ -12,9 +12,11 @@ function present(path: string) {
 describe('native synthetic UI automation contract', () => {
   it('keeps a separate iOS identifier and non-production simulator credentials', () => {
     const flow = source('e2e/maestro/synthetic-onboarding-first-week.yaml');
+    const profileFlow = source('e2e/maestro/synthetic-profile-entry.yaml');
     const workflow = source('.github/workflows/native-ios-simulator-smoke.yml');
     expect(flow).toContain('appId: com.sidequest.synthetic.qa');
-    expect(flow).toContain('clearState: true');
+    expect(flow).toContain('- runFlow: synthetic-profile-entry.yaml');
+    expect(profileFlow).toContain('clearState: true');
     expect(workflow).toContain('QA_BUNDLE_ID: com.sidequest.synthetic.qa');
     expect(workflow).toContain('app.expo.ios.bundleIdentifier = process.env.QA_BUNDLE_ID');
     expect(workflow).not.toContain('EXPO_PUBLIC_BETA_INVITE_CODE=');
@@ -57,6 +59,7 @@ describe('native synthetic UI automation contract', () => {
 
   it('requires nested journeys to point at committed sibling flows', () => {
     const flowNames = [
+      'synthetic-profile-entry.yaml',
       'synthetic-onboarding-first-week.yaml',
       'synthetic-completed-ride.yaml',
       'synthetic-ride-restart.yaml',
@@ -79,8 +82,9 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).toContain('synthetic-ios-first-launch.png');
     expect(workflow).toContain('maestro-evidence/');
     expect(workflow).toContain('if: always()');
-    expect(workflow).toContain('onboarding-junit.xml');
-    expect(workflow).toContain('ride-junit.xml');
+    expect(workflow).toContain('${LABEL}-junit.xml');
+    expect(workflow).toContain('run_flow profile e2e/maestro/synthetic-profile-entry.yaml');
+    expect(workflow).toContain('run_flow restart e2e/maestro/synthetic-ride-restart.yaml');
     expect(workflow).toContain('e2e/maestro/synthetic-onboarding-first-week.yaml');
     expect(workflow).toContain('e2e/maestro/synthetic-completed-ride.yaml');
     expect(workflow).toContain('exit 1');
