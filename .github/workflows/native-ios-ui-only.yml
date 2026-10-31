@@ -4,7 +4,8 @@ on:
   push:
     branches: [test/automated-athlete-acceptance-v1]
     paths:
-      - 'e2e/maestro/**'
+      - 'e2e/maestro/*.yaml'
+      - 'e2e/maestro/**/*.yaml'
       - 'scripts/qa/run-native-maestro.sh'
   workflow_dispatch:
     inputs:
