@@ -167,16 +167,18 @@ export async function saveLiveWorkoutSession(
   if (oldValue) {
     try {
       const previous: unknown = JSON.parse(oldValue);
-      if (isLiveWorkoutSession(previous)
-        && previous.pendingCompletion
-        && previous.workout.id === snapshot.workout.id
-        && previous.startedAt === snapshot.startedAt) {
+      if (isLiveWorkoutSession(previous) && previous.pendingCompletion) {
+        // The journal is owned by a completion that has not been acknowledged
+        // as fully committed. Even another workout cannot overwrite it.
+        const sameSession = previous.workout.id === snapshot.workout.id
+          && previous.startedAt === snapshot.startedAt;
         if (!snapshot.pendingCompletion) {
           // A late timer / background checkpoint must never erase the
           // original completion journal before the canonical ledger commits.
           return;
         }
-        if (previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
+        if (!sameSession
+          || previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
           || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
           throw new Error('Conflicting pending workout completion; original dose retained.');
         }
