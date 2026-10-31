@@ -28,6 +28,7 @@ import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
 import type { DailyReadinessCheckIn } from './readiness';
+import { ACTIVE_WORKOUT_PROFILE_KEY } from './active-workout-persistence';
 
 let db = SQLite.openDatabaseSync('circuit-generator.db');
 let activeDatabaseName = 'circuit-generator.db';
@@ -42,11 +43,16 @@ export async function activateUserDatabase(userId: string): Promise<void> {
   if (!originalOwner) { originalOwner = userId; profileStorage.setItem(ownerKey, userId); }
   const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
   const nextName = originalOwner === userId ? 'circuit-generator.db' : `circuit-generator-${safeId}.db`;
-  if (nextName === activeDatabaseName) { await initializeDatabase(); return; }
+  if (nextName === activeDatabaseName) {
+    await initializeDatabase();
+    profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
+    return;
+  }
   db = SQLite.openDatabaseSync(nextName);
   activeDatabaseName = nextName;
   initialized = false;
   await initializeDatabase();
+  profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
 }
 
 export function getActiveDatabaseName(): string { return activeDatabaseName; }
