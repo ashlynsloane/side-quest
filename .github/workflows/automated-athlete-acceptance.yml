@@ -42,7 +42,7 @@ jobs:
         run: pnpm --dir packages/planner exec vitest run test/actual-mobile-workout-sqlite.test.ts --reporter=default --reporter=junit --outputFile.junit=../../mobile-workout-qa-junit.xml
       - name: Full planner regression suite including SQLite
         id: full_planner
-        run: pnpm --dir packages/planner test
+        run: pnpm --dir packages/planner exec vitest run --reporter=default --reporter=junit --outputFile.junit=../../planner-regression-junit.xml
       - name: Validate iOS JavaScript export (not native launch)
         id: ios_js_export
         run: pnpm --dir apps/mobile exec expo export --platform ios --output-dir /tmp/sq-acceptance-ios
@@ -55,7 +55,7 @@ jobs:
           QA_MOBILE_SQL_SUITE: ${{ steps.mobile_sql_suite.outcome }}
           QA_FULL_PLANNER: ${{ steps.full_planner.outcome }}
           QA_IOS_JS_EXPORT: ${{ steps.ios_js_export.outcome }}
-        run: node scripts/qa/summarize-junit.mjs athlete-acceptance-junit.xml mobile-workout-qa-junit.xml
+        run: node scripts/qa/summarize-junit.mjs athlete-acceptance-junit.xml mobile-workout-qa-junit.xml planner-regression-junit.xml
       - name: Upload acceptance report
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,5 +64,6 @@ jobs:
           path: |
             athlete-acceptance-junit.xml
             mobile-workout-qa-junit.xml
+            planner-regression-junit.xml
             qa-summary.json
           if-no-files-found: warn
