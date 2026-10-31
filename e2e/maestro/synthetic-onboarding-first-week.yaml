@@ -8,39 +8,55 @@ appId: com.sidequest.synthetic.qa
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "Choose the goal."
 - scrollUntilVisible:
-    element: "Continue"
+    element:
+      id: "sidequest-qa-onboarding-next"
     direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "Use the time you actually have."
 - scrollUntilVisible:
-    element: "Continue"
+    element:
+      id: "sidequest-qa-onboarding-next"
     direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "What is available now?"
 - scrollUntilVisible:
-    element: "Continue"
+    element:
+      id: "sidequest-qa-onboarding-next"
     direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "Anything to protect?"
 - scrollUntilVisible:
-    element: "Continue"
+    element:
+      id: "sidequest-qa-onboarding-next"
     direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "How do you respond to training?"
 - scrollUntilVisible:
-    element: "Continue"
+    element:
+      id: "sidequest-qa-onboarding-next"
     direction: DOWN
+    visibilityPercentage: 50
     timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
 - assertVisible: "Ready to build."
 - scrollUntilVisible:
-    element: "Build my first week"
+    element:
+      id: "sidequest-qa-onboarding-next"
     direction: DOWN
+    visibilityPercentage: 50
     timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
@@ -50,8 +66,10 @@ appId: com.sidequest.synthetic.qa
 - assertVisible: "Your first week is ready."
 - takeScreenshot: "synthetic-first-week"
 - scrollUntilVisible:
-    element: "Review provisional first week"
+    element:
+      id: "sidequest-qa-review-first-week"
     direction: DOWN
-    timeout: 25000
+    visibilityPercentage: 50
+    timeout: 20000
 - tapOn:
     id: "sidequest-qa-review-first-week"
