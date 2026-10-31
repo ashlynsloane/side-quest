@@ -60,6 +60,7 @@ jobs:
           }
       - name: Boot a clean iPhone simulator
         id: simulator
+        timeout-minutes: 8
         run: |
           UDID=$(xcrun simctl list devices available -j | node -e '
             let input = "";
