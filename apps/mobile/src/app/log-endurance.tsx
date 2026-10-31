@@ -105,7 +105,7 @@ export default function LogEnduranceScreen() {
         workout or clearance to increase training. After saving, you can review
         whether it belongs to a specific planned session. No plan is modified automatically.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Pressable accessibilityRole="button" disabled={busy}
+      <Pressable testID="sidequest-qa-save-endurance" accessibilityRole="button" disabled={busy}
         onPress={() => void save()} style={[styles.save, busy && styles.disabled]}>
         <Text style={styles.saveText}>{busy ? 'Saving locally…' : 'Save completed activity'}</Text>
       </Pressable>
