@@ -194,6 +194,41 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await ledger()).toHaveLength(1);
   });
 
+  it('reopens an interrupted partial completion journal and repairs a committed ledger', async () => {
+    const checkpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const originalStart = startedAt;
+    const originalCompleted = completedAt;
+    const snapshot = checkpoint.createInitialLiveWorkoutSession(
+      workout, originalStart,
+      { sessionId: 'synthetic-planned-session', sessionDate: '2026-10-20',
+        sessionTitle: 'Planned session', modifiedFromPlan: false },
+    );
+    await service.saveTrainingBlock(weeklyBlock());
+    await checkpoint.saveLiveWorkoutSession({
+      ...snapshot, phase: 'rest', running: false,
+      pendingCompletion: { completionFraction: 0.37, completedAt: originalCompleted },
+    });
+    state.failNextContaining = 'INSERT INTO training_blocks';
+    await expect(save(0.37)).rejects.toThrow(/synthetic SQLite write interruption/);
+    expect(await ledger()).toHaveLength(1);
+    expect(await sessionStatus()).toBe('planned');
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const recovered = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const pending = await recovered.loadLiveWorkoutSession();
+    expect(pending?.startedAt).toBe(originalStart);
+    expect(pending?.pendingCompletion).toEqual({
+      completionFraction: 0.37, completedAt: originalCompleted,
+    });
+    await save(pending!.pendingCompletion!.completionFraction);
+    expect((await ledger()).map(x => x.completionFraction)).toEqual([0.37]);
+    expect(await sessionStatus()).toBe('completed');
+    await recovered.clearLiveWorkoutSession();
+    expect(await recovered.loadLiveWorkoutSession()).toBeNull();
+  });
+
   it('does not expose athlete A ledger or plan within athlete B profile', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     await save();
