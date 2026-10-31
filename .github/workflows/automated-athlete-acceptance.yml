@@ -45,5 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: synthetic-athlete-qa-results
-          path: |\n            athlete-acceptance-junit.xml\n            mobile-workout-qa-junit.xml
+          path: |
+            athlete-acceptance-junit.xml
+            mobile-workout-qa-junit.xml
           if-no-files-found: warn
