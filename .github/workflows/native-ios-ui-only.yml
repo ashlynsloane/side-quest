@@ -76,6 +76,7 @@ jobs:
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
       - name: Install previously built synthetic Release app
+        timeout-minutes: 10
         run: |
           mkdir -p "$RUNNER_TEMP/native-qa-app"
           tar -xzf native-binary/simulator-app.tar.gz -C "$RUNNER_TEMP/native-qa-app"
