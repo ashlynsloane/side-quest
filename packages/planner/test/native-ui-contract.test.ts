@@ -113,6 +113,17 @@ describe('native synthetic UI automation contract', () => {
     expect(second.stdout).toBe(first.stdout);
   });
 
+  it('scrolls onboarding using the visible native button ID rather than hidden child text', () => {
+    const flow = source('e2e/maestro/synthetic-onboarding-first-week.yaml');
+    expect(flow).not.toContain('element: "Continue"');
+    expect(flow).not.toContain('element: "Build my first week"');
+    const scrolls = [...flow.matchAll(/- scrollUntilVisible:\n    element:\n      id: "sidequest-qa-onboarding-next"\n    direction: DOWN\n    visibilityPercentage: 50/g)];
+    expect(scrolls.length).toBeGreaterThanOrEqual(6);
+    expect(flow).toContain('id: "sidequest-qa-review-first-week"');
+    expect(source('apps/mobile/src/app/onboarding.tsx'))
+      .toContain('testID="sidequest-qa-onboarding-next"');
+  });
+
   it('requires nested journeys to point at committed sibling flows', () => {
     const flowNames = [
       'synthetic-profile-entry.yaml',
