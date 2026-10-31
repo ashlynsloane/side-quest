@@ -15,7 +15,7 @@ import {
 const workout = {
   id: 'partial-save-recovery', name: 'Synthetic recovery session',
   stations: [], estimatedElapsedSeconds: 3600,
-} as Parameters<typeof createInitialLiveWorkoutSession>[0];
+} as unknown as Parameters<typeof createInitialLiveWorkoutSession>[0];
 
 beforeEach(() => {
   const values = new Map<string, string>();
