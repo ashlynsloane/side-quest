@@ -77,6 +77,8 @@ export interface LiveWorkoutSessionSnapshot {
   restRounds: number;
   restLoadUnit: 'lb' | 'kg';
   planLink?: ActiveWorkoutPlanLink;
+  /** Durable retry intent; cannot silently become a full completion after restart. */
+  pendingCompletion?: { completionFraction: number; completedAt: string };
 }
 
 const LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
@@ -104,12 +106,22 @@ function isActiveWorkoutPlanLink(value: unknown): value is ActiveWorkoutPlanLink
 function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<LiveWorkoutSessionSnapshot>;
+  const pending = snapshot.pendingCompletion;
+  const pendingValid = pending === undefined || (
+    pending !== null
+    && Number.isFinite(pending.completionFraction)
+    && pending.completionFraction >= 0
+    && pending.completionFraction <= 1
+    && typeof pending.completedAt === 'string'
+    && Number.isFinite(Date.parse(pending.completedAt))
+  );
   return snapshot.schemaVersion === 1
     && Boolean(snapshot.workout?.id)
     && typeof snapshot.startedAt === 'string'
     && Number.isInteger(snapshot.stationIndex)
     && (snapshot.phase === 'work' || snapshot.phase === 'rest')
-    && typeof snapshot.remainingSeconds === 'number';
+    && typeof snapshot.remainingSeconds === 'number'
+    && pendingValid;
 }
 
 export function createInitialLiveWorkoutSession(
