@@ -28,7 +28,8 @@ for (const filename of filenames) {
   }
   const xml = readFileSync(filename, 'utf8');
   const suiteTags = [...xml.matchAll(/<testsuite\b[^>]*>/g)].map(m => m[0]);
-  if (suiteTags.length === 0) {
+  const closedSuites = [...xml.matchAll(/<\/testsuite\s*>/g)].length;
+  if (suiteTags.length === 0 || closedSuites !== suiteTags.length) {
     report.files.push({ file: filename, status: 'INVALID_XML_OR_EMPTY' });
     report.status = 'INCOMPLETE';
     continue;
@@ -46,11 +47,18 @@ for (const filename of filenames) {
       result[field] += value;
     }
   }
-  if (result.tests === 0) {
-    result.status = 'ZERO_TESTS';
+  if (result.tests === 0 || result.tests <= result.skipped) {
+    result.status = result.tests === 0 ? 'ZERO_TESTS' : 'NO_EXECUTED_TESTS';
     report.status = 'INCOMPLETE';
   } else if (result.failures || result.errors) {
     result.status = 'FAIL';
+    report.status = 'FAIL';
+  }
+  // The XML attributes must not claim success when testcase elements report
+  // a failure or error. Treat discordant evidence as a failed release gate.
+  if ((/<failure(?:\s|>)/.test(xml) && result.failures === 0)
+    || (/<error(?:\s|>)/.test(xml) && result.errors === 0)) {
+    result.status = 'INCONSISTENT_XML_FAILURES';
     report.status = 'FAIL';
   }
   report.files.push(result);
