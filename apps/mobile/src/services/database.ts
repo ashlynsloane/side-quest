@@ -51,29 +51,92 @@ function chooseProfileDatabaseName(userId: string): string {
     const key = FILE_OWNER_PREFIX + candidate;
     const owner = profileStorage.getItem(key);
     if (owner !== null && owner !== userId) continue;
-    profileStorage.setItem(key, userId);
+    // Ownership is committed only AFTER SQLite itself has verified the owner.
     return candidate;
   }
   throw new Error('Could not allocate a unique athlete database filename.');
 }
 
+const DB_OWNER_TABLE = 'sidequest_athlete_database_owner';
+
+/**
+ * An unclaimed historical database cannot be attributed solely by its
+ * sanitized filename. The ownership row lives INSIDE the SQLite file, so
+ * wiping localStorage does not erase evidence of its original athlete.
+ */
+async function verifyAthleteDatabaseOwner(
+  database: typeof db,
+  userId: string,
+  permitLegacyAdoption: boolean,
+): Promise<void> {
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS sidequest_athlete_database_owner (
+      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+      user_id TEXT NOT NULL
+    );
+  `);
+  const existing = await database.getFirstAsync<{ user_id: string }>(
+    `SELECT user_id FROM ${DB_OWNER_TABLE} WHERE singleton = 1`,
+  );
+  if (existing) {
+    if (existing.user_id !== userId) {
+      throw new Error('Athlete database ownership mismatch. No training records were opened.');
+    }
+    return;
+  }
+  const tables = await database.getAllAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN (?, 'sqlite_sequence')",
+    DB_OWNER_TABLE,
+  );
+  if (tables.length && !permitLegacyAdoption) {
+    throw new Error(
+      'Existing athlete database has no verifiable owner. Data was preserved; migration requires review.',
+    );
+  }
+  // The single owner row is written before exposing any athlete records.
+  await database.runAsync(
+    `INSERT INTO ${DB_OWNER_TABLE} (singleton, user_id) VALUES (1, ?)`,
+    userId,
+  );
+}
+
 export async function activateUserDatabase(userId: string): Promise<void> {
   if (!userId.trim()) throw new Error('Athlete database identity is required.');
   const ownerKey = 'circuit.original-database-owner';
-  let originalOwner = profileStorage.getItem(ownerKey);
-  if (!originalOwner) { originalOwner = userId; profileStorage.setItem(ownerKey, userId); }
+  const storedOriginalOwner = profileStorage.getItem(ownerKey);
+  const originalOwner = storedOriginalOwner ?? userId;
   const nextName = originalOwner === userId
     ? 'circuit-generator.db' : chooseProfileDatabaseName(userId);
-  if (nextName === activeDatabaseName) {
+  const oldDb = db;
+  const oldName = activeDatabaseName;
+  const oldInitialized = initialized;
+  const candidate = nextName === oldName ? oldDb : SQLite.openDatabaseSync(nextName);
+  const storedOwner = profileStorage.getItem(FILE_OWNER_PREFIX + nextName);
+  // Existing files from before this change require independent ownership
+  // provenance. An old original owner is supported when its identity was
+  // previously persisted; a preexisting side-profile file is supported only
+  // with the matching filename ownership claim.
+  const permitLegacyAdoption = nextName === 'circuit-generator.db'
+    ? storedOriginalOwner === userId
+    : storedOwner === userId;
+  await verifyAthleteDatabaseOwner(candidate, userId, permitLegacyAdoption);
+  try {
+    if (nextName !== oldName) {
+      db = candidate;
+      activeDatabaseName = nextName;
+      initialized = false;
+    }
     await initializeDatabase();
+    // Commit ownership and active identity only AFTER initialization passes.
+    if (!storedOriginalOwner) profileStorage.setItem(ownerKey, userId);
+    profileStorage.setItem(FILE_OWNER_PREFIX + nextName, userId);
     profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
-    return;
+  } catch (error) {
+    db = oldDb;
+    activeDatabaseName = oldName;
+    initialized = oldInitialized;
+    throw error;
   }
-  db = SQLite.openDatabaseSync(nextName);
-  activeDatabaseName = nextName;
-  initialized = false;
-  await initializeDatabase();
-  profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
 }
 
 export function getActiveDatabaseName(): string { return activeDatabaseName; }
