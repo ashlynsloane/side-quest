@@ -34,6 +34,8 @@ jobs:
         run: pnpm --dir apps/mobile typecheck
       - name: Synthetic athlete acceptance
         run: pnpm --dir packages/planner exec vitest run test/automated-athlete-acceptance.test.ts --reporter=default --reporter=junit --outputFile.junit=../../athlete-acceptance-junit.xml
+      - name: Real mobile workout SQLite acceptance (including injected failures)
+        run: pnpm --dir packages/planner exec vitest run test/actual-mobile-workout-sqlite.test.ts --reporter=default --reporter=junit --outputFile.junit=../../mobile-workout-qa-junit.xml
       - name: Full planner regression suite including SQLite
         run: pnpm --dir packages/planner test
       - name: Validate iOS JavaScript export (not native launch)
@@ -43,5 +45,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: synthetic-athlete-qa-results
-          path: athlete-acceptance-junit.xml
+          path: |\n            athlete-acceptance-junit.xml\n            mobile-workout-qa-junit.xml
           if-no-files-found: warn
