@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const root = new URL('../../../', import.meta.url);
 function source(path: string) {
@@ -55,6 +56,25 @@ describe('native synthetic UI automation contract', () => {
     expect(screen).toContain("clearLiveWorkoutSession(user?.id ?? null)");
     expect(source('apps/mobile/src/services/active-workout-persistence.ts'))
       .toContain("if (profileId === null) return null;");
+  });
+
+  it('uses one staged native runner and refuses a non-synthetic app identity', () => {
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    for (const flow of ['profile', 'onboarding', 'ride', 'restart']) {
+      expect(runner).toMatch(new RegExp('run_flow ' + flow + ' e2e/maestro/'));
+    }
+    expect(runner).toContain('QA_BUNDLE_ID');
+    expect(runner).toContain('com.sidequest.synthetic.qa');
+    expect(runner).toContain('99=blocked');
+    const script = new URL('../../../scripts/qa/run-native-maestro.sh', import.meta.url);
+    const check = spawnSync('bash', ['-n', script.pathname], { encoding: 'utf8' });
+    expect(check.status, check.stderr).toBe(0);
+    const refused = spawnSync('bash', [script.pathname], {
+      encoding: 'utf8',
+      env: { ...process.env, MAESTRO_UDID: 'synthetic-do-not-run', QA_BUNDLE_ID: 'com.production.sidequest' },
+    });
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain('non-synthetic');
   });
 
   it('requires nested journeys to point at committed sibling flows', () => {
