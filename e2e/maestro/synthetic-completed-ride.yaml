@@ -16,7 +16,8 @@ appId: com.sidequest.synthetic.qa
     element: "Save completed activity"
     direction: DOWN
     timeout: 20000
-- tapOn: "Save completed activity"
+- tapOn:
+    id: "sidequest-qa-save-endurance"
 - extendedWaitUntil:
     visible: "Completed bike"
     timeout: 30000
