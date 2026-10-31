@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createManualEnduranceActivity } from '../src/manual-endurance';
 
 /**
  * This test loads the ACTUAL mobile database service. The only replacement
@@ -202,5 +203,57 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     await service.activateUserDatabase('synthetic-athlete-one');
     expect(await ledger()).toHaveLength(1);
     expect(await sessionStatus()).toBe('completed');
+  });
+});
+
+const endurance = () => createManualEnduranceActivity({
+  id: 'synthetic-ride-1', name: 'Completed bike session',
+  discipline: 'bike', localDate: '2026-10-20', durationMinutes: 75,
+  distanceKm: null, intensity: 'easy',
+  recordedAt: '2026-10-21T12:00:00.000Z',
+});
+
+describe('actual mobile endurance source integrity with real SQLite', () => {
+  it('repeated import of the same completed session never duplicates exposure records', async () => {
+    const first = await service.upsertEnduranceActivities([endurance()]);
+    const second = await service.upsertEnduranceActivities([endurance()]);
+    expect(first.insertedIds).toEqual(['synthetic-ride-1']);
+    expect(second.insertedIds).toEqual([]);
+    const stored = await service.listEnduranceActivities();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.movingTimeSeconds).toBe(4500);
+    expect(stored[0]?.distanceMeters).toBeUndefined();
+  });
+
+  it('does not double-count the same provider/source identifier under a new record ID', async () => {
+    const record = endurance();
+    await service.upsertEnduranceActivities([record]);
+    await expect(service.upsertEnduranceActivities([
+      { ...record, id: 'alternate-id-for-same-external-workout' },
+    ])).rejects.toThrow();
+    expect((await service.listEnduranceActivities()).map(x => x.id))
+      .toEqual(['synthetic-ride-1']);
+  });
+
+  it('treats failed endurance SQL upsert as absent, then admits a single retry', async () => {
+    state.failNextContaining = 'INSERT INTO endurance_activities';
+    await expect(service.upsertEnduranceActivities([endurance()]))
+      .rejects.toThrow(/synthetic SQLite write interruption/);
+    expect(await service.listEnduranceActivities()).toHaveLength(0);
+    await service.upsertEnduranceActivities([endurance()]);
+    expect(await service.listEnduranceActivities()).toHaveLength(1);
+  });
+
+  it('soft deletion removes completed activity from default views but retains audit record', async () => {
+    await service.upsertEnduranceActivities([endurance()]);
+    const deleted = await service.softDeleteEnduranceActivity({
+      source: 'manual', externalId: 'synthetic-ride-1',
+      deletedAt: '2026-10-22T12:00:00.000Z',
+    });
+    expect(deleted).toBe('synthetic-ride-1');
+    expect(await service.listEnduranceActivities()).toHaveLength(0);
+    const retained = await service.listEnduranceActivities({ includeDeleted: true });
+    expect(retained).toHaveLength(1);
+    expect(retained[0]?.deletedAt).toBe('2026-10-22T12:00:00.000Z');
   });
 });
