@@ -1,7 +1,7 @@
 // Legacy validation compatibility: header: () => <BrandMasthead />.
 import { Stack, useRouter, useSegments, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthProvider, useAuth } from '@/state/auth-context';
 import { ThemeProvider, useTheme } from '@/state/theme-context';
@@ -33,14 +33,21 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <WorkoutProvider>
+        <ScopedWorkoutProvider>
           <OnboardingProvider>
             <AuthGate />
           </OnboardingProvider>
-        </WorkoutProvider>
+        </ScopedWorkoutProvider>
       </ThemeProvider>
     </AuthProvider>
   );
+}
+
+function ScopedWorkoutProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  // Unmount both the active workout and its preview when auth ownership changes.
+  // A new athlete may only restore that athlete's namespaced checkpoint.
+  return <WorkoutProvider key={user?.id ?? 'signed-out'}>{children}</WorkoutProvider>;
 }
 
 function AuthGate() {
