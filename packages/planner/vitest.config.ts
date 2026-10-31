@@ -8,7 +8,7 @@ export default defineConfig({
     alias: [
       { find: /^react-native$/, replacement: fileURLToPath(new URL('./test/fixtures/react-native-node.ts', import.meta.url)) },
       { find: /^expo-sqlite$/, replacement: fileURLToPath(new URL('./test/fixtures/react-native-node.ts', import.meta.url)) },
-      { find: /^expo-sqlite\/localStorage\/install$/, replacement: fileURLToPath(new URL('./test/fixtures/react-native-node.ts', import.meta.url)) },
+      { find: /^expo-sqlite\/localStorage\/install$/, replacement: fileURLToPath(new URL('./test/fixtures/expo-localstorage-noop.ts', import.meta.url)) },
     ],
   },
 });
