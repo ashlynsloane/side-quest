@@ -96,6 +96,23 @@ describe('durable pending partial-workout completion contract', () => {
     expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
   });
 
+  it('keeps the original completed set log immutable across repeated journal writes', async () => {
+    const original = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
+    const pending = { completionFraction: 0.4, completedAt: '2026-10-20T10:40:00.000Z' };
+    await saveLiveWorkoutSession({
+      ...original, stationRounds: { first: 2 },
+      running: false, pendingCompletion: pending,
+    });
+    await saveLiveWorkoutSession({
+      ...original, stationRounds: { first: 0 },
+      running: true, pendingCompletion: pending,
+    });
+    const recovered = await loadLiveWorkoutSession();
+    expect(recovered?.stationRounds).toEqual({ first: 2 });
+    expect(recovered?.running).toBe(false);
+    expect(recovered?.pendingCompletion).toEqual(pending);
+  });
+
   it('remains backward compatible with pre-journal checkpoints', async () => {
     const legacy = createInitialLiveWorkoutSession(workout, '2026-10-20T10:00:00.000Z');
     await saveLiveWorkoutSession(legacy);
