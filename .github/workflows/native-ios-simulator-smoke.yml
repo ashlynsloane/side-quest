@@ -1,11 +1,22 @@
 name: Native iOS simulator acceptance
 on:
-  # Native tests rerun only for the workflow or scenario definitions.
+  # A full native compilation is needed only when the app or its build inputs
+  # change. Maestro YAML-only changes use native-ios-ui-only.yml instead.
   push:
     branches: [test/automated-athlete-acceptance-v1]
     paths:
       - '.github/workflows/native-ios-simulator-smoke.yml'
-      - 'e2e/maestro/**'
+      - 'apps/mobile/src/**'
+      - 'apps/mobile/assets/**'
+      - 'apps/mobile/app.json'
+      - 'apps/mobile/package.json'
+      - 'packages/domain/src/**'
+      - 'packages/planner/src/**'
+      - 'packages/generator/src/**'
+      - 'packages/design-system/src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
   workflow_dispatch:
 
 permissions:
