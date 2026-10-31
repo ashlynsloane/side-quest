@@ -443,7 +443,7 @@ export default function ActiveWorkoutScreen() {
       workout: activeWorkout,
       startedAt: startedAt.current,
       stationIndex,
-      phase: phase === 'complete' ? 'rest' : phase,
+      phase,
       remainingSeconds,
       running: false,
       stationRounds,
