@@ -36,13 +36,34 @@ let initialized = false;
 
 type StorageLike = { getItem(key:string):string|null; setItem(key:string,value:string):void };
 const profileStorage = (globalThis as typeof globalThis & { localStorage: StorageLike }).localStorage;
+const FILE_OWNER_PREFIX = 'circuit.database-file-owner.v1:';
+
+function chooseProfileDatabaseName(userId: string): string {
+  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const legacyName = `circuit-generator-${safeId}.db`;
+  // Keep the historical filename for its first confirmed owner. A second
+  // athlete with an equivalent sanitized ID MUST NOT open that same database.
+  // This local ownership ledger also preserves stable filenames after switch.
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidate = attempt === 0
+      ? legacyName
+      : `circuit-generator-${safeId}-collision-${attempt}.db`;
+    const key = FILE_OWNER_PREFIX + candidate;
+    const owner = profileStorage.getItem(key);
+    if (owner !== null && owner !== userId) continue;
+    profileStorage.setItem(key, userId);
+    return candidate;
+  }
+  throw new Error('Could not allocate a unique athlete database filename.');
+}
 
 export async function activateUserDatabase(userId: string): Promise<void> {
   const ownerKey = 'circuit.original-database-owner';
   let originalOwner = profileStorage.getItem(ownerKey);
   if (!originalOwner) { originalOwner = userId; profileStorage.setItem(ownerKey, userId); }
-  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-  const nextName = originalOwner === userId ? 'circuit-generator.db' : `circuit-generator-${safeId}.db`;
+  if (!userId.trim()) throw new Error('Athlete database identity is required.');
+  const nextName = originalOwner === userId
+    ? 'circuit-generator.db' : chooseProfileDatabaseName(userId);
   if (nextName === activeDatabaseName) {
     await initializeDatabase();
     profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
