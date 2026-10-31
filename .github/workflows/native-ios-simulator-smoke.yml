@@ -38,6 +38,8 @@ jobs:
           cache: pnpm
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+      - name: Fingerprint the exact checked-out native source before QA app rewriting
+        run: node scripts/qa/native-source-fingerprint.mjs > native-source.sha256
       - name: Isolate app identity in ephemeral runner only
         run: |
           node --input-type=module <<'NODE'
@@ -100,6 +102,21 @@ jobs:
           sleep 8
           xcrun simctl io "${{ steps.simulator.outputs.udid }}" screenshot synthetic-ios-first-launch.png
           test -s synthetic-ios-first-launch.png
+      - name: Package an isolated simulator binary for verified UI-only reruns
+        run: |
+          APP=$(find "$RUNNER_TEMP/sidequest-synthetic-build/Build/Products/Release-iphonesimulator" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP"
+          mkdir -p native-binary
+          tar -czf native-binary/simulator-app.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
+          cp native-source.sha256 native-binary/native-source.sha256
+          test -s native-binary/simulator-app.tar.gz
+      - name: Archive source-matched synthetic iOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidequest-synthetic-ios-app
+          path: native-binary/
+          if-no-files-found: error
+          retention-days: 5
       - name: Install Java for native UI automation
         uses: actions/setup-java@v4
         with:
@@ -112,64 +129,9 @@ jobs:
       - name: Run staged synthetic native UI journeys
         id: maestro_ui
         timeout-minutes: 30
-        run: |
-          set +e
-          mkdir -p maestro-evidence
-          export PATH="$HOME/.maestro/bin:$PATH"
-          UDID="${{ steps.simulator.outputs.udid }}"
-          # Each scenario starts with a new fictional local profile. Never
-          # execute downstream assertions when an upstream prerequisite fails.
-          run_flow() {
-            LABEL="$1"
-            FILE="$2"
-            maestro --udid="$UDID" test \
-              --format junit --output "maestro-evidence/${LABEL}-junit.xml" \
-              --test-output-dir="maestro-evidence/${LABEL}" \
-              "$FILE" > "maestro-evidence/${LABEL}-console.log" 2>&1
-            RESULT=$?
-            tail -n 70 "maestro-evidence/${LABEL}-console.log"
-            return "$RESULT"
-          }
-          PROFILE_STATUS=99
-          ONBOARDING_STATUS=99
-          RIDE_STATUS=99
-          RESTART_STATUS=99
-          run_flow profile e2e/maestro/synthetic-profile-entry.yaml
-          PROFILE_STATUS=$?
-          if [ "$PROFILE_STATUS" -eq 0 ]; then
-            run_flow onboarding e2e/maestro/synthetic-onboarding-first-week.yaml
-            ONBOARDING_STATUS=$?
-          else
-            echo "Onboarding blocked by failed profile entry." | tee maestro-evidence/onboarding-console.log
-          fi
-          if [ "$ONBOARDING_STATUS" -eq 0 ]; then
-            run_flow ride e2e/maestro/synthetic-completed-ride.yaml
-            RIDE_STATUS=$?
-          else
-            echo "Completed ride blocked by failed onboarding." | tee maestro-evidence/ride-console.log
-          fi
-          if [ "$RIDE_STATUS" -eq 0 ]; then
-            run_flow restart e2e/maestro/synthetic-ride-restart.yaml
-            RESTART_STATUS=$?
-          else
-            echo "Cold restart blocked by failed completed-ride journey." | tee maestro-evidence/restart-console.log
-          fi
-          xcrun simctl io "$UDID" screenshot maestro-evidence/final-simulator-screen.png || true
-          echo "profile=$PROFILE_STATUS" >> "$GITHUB_OUTPUT"
-          echo "onboarding=$ONBOARDING_STATUS" >> "$GITHUB_OUTPUT"
-          echo "ride=$RIDE_STATUS" >> "$GITHUB_OUTPUT"
-          echo "restart=$RESTART_STATUS" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Native iOS acceptance"
-            for RESULT in profile:$PROFILE_STATUS onboarding:$ONBOARDING_STATUS ride:$RIDE_STATUS restart:$RESTART_STATUS; do
-              echo "- $RESULT"
-            done
-            echo "0=passed; 99=blocked/not executed; other nonzero=failed."
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$PROFILE_STATUS" -ne 0 ] || [ "$ONBOARDING_STATUS" -ne 0 ] || [ "$RIDE_STATUS" -ne 0 ] || [ "$RESTART_STATUS" -ne 0 ]; then
-            echo "Native journey failed or was blocked; inspect artifacts."
-            exit 1
-          fi
+        env:
+          MAESTRO_UDID: ${{ steps.simulator.outputs.udid }}
+        run: bash scripts/qa/run-native-maestro.sh
       - name: Save screenshot and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
