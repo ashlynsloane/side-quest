@@ -31,7 +31,17 @@ Workflow: `.github/workflows/automated-athlete-acceptance.yml`.
 
 It runs planner/mobile typechecks, the dedicated synthetic and real-mobile-SQL acceptance tests, the full planner regression suite, and Expo **iOS JavaScript export**. JUnit XML files plus `qa-summary.json` are uploaded on each run. The GitHub Actions run summary shows check counts.
 
-The passing gate on commit `8157b960` established the Node/planner and direct database lifecycle checks **before** the new pending-completion changes. Subsequent commits require their own green run.
+The corrected planner/SQLite gate passed on commit `8f252366` ([GitHub Actions](https://github.com/ashlynsloane/side-quest/actions/runs/41161656734)). Later source changes must be verified on their own commits.
+
+## Native iOS evidence — first real simulator milestone
+
+- [GitHub Actions run 41161358738](https://github.com/ashlynsloane/side-quest/actions/runs/41161358738) **passed**: ephemeral bundle ID `com.sidequest.synthetic.qa`, Expo prebuild, CocoaPods, iPhone simulator boot, native Release build, install, application launch, and first-screen screenshot.
+- Artifact `isolated-synthetic-ios-smoke` includes `synthetic-ios-first-launch.png`, the launch receipt and native build logs.
+- Screenshot inspection showed the expected Side Quest brand/sign-in screen and local synthetic beta-profile form, not an OS crash screen.
+- This passes a **launch smoke test**, not onboarding, training history, workout recovery, screenshots across devices, or source reconciliation.
+- Next [native iOS automation run](https://github.com/ashlynsloane/side-quest/actions/runs/41163888023) adds actual Maestro onboarding and completed-ride interaction scripts. **Its results must be checked separately before calling those journeys verified.**
+- A restart persistence flow is also stored at `e2e/maestro/synthetic-ride-restart.yaml`; it is not yet incorporated in the native workflow.
+- Stable `testID` selectors have been added to key onboarding and activity controls for future scripted testing.
 
 ## What passing results DO NOT establish
 
