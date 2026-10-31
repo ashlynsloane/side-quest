@@ -59,6 +59,9 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 fi
 summary="Profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart (0=pass, 99=blocked)"
 echo "$summary"
+# Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
+# preserving diagnosis. Do not let reporting success override a failed UI test.
+node scripts/qa/diagnose-native-evidence.mjs maestro-evidence || true
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     echo "## Native iOS athlete acceptance"
