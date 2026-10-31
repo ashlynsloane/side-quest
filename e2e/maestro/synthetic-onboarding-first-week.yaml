@@ -1,0 +1,45 @@
+# Synthetic-only scenario: fresh local profile -> proposed multisport week.
+# This is designed for the isolated simulator bundle identifier, never the beta.
+# Requires EXPO_PUBLIC_BETA_INVITE_CODE and Supabase cloud auth to be unset.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Create your beta profile"
+- tapOn: "Name"
+- inputText: "Synthetic QA Athlete"
+- tapOn: "Email"
+- inputText: "synthetic-athlete@example.invalid"
+- hideKeyboard
+- tapOn: "Enter beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- assertVisible: "Build your first week."
+- tapOn: "Start setup"
+- assertVisible: "Choose the goal."
+- tapOn: "Continue"
+- assertVisible: "Use the time you actually have."
+- tapOn: "Continue"
+- assertVisible: "What is available now?"
+- tapOn: "Continue"
+- assertVisible: "Anything to protect?"
+- tapOn: "Continue"
+- assertVisible: "How do you respond to training?"
+- scrollUntilVisible:
+    element: "Continue"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Continue"
+- assertVisible: "Ready to build."
+- scrollUntilVisible:
+    element: "Build my first week"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Build my first week"
+- extendedWaitUntil:
+    visible: "Your first week is ready."
+    timeout: 120000
+- assertVisible: "Your first week is ready."
+- takeScreenshot: "synthetic-first-week"
+- tapOn: "Review provisional first week"
