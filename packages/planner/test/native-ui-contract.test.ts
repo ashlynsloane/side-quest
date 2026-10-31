@@ -77,6 +77,30 @@ describe('native synthetic UI automation contract', () => {
     expect(refused.stderr).toContain('non-synthetic');
   });
 
+  it('fails closed when trying to reuse a stale native binary for updated sources', () => {
+    const workflow = source('.github/workflows/native-ios-ui-only.yml');
+    const fingerprintScript = source('scripts/qa/native-source-fingerprint.mjs');
+    expect(workflow).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
+    expect(workflow).toContain('refusing to test an old binary');
+    expect(workflow).toContain('QA_BUNDLE_ID: com.sidequest.synthetic.qa');
+    expect(workflow).toContain('actions: read');
+    expect(workflow).toContain('scripts/qa/run-native-maestro.sh');
+    expect(fingerprintScript).toContain("path.startsWith('apps/mobile/src/')");
+    expect(fingerprintScript).toContain("path.startsWith('packages/domain/src/')");
+    expect(fingerprintScript).toContain("path.startsWith('packages/planner/src/')");
+    expect(fingerprintScript).not.toContain("path.startsWith('e2e/maestro/')");
+    const fingerprintPath = new URL('../../../scripts/qa/native-source-fingerprint.mjs', import.meta.url);
+    const first = spawnSync(process.execPath, [fingerprintPath.pathname], {
+      cwd: new URL('../../../', import.meta.url).pathname, encoding: 'utf8',
+    });
+    const second = spawnSync(process.execPath, [fingerprintPath.pathname], {
+      cwd: new URL('../../../', import.meta.url).pathname, encoding: 'utf8',
+    });
+    expect(first.status, first.stderr).toBe(0);
+    expect(first.stdout.trim()).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.stdout).toBe(first.stdout);
+  });
+
   it('requires nested journeys to point at committed sibling flows', () => {
     const flowNames = [
       'synthetic-profile-entry.yaml',
