@@ -8,3 +8,7 @@ export const Platform = {
     choices.ios ?? choices.default,
 };
 export const NativeModules = {};
+
+export function openDatabaseSync(): never {
+  throw new Error('Expo SQLite must be mocked by the disk-backed acceptance harness.');
+}
