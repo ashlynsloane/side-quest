@@ -25,28 +25,33 @@ appId: com.sidequest.synthetic.qa
 - scrollUntilVisible:
     element: "Continue"
     direction: DOWN
-- tapOn: "Continue"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - assertVisible: "Use the time you actually have."
 - scrollUntilVisible:
     element: "Continue"
     direction: DOWN
-- tapOn: "Continue"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - assertVisible: "What is available now?"
 - scrollUntilVisible:
     element: "Continue"
     direction: DOWN
-- tapOn: "Continue"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - assertVisible: "Anything to protect?"
 - scrollUntilVisible:
     element: "Continue"
     direction: DOWN
-- tapOn: "Continue"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - assertVisible: "How do you respond to training?"
 - scrollUntilVisible:
     element: "Continue"
     direction: DOWN
     timeout: 20000
-- tapOn: "Continue"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
 - assertVisible: "Ready to build."
 - scrollUntilVisible:
     element: "Build my first week"
