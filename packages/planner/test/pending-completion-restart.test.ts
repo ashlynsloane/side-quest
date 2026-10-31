@@ -189,6 +189,17 @@ describe('live workout profile isolation and owner-only migration', () => {
       .toBe('partial-save-recovery');
   });
 
+  it('explicit null identity never accesses the previous athlete even before key cleanup', async () => {
+    const saved = createInitialLiveWorkoutSession(workout);
+    await saveLiveWorkoutSession(saved, 'athlete-a');
+    // Simulate a UI callback running between account sign-out and storage cleanup.
+    globalThis.localStorage.setItem('sidequest.active-workout.profile-id', 'athlete-a');
+    expect(await loadLiveWorkoutSession(null)).toBeNull();
+    await expect(saveLiveWorkoutSession(saved, null)).rejects.toThrow(/unowned/);
+    await clearLiveWorkoutSession(null);
+    expect((await loadLiveWorkoutSession('athlete-a'))?.workout.id).toBe(workout.id);
+  });
+
   it('sign-out does not expose or erase another athlete checkpoint', async () => {
     await saveLiveWorkoutSession(createInitialLiveWorkoutSession(workout));
     globalThis.localStorage.removeItem('sidequest.active-workout.profile-id');
