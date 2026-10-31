@@ -58,6 +58,26 @@ for (const filename of filenames) {
     report.totals[key] += result[key];
   }
 }
+const gateDefinitions = [
+  ['QA_PLANNER_TYPECHECK', 'Planner typecheck'],
+  ['QA_MOBILE_TYPECHECK', 'Mobile typecheck'],
+  ['QA_SYNTHETIC_SUITE', 'Synthetic athlete suite'],
+  ['QA_MOBILE_SQL_SUITE', 'Actual mobile SQLite suite'],
+  ['QA_FULL_PLANNER', 'Full planner regression'],
+  ['QA_IOS_JS_EXPORT', 'iOS JavaScript export (not native runtime)'],
+];
+const gates = gateDefinitions
+  .filter(([key]) => process.env[key] !== undefined)
+  .map(([key, label]) => ({ label, outcome: process.env[key] }));
+report.gates = gates;
+for (const gate of gates) {
+  if (gate.outcome === 'failure' || gate.outcome === 'cancelled') {
+    report.status = 'FAIL';
+  } else if (gate.outcome !== 'success' && report.status === 'PASS') {
+    report.status = 'INCOMPLETE';
+  }
+}
+
 writeFileSync('qa-summary.json', JSON.stringify(report, null, 2) + '\n');
 const markdown = [
   '## Side Quest automated athlete QA',
@@ -67,7 +87,11 @@ const markdown = [
   ...report.files.map(f => '| ' + f.file + ' | ' + f.status + ' | ' +
     [f.tests ?? '-', f.failures ?? '-', f.errors ?? '-', f.skipped ?? '-'].join(' | ') + ' |'),
   '',
-  '**Aggregate status: ' + report.status + '**. This covers Node/planner tests only, not native iOS behavior.',
+  '| CI gate | Outcome |',
+  '| --- | --- |',
+  ...report.gates.map(g => '| ' + g.label + ' | ' + g.outcome + ' |'),
+  '',
+  '**Aggregate status: ' + report.status + '**. Test and step outcomes are scoped to CI, and do not prove native iOS behavior.',
   '',
 ].join('\n');
 if (process.env.GITHUB_STEP_SUMMARY) {
