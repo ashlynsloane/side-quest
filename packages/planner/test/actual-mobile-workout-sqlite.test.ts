@@ -96,10 +96,17 @@ beforeEach(async () => {
   state.handles = [];
   state.failNextContaining = null;
   const stored = new Map<string, string>();
-  (globalThis as typeof globalThis & { localStorage: unknown }).localStorage = {
-    getItem: (key: string) => stored.get(key) ?? null,
-    setItem: (key: string, value: string) => { stored.set(key, value); },
-  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true, writable: true,
+    value: {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => { stored.set(key, value); },
+      removeItem: (key: string) => { stored.delete(key); },
+      clear: () => stored.clear(),
+      key: (index: number) => [...stored.keys()][index] ?? null,
+      get length() { return stored.size; },
+    },
+  });
   service = await import('../../../apps/mobile/src/services/database');
   await service.activateUserDatabase('synthetic-athlete-one');
 });
