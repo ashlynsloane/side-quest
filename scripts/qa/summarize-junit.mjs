@@ -78,6 +78,13 @@ for (const gate of gates) {
   }
 }
 
+// The full regression run already contains the named acceptance suites.
+// Do not inflate the count by summing overlapping runs.
+const completePlanner = report.files.find(f => f.file === 'planner-regression-junit.xml');
+report.uniquePlannerTests = completePlanner?.status === 'PASS'
+  ? { tests: completePlanner.tests, failures: completePlanner.failures,
+      errors: completePlanner.errors, skipped: completePlanner.skipped }
+  : null;
 writeFileSync('qa-summary.json', JSON.stringify(report, null, 2) + '\n');
 const markdown = [
   '## Side Quest automated athlete QA',
@@ -91,7 +98,7 @@ const markdown = [
   '| --- | --- |',
   ...report.gates.map(g => '| ' + g.label + ' | ' + g.outcome + ' |'),
   '',
-  '**Aggregate status: ' + report.status + '**. Test and step outcomes are scoped to CI, and do not prove native iOS behavior.',
+  '**Aggregate status: ' + report.status + '**. Full regression is the unique planner test count; named suites are repeated within it. These outcomes do not prove native iOS behavior.',
   '',
 ].join('\n');
 if (process.env.GITHUB_STEP_SUMMARY) {
