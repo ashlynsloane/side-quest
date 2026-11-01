@@ -36,6 +36,17 @@ describe('native synthetic UI automation contract', () => {
       .not.toMatch(/^- hideKeyboard/m);
   });
 
+  it('routes the final native onboarding action using Expo Router params and surfaces failures', () => {
+    const onboarding = source('apps/mobile/src/app/onboarding.tsx');
+    const finish = onboarding.slice(onboarding.indexOf('function finish()'), onboarding.indexOf('return <AppScreen'));
+    expect(finish).toContain("pathname: '/onboarding-first-week'");
+    expect(finish).toContain('router.replace({');
+    expect(finish).not.toContain('new URLSearchParams(');
+    expect(finish).toContain('setNavigationError(');
+    expect(onboarding).toContain('First-week navigation error:');
+    expect(onboarding).toContain("onPress={step === 'review' ? finish : next}");
+  });
+
   it('keeps the recorded flow targets backed by live accessible controls', () => {
     const cases: Array<[string, string]> = [
       ['apps/mobile/src/app/sign-in.tsx', 'sidequest-qa-athlete-name'],
