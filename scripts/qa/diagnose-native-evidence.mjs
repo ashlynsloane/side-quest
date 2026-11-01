@@ -49,6 +49,43 @@ function profileDiagnostic() {
   }
   return null;
 }
+// Classify what the application actually displayed when the onboarding
+// assertion failed. Never publish raw accessibility values or athlete inputs.
+function onboardingDiagnostic() {
+  const files = recurse(join(root, 'onboarding')).filter((p) =>
+    p.includes('screen-hierarchy') && p.endsWith('.json')).sort().reverse();
+  for (const path of files) {
+    try {
+      const texts = new Set();
+      let nextEnabled = false;
+      function visit(node) {
+        if (!node || typeof node !== 'object') return;
+        const attrs = node.attributes ?? {};
+        const label = String(attrs.accessibilityText ?? '');
+        if (label) texts.add(label);
+        if (attrs['resource-id'] === 'sidequest-qa-onboarding-next'
+          && attrs.enabled === 'true') nextEnabled = true;
+        for (const child of node.children ?? []) visit(child);
+      }
+      visit(JSON.parse(readFileSync(path, 'utf8')));
+      if ([...texts].some((t) => t.includes('First-week navigation error:'))) {
+        return 'Native first-week route threw a navigation exception; inspect the app-level error on the captured screenshot.';
+      }
+      if (texts.has('Ready to build.') && nextEnabled) {
+        return 'Final Build my first week button remained enabled on the last questionnaire screen after being tapped; route did not advance.';
+      }
+      if (texts.has('Making the first draft.')) {
+        return 'App entered first-week generation but did not reach a completed or recoverable error state before timeout.';
+      }
+      if (texts.has('The week needs one more review.')) {
+        return 'App reached the first-week generation error state; inspect its visible error without publishing athlete inputs.';
+      }
+    } catch {
+      // Preserve the original JUnit failure when hierarchy is incomplete.
+    }
+  }
+  return null;
+}
 const report = { schemaVersion: 1, stages: [], allPassed: true };
 for (const stage of stages) {
   const junitPath = join(root, stage + '-junit.xml');
@@ -77,7 +114,9 @@ for (const stage of stages) {
     status = 'NO_REPORT';
   }
   if (status !== 'PASSED') report.allPassed = false;
-  const diagnosis = stage === 'profile' && status === 'FAILED' ? profileDiagnostic() : null;
+  const diagnosis = status !== 'FAILED' ? null
+    : stage === 'profile' ? profileDiagnostic()
+      : stage === 'onboarding' ? onboardingDiagnostic() : null;
   report.stages.push({ stage, status, failure, diagnosis });
 }
 const output = join(root, 'native-ui-summary.json');
