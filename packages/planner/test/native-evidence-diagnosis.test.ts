@@ -62,6 +62,31 @@ describe('native UI failure evidence diagnosis', () => {
       .not.toContain('synthetic-secret@example.invalid');
   });
 
+  it('distinguishes a tapped-but-stuck final onboarding screen from generation errors', () => {
+    for (const [label, diagnosis] of [
+      ['Ready to build.', 'route did not advance'],
+      ['Making the first draft.', 'did not reach a completed'],
+      ['The week needs one more review.', 'generation error state'],
+      ['First-week navigation error: synthetic message', 'route threw a navigation exception'],
+    ]) {
+      const root = fixture();
+      writeFileSync(join(root, 'profile-junit.xml'), junit(1));
+      writeFileSync(join(root, 'onboarding-junit.xml'), junit(1, true));
+      const folder = join(root, 'onboarding', 'screen-hierarchy');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+        children: [
+          { attributes: { accessibilityText: label } },
+          { attributes: { 'resource-id': 'sidequest-qa-onboarding-next', enabled: 'true' } },
+        ],
+      }));
+      const { report } = diagnose(root);
+      expect(report.stages[1]?.status).toBe('FAILED');
+      expect(report.stages[1]?.diagnosis).toContain(diagnosis);
+      expect(report.allPassed).toBe(false);
+    }
+  });
+
   it('never counts a missing or truncated JUnit report as passing', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-junit.xml'), '<testsuite name="incomplete" tests="1">');
