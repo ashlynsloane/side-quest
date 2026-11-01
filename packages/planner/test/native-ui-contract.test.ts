@@ -131,6 +131,9 @@ describe('native synthetic UI automation contract', () => {
     const scrolls = [...flow.matchAll(/- scrollUntilVisible:\n    element:\n      id: "sidequest-qa-onboarding-next"\n    direction: DOWN\n    visibilityPercentage: 50/g)];
     expect(scrolls.length).toBeGreaterThanOrEqual(6);
     expect(flow).toContain('id: "sidequest-qa-review-first-week"');
+    expect(flow).toContain('retryTapIfNoChange: true');
+    expect(flow).toContain('notVisible: "Ready to build."');
+    expect(flow).toContain('timeout: 15000');
     expect(source('apps/mobile/src/app/onboarding.tsx'))
       .toContain('testID="sidequest-qa-onboarding-next"');
   });
