@@ -25,6 +25,12 @@ This directory contains Maestro journeys for the **isolated synthetic iOS app**,
 - Native compilation now triggers only when app source/config/dependencies change. UI YAML or runner script edits use the source-matched UI-only workflow. A source-hash mismatch **must** fail, not use a stale binary.
 - Regression results: [615/615 tests](https://github.com/ashlynsloane/side-quest/actions/runs/41215203188) passed before the latest selectors; subsequent changes require their own CI result.
 
+## November 2 — verified final-button selector regression
+
+[Full native iOS run 41262127886](https://github.com/ashlynsloane/side-quest/actions/runs/41262127886) **passed synthetic profile entry and progressed through Step 7** but failed at Maestro `tapOn: {text: "Build my first week"}`. The actual saved iOS accessibility hierarchy exposes the pressable as `accessibilityText: "Build my first week, ›"`, with `resource-id: sidequest-qa-onboarding-next` and `enabled: true`. Therefore this particular failure was the **test failing to find the pressable**, not proof that the app's route change failed.
+
+Restored the stable `id: sidequest-qa-onboarding-next` target, recorded a pre-tap screenshot, retained `retryTapIfNoChange: true`, and separated a 15-second navigation check from the later 120-second generation assertion. Run [41485434344](https://github.com/ashlynsloane/side-quest/actions/runs/41485434344) is the native UI-only verification attempt for this exact selector change. Do **not** count plan creation or ride persistence as native-verified until JUnit and screenshots confirm each stage.
+
 ## Required evidence to call the native release gate passing
 
 - All three Maestro scenarios execute successfully against a native iPhone simulator with non-empty JUnit reports.
