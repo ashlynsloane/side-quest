@@ -108,6 +108,10 @@ for (const stage of stages) {
     } else {
       status = 'PASSED';
     }
+  } else if (/iOS driver not ready in time|IOSDriverTimeoutException/.test(log)) {
+    // No user-journey assertion was attempted: the CI XCTest transport failed.
+    status = 'DRIVER_STARTUP_TIMEOUT';
+    failure = 'Maestro XCTest driver failed to start; no app interaction was evaluated.';
   } else if (/BLOCKED|blocked|prerequisite/i.test(log)) {
     status = 'BLOCKED';
   } else if (log.trim()) {
