@@ -25,11 +25,12 @@ concurrency:
 jobs:
   synthetic-ui:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       QA_BUNDLE_ID: com.sidequest.synthetic.qa
       MAESTRO_CLI_NO_ANALYTICS: '1'
+      MAESTRO_DRIVER_STARTUP_TIMEOUT: '360000'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -95,6 +96,7 @@ jobs:
           curl -fsSL https://get.maestro.mobile.dev | bash
           "$HOME/.maestro/bin/maestro" --version
       - name: Run all staged native athlete journeys
+        timeout-minutes: 48
         env:
           MAESTRO_UDID: ${{ steps.simulator.outputs.udid }}
         run: bash scripts/qa/run-native-maestro.sh
