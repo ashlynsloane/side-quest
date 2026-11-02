@@ -38,6 +38,7 @@ jobs:
       CI: '1'
       QA_BUNDLE_ID: com.sidequest.synthetic.qa
       MAESTRO_CLI_NO_ANALYTICS: '1'
+      MAESTRO_DRIVER_STARTUP_TIMEOUT: '360000'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
