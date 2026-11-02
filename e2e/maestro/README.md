@@ -31,6 +31,12 @@ This directory contains Maestro journeys for the **isolated synthetic iOS app**,
 
 Restored the stable `id: sidequest-qa-onboarding-next` target, recorded a pre-tap screenshot, retained `retryTapIfNoChange: true`, and separated a 15-second navigation check from the later 120-second generation assertion. Run [41485434344](https://github.com/ashlynsloane/side-quest/actions/runs/41485434344) is the native UI-only verification attempt for this exact selector change. Do **not** count plan creation or ride persistence as native-verified until JUnit and screenshots confirm each stage.
 
+## November 2 — XCTest driver cold-start incident
+
+[Native UI-only run 41485434344](https://github.com/ashlynsloane/side-quest/actions/runs/41485434344) installed and launched the source-matched synthetic app but **never executed the profile scenario**. Maestro printed `iOS driver not ready in time` and produced no JUnit XML. The archived `xctest_runner` log shows the iOS UI test runner eventually started its local HTTP server after a long cold start. This is an infrastructure startup timeout, **not evidence that the profile or final-button code failed**.
+
+The shared runner now exports `MAESTRO_DRIVER_STARTUP_TIMEOUT=360000` (milliseconds, six minutes), and the native workflow allows enough time for four sequential test-driver sessions. The diagnostic report explicitly marks no-JUnit driver startup as `DRIVER_STARTUP_TIMEOUT` instead of app failure. The native release gate remains red until a full run passes profile → onboarding → completed ride → relaunch.
+
 ## Required evidence to call the native release gate passing
 
 - All three Maestro scenarios execute successfully against a native iPhone simulator with non-empty JUnit reports.
