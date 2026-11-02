@@ -10,6 +10,7 @@ import { OnboardingProvider, useOnboarding } from '@/state/onboarding-context';
 import { refreshTrainingIntegrations } from '@/services/integration-runtime';
 import { V23BrandHeader } from '@/components/v23-ui';
 import { normalizeUserFacingError } from '@/services/production-readiness';
+import { authRedirectFor } from '@/services/auth-navigation';
 
 
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
@@ -57,13 +58,14 @@ function AuthGate() {
   const router = useRouter();
   const segments = useSegments() as string[];
   useEffect(() => {
-    if (loading || onboardingLoading) return;
-    const authRoute = segments[0] === 'sign-in';
-    const onboardingRoute = segments[0] === 'onboarding';
-    const onboardingSetupRoute = ['goal-catalog', 'goal-plan', 'equipment-profiles', 'pt-profile', 'training-intelligence', 'calendar-sync', 'generate'].includes(segments[0] ?? '');
-    if (!user && !authRoute) router.replace('/sign-in' as Href);
-    if (user && needsOnboarding && !onboardingRoute && !onboardingSetupRoute) router.replace('/onboarding' as Href);
-    if (user && !needsOnboarding && authRoute) router.replace('/(tabs)' as Href);
+    const redirect = authRedirectFor({
+      authenticated: Boolean(user),
+      authLoading: loading,
+      onboardingLoading,
+      needsOnboarding,
+      route: segments[0],
+    });
+    if (redirect) router.replace(redirect as Href);
   }, [user, loading, onboardingLoading, needsOnboarding, segments, router]);
   useEffect(() => {
     if (loading || !user) return;
