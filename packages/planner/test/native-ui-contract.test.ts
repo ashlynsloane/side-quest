@@ -136,7 +136,13 @@ describe('native synthetic UI automation contract', () => {
     // Native hierarchy includes the arrow in "Build my first week, ›":
     // an exact nested Text selector failed even though the Pressable was visible.
     expect(flow).not.toContain('text: "Build my first week"');
-    expect(flow).toMatch(/- assertVisible:\\n    id: "sidequest-qa-onboarding-next"\\n- takeScreenshot: "synthetic-before-first-week-build"\\n- tapOn:\\n    id: "sidequest-qa-onboarding-next"/);
+    expect(flow).toContain([
+      '- assertVisible:',
+      '    id: "sidequest-qa-onboarding-next"',
+      '- takeScreenshot: "synthetic-before-first-week-build"',
+      '- tapOn:',
+      '    id: "sidequest-qa-onboarding-next"',
+    ].join('\n'));
     expect(flow).toContain('notVisible: "Ready to build."');
     expect(flow).toContain('timeout: 15000');
     expect(source('apps/mobile/src/app/onboarding.tsx'))
