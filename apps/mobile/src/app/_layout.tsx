@@ -61,7 +61,7 @@ function ScopedOnboardingProvider({ children }: { children: ReactNode }) {
 function AuthGate() {
   const { user, loading, cloudEnabled } = useAuth();
   const { palette } = useTheme();
-  const { loading: onboardingLoading, needsOnboarding } = useOnboarding();
+  const { loading: onboardingLoading, needsOnboarding, state: onboardingState } = useOnboarding();
   const router = useRouter();
   const segments = useSegments() as string[];
   useEffect(() => {
@@ -70,6 +70,11 @@ function AuthGate() {
       authLoading: loading,
       onboardingLoading,
       needsOnboarding,
+      firstWeekPrerequisitesComplete: Boolean(
+        onboardingState.firstWeekSetupStartedAt
+          && onboardingState.strengthModelAcknowledged
+          && onboardingState.privacyModelAcknowledged,
+      ),
       route: segments[0],
     });
     if (redirect) router.replace(redirect as Href);
