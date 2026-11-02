@@ -35,9 +35,9 @@ export default function RootLayout() {
     <AuthProvider>
       <ThemeProvider>
         <ScopedWorkoutProvider>
-          <OnboardingProvider>
+          <ScopedOnboardingProvider>
             <AuthGate />
-          </OnboardingProvider>
+          </ScopedOnboardingProvider>
         </ScopedWorkoutProvider>
       </ThemeProvider>
     </AuthProvider>
@@ -49,6 +49,13 @@ function ScopedWorkoutProvider({ children }: { children: ReactNode }) {
   // Unmount both the active workout and its preview when auth ownership changes.
   // A new athlete may only restore that athlete's namespaced checkpoint.
   return <WorkoutProvider key={user?.id ?? 'signed-out'}>{children}</WorkoutProvider>;
+}
+
+function ScopedOnboardingProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  // Changing athletes discards previous first-run UI state and any pending
+  // asynchronous evaluation before the new athlete's context mounts.
+  return <OnboardingProvider key={user?.id ?? 'signed-out'}>{children}</OnboardingProvider>;
 }
 
 function AuthGate() {
