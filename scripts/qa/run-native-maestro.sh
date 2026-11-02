@@ -9,6 +9,9 @@ if [[ "$QA_BUNDLE_ID" != "com.sidequest.synthetic.qa" ]]; then
   exit 2
 fi
 export PATH="$HOME/.maestro/bin:$PATH"
+# iOS 26 XCTest first launch can take >2 minutes even after the app is booted.
+# Maestro expects milliseconds (confirmed by its release documentation).
+export MAESTRO_DRIVER_STARTUP_TIMEOUT="${MAESTRO_DRIVER_STARTUP_TIMEOUT:-360000}"
 mkdir -p maestro-evidence
 
 run_flow() {
