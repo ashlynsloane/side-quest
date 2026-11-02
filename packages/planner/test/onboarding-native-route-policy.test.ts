@@ -6,6 +6,7 @@ const state: AuthNavigationState = {
   authLoading: false,
   onboardingLoading: false,
   needsOnboarding: true,
+  firstWeekPrerequisitesComplete: true,
   route: 'onboarding',
 };
 
@@ -13,6 +14,16 @@ describe('first-run navigation guard', () => {
   it('allows the actual generated week to render before onboarding completes', () => {
     expect(authRedirectFor({ ...state, route: 'onboarding' })).toBeNull();
     expect(authRedirectFor({ ...state, route: 'onboarding-first-week' })).toBeNull();
+  });
+
+  it('rejects direct first-week preview links without setup acknowledgements', () => {
+    expect(authRedirectFor({
+      ...state, route: 'onboarding-first-week', firstWeekPrerequisitesComplete: false,
+    })).toBe('/onboarding');
+    // The user is still allowed to review setup normally.
+    expect(authRedirectFor({
+      ...state, route: 'onboarding', firstWeekPrerequisitesComplete: false,
+    })).toBeNull();
   });
 
   it('does not unlock the full training app while onboarding is incomplete', () => {
