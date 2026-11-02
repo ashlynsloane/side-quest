@@ -36,6 +36,23 @@ describe('native synthetic UI automation contract', () => {
       .not.toMatch(/^- hideKeyboard/m);
   });
 
+  it('cannot silently bypass an interrupted first-week setup after saving only a goal', () => {
+    const onboarding = source('apps/mobile/src/services/onboarding.ts');
+    const context = source('apps/mobile/src/state/onboarding-context.tsx');
+    const screen = source('apps/mobile/src/app/onboarding.tsx');
+    const authLayout = source('apps/mobile/src/app/_layout.tsx');
+
+    const firstRun = onboarding.slice(onboarding.indexOf('export async function evaluateFirstRun('));
+    expect(firstRun.indexOf('mustResumeFirstWeekSetup(state)')).toBeGreaterThan(0);
+    expect(firstRun.indexOf('mustResumeFirstWeekSetup(state)'))
+      .toBeLessThan(firstRun.indexOf('const [goal, completed, calendar, pt]'));
+    expect(context).toContain('firstWeekSetupStartedAt: current.firstWeekSetupStartedAt ?? new Date().toISOString()');
+    expect(context).toContain('beginFirstWeek,');
+    expect(screen).toContain("if (step === 'welcome') beginFirstWeek();");
+    expect(authLayout).toContain("OnboardingProvider key={user?.id ?? 'signed-out'}");
+    expect(authLayout).toContain('<ScopedOnboardingProvider>');
+  });
+
   it('routes the final native onboarding action using Expo Router params and surfaces failures', () => {
     const onboarding = source('apps/mobile/src/app/onboarding.tsx');
     const finish = onboarding.slice(onboarding.indexOf('function finish()'), onboarding.indexOf('return <AppScreen'));
