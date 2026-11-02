@@ -11,6 +11,7 @@ export type AuthNavigationState = {
   authLoading: boolean;
   onboardingLoading: boolean;
   needsOnboarding: boolean;
+  firstWeekPrerequisitesComplete: boolean;
   route: string | undefined;
 };
 const SETUP_ROUTES = new Set([
@@ -29,6 +30,12 @@ export function authRedirectFor(state: AuthNavigationState): AuthDestination | n
   if (state.authLoading || state.onboardingLoading) return null;
   if (!state.authenticated) return state.route === 'sign-in' ? null : '/sign-in';
   if (state.needsOnboarding) {
+    // The preview is part of first-run setup, but deep-linking directly here
+    // must not bypass the required strength/privacy acknowledgements or write
+    // a partial goal that later masquerades as an existing athlete profile.
+    if (state.route === 'onboarding-first-week' && !state.firstWeekPrerequisitesComplete) {
+      return '/onboarding';
+    }
     return state.route && SETUP_ROUTES.has(state.route) ? null : '/onboarding';
   }
   return state.route === 'sign-in' ? '/(tabs)' : null;
