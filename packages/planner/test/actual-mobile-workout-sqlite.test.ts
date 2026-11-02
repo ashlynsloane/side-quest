@@ -31,6 +31,9 @@ vi.mock('react-native', () => ({
   NativeModules: {},
 }));
 vi.mock('expo-sqlite/localStorage/install', () => ({}));
+vi.mock('../../../apps/mobile/src/services/strava', () => ({
+  getStravaConnection: vi.fn(async () => null),
+}));
 vi.mock('expo-sqlite', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   return {
@@ -227,6 +230,39 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await sessionStatus()).toBe('completed');
     await recovered.clearLiveWorkoutSession();
     expect(await recovered.loadLiveWorkoutSession()).toBeNull();
+  });
+
+  it('resumes first-run after goal succeeded but training block failed on real SQLite', async () => {
+    const onboarding = await import('../../../apps/mobile/src/services/onboarding');
+    const userId = 'synthetic-athlete-one';
+    onboarding.saveOnboardingState(userId, {
+      ...onboarding.defaultOnboardingState(),
+      strengthModelAcknowledged: true,
+      privacyModelAcknowledged: true,
+      firstWeekSetupStartedAt: startedAt,
+    });
+    const partialGoal = {
+      ...weeklyBlock().goal,
+      id: 'incomplete-first-week-goal',
+      createdAt: startedAt,
+    } as Parameters<MobileDb['savePerformanceGoal']>[0];
+    await service.savePerformanceGoal(partialGoal);
+    state.failNextContaining = 'INSERT INTO training_blocks';
+    await expect(service.saveTrainingBlock(weeklyBlock()))
+      .rejects.toThrow(/synthetic SQLite write interruption/);
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+    for (const handle of state.handles.splice(0)) handle.close();
+
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase(userId);
+    const resumed = await import('../../../apps/mobile/src/services/onboarding');
+    const result = await resumed.evaluateFirstRun(userId);
+    expect(result.needsOnboarding).toBe(true);
+    expect(result.state.firstWeekSetupStartedAt).toBe(startedAt);
+    expect(result.state.firstRunBypassedAt).toBeUndefined();
+    expect((await service.getLatestPerformanceGoal())?.id).toBe(partialGoal.id);
+    expect(await service.getLatestTrainingBlock()).toBeNull();
   });
 
   it('records its verified athlete owner inside each SQLite file', async () => {
