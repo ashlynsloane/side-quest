@@ -37,7 +37,7 @@ function saveDraft(key: string, draft: OnboardingDraft): void { try { draftStora
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { acknowledgeStrengthModel, acknowledgePrivacyModel } = useOnboarding();
+  const { beginFirstWeek } = useOnboarding();
   const { user } = useAuth();
   const draftKey = `${DRAFT_KEY}.${user?.id ?? 'guest'}`;
   const { palette } = useTheme();
@@ -61,10 +61,7 @@ export default function OnboardingScreen() {
   const progress = Math.max(0, stepIndex) / (STEPS.length - 1);
 
   function next() {
-    if (step === 'welcome') {
-      acknowledgeStrengthModel(true);
-      acknowledgePrivacyModel(true);
-    }
+    if (step === 'welcome') beginFirstWeek();
     setStep(STEPS[Math.min(stepIndex + 1, STEPS.length - 1)] ?? 'review');
   }
   function back() {
