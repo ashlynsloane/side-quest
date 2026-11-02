@@ -87,6 +87,18 @@ describe('native UI failure evidence diagnosis', () => {
     }
   });
 
+  it('reports XCTest startup failure as infrastructure, never an app assertion failure', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'profile-console.log'),
+      'iOS driver not ready in time, consider increasing timeout by configuring MAESTRO_DRIVER_STARTUP_TIMEOUT');
+    writeFileSync(join(root, 'onboarding-console.log'),
+      'BLOCKED: onboarding requires passing profile creation');
+    const { report } = diagnose(root);
+    expect(report.allPassed).toBe(false);
+    expect(report.stages[0]?.status).toBe('DRIVER_STARTUP_TIMEOUT');
+    expect(report.stages[1]?.status).toBe('BLOCKED');
+  });
+
   it('never counts a missing or truncated JUnit report as passing', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-junit.xml'), '<testsuite name="incomplete" tests="1">');
