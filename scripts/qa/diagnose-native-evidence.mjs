@@ -86,6 +86,37 @@ function onboardingDiagnostic() {
   }
   return null;
 }
+function visibleStageLabels(stage) {
+  const files = recurse(join(root, stage)).filter((p) =>
+    p.includes('screen-hierarchy') && p.endsWith('.json')).sort().reverse();
+  for (const path of files) {
+    try {
+      const labels = [];
+      function visit(node) {
+        if (!node || typeof node !== 'object') return;
+        const label = node.attributes?.accessibilityText;
+        if (typeof label === 'string') labels.push(label);
+        for (const child of node.children ?? []) visit(child);
+      }
+      visit(JSON.parse(readFileSync(path, 'utf8')));
+      if (labels.length) return labels;
+    } catch {
+      // Partial hierarchy is not proof of a successful athlete journey.
+    }
+  }
+  return [];
+}
+function completedDoseSelectorDiagnostic(stage, failure) {
+  if (stage !== 'ride' && stage !== 'restart') return null;
+  const expected = stage === 'ride' ? '75 minutes' : '75 min';
+  if (!String(failure ?? '').includes(expected)) return null;
+  const labels = visibleStageLabels(stage);
+  if (!labels.includes('Completed bike')) return null;
+  const exact = labels.find((label) => label.startsWith(expected + ' ·'));
+  return exact
+    ? 'Saved bike and 75-minute dose are visible; exact-text assertion ignored the composite native accessibility label.'
+    : null;
+}
 const report = { schemaVersion: 1, stages: [], allPassed: true };
 for (const stage of stages) {
   const junitPath = join(root, stage + '-junit.xml');
@@ -120,7 +151,8 @@ for (const stage of stages) {
   if (status !== 'PASSED') report.allPassed = false;
   const diagnosis = status !== 'FAILED' ? null
     : stage === 'profile' ? profileDiagnostic()
-      : stage === 'onboarding' ? onboardingDiagnostic() : null;
+      : stage === 'onboarding' ? onboardingDiagnostic()
+        : completedDoseSelectorDiagnostic(stage, failure);
   report.stages.push({ stage, status, failure, diagnosis });
 }
 const output = join(root, 'native-ui-summary.json');
