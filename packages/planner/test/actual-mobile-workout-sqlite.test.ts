@@ -265,6 +265,31 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await service.getLatestTrainingBlock()).toBeNull();
   });
 
+  it('repairs a partially saved first-week block from its original identity', async () => {
+    const original = weeklyBlock();
+    expect(await service.getTrainingBlockById(original.id)).toBeNull();
+    state.failNextContaining = 'INSERT INTO weekly_training_plans';
+    await expect(service.saveTrainingBlock(original))
+      .rejects.toThrow(/synthetic SQLite write interruption/);
+    // The header committed before its weekly rows. Recover it exactly rather
+    // than inserting a new seeded block with different workout IDs.
+    const partiallySaved = await service.getTrainingBlockById(original.id);
+    expect(partiallySaved?.block).toEqual(original);
+    expect(await service.getLatestWeeklyPlan()).toBeNull();
+    await service.saveTrainingBlock(partiallySaved!.block);
+    const restored = await service.getTrainingBlockById(original.id);
+    expect(restored?.block.id).toBe(original.id);
+    expect((await service.getLatestWeeklyPlan())?.plan.id).toBe(original.weeks[0]?.id);
+    expect(await service.getTrainingBlockById('unrelated-block')).toBeNull();
+
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect((await service.getTrainingBlockById(original.id))?.block.id).toBe(original.id);
+    expect((await service.getLatestWeeklyPlan())?.plan.id).toBe(original.weeks[0]?.id);
+  });
+
   it('records its verified athlete owner inside each SQLite file', async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const firstName = service.getActiveDatabaseName();
