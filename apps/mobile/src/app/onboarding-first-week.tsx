@@ -49,7 +49,7 @@ export default function OnboardingFirstWeekScreen() {
     void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }).then(async (result) => {
       // Recover an identical previously saved draft; do not replace it with
       // regenerated content if an interruption happened after commit.
-      const canonical = (await getTrainingBlockById(result.block.id))?.block ?? result.block;
+      const canonical = (await getTrainingBlockById(result.block.id)) ?? result.block;
       await savePerformanceGoal(canonical.goal);
       // Re-upsert the SAME canonical weeks: a previous crash may have left the
       // block JSON saved but some weekly plan rows absent.
