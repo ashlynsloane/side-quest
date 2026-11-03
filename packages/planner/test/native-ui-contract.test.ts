@@ -205,7 +205,13 @@ describe('native synthetic UI automation contract', () => {
     }
     const runner = source('scripts/qa/run-native-maestro.sh');
     expect(runner).toContain('one persistent synthetic athlete');
+    const onboarding = source('e2e/maestro/synthetic-onboarding-steps.yaml');
+    expect(onboarding).toContain('- launchApp');
+    expect(onboarding).toContain('retryTapIfNoChange: true');
+    expect(onboarding).toContain('visible: "Build your first week."');
     const ride = source('e2e/maestro/synthetic-completed-ride-steps.yaml');
+    expect(ride).toContain('- launchApp');
+    expect(ride).toContain('- tapOn: "Week"');
     const restart = source('e2e/maestro/synthetic-ride-restart-steps.yaml');
     // Native inspection showed the labels include trailing intensity context.
     expect(ride).toContain('assertVisible: "75 minutes.*"');
