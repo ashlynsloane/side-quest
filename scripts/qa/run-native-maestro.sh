@@ -26,6 +26,9 @@ run_flow() {
   return "$result"
 }
 
+# The four stages use one persistent synthetic athlete instead of clearing
+# the app four times through nested standalone wrappers. Each stage keeps its
+# own JUnit and screenshot evidence, and is gated on its predecessor.
 # Every downstream test is blocked (code 99) if prerequisites failed.
 profile=99
 onboarding=99
@@ -34,19 +37,19 @@ restart=99
 run_flow profile e2e/maestro/synthetic-profile-entry.yaml
 profile=$?
 if [[ "$profile" -eq 0 ]]; then
-  run_flow onboarding e2e/maestro/synthetic-onboarding-first-week.yaml
+  run_flow onboarding e2e/maestro/synthetic-onboarding-steps.yaml
   onboarding=$?
 else
   echo "BLOCKED: onboarding requires passing profile creation" | tee maestro-evidence/onboarding-console.log
 fi
 if [[ "$onboarding" -eq 0 ]]; then
-  run_flow ride e2e/maestro/synthetic-completed-ride.yaml
+  run_flow ride e2e/maestro/synthetic-completed-ride-steps.yaml
   ride=$?
 else
   echo "BLOCKED: recorded ride requires passing onboarding" | tee maestro-evidence/ride-console.log
 fi
 if [[ "$ride" -eq 0 ]]; then
-  run_flow restart e2e/maestro/synthetic-ride-restart.yaml
+  run_flow restart e2e/maestro/synthetic-ride-restart-steps.yaml
   restart=$?
 else
   echo "BLOCKED: restart requires passing completed ride" | tee maestro-evidence/restart-console.log
