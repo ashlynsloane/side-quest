@@ -87,6 +87,32 @@ describe('native UI failure evidence diagnosis', () => {
     }
   });
 
+  it('identifies a composite native duration label after a successfully saved ride', () => {
+    for (const [stage, durationLabel] of [
+      ['ride', '75 minutes · Intensity unavailable'],
+      ['restart', '75 min · intensity unavailable'],
+    ]) {
+      const root = fixture();
+      const expected = stage === 'ride' ? '75 minutes' : '75 min';
+      writeFileSync(join(root, stage + '-junit.xml'),
+        junit(1, true).replace('Assertion failed',
+          'Assertion is false: "' + expected + '" is visible'));
+      const folder = join(root, stage, 'screen-hierarchy');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+        children: [
+          { attributes: { accessibilityText: 'Completed bike' } },
+          { attributes: { accessibilityText: durationLabel } },
+        ],
+      }));
+      const { report } = diagnose(root);
+      const result = report.stages.find(x => x.stage === stage);
+      expect(result?.status).toBe('FAILED');
+      expect(result?.diagnosis).toContain('composite native accessibility label');
+      expect(report.allPassed).toBe(false);
+    }
+  });
+
   it('reports XCTest startup failure as infrastructure, never an app assertion failure', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-console.log'),
