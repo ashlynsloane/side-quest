@@ -412,6 +412,23 @@ describe('actual mobile endurance source integrity with real SQLite', () => {
     expect(stored[0]?.distanceMeters).toBeUndefined();
   });
 
+  it('recovers the exact 75-minute ride with unknown distance after database restart', async () => {
+    await service.upsertEnduranceActivities([endurance()]);
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const retrieved = await service.getEnduranceActivity('synthetic-ride-1');
+    expect(retrieved?.name).toBe('Completed bike session');
+    expect(retrieved?.discipline).toBe('bike');
+    expect(retrieved?.movingTimeSeconds).toBe(75 * 60);
+    expect(retrieved?.distanceMeters).toBeUndefined();
+    expect((await service.listEnduranceActivities()).map(x => x.id))
+      .toEqual(['synthetic-ride-1']);
+    await service.upsertEnduranceActivities([endurance()]);
+    expect(await service.listEnduranceActivities()).toHaveLength(1);
+  });
+
   it('does not double-count the same provider/source identifier under a new record ID', async () => {
     const record = endurance();
     await service.upsertEnduranceActivities([record]);
