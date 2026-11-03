@@ -8,6 +8,16 @@ This directory contains Maestro journeys for the **isolated synthetic iOS app**,
 - `synthetic-completed-ride.yaml`: onboard a fresh synthetic athlete, record a 75-minute bike activity with deliberately **unknown** distance, inspect actual activity review.
 - `synthetic-ride-restart.yaml`: record the synthetic ride, terminate and relaunch the native app, then verify the record remains in history.
 
+## November 3 acceptance checkpoint
+
+- [Full simulator run 41500092739](https://github.com/ashlynsloane/side-quest/actions/runs/41500092739) verified **profile PASS and entire first-week onboarding PASS**, including generated first-week preview.
+- The completed-ride scenario reached `Completed bike` in Activity Review. Its archived screenshot and accessibility hierarchy both confirmed the actual saved dose displayed as `75 minutes · Intensity unavailable`. The exact-text assertion `75 minutes` failed because Maestro matched the entire accessibility label. That is **not** evidence of lost activity data; cold restart was **BLOCKED**.
+- Native assertions now match composite labels using `75 minutes.*` and `75 min.*`, rather than weakening the record or assuming an unknown distance was zero.
+- The shared runner now stages profile → onboarding → ride → restart with one synthetic athlete, avoiding repeated app resets. Independent Maestro invocations require an explicit `launchApp` and a retryable onboarding tap because the first foreground tap could otherwise be consumed without advancing. This revised staged handoff is still undergoing native verification.
+- Source-matched reusable-binary jobs deliberately refuse a stale archive after app-source edits. Changes to the first-week save/recovery code require a new native Release artifact before these newer journeys can be verified.
+- [Automated QA 41739781463](https://github.com/ashlynsloane/side-quest/actions/runs/41739781463) passed **643 tests in 109 files**. That verifies code-level behavior and disk-backed SQLite recovery, **not** cold-restart acceptance.
+- The initial plan now uses a restart-stable opaque attempt identity and recovers a matching persisted block, repairing weekly rows after partial saves (issue [#18](https://github.com/ashlynsloane/side-quest/issues/18)). Cross-account async write fencing remains a separate open release risk ([#19](https://github.com/ashlynsloane/side-quest/issues/19)).
+
 ## Evidence chronology
 
 1. **Native build and launch passed** in [run 41161358738](https://github.com/ashlynsloane/side-quest/actions/runs/41161358738): native Release build, simulator install, launch and initial screenshot.
