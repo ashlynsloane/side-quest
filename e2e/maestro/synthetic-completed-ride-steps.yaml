@@ -3,6 +3,12 @@
 appId: com.sidequest.synthetic.qa
 ---
 # Requires completed first-week onboarding, no athlete reset.
+# Re-activate the same app after the previous Maestro invocation exits.
+- launchApp
+- extendedWaitUntil:
+    visible: "Week"
+    timeout: 30000
+- tapOn: "Week"
 - scrollUntilVisible:
     element: "Record a completed run, ride or swim"
     direction: DOWN
