@@ -274,11 +274,11 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     // The header committed before its weekly rows. Recover it exactly rather
     // than inserting a new seeded block with different workout IDs.
     const partiallySaved = await service.getTrainingBlockById(original.id);
-    expect(partiallySaved?.block).toEqual(original);
+    expect(partiallySaved).toEqual(original);
     expect(await service.getLatestWeeklyPlan()).toBeNull();
-    await service.saveTrainingBlock(partiallySaved!.block);
+    await service.saveTrainingBlock(partiallySaved!);
     const restored = await service.getTrainingBlockById(original.id);
-    expect(restored?.block.id).toBe(original.id);
+    expect(restored?.id).toBe(original.id);
     expect((await service.getLatestWeeklyPlan())?.plan.id).toBe(original.weeks[0]?.id);
     expect(await service.getTrainingBlockById('unrelated-block')).toBeNull();
 
@@ -286,7 +286,7 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     vi.resetModules();
     service = await import('../../../apps/mobile/src/services/database');
     await service.activateUserDatabase('synthetic-athlete-one');
-    expect((await service.getTrainingBlockById(original.id))?.block.id).toBe(original.id);
+    expect((await service.getTrainingBlockById(original.id))?.id).toBe(original.id);
     expect((await service.getLatestWeeklyPlan())?.plan.id).toBe(original.weeks[0]?.id);
   });
 
