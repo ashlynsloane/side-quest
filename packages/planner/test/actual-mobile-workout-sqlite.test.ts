@@ -429,6 +429,18 @@ describe('actual mobile endurance source integrity with real SQLite', () => {
     expect(await service.listEnduranceActivities()).toHaveLength(1);
   });
 
+  it('does not expose a completed ride when a different athlete becomes active', async () => {
+    await service.upsertEnduranceActivities([endurance()]);
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect(await service.getEnduranceActivity('synthetic-ride-1')).toBeNull();
+    expect(await service.listEnduranceActivities()).toHaveLength(0);
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect((await service.getEnduranceActivity('synthetic-ride-1'))?.movingTimeSeconds)
+      .toBe(4500);
+    expect((await service.listEnduranceActivities()).map(x => x.id))
+      .toEqual(['synthetic-ride-1']);
+  });
+
   it('does not double-count the same provider/source identifier under a new record ID', async () => {
     const record = endurance();
     await service.upsertEnduranceActivities([record]);
