@@ -49,7 +49,7 @@ export function firstWeekAttemptSeed(
   answers: FirstWeekAnswers,
   weekStartDate: string,
 ): string {
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(weekStartDate)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
     throw new Error('Expected an ISO training week start date.');
   }
   const canonical = JSON.stringify(ANSWER_FIELDS.map((key) => [
