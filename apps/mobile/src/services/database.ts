@@ -972,29 +972,6 @@ export async function saveTrainingBlock(
   }
 }
 
-/**
- * Recover the exact first-week block after an interrupted save. Never fall
- * back to another (possibly edited) block just because it is the latest.
- */
-export async function getTrainingBlockById(id: string): Promise<SavedTrainingBlockRecord | null> {
-  if (!id) throw new Error('Training block identity is required.');
-  await initializeDatabase();
-  const row = await db.getFirstAsync<{ id: string; block_json: string; created_at: string }>(
-    'SELECT id, block_json, created_at FROM training_blocks WHERE id = ?',
-    id,
-  );
-  if (!row) return null;
-  try {
-    return {
-      id: row.id,
-      block: JSON.parse(row.block_json) as import('@circuit/domain').TrainingBlockPlan,
-      createdAt: row.created_at,
-    };
-  } catch {
-    throw new Error('Saved training block is unreadable; existing data was preserved.');
-  }
-}
-
 export async function getLatestTrainingBlock(): Promise<SavedTrainingBlockRecord | null> {
   await initializeDatabase();
   const row = await db.getFirstAsync<{
