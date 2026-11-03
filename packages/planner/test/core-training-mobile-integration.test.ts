@@ -8,7 +8,8 @@ function mobile(relative: string): string {
 describe('core training journey integration contract', () => {
   it('generates endurance sessions before declaring onboarding first week ready', () => {
     const screen = mobile('app/onboarding-first-week.tsx');
-    expect(screen).toContain('await saveTrainingBlock(result.block)');
+    expect(screen).toContain('getTrainingBlockById(result.block.id)');
+    expect(screen).toContain('await saveTrainingBlock(canonical)');
     expect(screen).toContain('await refreshLatestWholeAthletePlan()');
     expect(screen).toContain('buildFirstWeekTrainingSummary({');
     expect(screen).toContain('generatedEvents: enduranceEvents');
