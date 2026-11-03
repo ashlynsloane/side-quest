@@ -32,7 +32,7 @@ describe('native synthetic UI automation contract', () => {
     expect(nameIndex).toBeGreaterThan(emailIndex);
     expect(profile).not.toMatch(/^- hideKeyboard/m);
     // The numeric activity keyboard must also avoid the unreliable dismiss API.
-    expect(source('e2e/maestro/synthetic-completed-ride.yaml'))
+    expect(source('e2e/maestro/synthetic-completed-ride-steps.yaml'))
       .not.toMatch(/^- hideKeyboard/m);
   });
 
@@ -144,7 +144,7 @@ describe('native synthetic UI automation contract', () => {
   });
 
   it('scrolls onboarding using the visible native button ID rather than hidden child text', () => {
-    const flow = source('e2e/maestro/synthetic-onboarding-first-week.yaml');
+    const flow = source('e2e/maestro/synthetic-onboarding-steps.yaml');
     expect(flow).not.toContain('element: "Continue"');
     expect(flow).not.toContain('element: "Build my first week"');
     const scrolls = [...flow.matchAll(/- scrollUntilVisible:\n    element:\n      id: "sidequest-qa-onboarding-next"\n    direction: DOWN\n    visibilityPercentage: 50/g)];
@@ -174,6 +174,9 @@ describe('native synthetic UI automation contract', () => {
       'synthetic-onboarding-first-week.yaml',
       'synthetic-completed-ride.yaml',
       'synthetic-ride-restart.yaml',
+      'synthetic-onboarding-steps.yaml',
+      'synthetic-completed-ride-steps.yaml',
+      'synthetic-ride-restart-steps.yaml',
     ];
     for (const name of flowNames) {
       const path = 'e2e/maestro/' + name;
@@ -188,6 +191,30 @@ describe('native synthetic UI automation contract', () => {
     }
   });
 
+  it('runs exactly one synthetic athlete from onboarding through restart', () => {
+    const wrapperPairs: Array<[string, string, string]> = [
+      ['synthetic-onboarding-first-week.yaml', 'synthetic-profile-entry.yaml', 'synthetic-onboarding-steps.yaml'],
+      ['synthetic-completed-ride.yaml', 'synthetic-onboarding-first-week.yaml', 'synthetic-completed-ride-steps.yaml'],
+      ['synthetic-ride-restart.yaml', 'synthetic-completed-ride.yaml', 'synthetic-ride-restart-steps.yaml'],
+    ];
+    for (const [wrapper, predecessor, stage] of wrapperPairs) {
+      const value = source('e2e/maestro/' + wrapper);
+      expect(value).toContain('- runFlow: ' + predecessor);
+      expect(value).toContain('- runFlow: ' + stage);
+      expect(source('e2e/maestro/' + stage)).not.toMatch(/^- runFlow:/m);
+    }
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    expect(runner).toContain('one persistent synthetic athlete');
+    const ride = source('e2e/maestro/synthetic-completed-ride-steps.yaml');
+    const restart = source('e2e/maestro/synthetic-ride-restart-steps.yaml');
+    // Native inspection showed the labels include trailing intensity context.
+    expect(ride).toContain('assertVisible: "75 minutes.*"');
+    expect(restart).toContain('assertVisible: "75 min.*"');
+    expect(ride).toContain('takeScreenshot: "synthetic-completed-ride-review"');
+    expect(restart).toContain('stopApp');
+    expect(restart).toContain('launchApp');
+  });
+
   it('records native screenshots and uploads failure evidence', () => {
     const workflow = source('.github/workflows/native-ios-simulator-smoke.yml');
     expect(workflow).toContain('synthetic-ios-first-launch.png');
@@ -200,9 +227,10 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).toContain('native-source.sha256');
     expect(runner).toContain('${label}-junit.xml');
     expect(runner).toContain('run_flow profile e2e/maestro/synthetic-profile-entry.yaml');
-    expect(runner).toContain('run_flow restart e2e/maestro/synthetic-ride-restart.yaml');
-    expect(runner).toContain('e2e/maestro/synthetic-onboarding-first-week.yaml');
-    expect(runner).toContain('e2e/maestro/synthetic-completed-ride.yaml');
+    expect(runner).toContain('run_flow onboarding e2e/maestro/synthetic-onboarding-steps.yaml');
+    expect(runner).toContain('run_flow ride e2e/maestro/synthetic-completed-ride-steps.yaml');
+    expect(runner).toContain('run_flow restart e2e/maestro/synthetic-ride-restart-steps.yaml');
+    expect(runner).not.toContain('run_flow ride e2e/maestro/synthetic-completed-ride.yaml');
     expect(runner).toContain('exit 1');
   });
 });
