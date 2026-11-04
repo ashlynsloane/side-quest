@@ -130,7 +130,15 @@ describe('native synthetic UI automation contract', () => {
     expect(fingerprintScript).toContain("path.startsWith('apps/mobile/src/')");
     expect(fingerprintScript).toContain("path.startsWith('packages/domain/src/')");
     expect(fingerprintScript).toContain("path.startsWith('packages/planner/src/')");
+    expect(fingerprintScript).toContain("path.startsWith('packages/exercise-content/data/')");
+    expect(fingerprintScript).toContain("path.startsWith('packages/exercise-content/src/')");
+    expect(fingerprintScript).toContain("path.startsWith('apps/mobile/assets/')");
+    expect(fingerprintScript).toContain('package\\.json');
     expect(fingerprintScript).not.toContain("path.startsWith('e2e/maestro/')");
+    const full = source('.github/workflows/native-ios-simulator-smoke.yml');
+    expect(full).toContain("packages/exercise-content/data/**");
+    expect(full).toContain("packages/exercise-content/src/**");
+    expect(full).toContain("packages/*/package.json");
     const fingerprintPath = new URL('../../../scripts/qa/native-source-fingerprint.mjs', import.meta.url);
     const first = spawnSync(process.execPath, [fingerprintPath.pathname], {
       cwd: new URL('../../../', import.meta.url).pathname, encoding: 'utf8',
