@@ -28,6 +28,7 @@ import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
 import type { DailyReadinessCheckIn } from './readiness';
+import { ACTIVE_WORKOUT_PROFILE_KEY } from './active-workout-persistence';
 
 let db = SQLite.openDatabaseSync('circuit-generator.db');
 let activeDatabaseName = 'circuit-generator.db';
@@ -35,18 +36,107 @@ let initialized = false;
 
 type StorageLike = { getItem(key:string):string|null; setItem(key:string,value:string):void };
 const profileStorage = (globalThis as typeof globalThis & { localStorage: StorageLike }).localStorage;
+const FILE_OWNER_PREFIX = 'circuit.database-file-owner.v1:';
+
+function chooseProfileDatabaseName(userId: string): string {
+  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const legacyName = `circuit-generator-${safeId}.db`;
+  // Keep the historical filename for its first confirmed owner. A second
+  // athlete with an equivalent sanitized ID MUST NOT open that same database.
+  // This local ownership ledger also preserves stable filenames after switch.
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidate = attempt === 0
+      ? legacyName
+      : `circuit-generator-${safeId}-collision-${attempt}.db`;
+    const key = FILE_OWNER_PREFIX + candidate;
+    const owner = profileStorage.getItem(key);
+    if (owner !== null && owner !== userId) continue;
+    // Ownership is committed only AFTER SQLite itself has verified the owner.
+    return candidate;
+  }
+  throw new Error('Could not allocate a unique athlete database filename.');
+}
+
+const DB_OWNER_TABLE = 'sidequest_athlete_database_owner';
+
+/**
+ * An unclaimed historical database cannot be attributed solely by its
+ * sanitized filename. The ownership row lives INSIDE the SQLite file, so
+ * wiping localStorage does not erase evidence of its original athlete.
+ */
+async function verifyAthleteDatabaseOwner(
+  database: typeof db,
+  userId: string,
+  permitLegacyAdoption: boolean,
+): Promise<void> {
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS sidequest_athlete_database_owner (
+      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+      user_id TEXT NOT NULL
+    );
+  `);
+  const existing = await database.getFirstAsync<{ user_id: string }>(
+    `SELECT user_id FROM ${DB_OWNER_TABLE} WHERE singleton = 1`,
+  );
+  if (existing) {
+    if (existing.user_id !== userId) {
+      throw new Error('Athlete database ownership mismatch. No training records were opened.');
+    }
+    return;
+  }
+  const tables = await database.getAllAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN (?, 'sqlite_sequence')",
+    DB_OWNER_TABLE,
+  );
+  if (tables.length && !permitLegacyAdoption) {
+    throw new Error(
+      'Existing athlete database has no verifiable owner. Data was preserved; migration requires review.',
+    );
+  }
+  // The single owner row is written before exposing any athlete records.
+  await database.runAsync(
+    `INSERT INTO ${DB_OWNER_TABLE} (singleton, user_id) VALUES (1, ?)`,
+    userId,
+  );
+}
 
 export async function activateUserDatabase(userId: string): Promise<void> {
+  if (!userId.trim()) throw new Error('Athlete database identity is required.');
   const ownerKey = 'circuit.original-database-owner';
-  let originalOwner = profileStorage.getItem(ownerKey);
-  if (!originalOwner) { originalOwner = userId; profileStorage.setItem(ownerKey, userId); }
-  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-  const nextName = originalOwner === userId ? 'circuit-generator.db' : `circuit-generator-${safeId}.db`;
-  if (nextName === activeDatabaseName) { await initializeDatabase(); return; }
-  db = SQLite.openDatabaseSync(nextName);
-  activeDatabaseName = nextName;
-  initialized = false;
-  await initializeDatabase();
+  const storedOriginalOwner = profileStorage.getItem(ownerKey);
+  const originalOwner = storedOriginalOwner ?? userId;
+  const nextName = originalOwner === userId
+    ? 'circuit-generator.db' : chooseProfileDatabaseName(userId);
+  const oldDb = db;
+  const oldName = activeDatabaseName;
+  const oldInitialized = initialized;
+  const candidate = nextName === oldName ? oldDb : SQLite.openDatabaseSync(nextName);
+  const storedOwner = profileStorage.getItem(FILE_OWNER_PREFIX + nextName);
+  // Existing files from before this change require independent ownership
+  // provenance. An old original owner is supported when its identity was
+  // previously persisted; a preexisting side-profile file is supported only
+  // with the matching filename ownership claim.
+  const permitLegacyAdoption = nextName === 'circuit-generator.db'
+    ? storedOriginalOwner === userId
+    : storedOwner === userId;
+  await verifyAthleteDatabaseOwner(candidate, userId, permitLegacyAdoption);
+  try {
+    if (nextName !== oldName) {
+      db = candidate;
+      activeDatabaseName = nextName;
+      initialized = false;
+    }
+    await initializeDatabase();
+    // Commit ownership and active identity only AFTER initialization passes.
+    if (!storedOriginalOwner) profileStorage.setItem(ownerKey, userId);
+    profileStorage.setItem(FILE_OWNER_PREFIX + nextName, userId);
+    profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
+  } catch (error) {
+    db = oldDb;
+    activeDatabaseName = oldName;
+    initialized = oldInitialized;
+    throw error;
+  }
 }
 
 export function getActiveDatabaseName(): string { return activeDatabaseName; }

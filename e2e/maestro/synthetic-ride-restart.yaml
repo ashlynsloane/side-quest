@@ -1,0 +1,8 @@
+# Exercise completed-activity persistence over a genuine iOS application restart.
+# Never uses real athlete data or credentials.
+appId: com.sidequest.synthetic.qa
+---
+# Standalone scenario composes all prerequisites for direct manual execution.
+# CI runs the named stage alone after verifying its preceding stage.
+- runFlow: synthetic-completed-ride.yaml
+- runFlow: synthetic-ride-restart-steps.yaml

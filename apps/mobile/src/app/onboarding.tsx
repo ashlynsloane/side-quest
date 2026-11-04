@@ -37,7 +37,7 @@ function saveDraft(key: string, draft: OnboardingDraft): void { try { draftStora
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { acknowledgeStrengthModel, acknowledgePrivacyModel } = useOnboarding();
+  const { beginFirstWeek } = useOnboarding();
   const { user } = useAuth();
   const draftKey = `${DRAFT_KEY}.${user?.id ?? 'guest'}`;
   const { palette } = useTheme();
@@ -61,10 +61,7 @@ export default function OnboardingScreen() {
   const progress = Math.max(0, stepIndex) / (STEPS.length - 1);
 
   function next() {
-    if (step === 'welcome') {
-      acknowledgeStrengthModel(true);
-      acknowledgePrivacyModel(true);
-    }
+    if (step === 'welcome') beginFirstWeek();
     setStep(STEPS[Math.min(stepIndex + 1, STEPS.length - 1)] ?? 'review');
   }
   function back() {
@@ -74,12 +71,24 @@ export default function OnboardingScreen() {
   function toggleDay(index: number) {
     setDays((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index].sort());
   }
+  const [navigationError, setNavigationError] = useState<string | null>(null);
   function finish() {
-    const query = new URLSearchParams({
-      goal, priority, hours: String(hours), days: days.join(','), equipment, restriction,
-      background, runStatus, injury, strength,
-    });
-    router.replace(`/onboarding-first-week?${query.toString()}` as Href);
+    setNavigationError(null);
+    try {
+      // Expo Router owns query encoding. Avoid URLSearchParams inside native
+      // Hermes: a thrown event-handler exception previously left users on the
+      // last onboarding step with no actionable error.
+      router.replace({
+        pathname: '/onboarding-first-week',
+        params: {
+          goal, priority, hours: String(hours), days: days.join(','),
+          equipment, restriction, background, runStatus, injury, strength,
+        },
+      } as Href);
+    } catch (caught) {
+      setNavigationError(caught instanceof Error ? caught.message
+        : 'Could not open the proposed week. Try again or return to setup.');
+    }
   }
 
   return <AppScreen eyebrow={`STEP ${stepIndex + 1} OF ${STEPS.length}`} title={titleFor(step)} subtitle={subtitleFor(step)}>
@@ -91,9 +100,10 @@ export default function OnboardingScreen() {
     {step === 'restrictions' ? <RestrictionsStep value={restriction} setValue={setRestriction} styles={styles} /> : null}
     {step === 'profile' ? <ProfileStep background={background} setBackground={setBackground} runStatus={runStatus} setRunStatus={setRunStatus} injury={injury} setInjury={setInjury} strength={strength} setStrength={setStrength} styles={styles} /> : null}
     {step === 'review' ? <Review goal={goal} priority={priority} hours={hours} days={days} equipment={equipment} restriction={restriction} background={background} runStatus={runStatus} injury={injury} strength={strength} styles={styles} /> : null}
+    {navigationError ? <Text accessibilityRole="alert" style={{ color: palette.ink, paddingHorizontal: 10 }}>First-week navigation error: {navigationError}</Text> : null}
     <View style={styles.actions}>
       <Pressable onPress={back} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}><Text style={styles.secondaryText}>{step === 'welcome' ? 'Not now' : 'Back'}</Text></Pressable>
-      <Pressable disabled={step === 'schedule' && days.length < 2} onPress={step === 'review' ? finish : next} style={({ pressed }) => [styles.primary, step === 'schedule' && days.length < 2 && styles.disabled, pressed && styles.pressed]}>
+      <Pressable testID="sidequest-qa-onboarding-next" accessibilityRole="button" disabled={step === 'schedule' && days.length < 2} onPress={step === 'review' ? finish : next} style={({ pressed }) => [styles.primary, step === 'schedule' && days.length < 2 && styles.disabled, pressed && styles.pressed]}>
         <Text style={styles.primaryText}>{step === 'review' ? 'Build my first week' : step === 'welcome' ? 'Start setup' : 'Continue'}</Text><Text style={styles.arrow}>›</Text>
       </Pressable>
     </View>

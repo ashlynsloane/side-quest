@@ -4,13 +4,14 @@ import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen, Surface } from '@/components/v12-ui';
-import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegionExposures, savePerformanceGoal, saveTrainingBlock } from '@/services/database';
+import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegionExposures, savePerformanceGoal, saveTrainingBlock, getTrainingBlockById } from '@/services/database';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { useOnboarding } from '@/state/onboarding-context';
 import { useTheme } from '@/state/theme-context';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
+import { firstWeekAttemptSeed } from '@/services/first-week-provenance';
 
 type Params = { goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; background?: string; runStatus?: string; injury?: string; strength?: string };
 type BuildState = 'building' | 'ready' | 'error';
@@ -21,7 +22,7 @@ export default function OnboardingFirstWeekScreen() {
   const params = useLocalSearchParams<Params>();
   const router = useRouter();
   const { exercises } = useExerciseCatalog();
-  const { complete } = useOnboarding();
+  const { complete, state: onboardingState } = useOnboarding();
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [state, setState] = useState<BuildState>('building');
@@ -34,10 +35,26 @@ export default function OnboardingFirstWeekScreen() {
   useEffect(() => {
     if (started.current || exercises.length === 0) return;
     started.current = true;
-    void buildFirstWeek(params, exercises).then(async (result) => {
-      await savePerformanceGoal(result.goal);
-      await saveTrainingBlock(result.block);
-      setBlock(result.block);
+    // The setup timestamp is durable and athlete-scoped. A restart after a
+    // partial SQLite write must target the SAME week and generated block ID.
+    const startedAt = onboardingState.firstWeekSetupStartedAt;
+    const referenceDate = startedAt ? new Date(startedAt) : new Date();
+    if (!Number.isFinite(referenceDate.getTime())) {
+      setError('First-week setup timestamp is invalid; return to setup and retry.');
+      setState('error');
+      return;
+    }
+    const weekStartDate = nextLocalMonday(referenceDate);
+    const seed = firstWeekAttemptSeed(params, weekStartDate);
+    void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }).then(async (result) => {
+      // Recover an identical previously saved draft; do not replace it with
+      // regenerated content if an interruption happened after commit.
+      const canonical = (await getTrainingBlockById(result.block.id)) ?? result.block;
+      await savePerformanceGoal(canonical.goal);
+      // Re-upsert the SAME canonical weeks: a previous crash may have left the
+      // block JSON saved but some weekly plan rows absent.
+      await saveTrainingBlock(canonical);
+      setBlock(canonical);
       // The athlete should see the whole proposed training week, not only
       // strength sessions while endurance silently generates later on Plan focus.
       try {
@@ -53,7 +70,7 @@ export default function OnboardingFirstWeekScreen() {
       setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
       setState('error');
     });
-  }, [complete, exercises, params]);
+  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt]);
 
   if (state === 'building') return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
 
@@ -83,12 +100,16 @@ export default function OnboardingFirstWeekScreen() {
     </View>)}</Surface>
     {enduranceWarning ? <Surface style={styles.errorCard}><Text style={styles.errorTitle}>Endurance calendar needs review</Text><Text style={styles.body}>{enduranceWarning}</Text><Text style={styles.body}>Your strength block was saved. The Week screen can retry the wider plan.</Text></Surface> : null}
     <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{params.restriction && params.restriction !== 'none' ? <Text style={styles.body}>A reported limitation still requires review of specific exercises and clinical restrictions before training.</Text> : null}</View>
-    <Pressable onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
+    <Pressable testID="sidequest-qa-review-first-week" accessibilityRole="button" onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
     <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
 }
 
-async function buildFirstWeek(params: Params, exercises: Parameters<typeof generateTrainingBlock>[1]['exercises']): Promise<{ goal: PerformanceGoal; block: TrainingBlockPlan }> {
+async function buildFirstWeek(
+  params: Params,
+  exercises: Parameters<typeof generateTrainingBlock>[1]['exercises'],
+  attempt: { weekStartDate: string; seed: string; referenceDate: Date },
+): Promise<{ goal: PerformanceGoal; block: TrainingBlockPlan }> {
   const goalType = parseGoal(params.goal);
   const totalHours = clamp(Number(params.hours) || 10, 3, 25);
   const capacity = buildCapacity(params, totalHours);
@@ -97,8 +118,9 @@ async function buildFirstWeek(params: Params, exercises: Parameters<typeof gener
   if (recommendation.validationErrors.length > 0) throw new Error(recommendation.validationErrors[0]);
   const preferredDays = parseDays(params.days);
   const sessionsPerWeek = Math.max(2, Math.min(recommendation.sessionsPerWeek, preferredDays.length)) as 2 | 3 | 4 | 5;
-  const now = new Date().toISOString();
-  const eventDate = goalType === 'general_offseason' ? undefined : addWeeks(12);
+  const now = attempt.referenceDate.toISOString();
+  const eventDate = goalType === 'general_offseason'
+    ? undefined : addWeeks(12, attempt.referenceDate);
   const goal: PerformanceGoal = {
     id: `goal_${goalType}`,
     type: goalType,
@@ -118,7 +140,7 @@ async function buildFirstWeek(params: Params, exercises: Parameters<typeof gener
   const profiles = await ensureDefaultEquipmentProfiles();
   const equipment = equipmentFor(params.equipment, profiles);
   const [recentRegionExposures, previousExerciseIds] = await Promise.all([getRecentRegionExposures(), getPreviousExerciseIds()]);
-  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: nextLocalMonday(), availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: `onboarding-${Date.now()}` }, { exercises, recentRegionExposures, previousExerciseIds });
+  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: attempt.weekStartDate, availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
   return { goal, block };
@@ -183,7 +205,7 @@ function parsePriority(value: string | undefined): PerformanceGoal['priority'] {
 function disciplinesFor(goal: PerformanceGoalType): EnduranceDiscipline[] { if (goal === 'ironman_70_3' || goal === 'triathlon_olympic') return ['swim','bike','run']; if (goal === 'general_offseason') return []; return ['run']; }
 function enduranceScheduleFor(goal: PerformanceGoalType): EnduranceSchedule { return disciplinesFor(goal).includes('swim') ? { keySwim:'tuesday', keyBike:'saturday', keyRun:'sunday' } : disciplinesFor(goal).includes('run') ? { keyRun:'sunday' } : {}; }
 function goalLabel(goal: PerformanceGoalType): string { const labels: Record<PerformanceGoalType, string> = { triathlon_sprint:'Sprint triathlon', triathlon_olympic:'Olympic triathlon', ironman_70_3:'Ironman 70.3', ironman_full:'Ironman distance', swimrun:'Swimrun', road_10k:'Road 10K', road_half_marathon:'Half marathon', road_marathon:'Marathon', trail_50k:'Trail 50K', trail_100k:'Trail 100K', swim_speed:'Swim faster', general_offseason:'General strength' }; return labels[goal]; }
-function addWeeks(weeks: number): string { const date = new Date(); date.setDate(date.getDate() + weeks * 7); return date.toISOString().slice(0,10); }
+function addWeeks(weeks: number, referenceDate: Date = new Date()): string { const date = new Date(referenceDate.getTime()); date.setDate(date.getDate() + weeks * 7); return date.toISOString().slice(0,10); }
 function shortDate(value: string): string { const date = new Date(`${value}T12:00:00`); return date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
 function profileSummary(params: Params): string { const background = params.background === 'swim' ? 'swim-strong' : params.background === 'bike' ? 'bike-strong' : params.background === 'run' ? 'run-strong' : params.background === 'triathlon' ? 'triathlon background' : 'mixed / newer background'; const run = params.runStatus === 'not_running' ? 'not currently running' : params.runStatus === 'return_to_run' ? 'returning to run' : params.runStatus === 'reduced' ? 'reduced running' : 'running normally'; return `${background} · ${run}`; }
 function rationaleFor(params: Params): string { if (params.injury === 'recent_bone_stress') return 'The starting dose preserves direct strength while using conservative lower-body progression because you reported a recent bone-stress concern.'; if (params.injury === 'recurring_run' || params.runStatus === 'return_to_run' || params.runStatus === 'not_running') return 'The starting dose treats running durability and impact tolerance as developing, rather than assuming endurance experience transfers evenly across sports.'; if (params.background === 'swim') return 'Your swim background is treated as real experience, while run and impact progression remain separate planning dimensions.'; if (params.background === 'triathlon') return 'Your multisport background is treated as experience across swim, bike, and run, while current run status and injury history still control progression.'; return 'The first draft uses your available time and current context without pretending it already knows your full training history.'; }
