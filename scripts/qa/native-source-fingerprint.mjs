@@ -8,11 +8,15 @@ const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
   .split('\0').filter(Boolean);
 const includes = (path) =>
   path.startsWith('apps/mobile/src/')
+  || path.startsWith('apps/mobile/assets/')
   || path.startsWith('packages/domain/src/')
   || path.startsWith('packages/planner/src/')
   || path.startsWith('packages/generator/src/')
+  || path.startsWith('packages/exercise-content/src/')
+  || path.startsWith('packages/exercise-content/data/')
   || path.startsWith('packages/design-system/src/')
-  || /^apps\/mobile\/(app\.json|package\.json|babel\.config\.[^/]+|metro\.config\.[^/]+)$/.test(path)
+  || /^packages\/[^/]+\/package\.json$/.test(path)
+  || /^apps\/mobile\/(app\.json|package\.json|eas\.json|babel\.config\.[^/]+|metro\.config\.[^/]+)$/.test(path)
   || ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(path);
 const relevant = tracked.filter(includes).sort();
 if (relevant.length < 30) throw new Error('Native source inventory unexpectedly small.');
