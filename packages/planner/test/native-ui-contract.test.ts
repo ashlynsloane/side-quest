@@ -219,6 +219,11 @@ describe('native synthetic UI automation contract', () => {
     expect(ride).toContain('takeScreenshot: "synthetic-completed-ride-review"');
     expect(restart).toContain('stopApp');
     expect(restart).toContain('launchApp');
+    // The real cold-relaunch iOS hierarchy names this native tab
+    // "Week, tab, 2 of 6", not a separate exact "Week" text node.
+    expect(restart).toContain('text: "Week, tab, .*"');
+    expect(restart).toContain('retryTapIfNoChange: true');
+    expect(restart).not.toContain('- tapOn: "Week"');
   });
 
   it('records native screenshots and uploads failure evidence', () => {
