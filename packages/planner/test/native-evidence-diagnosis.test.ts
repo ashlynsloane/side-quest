@@ -113,6 +113,27 @@ describe('native UI failure evidence diagnosis', () => {
     }
   });
 
+  it('identifies the restored Today screen and composite Week tab after cold restart', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'restart-junit.xml'),
+      junit(1, true).replace('Assertion failed',
+        'Element not found: Text matching regex: Week'));
+    const folder = join(root, 'restart', 'screen-hierarchy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+      children: [
+        { attributes: { accessibilityText: 'TODAY' } },
+        { attributes: { accessibilityText: 'Week, tab, 2 of 6' } },
+      ],
+    }));
+    const { report } = diagnose(root);
+    expect(report.allPassed).toBe(false);
+    expect(report.stages[3]?.status).toBe('FAILED');
+    expect(report.stages[3]?.diagnosis).toMatch(/Cold restart restored the Today screen/);
+    expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
+      .not.toContain('synthetic-secret');
+  });
+
   it('reports XCTest startup failure as infrastructure, never an app assertion failure', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-console.log'),
