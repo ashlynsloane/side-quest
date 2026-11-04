@@ -106,11 +106,18 @@ function visibleStageLabels(stage) {
   }
   return [];
 }
-function completedDoseSelectorDiagnostic(stage, failure) {
+function nativeStageDiagnostic(stage, failure) {
   if (stage !== 'ride' && stage !== 'restart') return null;
+  const labels = visibleStageLabels(stage);
+  // A cold restart can correctly restore Today while Maestro fails to match
+  // the short "Week" selector. The native tab label includes position/role.
+  if (stage === 'restart' && /Text matching regex: Week/.test(String(failure ?? ''))
+      && labels.some((label) => /^Week, tab, [0-9]+ of [0-9]+$/.test(label))
+      && labels.includes('TODAY')) {
+    return 'Cold restart restored the Today screen and Week tab; the short selector did not match the composite accessibility tab label.';
+  }
   const expected = stage === 'ride' ? '75 minutes' : '75 min';
   if (!String(failure ?? '').includes(expected)) return null;
-  const labels = visibleStageLabels(stage);
   if (!labels.includes('Completed bike')) return null;
   const exact = labels.find((label) => label.startsWith(expected + ' ·'));
   return exact
@@ -152,7 +159,7 @@ for (const stage of stages) {
   const diagnosis = status !== 'FAILED' ? null
     : stage === 'profile' ? profileDiagnostic()
       : stage === 'onboarding' ? onboardingDiagnostic()
-        : completedDoseSelectorDiagnostic(stage, failure);
+        : nativeStageDiagnostic(stage, failure);
   report.stages.push({ stage, status, failure, diagnosis });
 }
 const output = join(root, 'native-ui-summary.json');
