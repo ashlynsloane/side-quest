@@ -8,12 +8,16 @@ on:
       - '.github/workflows/native-ios-simulator-smoke.yml'
       - 'apps/mobile/src/**'
       - 'apps/mobile/assets/**'
+      - 'apps/mobile/eas.json'
       - 'apps/mobile/app.json'
       - 'apps/mobile/package.json'
       - 'packages/domain/src/**'
       - 'packages/planner/src/**'
       - 'packages/generator/src/**'
       - 'packages/design-system/src/**'
+      - 'packages/exercise-content/src/**'
+      - 'packages/exercise-content/data/**'
+      - 'packages/*/package.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -86,6 +90,7 @@ jobs:
           cd apps/mobile/ios
           pod install
       - name: Boot simulator
+        timeout-minutes: 8
         run: |
           xcrun simctl boot "${{ steps.simulator.outputs.udid }}"
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
@@ -104,6 +109,7 @@ jobs:
               exit 1
             }
       - name: Install, launch and capture native screen
+        timeout-minutes: 10
         run: |
           set -e
           APP=$(find "$RUNNER_TEMP/sidequest-synthetic-build/Build/Products/Release-iphonesimulator" \
