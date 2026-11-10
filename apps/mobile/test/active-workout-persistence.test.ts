@@ -9,6 +9,7 @@ import {
   loadLiveWorkoutSession,
   saveLiveWorkoutSession,
   clearLiveWorkoutSession,
+  updateLiveWorkoutCloudLease,
   type LiveWorkoutSessionSnapshot,
 } from '../src/services/active-workout-persistence';
 import {
@@ -108,4 +109,58 @@ describe('real mobile checkpoint adapter', () => {
     await expect(saveLiveWorkoutSession(createInitialLiveWorkoutSession(workout()), 'athlete'))
       .rejects.toThrow('storage quota exhausted');
   });
+  it('preserves the server lease through timer updates and advances only its expiry', async () => {
+    const original = {
+      leaseId: '00000000-0000-4000-8000-000000000001',
+      deviceId: 'device-A',
+      expiresAt: new Date(Date.now() + 90_000).toISOString(),
+    };
+    const first = createInitialLiveWorkoutSession(workout(), new Date().toISOString(), undefined, original);
+    await saveLiveWorkoutSession(first, 'athlete-1');
+    const later = { ...first, savedAt: new Date(Date.now() + 500).toISOString(),
+      stationRounds: { 'station-1': 2 }, cloudLease: undefined };
+    await saveLiveWorkoutSession(later, 'athlete-1');
+    expect((await loadLiveWorkoutSession('athlete-1'))?.cloudLease).toEqual(original);
+
+    const renewed = { ...original, expiresAt: new Date(Date.now() + 180_000).toISOString() };
+    await updateLiveWorkoutCloudLease('athlete-1', 'w1', renewed);
+    const restored = await loadLiveWorkoutSession('athlete-1');
+    expect(restored?.cloudLease).toEqual(renewed);
+    expect(restored?.stationRounds).toEqual({ 'station-1': 2 });
+  });
+
+  it('does not allow a delayed checkpoint to restore older timer/rest state or a stale cloud expiry', async () => {
+    const original = {
+      leaseId: '00000000-0000-4000-8000-000000000001',
+      deviceId: 'device-A',
+      expiresAt: new Date(Date.now() + 90_000).toISOString(),
+    };
+    const first = createInitialLiveWorkoutSession(workout(), new Date().toISOString(), undefined, original);
+    const newer = { ...first, savedAt: new Date(Date.now() + 2000).toISOString(),
+      stationRounds: { 'station-1': 4 } };
+    await saveLiveWorkoutSession(newer, 'athlete-1');
+    await saveLiveWorkoutSession({ ...first, stationRounds: { 'station-1': 1 } }, 'athlete-1');
+    expect((await loadLiveWorkoutSession('athlete-1'))?.stationRounds).toEqual({ 'station-1': 4 });
+    const renewed = { ...original, expiresAt: new Date(Date.now() + 180_000).toISOString() };
+    await updateLiveWorkoutCloudLease('athlete-1', 'w1', renewed);
+    await updateLiveWorkoutCloudLease('athlete-1', 'w1', original);
+    expect((await loadLiveWorkoutSession('athlete-1'))?.cloudLease).toEqual(renewed);
+  });
+
+  it('rejects another remote token and prevents renewing a different workout', async () => {
+    const token = {
+      leaseId: '00000000-0000-4000-8000-000000000001',
+      deviceId: 'device-A',
+      expiresAt: new Date(Date.now() + 90_000).toISOString(),
+    };
+    const snapshot = createInitialLiveWorkoutSession(workout(), new Date().toISOString(), undefined, token);
+    await saveLiveWorkoutSession(snapshot, 'athlete-1');
+    const other = { ...token, leaseId: '00000000-0000-4000-8000-000000000002' };
+    await expect(saveLiveWorkoutSession({
+      ...snapshot, cloudLease: other,
+    }, 'athlete-1')).rejects.toThrow('another cloud lease');
+    await expect(updateLiveWorkoutCloudLease('athlete-1', 'different-workout', token))
+      .rejects.toThrow('no longer owns');
+  });
+
 });
