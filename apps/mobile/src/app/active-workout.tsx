@@ -8,7 +8,7 @@ import type {
 } from '@circuit/domain';
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
-import { evaluateWorkoutAuthorizationAge, requiresActiveWorkoutPause } from '@circuit/planner';
+import { evaluateWorkoutAuthorizationAge, evaluateActiveSessionRecovery } from '@circuit/planner';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useRouter, type Href } from 'expo-router';
@@ -57,7 +57,7 @@ import {
 } from '@/services/active-workout-persistence';
 import { publishWorkoutActivity } from '@/services/social';
 import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
-import { recordTrainingEvent } from '@/services/training-guardrail-storage';
+import { loadDailyCeiling, recordTrainingEvent } from '@/services/training-guardrail-storage';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import {
   getWorkoutCuePreferences,
@@ -201,24 +201,35 @@ export default function ActiveWorkoutScreen() {
   useEffect(() => {
     if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
     let live = true;
+    const athleteId = user.id;
     const review = () => {
-      void getActiveTrainingCheckIn().then((checkIn) => {
+      void Promise.all([
+        getActiveTrainingCheckIn(),
+        loadDailyCeiling(athleteId, localTrainingDate()),
+      ]).then(([checkIn, ceiling]) => {
         if (!live) return;
-        if (requiresActiveWorkoutPause(checkIn)) {
+        const decision = evaluateActiveSessionRecovery(
+          workout, startedAt.current, checkIn, ceiling,
+        );
+        if (decision.pause) {
           setRequiresRecoveryReview(true);
           setRunning(false);
         }
       }).catch(() => {
         if (live) {
+          // Unreadable or unavailable recovery storage is not clearance.
           setRequiresRecoveryReview(true);
           setRunning(false);
         }
       });
     };
     review();
-    const interval = setInterval(review, 30000);
-    return () => { live = false; clearInterval(interval); };
-  }, [workout?.id, sessionHydrated, phase, user?.id]);
+    const interval = setInterval(review, 15000);
+    const subscription = AppState.addEventListener('change', (status) => {
+      if (status === 'active') review();
+    });
+    return () => { live = false; clearInterval(interval); subscription.remove(); };
+  }, [workout, sessionHydrated, phase, user?.id]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
