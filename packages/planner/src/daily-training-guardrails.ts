@@ -44,14 +44,13 @@ export function evaluateTrainingAddition(
 ): TrainingGuardrailResult {
   const validRegions = new Set<TrainingRegion>(['general', 'achilles', 'upper_back']);
   const validStatuses = new Set<RecoveryStatus>(['stable', 'uncertain', 'worse', 'red_flag']);
-  const validDose = (dose: ActivityDose) => Boolean(
+  const validDose = (dose: ActivityDose, permitZero = false) => Boolean(
     dose && typeof dose.activity === 'string' && dose.activity.trim()
     && Array.isArray(dose.regions) && dose.regions.length > 0
     && dose.regions.every((region) => validRegions.has(region))
     && [dose.minutes, dose.sets].every((value) =>
       value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0))
-    && (dose.minutes === undefined || dose.minutes > 0 || (dose.sets ?? 0) > 0)
-    && (dose.sets === undefined || dose.sets > 0 || (dose.minutes ?? 0) > 0)
+    && (permitZero || (dose.minutes ?? 0) > 0 || (dose.sets ?? 0) > 0)
     && (dose.minutes !== undefined || dose.sets !== undefined)
   );
   if (!ceiling || !Array.isArray(ceiling.planned)
@@ -116,7 +115,7 @@ export function evaluateTrainingAddition(
   if (history.some((event) => (event.kind === 'completed' || event.kind === 'unplanned')
       && !retractedIds.has(event.id)
       && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
-      && (!event.activity || !validDose(event.activity)))) {
+      && (!event.activity || !validDose(event.activity, true)))) {
     return {
       decision: 'stop',
       reasons: ['Completed-workout history contains an invalid exposure. Correct the training log first.'],
