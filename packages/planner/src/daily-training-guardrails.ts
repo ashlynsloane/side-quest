@@ -171,7 +171,7 @@ export interface TrainingEvent {
   id: string;
   occurredAt: string;
   trainingDate?: string;
-  kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery' | 'assessment' | 'retracted';
+  kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery' | 'assessment' | 'retracted' | 'urge';
   /** Reference to a previously recorded activity event that no longer counts. */
   retractsEventId?: string;
   /** Stable source workout ledger ID for revision and deletion reconciliation. */
