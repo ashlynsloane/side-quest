@@ -53,3 +53,36 @@ jobs:
         run: pnpm validate:exercises && pnpm validate:media
       - name: Runtime core integration contracts
         run: pnpm check:runtime-core
+
+  cloud-lease-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sidequest_lease_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sidequest_lease_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision isolated mock-auth PostgreSQL
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/workout-lease-ci-setup.sql
+      - name: Execute real Supabase lease migration
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/migrations/20261110150000_training_workout_leases.sql
+      - name: Verify athlete ownership, duplicate starts and expiry
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/workout-lease-ci-assertions.sql
