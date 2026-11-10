@@ -6,6 +6,7 @@ import {
   storeDailyTrainingCeiling,
   saveObservedTrainingRecovery,
 } from './database';
+import { publishRemoteRecovery } from './server-training-ledger';
 
 /**
  * Durable storage lives in the same per-athlete SQLite database as workouts.
@@ -39,6 +40,13 @@ export async function recordTrainingEvent(
 export async function recordObservedRecovery(
   userId: string, date: string,
   updates: Partial<Record<TrainingRegion, RecoveryStatus>>,
+  options: { syncCloud?: boolean } = {},
 ): Promise<void> {
+  // Publish to the athlete-scoped server before updating local clearance.
+  // If network/authentication fails, neither this device nor another should
+  // interpret an unsynchronized 'stable' report as cloud clearance.
+  if (options.syncCloud) {
+    await publishRemoteRecovery(date, updates);
+  }
   await saveObservedTrainingRecovery(userId, date, updates);
 }
