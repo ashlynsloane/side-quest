@@ -23,7 +23,7 @@ export interface CloudWorkoutLease {
 }
 
 export interface WorkoutLeaseRpc {
-  rpc(name: string, params: Record<string, string>): Promise<{
+  rpc(name: string, params: Record<string, unknown>): Promise<{
     data: unknown;
     error: { message: string } | null;
   }>;
@@ -59,7 +59,7 @@ function requireBackend(rpc?: WorkoutLeaseRpc): WorkoutLeaseRpc {
 }
 
 async function request(
-  rpc: WorkoutLeaseRpc, name: string, params: Record<string, string>,
+  rpc: WorkoutLeaseRpc, name: string, params: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const response = await rpc.rpc(name, params);
   if (response.error) throw new Error(`Cloud workout coordination failed: ${response.error.message}`);
@@ -96,8 +96,8 @@ export async function acquireCloudWorkoutLease(
     ...(coordinated && prescription ? {
       p_training_date: prescription.trainingDate,
       p_session_id: prescription.sessionId,
-      p_planned_minutes: String(prescription.minutes),
-      p_regions: JSON.stringify(prescription.regions),
+      p_planned_minutes: prescription.minutes,
+      p_regions: prescription.regions,
     } : {}),
   });
   if (row.granted !== true) {
