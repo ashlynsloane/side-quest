@@ -1,3 +1,4 @@
+export { evaluateWorkoutAuthorizationAge, LIVE_WORKOUT_AUTHORIZATION_MAX_HOURS } from './workout-authorization-expiry';
 export { assessActiveWorkoutMutation } from './active-workout-mutation';
 export type { WorkoutMutationDecision } from './active-workout-mutation';
 export { summarizeTrainingUrges } from './training-urge-insights';
