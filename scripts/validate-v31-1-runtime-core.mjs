@@ -31,13 +31,16 @@ for (const route of ["today: '/(tabs)'", "train: '/(tabs)/train'", "plan: '/(tab
 for (const bad of ["/(tabs)/today", "/(tabs)/progress", "/(tabs)/you"]) {
   if (adapter.includes(bad)) failures.push(`router adapter references nonexistent route ${bad}`);
 }
-for (const label of ["title: 'Today'", "title: 'Train'", "title: 'Plan'", "title: 'Progress'", "title: 'You'"]) {
+for (const label of ["title: 'Today'", "title: 'Train'", "title: 'Week'", "title: 'Coach'", "title: 'You'"]) {
   if (!layout.includes(label)) failures.push(`tab layout missing ${label}`);
 }
 
+if (!layout.includes('<Tabs.Screen name="library" options={{ href: null }} />')) {
+  failures.push('the library route must remain accessible through the adapter but hidden from the tab bar');
+}
 if (failures.length) {
   console.error(`V31.1 runtime core validation failed (${failures.length}):`);
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log('V31.1 runtime core validation passed: reactive entry state, repository-accurate routes, and canonical tab labels are present.');
+console.log('V31.1 runtime core validation passed: reactive entry state, repository-accurate routes, and current visible tab labels and hidden library route are present.');
