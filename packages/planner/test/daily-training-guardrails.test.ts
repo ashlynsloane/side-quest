@@ -53,9 +53,10 @@ describe('daily training ceiling', () => {
       trainingDate: '2026-11-09',
       activity: { activity: 'strength', minutes: 20, regions: ['general' as const] },
     }];
-    expect(evaluateTrainingAddition(baseline,
+    const recovered = { ...baseline, recoveryObservedAt: { general: '2026-11-09T17:00:00Z' } };
+    expect(evaluateTrainingAddition(recovered,
       { activity: 'strength', minutes: 20, regions: ['general'], scheduled: true }, history).decision).toBe('modify');
-    expect(evaluateTrainingAddition(baseline,
+    expect(evaluateTrainingAddition(recovered,
       { activity: 'strength', minutes: 15, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
   });
   it('does not count prescription or assessment entries as completed load', () => {
@@ -114,8 +115,51 @@ describe('daily training ceiling', () => {
       trainingDate: '2026-11-09',
       activity: { activity: 'strength', minutes: 12, regions: ['general' as const] },
     }];
-    expect(evaluateTrainingAddition(baseline,
+    const recovered = { ...baseline, recoveryObservedAt: { general: '2026-11-09T17:00:00Z' } };
+    expect(evaluateTrainingAddition(recovered,
       { activity: 'strength', minutes: 30, regions: ['general'], scheduled: true }, history).decision).toBe('modify');
+  });
+
+  it('does not use a pre-workout check-in as clearance after the workout', () => {
+    const ceiling = { ...baseline, recoveryObservedAt: { general: '2026-11-09T14:00:00Z' } };
+    const history = [{
+      id: 'completed-1', kind: 'completed' as const, occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', minutes: 10, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(ceiling,
+      { activity: 'strength', minutes: 15, regions: ['general'], scheduled: true }, history).decision).toBe('defer');
+  });
+  it('does not authorize repeating a partially completed planned session', () => {
+    const ceiling = {
+      ...baseline,
+      planned: [{ activity: 'strength', sessionId: 'session-1', minutes: 35, regions: ['general' as const] }],
+      recoveryObservedAt: { general: '2026-11-09T17:00:00Z' },
+    };
+    const history = [{
+      id: 'completed-1', kind: 'completed' as const, occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', sessionId: 'session-1', minutes: 10, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(ceiling,
+      { activity: 'strength', sessionId: 'session-1', minutes: 15, regions: ['general'], scheduled: true }, history).decision).toBe('defer');
+  });
+  it('can run a separate planned session after an explicit post-exposure check', () => {
+    const ceiling = {
+      ...baseline,
+      planned: [
+        { activity: 'strength', sessionId: 's1', minutes: 20, regions: ['general' as const] },
+        { activity: 'strength', sessionId: 's2', minutes: 20, regions: ['general' as const] },
+      ],
+      recoveryObservedAt: { general: '2026-11-09T17:00:00Z' },
+    };
+    const history = [{
+      id: 'completed-1', kind: 'completed' as const, occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', sessionId: 's1', minutes: 20, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(ceiling,
+      { activity: 'strength', sessionId: 's2', minutes: 20, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
   });
 
 });
