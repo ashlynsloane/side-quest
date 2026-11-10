@@ -2,8 +2,6 @@ name: Training guardrails integration
 on:
   pull_request:
     branches: [sq2-experience-rebuild]
-  push:
-    branches: [feature/training-ceiling-guardrails]
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -19,6 +17,8 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Guardrail integration contract
+        run: node scripts/audit-training-guardrail-integration.mjs
       - name: Planner typecheck
         run: pnpm --dir packages/planner typecheck
       - name: Mobile typecheck
