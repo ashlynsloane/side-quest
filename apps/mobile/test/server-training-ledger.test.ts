@@ -293,7 +293,7 @@ describe('synchronized authoritative ledger mobile protocol', () => {
       expect.objectContaining({ p_event_id: pending.eventId }),
     );
     await expect(publishRemoteRecovery('athlete-1', date, {
-      achilles: 'worse',
+      achilles: 'uncertain',
     }, backend)).rejects.toThrow('pending recovery synchronization');
     acknowledgeRemoteRecovery('athlete-1', date, recoveredId);
     expect(cache.size).toBe(0);
