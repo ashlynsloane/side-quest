@@ -85,6 +85,26 @@ begin
     'recheck-1',v_date,'{"general":"stable","achilles":"stable"}'::jsonb) then
     raise exception 'Post-exposure recovery failed';
   end if;
+  -- Replaying the same observation must not change its server timestamp.
+  if not public.publish_training_remote_recovery(
+    'recheck-1',v_date,'{"general":"stable","achilles":"stable"}'::jsonb) then
+    raise exception 'Exact recovery retry failed';
+  end if;
+  begin
+    perform public.publish_training_remote_recovery(
+      'recheck-1',v_date,'{"general":"stable","achilles":"worse"}'::jsonb);
+    raise exception 'A changed symptom was allowed to reuse a prior event ID';
+  exception when unique_violation then
+    null;
+  end;
+  begin
+    perform public.publish_training_remote_recovery(
+      'recheck-1',v_date,'{"general":"stable","achilles":"stable","upper_back":"stable"}'::jsonb);
+    raise exception 'A newly added region was allowed under an older event ID';
+  exception when unique_violation then
+    null;
+  end;
+
   select * into v_second from public.acquire_training_workout_lease_v2(
     'strength-B','device-1',v_date,'planned-B',20,array['general','achilles']::text[]);
   if not v_second.granted then raise exception 'Second scheduled activity unexpectedly blocked: %',v_second.reason; end if;
