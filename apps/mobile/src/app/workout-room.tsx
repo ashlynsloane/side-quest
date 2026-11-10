@@ -6,6 +6,7 @@ import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen, Pill, SectionTitle, Surface } from '@/components/v12-ui';
 import { getLatestTrainingBlock } from '@/services/database';
+import { assessWorkoutStart } from '@/services/training-addition-gate';
 import {
   cancelWorkoutRoom,
   getWorkoutRoomByCode,
@@ -96,8 +97,43 @@ export default function WorkoutRoomScreen() {
     try{await setWorkoutRoomPlanRelation({roomId:room.id,userId:user.id,relation,plannedSessionId:relation==='substitute_next'?nextSession?.id:undefined,plannedSessionTitle:relation==='substitute_next'?nextSession?.title:undefined});await refresh();}
     catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setBusy(false)}
   }
-  async function toggleReady(){if(!room||!user||!me)return;setBusy(true);try{await setWorkoutRoomReady(room.id,user.id,!me.ready);await refresh();}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setBusy(false)}}
-  async function start(){if(!room||!user||!isHost)return;setBusy(true);try{await startWorkoutRoom(room.id,user.id,8);await refresh();}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setBusy(false)}}
+  async function sharedWorkoutCleared(): Promise<boolean> {
+    if (!room || !user) return false;
+    const substitute = me?.planRelation === 'substitute_next';
+    const assessment = await assessWorkoutStart({
+      userId: user.id,
+      workout: room.workout,
+      sessionId: substitute ? me?.plannedSessionId : undefined,
+    });
+    if (assessment.authorized) return true;
+    const detail = assessment.result.reasons.join(' ');
+    setError(detail);
+    Alert.alert('Training ceiling check', detail, [
+      { text: 'Keep current plan', style: 'cancel' },
+      { text: 'Update regional recovery', onPress: () => router.push('/daily-training-ceiling' as Href) },
+    ]);
+    return false;
+  }
+  async function toggleReady() {
+    if (!room || !user || !me || busy) return;
+    setBusy(true);
+    try {
+      if (!me.ready && !(await sharedWorkoutCleared())) return;
+      await setWorkoutRoomReady(room.id, user.id, !me.ready);
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  }
+  async function start() {
+    if (!room || !user || !isHost || busy) return;
+    setBusy(true);
+    try {
+      if (!(await sharedWorkoutCleared())) return;
+      await startWorkoutRoom(room.id, user.id, 8);
+      await refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  }
   async function shareCode(){if(room)await Share.share({message:`Join my workout in Side Quest. Room code: ${room.code}`});}
   function cancel(){if(!room||!user||!isHost){router.back();return}Alert.alert('Cancel workout room?','Everyone in the lobby will be disconnected.',[{text:'Keep room',style:'cancel'},{text:'Cancel room',style:'destructive',onPress:()=>void(async()=>{await cancelWorkoutRoom(room.id,user.id);router.replace('/workout-together' as Href)})()}]);}
 
