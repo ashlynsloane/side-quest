@@ -1,6 +1,6 @@
 import type { GeneratedWorkout, PlannedStrengthSession, WorkoutRecommendationExplanation } from '@circuit/domain';
 import { exerciseSeed } from '@circuit/exercise-content';
-import type { TrainingGuardrailResult } from '@circuit/planner';
+import { assessActiveWorkoutMutation, type TrainingGuardrailResult, type WorkoutMutationDecision } from '@circuit/planner';
 import { explainPlannedStrengthSession, type RecommendationExplanationContext } from '@circuit/planner';
 import {
   createContext,
@@ -48,7 +48,7 @@ type WorkoutContextValue = {
     started: boolean;
     result: TrainingGuardrailResult;
   }>;
-  updateActiveWorkout: (workout: GeneratedWorkout) => void;
+  updateActiveWorkout: (workout: GeneratedWorkout) => WorkoutMutationDecision;
   clearActiveWorkout: () => void;
 };
 
@@ -184,7 +184,13 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       }
     },
     updateActiveWorkout(workout) {
-      setActiveWorkout(workout);
+      if (!activeWorkout) return {
+        allowed: false,
+        reasons: ['No authorized workout is active.'],
+      };
+      const decision = assessActiveWorkoutMutation(activeWorkout, workout);
+      if (decision.allowed) setActiveWorkout(workout);
+      return decision;
     },
     clearActiveWorkout() {
       setActiveWorkout(null);
