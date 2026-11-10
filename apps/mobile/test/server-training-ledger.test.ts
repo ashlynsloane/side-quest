@@ -157,6 +157,30 @@ describe('synchronized authoritative ledger mobile protocol', () => {
       }));
   });
 
+  it('rejects a stale client that omits Achilles from the saved prescribed regions', async () => {
+    const calfWorkout = { ...workout, id: 'calf-plan',
+      targetRegions: ['soleus'] } as unknown as GeneratedWorkout;
+    db.getLatestTrainingBlock.mockResolvedValue({ block: { weeks: [{
+      sessions: [{
+        id: 'session-1', date, completionStatus: 'planned',
+        workout: calfWorkout,
+      }],
+    }] } });
+    const client = rpc();
+    await expect(acquireSynchronizedWorkoutLease(
+      'athlete-1', workout, 'session-1', client,
+    )).rejects.toThrow('tissue regions');
+    expect(client.rpc).toHaveBeenCalledWith(
+      'publish_training_remote_plan',
+      expect.objectContaining({
+        p_sessions: [expect.objectContaining({ regions: ['general', 'achilles'] })],
+      }),
+    );
+    expect(client.rpc).not.toHaveBeenCalledWith(
+      'acquire_training_workout_lease_v2', expect.anything(),
+    );
+  });
+
   it('uses an explicit remote recovery RPC rather than stale local timestamps', async () => {
     const backend = rpc();
     await publishRemoteRecovery('athlete-1', date, { achilles: 'worse' }, backend);
