@@ -381,6 +381,80 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await ledger()).toHaveLength(0);
   });
 
+  it('rejects athlete A first-week writes if their generator resolves after activating B', async () => {
+    let finishGeneration!: () => void;
+    const generated = new Promise<void>((resolve) => { finishGeneration = resolve; });
+    let resumed = false;
+    const delayedFirstWeek = (async () => {
+      await generated; // expensive first-week generation paused mid-flight
+      resumed = true;
+      await service.withVerifiedAthleteDatabase('synthetic-athlete-one', async () => {
+        await service.savePerformanceGoal({
+          ...weeklyBlock().goal, id: 'stale-athlete-a-goal', createdAt: startedAt,
+        } as Parameters<MobileDb['savePerformanceGoal']>[0]);
+        await service.saveTrainingBlock(weeklyBlock());
+      });
+    })();
+    await service.activateUserDatabase('synthetic-athlete-two');
+    finishGeneration();
+    await expect(delayedFirstWeek).rejects.toThrow('Athlete profile changed');
+    expect(resumed).toBe(true);
+    expect(await service.getLatestPerformanceGoal()).toBeNull();
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+    // The rejected stale result did not write into A OR B.
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect(await service.getLatestPerformanceGoal()).toBeNull();
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+  });
+
+  it('serializes a profile switch across pending goal, block and calendar writes', async () => {
+    let signalGoalSaved!: () => void;
+    let releaseAfterGoal!: () => void;
+    const goalSaved = new Promise<void>((resolve) => { signalGoalSaved = resolve; });
+    const allowBlock = new Promise<void>((resolve) => { releaseAfterGoal = resolve; });
+    const goal = { ...weeklyBlock().goal, id: 'a-goal',
+      createdAt: startedAt } as Parameters<MobileDb['savePerformanceGoal']>[0];
+    const write = service.withVerifiedAthleteDatabase('synthetic-athlete-one', async () => {
+      await service.savePerformanceGoal(goal);
+      signalGoalSaved();
+      await allowBlock; // B switches while A is midway through the workflow.
+      await service.saveTrainingBlock(weeklyBlock());
+      await service.saveWeeklyPlan(weeklyBlock().weeks[0]!); // derived-calendar placeholder
+    });
+    await goalSaved;
+    let switched = false;
+    const switchToB = service.activateUserDatabase('synthetic-athlete-two')
+      .then(() => { switched = true; });
+    await Promise.resolve();
+    expect(switched).toBe(false);
+    releaseAfterGoal();
+    await write;
+    await switchToB;
+    expect(switched).toBe(true);
+    expect(await service.getLatestPerformanceGoal()).toBeNull();
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+    expect(await service.getLatestWeeklyPlan()).toBeNull();
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect((await service.getLatestPerformanceGoal())?.id).toBe('a-goal');
+    expect((await service.getLatestTrainingBlock())?.id).toBe('synthetic-block');
+    expect((await service.getLatestWeeklyPlan())?.id).toBe('synthetic-week');
+  });
+
+  it('releases profile write lock after a SQLite failure, with no other athlete pollution', async () => {
+    state.failNextContaining = 'INSERT INTO training_blocks';
+    await expect(service.withVerifiedAthleteDatabase('synthetic-athlete-one', async () => {
+      await service.saveTrainingBlock(weeklyBlock());
+    })).rejects.toThrow('synthetic SQLite write interruption');
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+    await service.withVerifiedAthleteDatabase('synthetic-athlete-two', async () => {
+      await service.saveTrainingBlock({ ...weeklyBlock(), id: 'b-block' });
+    });
+    expect((await service.getLatestTrainingBlock())?.id).toBe('b-block');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect(await service.getLatestTrainingBlock()).toBeNull();
+  });
+
   it('does not expose athlete A ledger or plan within athlete B profile', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     await save();
