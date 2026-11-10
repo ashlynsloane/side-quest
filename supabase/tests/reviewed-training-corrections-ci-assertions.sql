@@ -301,3 +301,88 @@ begin
 end
 $completed_reservation_still_active$;
 reset role;
+
+-- Recovery supersession is a correctness requirement: a timed-out old
+-- "stable" packet must not clear a newer worsening report on another phone.
+insert into auth.users(id) values ('00000000-0000-4000-8000-000000000006')
+  on conflict do nothing;
+do $supersession_permissions$
+begin
+  if has_function_privilege('anon',
+    'public.publish_training_remote_recovery_restrictive(text,date,jsonb,text)','EXECUTE')
+    or has_table_privilege('authenticated',
+    'public.training_remote_recovery_supersessions','SELECT') then
+    raise exception 'Restrictive recovery supersession is publicly exposed';
+  end if;
+end
+$supersession_permissions$;
+
+set role authenticated;
+select set_config('request.jwt.claim.sub',
+  '00000000-0000-4000-8000-000000000006',false);
+do $restrictive_recovery$
+declare
+  v_day date := current_date;
+  v_snapshot jsonb;
+  v_first timestamptz;
+  v_latest text;
+  v_rejected boolean;
+begin
+  -- New restrictive update arrives before the delayed old stable RPC.
+  perform public.publish_training_remote_recovery_restrictive(
+    'new-worse',v_day,'{"achilles":"worse"}'::jsonb,'lost-stable');
+  begin
+    perform public.publish_training_remote_recovery(
+      'lost-stable',v_day,'{"achilles":"stable"}'::jsonb);
+    raise exception 'Superseded late stable report was wrongly accepted';
+  exception when unique_violation then null;
+  end;
+  if exists (select 1 from public.read_training_remote_snapshot(v_day) as snap,
+    lateral pg_catalog.jsonb_array_elements(snap->'recovery') x(value)
+    where x.value->>'region'='achilles' and x.value->>'status'='stable') then
+    raise exception 'The late stable attempt cleared worse symptoms';
+  end if;
+  select observed_at into v_first from public.training_remote_recovery
+    where athlete_id='00000000-0000-4000-8000-000000000006'
+      and event_id='new-worse' and region='achilles';
+  perform public.publish_training_remote_recovery_restrictive(
+    'new-worse',v_day,'{"achilles":"worse"}'::jsonb,'lost-stable');
+  if (select observed_at from public.training_remote_recovery
+    where athlete_id='00000000-0000-4000-8000-000000000006'
+      and event_id='new-worse' and region='achilles') <> v_first then
+    raise exception 'Restrictive retry changed server observation timestamp';
+  end if;
+  begin
+    perform public.publish_training_remote_recovery_restrictive(
+      'new-worse',v_day,'{"achilles":"stable"}'::jsonb,'lost-stable');
+    raise exception 'A non-restrictive supersession was accepted';
+  exception when invalid_parameter_value then null;
+  end;
+  begin
+    perform public.publish_training_remote_recovery_restrictive(
+      'other-event',v_day,'{"achilles":"worse"}'::jsonb,'lost-stable');
+    raise exception 'An existing supersession was silently rewritten';
+  exception when unique_violation then null;
+  end;
+
+  -- Also handle a previously committed stable packet: the newer
+  -- restrictive event MUST be latest by server-assigned observed_at.
+  perform public.publish_training_remote_recovery(
+    'arrived-stable',v_day,'{"upper_back":"stable"}'::jsonb);
+  perform public.publish_training_remote_recovery_restrictive(
+    'new-red-flag',v_day,'{"upper_back":"red_flag"}'::jsonb,'arrived-stable');
+  select status into v_latest from public.training_remote_recovery
+    where athlete_id='00000000-0000-4000-8000-000000000006'
+      and region='upper_back' order by observed_at desc,event_id desc limit 1;
+  if v_latest <> 'red_flag' then
+    raise exception 'Server observation order did not preserve latest red flag';
+  end if;
+  begin
+    perform public.publish_training_remote_recovery(
+      'arrived-stable',v_day,'{"upper_back":"stable"}'::jsonb);
+    raise exception 'Completed stale recovery replay was not tombstoned';
+  exception when unique_violation then null;
+  end;
+end
+$restrictive_recovery$;
+reset role;
