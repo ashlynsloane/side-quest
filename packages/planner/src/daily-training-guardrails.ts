@@ -42,6 +42,36 @@ export function evaluateTrainingAddition(
   proposed: ProposedActivity,
   history: readonly TrainingEvent[] = [],
 ): TrainingGuardrailResult {
+  const validRegions = new Set<TrainingRegion>(['general', 'achilles', 'upper_back']);
+  const validStatuses = new Set<RecoveryStatus>(['stable', 'uncertain', 'worse', 'red_flag']);
+  const validDose = (dose: ActivityDose) => Boolean(
+    dose && typeof dose.activity === 'string' && dose.activity.trim()
+    && Array.isArray(dose.regions) && dose.regions.length > 0
+    && dose.regions.every((region) => validRegions.has(region))
+    && [dose.minutes, dose.sets].every((value) =>
+      value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0))
+    && (dose.minutes === undefined || dose.minutes > 0 || (dose.sets ?? 0) > 0)
+    && (dose.sets === undefined || dose.sets > 0 || (dose.minutes ?? 0) > 0)
+    && (dose.minutes !== undefined || dose.sets !== undefined)
+  );
+  if (!ceiling || !Array.isArray(ceiling.planned)
+      || typeof ceiling.restrictUnplanned !== 'boolean'
+      || !ceiling.recovery || typeof ceiling.recovery !== 'object'
+      || Object.values(ceiling.recovery).some((status) => !validStatuses.has(status))
+      || ceiling.planned.some((dose) => !validDose(dose))) {
+    return {
+      decision: 'stop',
+      reasons: ['Training ceiling is incomplete or corrupted. Rebuild the plan before authorizing activity.'],
+      requiresReassessment: true,
+    };
+  }
+  if (!validDose(proposed)) {
+    return {
+      decision: 'stop',
+      reasons: ['Activity dose or affected regions are missing or invalid.'],
+      requiresReassessment: true,
+    };
+  }
   if (!proposed.activity.trim() || !proposed.regions.length ||
       [proposed.minutes, proposed.sets].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))) {
     return { decision: 'stop', reasons: ['Invalid activity dose or missing affected regions.'], requiresReassessment: true };
@@ -83,6 +113,16 @@ export function evaluateTrainingAddition(
   }
   const retractedIds = new Set(history.filter((event) => event.kind === 'retracted')
     .map((event) => event.retractsEventId).filter((id): id is string => Boolean(id)));
+  if (history.some((event) => (event.kind === 'completed' || event.kind === 'unplanned')
+      && !retractedIds.has(event.id)
+      && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
+      && (!event.activity || !validDose(event.activity)))) {
+    return {
+      decision: 'stop',
+      reasons: ['Completed-workout history contains an invalid exposure. Correct the training log first.'],
+      requiresReassessment: true,
+    };
+  }
   const performedToday = history.filter((event) =>
     !retractedIds.has(event.id)
     && (event.kind === 'completed' || event.kind === 'unplanned')
