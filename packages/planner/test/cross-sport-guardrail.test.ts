@@ -28,4 +28,38 @@ describe('cross-sport overlap precautions', () => {
       { id: 'ride', discipline: 'bike', minutes: 15 },
     ]).reasons[0]).toContain('Review combined exposure');
   });
+  it('flags Achilles activity from yesterday within a rolling 48-hour review', () => {
+    const now = '2026-11-09T20:00:00Z';
+    const reviewed = assessCrossSportExposure(['achilles'], [
+      { id: 'yesterday-bike', discipline: 'bike', minutes: 30,
+        occurredAt: '2026-11-08T19:00:00Z' },
+    ], { now, lookbackHours: 48 });
+    expect(reviewed.conflict).toBe(true);
+  });
+  it('does not attribute remote activity to the recent 48-hour window', () => {
+    expect(assessCrossSportExposure(['achilles'], [
+      { id: 'old-bike', discipline: 'bike', minutes: 30,
+        occurredAt: '2026-11-06T10:00:00Z' },
+    ], { now: '2026-11-09T20:00:00Z', lookbackHours: 48 }).conflict).toBe(false);
+  });
+  it('uses known prior strength regions instead of assuming all strength loads Achilles', () => {
+    expect(assessCrossSportExposure(['achilles'], [
+      { id: 'core', discipline: 'strength', minutes: 20, regions: ['general'],
+        occurredAt: '2026-11-09T10:00:00Z' },
+    ], { now: '2026-11-09T20:00:00Z', lookbackHours: 48 }).conflict).toBe(false);
+    expect(assessCrossSportExposure(['achilles'], [
+      { id: 'calf', discipline: 'strength', minutes: 20, regions: ['general', 'achilles'],
+        occurredAt: '2026-11-09T10:00:00Z' },
+    ], { now: '2026-11-09T20:00:00Z', lookbackHours: 48 }).conflict).toBe(true);
+  });
+  it('ignores future timestamps and fails on an invalid review window', () => {
+    expect(assessCrossSportExposure(['achilles'], [
+      { id: 'future', discipline: 'run', minutes: 30,
+        occurredAt: '2026-11-10T10:00:00Z' },
+    ], { now: '2026-11-09T20:00:00Z', lookbackHours: 48 }).conflict).toBe(false);
+    expect(() => assessCrossSportExposure(['achilles'], [], {
+      now: 'bad', lookbackHours: 48,
+    })).toThrow();
+  });
+
 });
