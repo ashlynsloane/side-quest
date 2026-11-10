@@ -181,4 +181,62 @@ describe('synchronized authoritative ledger mobile protocol', () => {
     }, backend)).rejects.toThrow('Invalid remote');
     expect(backend.rpc).not.toHaveBeenCalled();
   });
+  it('backfills an older saved workout outside the former 48-hour sync window', async () => {
+    db.listWorkoutLedgerEntriesForGuardrails.mockResolvedValue([{
+      id: 'old-workout', workout,
+      completedAt: '2026-10-01T18:40:00.000Z',
+      startedAt: '2026-10-01T18:20:00.000Z',
+      completionFraction: 1,
+      updatedAt: '2026-10-01T18:41:00.000Z',
+      plannedSessionId: 'old-session',
+    }]);
+    const client = rpc();
+    expect(await synchronizeRecordedTrainingExposure('athlete-1', client)).toBe(1);
+    expect(db.listWorkoutLedgerEntriesForGuardrails).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 200, offset: 0 }),
+    );
+    expect(client.rpc).toHaveBeenCalledWith('publish_training_remote_exposure_batch',
+      expect.objectContaining({ p_events: [
+        expect.objectContaining({ eventId: 'workout:old-workout',
+          trainingDate: '2026-10-01' }),
+      ] }),
+    );
+  });
+
+  it('paginates a large local history and uploads bounded atomic batches', async () => {
+    const start = Date.parse('2026-11-01T18:00:00.000Z');
+    const rows = Array.from({ length: 215 }, (_, index) => ({
+      id: `session-${index}`,
+      workout,
+      startedAt: new Date(start + index * 60_000).toISOString(),
+      completedAt: new Date(start + index * 60_000 + 60_000).toISOString(),
+      updatedAt: now,
+      completionFraction: 1,
+    }));
+    db.listWorkoutLedgerEntriesForGuardrails.mockImplementation(async (
+      params: {offset:number;limit:number},
+    ) => rows.slice(params.offset, params.offset + params.limit));
+    const client = rpc();
+    expect(await synchronizeRecordedTrainingExposure('athlete-1', client)).toBe(215);
+    expect(db.listWorkoutLedgerEntriesForGuardrails).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(client.rpc).mock.calls.filter(
+      ([name]) => name === 'publish_training_remote_exposure_batch',
+    );
+    expect(calls.map(([, args]) => (args.p_events as unknown[]).length)).toEqual([100,100,15]);
+  });
+
+  it('fails closed on a partial batch acknowledgement', async () => {
+    db.listWorkoutLedgerEntriesForGuardrails.mockResolvedValue([{
+      id: 'one', workout, startedAt: now, completedAt: now,
+      updatedAt: now, completionFraction: 1,
+    }]);
+    const client = rpc({ publish_training_remote_exposure_batch: 0 });
+    await expect(acquireSynchronizedWorkoutLease(
+      'athlete-1', workout, 'session-1', client,
+    )).rejects.toThrow('not fully confirmed');
+    expect(client.rpc).not.toHaveBeenCalledWith(
+      'acquire_training_workout_lease_v2', expect.anything(),
+    );
+  });
+
 });
