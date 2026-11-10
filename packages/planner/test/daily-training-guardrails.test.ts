@@ -95,4 +95,27 @@ describe('daily training ceiling', () => {
       { activity: 'strength', sessionId: 'session-a', minutes: 20, regions: ['general'], scheduled: true }).decision).toBe('allow');
   });
 
+  it('stops when a no-training check-in is active', () => {
+    expect(evaluateTrainingAddition({ ...baseline, pauseTraining: true },
+      { activity: 'strength', minutes: 10, regions: ['general'], scheduled: true }).decision).toBe('stop');
+  });
+  it('keeps original tissue restrictions after workout-region edits', () => {
+    const constrained = {
+      ...baseline,
+      planned: [{ activity: 'strength', minutes: 35, regions: ['general' as const, 'achilles' as const] }],
+      recovery: { general: 'stable' as const, achilles: 'uncertain' as const },
+    };
+    expect(evaluateTrainingAddition(constrained,
+      { activity: 'strength', minutes: 30, regions: ['general'], scheduled: true }).decision).toBe('defer');
+  });
+  it('counts unplanned performed training against a matching ceiling', () => {
+    const history = [{
+      id: 'extra', kind: 'unplanned' as const, occurredAt: '2026-11-09T12:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', minutes: 12, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 30, regions: ['general'], scheduled: true }, history).decision).toBe('modify');
+  });
+
 });
