@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { localTrainingDate } from '@/services/training-addition-gate';
-import { loadDailyCeiling, loadTrainingEvents, saveDailyCeiling } from '@/services/training-guardrail-storage';
+import { loadDailyCeiling, loadTrainingEvents, recordObservedRecovery } from '@/services/training-guardrail-storage';
 import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 
@@ -41,6 +41,7 @@ export default function DailyTrainingCeilingScreen() {
   const [ceiling, setCeiling] = useState<DailyTrainingCeiling | null>(null);
   const [events, setEvents] = useState<TrainingEvent[]>([]);
   const [readiness, setReadiness] = useState<Partial<Record<TrainingRegion, RecoveryStatus>>>({});
+  const [recheckedRegions, setRecheckedRegions] = useState<TrainingRegion[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -66,10 +67,13 @@ export default function DailyTrainingCeilingScreen() {
   ).reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
 
   async function save() {
-    if (!ceiling || !user?.id || saving) return;
+    if (!ceiling || !user?.id || saving || recheckedRegions.length === 0) return;
     setSaving(true);
     try {
-      await saveDailyCeiling(user.id, { ...ceiling, recovery: { ...ceiling.recovery, ...readiness } }, true);
+      const observed = Object.fromEntries(
+        recheckedRegions.map((region) => [region, readiness[region]]),
+      ) as Partial<Record<TrainingRegion, RecoveryStatus>>;
+      await recordObservedRecovery(user.id, date, observed);
       router.back();
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
@@ -94,17 +98,25 @@ export default function DailyTrainingCeilingScreen() {
         {REGIONS.map((region) => <View style={styles.card} key={region.id}>
           <Text style={styles.cardTitle}>{region.name}</Text>
           <Text style={styles.body}>{region.detail}</Text>
+          <Text style={styles.body}>{ceiling.recoveryObservedAt?.[region.id]
+            ? `Last explicitly checked: ${new Date(ceiling.recoveryObservedAt[region.id]).toLocaleString()}`
+            : 'No explicit recovery observation recorded today'}</Text>
           {OPTIONS.map((option) => <Pressable
             key={option.value} accessibilityRole="radio"
             accessibilityState={{ checked: readiness[region.id] === option.value }}
-            onPress={() => setReadiness((current) => ({ ...current, [region.id]: option.value }))}
+            onPress={() => {
+              setReadiness((current) => ({ ...current, [region.id]: option.value }));
+              setRecheckedRegions((current) => current.includes(region.id) ? current : [...current, region.id]);
+            }}
             style={[styles.option, readiness[region.id] === option.value && styles.optionSelected]}>
             <Text style={styles.optionText}>{option.label}</Text>
           </Pressable>)}
         </View>)}
         <Text style={styles.body}>Stable means no meaningful deterioration relative to your usual baseline after the previous exposure. It does not guarantee that a higher dose is safe. An urgent concern blocks training; seek appropriate medical advice.</Text>
-        <Pressable accessibilityRole="button" disabled={saving} style={[styles.button, saving && { opacity: 0.5 }]} onPress={() => void save()}>
-          <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save regional check-in'}</Text>
+        <Pressable accessibilityRole="button" disabled={saving || recheckedRegions.length === 0}
+          style={[styles.button, (saving || recheckedRegions.length === 0) && { opacity: 0.5 }]}
+          onPress={() => void save()}>
+          <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save explicitly checked regions'}</Text>
         </Pressable>
       </> : <View style={styles.card}>
         <Text style={styles.cardTitle}>No daily prescription is available</Text>
