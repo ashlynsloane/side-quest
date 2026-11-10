@@ -8,6 +8,7 @@ export type RecoveryStatus = 'stable' | 'uncertain' | 'worse' | 'red_flag';
 
 export interface ActivityDose {
   activity: string;
+  sessionId?: string;
   minutes?: number;
   sets?: number;
   regions: TrainingRegion[];
@@ -35,6 +36,7 @@ export interface TrainingGuardrailResult {
 export function evaluateTrainingAddition(
   ceiling: DailyTrainingCeiling,
   proposed: ProposedActivity,
+  history: readonly TrainingEvent[] = [],
 ): TrainingGuardrailResult {
   if (!proposed.activity.trim() || !proposed.regions.length ||
       [proposed.minutes, proposed.sets].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))) {
@@ -62,7 +64,7 @@ export function evaluateTrainingAddition(
       requiresReassessment: true,
     };
   }
-  const planned = ceiling.planned.find((item) => item.activity === proposed.activity);
+  const planned = ceiling.planned.find((item) => item.activity === proposed.activity && (!item.sessionId || item.sessionId === proposed.sessionId));
   if (!proposed.scheduled || !planned) {
     return {
       decision: ceiling.restrictUnplanned ? 'defer' : 'modify',
@@ -87,13 +89,29 @@ export function evaluateTrainingAddition(
       requiresReassessment: false,
     };
   }
-  return { decision: 'allow', reasons: ['Within the planned dose and reported recovery constraints.'], requiresReassessment: false };
+  const performed = history.filter((event) =>
+    (event.kind === 'completed' || event.kind === 'unplanned')
+    && event.activity?.activity === proposed.activity
+    && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
+    && (!planned.sessionId || event.activity?.sessionId === planned.sessionId)
+  );
+  const usedMinutes = performed.reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
+  const usedSets = performed.reduce((sum, event) => sum + (event.activity?.sets ?? 0), 0);
+  if (usedMinutes >= (planned.minutes ?? Infinity) || usedSets >= (planned.sets ?? Infinity)) {
+    return { decision: 'defer', reasons: ['The prescribed activity ceiling has already been reached today.'], requiresReassessment: true };
+  }
+  if ((planned.minutes !== undefined && (proposed.minutes ?? 0) + usedMinutes > planned.minutes) ||
+      (planned.sets !== undefined && (proposed.sets ?? 0) + usedSets > planned.sets)) {
+    return { decision: 'modify', reasons: ['Previously completed training uses part of today\\'s budget. Reduce the proposed dose.'], requiresReassessment: false };
+  }
+  return { decision: 'allow', reasons: ['Within the remaining planned dose and reported recovery constraints.'], requiresReassessment: false };
 }
 
 /** Append-only facts; prescriptions are never automatically logged as completed. */
 export interface TrainingEvent {
   id: string;
   occurredAt: string;
+  trainingDate?: string;
   kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery' | 'assessment';
   activity?: ActivityDose;
   note?: string;
