@@ -1,6 +1,7 @@
 -- Executed only after the three ledger migrations and original PostgreSQL CI tests.
 -- These tests distinguish pending, rejected and approved corrections.
 \set ON_ERROR_STOP on
+insert into auth.users(id) values ('00000000-0000-4000-8000-000000000004') on conflict do nothing;
 do $permissions$
 begin
   if has_function_privilege('authenticated',
@@ -17,7 +18,7 @@ $permissions$;
 
 set role authenticated;
 select set_config('request.jwt.claim.sub',
-  '00000000-0000-4000-8000-000000000003',false);
+  '00000000-0000-4000-8000-000000000004',false);
 
 do $requester$
 declare
@@ -64,7 +65,7 @@ begin
   -- An authenticated client cannot execute the administrative decision.
   begin
     perform public.review_training_remote_correction(
-      '00000000-0000-4000-8000-000000000003','request-minutes','approved','CASE-REVIEW-001');
+      '00000000-0000-4000-8000-000000000004','request-minutes','approved','CASE-REVIEW-001');
     raise exception 'Athlete approved own correction';
   exception when insufficient_privilege then null;
   end;
@@ -77,7 +78,7 @@ set role service_role;
 select set_config('request.jwt.claim.role','service_role',false);
 do $approvals$
 declare
-  v_athlete uuid := '00000000-0000-4000-8000-000000000003';
+  v_athlete uuid := '00000000-0000-4000-8000-000000000004';
 begin
   perform public.review_training_remote_correction(
     v_athlete,'request-reject','rejected','CASE-REVIEW-REJECT');
@@ -99,7 +100,7 @@ reset role;
 
 set role authenticated;
 select set_config('request.jwt.claim.sub',
-  '00000000-0000-4000-8000-000000000003',false);
+  '00000000-0000-4000-8000-000000000004',false);
 do $effective$
 declare
   v_day date := current_date;
@@ -123,13 +124,13 @@ begin
   perform public.publish_training_remote_exposure(
     'correction-bike','bike-id',null,'bike',10,array['general']::text[],
     (select completed_at from public.training_remote_exposures
-     where athlete_id='00000000-0000-4000-8000-000000000003'
+     where athlete_id='00000000-0000-4000-8000-000000000004'
        and event_id='correction-bike'),v_day);
   begin
     perform public.publish_training_remote_exposure(
       'correction-bike','bike-id',null,'bike',11,array['general']::text[],
       (select completed_at from public.training_remote_exposures
-       where athlete_id='00000000-0000-4000-8000-000000000003'
+       where athlete_id='00000000-0000-4000-8000-000000000004'
          and event_id='correction-bike'),v_day);
     raise exception 'Unapproved local re-edit passed ledger sync';
   exception when unique_violation then null;
@@ -138,7 +139,7 @@ begin
   perform public.publish_training_remote_exposure(
     'correction-bike','bike-id',null,'bike',25,array['general']::text[],
     (select completed_at from public.training_remote_exposures
-     where athlete_id='00000000-0000-4000-8000-000000000003'
+     where athlete_id='00000000-0000-4000-8000-000000000004'
        and event_id='correction-bike'),v_day);
   perform public.publish_training_remote_recovery(
     'post-correction-review',v_day,'{"general":"stable"}'::jsonb);
@@ -158,7 +159,7 @@ do $active_lease_restriction$
 begin
   begin
     perform public.review_training_remote_correction(
-      '00000000-0000-4000-8000-000000000003',
+      '00000000-0000-4000-8000-000000000004',
       'reservation-retract','approved','CASE-REVIEW-RESERVE');
     raise exception 'Reviewer changed dose while an athlete held an active lease';
   exception when sqlstate '55000' then null;
@@ -169,7 +170,7 @@ reset role;
 
 set role authenticated;
 select set_config('request.jwt.claim.sub',
-  '00000000-0000-4000-8000-000000000003',false);
+  '00000000-0000-4000-8000-000000000004',false);
 do $release$
 begin
   if not public.release_training_workout_lease(
@@ -183,13 +184,13 @@ reset role;
 set role service_role;
 select set_config('request.jwt.claim.role','service_role',false);
 select public.review_training_remote_correction(
-  '00000000-0000-4000-8000-000000000003',
+  '00000000-0000-4000-8000-000000000004',
   'reservation-retract','approved','CASE-REVIEW-RESERVE');
 reset role;
 
 set role authenticated;
 select set_config('request.jwt.claim.sub',
-  '00000000-0000-4000-8000-000000000003',false);
+  '00000000-0000-4000-8000-000000000004',false);
 do $reservation_and_isolation$
 declare
   v_snap jsonb;
