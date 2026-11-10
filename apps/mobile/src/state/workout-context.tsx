@@ -1,5 +1,6 @@
 import type { GeneratedWorkout, PlannedStrengthSession, WorkoutRecommendationExplanation } from '@circuit/domain';
 import { exerciseSeed } from '@circuit/exercise-content';
+import type { TrainingGuardrailResult } from '@circuit/planner';
 import { explainPlannedStrengthSession, type RecommendationExplanationContext } from '@circuit/planner';
 import {
   createContext,
@@ -17,6 +18,8 @@ import {
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
+import { assessWorkoutStart } from '@/services/training-addition-gate';
+import { useAuth } from '@/state/auth-context';
 import {
   generateWorkoutForAssignedTrainingSpace,
   trainingSpaceAssignmentForPlannedSession,
@@ -40,7 +43,10 @@ type WorkoutContextValue = {
   setPreviewWorkout: (workout: GeneratedWorkout | null) => void;
   updatePreviewWorkout: (workout: GeneratedWorkout) => void;
   openPlannedWorkoutPreview: (session: PlannedStrengthSession, context?: RecommendationExplanationContext) => void;
-  beginWorkout: (workout: GeneratedWorkout) => void;
+  beginWorkout: (workout: GeneratedWorkout, options?: { overrideReason?: string }) => Promise<{
+    started: boolean;
+    result: TrainingGuardrailResult;
+  }>;
   updateActiveWorkout: (workout: GeneratedWorkout) => void;
   clearActiveWorkout: () => void;
 };
@@ -83,6 +89,7 @@ function resolvePlannedSessionForTrainingSpace(session: PlannedStrengthSession):
 }
 
 export function WorkoutProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [previewWorkout, setPreviewWorkoutState] = useState<GeneratedWorkout | null>(null);
   const [previewExplanation, setPreviewExplanation] = useState<WorkoutRecommendationExplanation | null>(null);
   const [plannedPreviewSource, setPlannedPreviewSource] = useState<PlannedPreviewSource | null>(null);
@@ -137,13 +144,29 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPlannedPreviewSource(source);
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
-    beginWorkout(workout) {
+    async beginWorkout(workout, options) {
+      if (!user?.id) return {
+        started: false,
+        result: {
+          decision: 'defer' as const,
+          reasons: ['Sign in or use a local athlete profile before starting a session.'],
+          requiresReassessment: true,
+        },
+      };
       const planLink = buildPlanLink(plannedPreviewSource);
+      const assessment = await assessWorkoutStart({
+        userId: user.id,
+        workout,
+        sessionId: planLink?.sessionId,
+        overrideReason: options?.overrideReason,
+      });
+      if (!assessment.authorized) return { started: false, result: assessment.result };
       const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
+      await saveLiveWorkoutSession(snapshot);
       setActiveWorkout(workout);
       setActivePlanLink(planLink);
       setRestoredActiveWorkout(false);
-      void saveLiveWorkoutSession(snapshot);
+      return { started: true, result: assessment.result };
     },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
@@ -154,7 +177,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setRestoredActiveWorkout(false);
       void clearLiveWorkoutSession();
     },
-  }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady]);
+  }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady, user?.id]);
 
   return <WorkoutContext.Provider value={value}>{children}</WorkoutContext.Provider>;
 }
