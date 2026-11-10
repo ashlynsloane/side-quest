@@ -4,9 +4,10 @@ import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen, Surface } from '@/components/v12-ui';
-import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegionExposures, savePerformanceGoal, saveTrainingBlock, getTrainingBlockById } from '@/services/database';
+import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegionExposures, savePerformanceGoal, saveTrainingBlock, getTrainingBlockById, withVerifiedAthleteDatabase } from '@/services/database';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { useOnboarding } from '@/state/onboarding-context';
+import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import type { TrainingCalendarEvent } from '@circuit/domain';
@@ -23,6 +24,7 @@ export default function OnboardingFirstWeekScreen() {
   const router = useRouter();
   const { exercises } = useExerciseCatalog();
   const { complete, state: onboardingState } = useOnboarding();
+  const { user } = useAuth();
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [state, setState] = useState<BuildState>('building');
@@ -30,47 +32,71 @@ export default function OnboardingFirstWeekScreen() {
   const [error, setError] = useState<string | null>(null);
   const [enduranceEvents, setEnduranceEvents] = useState<TrainingCalendarEvent[]>([]);
   const [enduranceWarning, setEnduranceWarning] = useState<string | null>(null);
-  const started = useRef(false);
+  const started = useRef<string | null>(null);
+  const activeAthleteId = useRef<string | null>(user?.id ?? null);
+  activeAthleteId.current = user?.id ?? null;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
-    if (started.current || exercises.length === 0) return;
-    started.current = true;
+    const athleteId = user?.id;
+    if (!athleteId || started.current === athleteId || exercises.length === 0) return;
+    started.current = athleteId;
+    const stillCurrent = () => mounted.current && activeAthleteId.current === athleteId;
     // The setup timestamp is durable and athlete-scoped. A restart after a
     // partial SQLite write must target the SAME week and generated block ID.
     const startedAt = onboardingState.firstWeekSetupStartedAt;
     const referenceDate = startedAt ? new Date(startedAt) : new Date();
     if (!Number.isFinite(referenceDate.getTime())) {
-      setError('First-week setup timestamp is invalid; return to setup and retry.');
-      setState('error');
+      if (stillCurrent()) {
+        setError('First-week setup timestamp is invalid; return to setup and retry.');
+        setState('error');
+      }
       return;
     }
     const weekStartDate = nextLocalMonday(referenceDate);
     const seed = firstWeekAttemptSeed(params, weekStartDate);
-    void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }).then(async (result) => {
-      // Recover an identical previously saved draft; do not replace it with
-      // regenerated content if an interruption happened after commit.
-      const canonical = (await getTrainingBlockById(result.block.id)) ?? result.block;
-      await savePerformanceGoal(canonical.goal);
-      // Re-upsert the SAME canonical weeks: a previous crash may have left the
-      // block JSON saved but some weekly plan rows absent.
-      await saveTrainingBlock(canonical);
-      setBlock(canonical);
-      // The athlete should see the whole proposed training week, not only
-      // strength sessions while endurance silently generates later on Plan focus.
-      try {
-        const wholeAthlete = await refreshLatestWholeAthletePlan();
-        setEnduranceEvents(wholeAthlete?.generatedEvents ?? []);
-      } catch (planningError) {
-        setEnduranceWarning(planningError instanceof Error ? planningError.message
-          : 'Endurance planning is not available; strength draft was saved.');
-      }
-      await complete();
-      setState('ready');
-    }).catch((caught: unknown) => {
-      setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
-      setState('error');
-    });
-  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt]);
+    void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate })
+      .then(async (result) => {
+        // Both identity checks matter: user changes during generation AND
+        // while waiting for the SQLite activation/write queue must fail closed.
+        if (!stillCurrent()) return;
+        const saved = await withVerifiedAthleteDatabase(athleteId, async () => {
+          if (!stillCurrent()) throw new Error('Athlete changed during first-week generation.');
+          // Ownership remains locked across ALL awaited writes, including
+          // weekly repair and endurance calendar refresh.
+          const canonical = (await getTrainingBlockById(result.block.id)) ?? result.block;
+          if (!stillCurrent()) throw new Error('Athlete changed before saving the first week.');
+          await savePerformanceGoal(canonical.goal);
+          await saveTrainingBlock(canonical);
+          let generatedEvents: TrainingCalendarEvent[] = [];
+          let warning: string | null = null;
+          try {
+            const wholeAthlete = await refreshLatestWholeAthletePlan();
+            generatedEvents = wholeAthlete?.generatedEvents ?? [];
+          } catch (planningError) {
+            warning = planningError instanceof Error ? planningError.message
+              : 'Endurance planning is not available; strength draft was saved.';
+          }
+          if (!stillCurrent()) return null;
+          await complete();
+          return { canonical, generatedEvents, warning };
+        });
+        if (!stillCurrent() || !saved) return;
+        setBlock(saved.canonical);
+        setEnduranceEvents(saved.generatedEvents);
+        setEnduranceWarning(saved.warning);
+        setState('ready');
+      })
+      .catch((caught: unknown) => {
+        if (!stillCurrent()) return; // Don't show athlete A's errors on B's screen.
+        setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
+        setState('error');
+      });
+  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, user?.id]);
 
   if (state === 'building') return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
 
