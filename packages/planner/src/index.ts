@@ -1,3 +1,5 @@
+export { summarizeTrainingUrges } from './training-urge-insights';
+export type { TrainingUrgeSummary, TrainingUrgeActivity, TrainingUrgeReason } from './training-urge-insights';
 export { planLedgerReconciliation, ledgerEventId } from './training-event-reconciliation';
 export type { LedgerExposure } from './training-event-reconciliation';
 export { affectedTrainingRegions } from './training-region-inference';
