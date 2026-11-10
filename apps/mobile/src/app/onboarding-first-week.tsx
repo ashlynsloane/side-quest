@@ -33,6 +33,7 @@ export default function OnboardingFirstWeekScreen() {
   const [enduranceEvents, setEnduranceEvents] = useState<TrainingCalendarEvent[]>([]);
   const [enduranceWarning, setEnduranceWarning] = useState<string | null>(null);
   const [retryAttempt, setRetryAttempt] = useState(0);
+  const [resultAttemptKey, setResultAttemptKey] = useState<string | null>(null);
   const currentAttempt = useRef(0);
   const started = useRef<string | null>(null);
   const activeAthleteId = useRef<string | null>(user?.id ?? null);
@@ -48,6 +49,11 @@ export default function OnboardingFirstWeekScreen() {
     const attemptKey = `${athleteId ?? 'signed-out'}:${retryAttempt}`;
     if (!athleteId || started.current === attemptKey || exercises.length === 0) return;
     started.current = attemptKey;
+    setBlock(null);
+    setError(null);
+    setEnduranceWarning(null);
+    setEnduranceEvents([]);
+    setState('building');
     const attemptNumber = ++currentAttempt.current;
     const stillCurrent = () => mounted.current && activeAthleteId.current === athleteId
       && currentAttempt.current === attemptNumber;
@@ -58,6 +64,7 @@ export default function OnboardingFirstWeekScreen() {
     if (!Number.isFinite(referenceDate.getTime())) {
       if (stillCurrent()) {
         setError('First-week setup timestamp is invalid; return to setup and retry.');
+        setResultAttemptKey(attemptKey);
         setState('error');
       }
       return;
@@ -94,16 +101,21 @@ export default function OnboardingFirstWeekScreen() {
         setBlock(saved.canonical);
         setEnduranceEvents(saved.generatedEvents);
         setEnduranceWarning(saved.warning);
+        setResultAttemptKey(attemptKey);
         setState('ready');
       })
       .catch((caught: unknown) => {
         if (!stillCurrent()) return; // Don't show athlete A's errors on B's screen.
         setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
+        setResultAttemptKey(attemptKey);
         setState('error');
       });
   }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, retryAttempt, user?.id]);
 
-  if (state === 'building') return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
+  // A profile switch invalidates the displayed A plan immediately, before
+  // React effects run or asynchronous SQLite activation finishes for B.
+  const expectedAttemptKey = `${user?.id ?? 'signed-out'}:${retryAttempt}`;
+  if (state === 'building' || resultAttemptKey !== expectedAttemptKey) return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
 
   if (state === 'error' || !block) return <AppScreen eyebrow="FIRST DRAFT" title="The week needs one more review." subtitle={error ?? 'The draft could not be generated.'}><Surface style={styles.errorCard}><Text style={styles.errorTitle}>{block
       ? 'The strength plan was saved, but setup could not finish.'
