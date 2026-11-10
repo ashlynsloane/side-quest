@@ -1,11 +1,11 @@
-import type { DailyTrainingCeiling, RecoveryStatus, TrainingRegion } from '@circuit/planner';
+import type { DailyTrainingCeiling, RecoveryStatus, TrainingEvent, TrainingRegion } from '@circuit/planner';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { localTrainingDate } from '@/services/training-addition-gate';
-import { loadDailyCeiling, saveDailyCeiling } from '@/services/training-guardrail-storage';
+import { loadDailyCeiling, loadTrainingEvents, saveDailyCeiling } from '@/services/training-guardrail-storage';
 import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 
@@ -39,6 +39,7 @@ export default function DailyTrainingCeilingScreen() {
     buttonText: { textAlign: 'center', color: tokens.canvas, fontWeight: '800' },
   }), [tokens]);
   const [ceiling, setCeiling] = useState<DailyTrainingCeiling | null>(null);
+  const [events, setEvents] = useState<TrainingEvent[]>([]);
   const [readiness, setReadiness] = useState<Partial<Record<TrainingRegion, RecoveryStatus>>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -48,15 +49,21 @@ export default function DailyTrainingCeilingScreen() {
   useEffect(() => {
     let mounted = true;
     if (!user?.id) { setLoading(false); return; }
-    void loadDailyCeiling(user.id, date).then((current) => {
+    void Promise.all([loadDailyCeiling(user.id, date), loadTrainingEvents(user.id, date)]).then(([current, history]) => {
       if (!mounted) return;
       setCeiling(current);
       setReadiness(current?.recovery ?? {});
+      setEvents(history);
     }).catch((cause) => {
       if (mounted) setMessage(cause instanceof Error ? cause.message : String(cause));
     }).finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [user?.id, date]);
+
+  const plannedMinutes = ceiling?.planned.reduce((sum, item) => sum + (item.minutes ?? 0), 0) ?? 0;
+  const performedMinutes = events.filter((event) =>
+    (event.kind === 'completed' || event.kind === 'unplanned') && event.activity?.activity === 'strength'
+  ).reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
 
   async function save() {
     if (!ceiling || !user?.id || saving) return;
@@ -75,7 +82,9 @@ export default function DailyTrainingCeilingScreen() {
       <Text style={styles.body}>{date} · Report how you responded to previous training. A good energy level alone does not clear an injured area for progression.</Text>
       {loading ? <ActivityIndicator /> : ceiling ? <>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Today's prescribed training</Text>
+          <Text style={styles.cardTitle}>Today's strength budget</Text>
+          <Text style={styles.body}>{plannedMinutes} min prescribed · {performedMinutes} min recorded as completed</Text>
+          <Text style={styles.body}>Remaining: {Math.max(0, plannedMinutes - performedMinutes)} min. This is a ceiling, not an invitation to add work.</Text>
           {ceiling.planned.map((item, index) =>
             <Text style={styles.body} key={item.sessionId ?? index}>
               {item.activity} · {item.minutes ?? 0} minutes {item.sessionId ? '(planned session)' : ''}
