@@ -1,3 +1,5 @@
+export { evaluateTrainingAddition, appendTrainingEvent, completedActivities } from './daily-training-guardrails';
+export type { ActivityDose, DailyTrainingCeiling, ProposedActivity, TrainingEvent, TrainingGuardrailResult, TrainingDecision, TrainingRegion, RecoveryStatus } from './daily-training-guardrails';
 import type {
   BodyRegion,
   EnduranceDiscipline,
