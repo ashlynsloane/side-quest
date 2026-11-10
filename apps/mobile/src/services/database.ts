@@ -34,6 +34,44 @@ let db = SQLite.openDatabaseSync('circuit-generator.db');
 let activeDatabaseName = 'circuit-generator.db';
 let initialized = false;
 
+/**
+ * First-week generation can finish after a profile switch. Serialize database
+ * activation with its multi-step persistence so a mutable SQLite handle can
+ * never change owner halfway through saving a goal, block, and calendar.
+ *
+ * Generation happens OUTSIDE this queue. If the requested athlete has
+ * switched before writing begins, reject without modifying the new profile.
+ */
+let verifiedActiveAthlete: string | null = null;
+let athleteDatabaseQueue: Promise<void> = Promise.resolve();
+
+async function runWithDatabaseActivationLock<T>(work: () => Promise<T>): Promise<T> {
+  const preceding = athleteDatabaseQueue;
+  let release!: () => void;
+  athleteDatabaseQueue = new Promise<void>((resolve) => { release = resolve; });
+  await preceding;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
+/** Scoped SQLite write boundary for long, awaited first-week persistence.
+ * Never use this for an unbounded computation or network request.
+ */
+export async function withVerifiedAthleteDatabase<T>(
+  athleteId: string, persist: () => Promise<T>,
+): Promise<T> {
+  if (!athleteId.trim()) throw new Error('Athlete database identity is required.');
+  return runWithDatabaseActivationLock(async () => {
+    if (verifiedActiveAthlete !== athleteId) {
+      throw new Error('Athlete profile changed while preparing the first week. No plan was saved.');
+    }
+    return persist();
+  });
+}
+
 type StorageLike = { getItem(key:string):string|null; setItem(key:string,value:string):void };
 const profileStorage = (globalThis as typeof globalThis & { localStorage: StorageLike }).localStorage;
 const FILE_OWNER_PREFIX = 'circuit.database-file-owner.v1:';
@@ -102,6 +140,7 @@ async function verifyAthleteDatabaseOwner(
 
 export async function activateUserDatabase(userId: string): Promise<void> {
   if (!userId.trim()) throw new Error('Athlete database identity is required.');
+  return runWithDatabaseActivationLock(async () => {
   const ownerKey = 'circuit.original-database-owner';
   const storedOriginalOwner = profileStorage.getItem(ownerKey);
   const originalOwner = storedOriginalOwner ?? userId;
@@ -131,12 +170,14 @@ export async function activateUserDatabase(userId: string): Promise<void> {
     if (!storedOriginalOwner) profileStorage.setItem(ownerKey, userId);
     profileStorage.setItem(FILE_OWNER_PREFIX + nextName, userId);
     profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
+    verifiedActiveAthlete = userId;
   } catch (error) {
     db = oldDb;
     activeDatabaseName = oldName;
     initialized = oldInitialized;
     throw error;
   }
+  });
 }
 
 export function getActiveDatabaseName(): string { return activeDatabaseName; }
