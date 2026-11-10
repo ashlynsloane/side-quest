@@ -124,7 +124,7 @@ const contracts = [
       /releaseCloudWorkoutLease\(/]],
   ['Shared workout also requires a server lease',
     'apps/mobile/src/app/together-session.tsx',
-    [/acquireCloudWorkoutLease\(/, /createCloudWorkoutLeaseMonitor\(/,
+    [/acquireSynchronizedWorkoutLease\(/, /createCloudWorkoutLeaseMonitor\(/,
       /storeSharedWorkoutCloudLease\(/, /clearSharedWorkoutCloudLease\(/]],
   ['Shared sessions retain regional recovery monitoring',
     'apps/mobile/src/app/together-session.tsx',
