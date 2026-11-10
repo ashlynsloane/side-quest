@@ -187,10 +187,15 @@ export async function saveLiveWorkoutSession(
       // A delayed background checkpoint may not reverse a newer save.
       return;
     }
+    if (prior.cloudLease && snapshot.cloudLease
+        && (prior.cloudLease.leaseId !== snapshot.cloudLease.leaseId
+          || prior.cloudLease.deviceId !== snapshot.cloudLease.deviceId)) {
+      throw new Error('Saved workout belongs to another cloud lease.');
+    }
     next = {
       ...snapshot,
       // Timer/rest state re-saves must not discard the remote lease token.
-      cloudLease: snapshot.cloudLease ?? prior.cloudLease,
+      cloudLease: prior.cloudLease ?? snapshot.cloudLease,
     };
   }
   if (!isLiveWorkoutSession(next)) throw new Error('Invalid workout checkpoint cannot be saved.');
@@ -240,4 +245,37 @@ export async function clearLiveWorkoutSession(athleteId: string): Promise<void> 
       }
     } catch { /* Malformed local data does not prevent local cleanup. */ }
   }
+}
+
+
+/**
+ * Update only the server lease evidence; never overwrite the athlete's current
+ * sets/timer with an earlier snapshot when an async renewal completes late.
+ */
+export async function updateLiveWorkoutCloudLease(
+  athleteId: string,
+  workoutId: string,
+  renewed: CloudWorkoutLease,
+): Promise<void> {
+  if (!validCloudWorkoutLease(renewed) || Date.parse(renewed.expiresAt) <= Date.now()) {
+    throw new Error('Cannot store an invalid or expired cloud workout lease.');
+  }
+  const storage = requireLocalStorage();
+  const key = scopedSessionKey(athleteId);
+  const raw = storage.getItem(key);
+  if (!raw) throw new Error('Cannot renew a missing workout checkpoint.');
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch {
+    throw new Error('Cannot renew a corrupted workout checkpoint.');
+  }
+  if (!isLiveWorkoutSession(parsed) || parsed.workout.id !== workoutId
+      || !parsed.cloudLease || parsed.cloudLease.leaseId !== renewed.leaseId
+      || parsed.cloudLease.deviceId !== renewed.deviceId) {
+    throw new Error('Workout checkpoint no longer owns the cloud lease.');
+  }
+  if (Date.parse(parsed.cloudLease.expiresAt) > Date.parse(renewed.expiresAt)) {
+    // A slower renewal response must not overwrite a newer lease expiry.
+    return;
+  }
+  storage.setItem(key, JSON.stringify({ ...parsed, cloudLease: renewed }));
 }
