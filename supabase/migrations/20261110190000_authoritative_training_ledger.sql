@@ -46,6 +46,14 @@ create index if not exists training_remote_recovery_recent
 alter table public.training_remote_plans enable row level security;
 alter table public.training_remote_exposures enable row level security;
 alter table public.training_remote_recovery enable row level security;
+
+-- Bind the lease to the exact plan decision so each renewal can re-check
+-- centrally reported symptoms and completed exposure.
+alter table public.training_workout_leases
+  add column if not exists training_date date,
+  add column if not exists session_id text,
+  add column if not exists authorized_minutes integer,
+  add column if not exists authorized_regions text[];
 revoke all on table public.training_remote_plans from public, anon, authenticated;
 revoke all on table public.training_remote_exposures from public, anon, authenticated;
 revoke all on table public.training_remote_recovery from public, anon, authenticated;
@@ -314,14 +322,18 @@ begin
     end if;
   end loop;
   insert into public.training_workout_leases as held(
-    athlete_id,lease_id,workout_id,device_id,acquired_at,updated_at,expires_at
+    athlete_id,lease_id,workout_id,device_id,acquired_at,updated_at,expires_at,
+    training_date,session_id,authorized_minutes,authorized_regions
   ) values (
     v_user,v_token,p_workout_id,p_device_id,pg_catalog.clock_timestamp(),
-    pg_catalog.clock_timestamp(),v_expiry
+    pg_catalog.clock_timestamp(),v_expiry,p_training_date,p_session_id,p_planned_minutes,p_regions
   ) on conflict(athlete_id) do update
     set lease_id=excluded.lease_id, workout_id=excluded.workout_id,
       device_id=excluded.device_id,acquired_at=excluded.acquired_at,
-      updated_at=excluded.updated_at,expires_at=excluded.expires_at
+      updated_at=excluded.updated_at,expires_at=excluded.expires_at,
+      training_date=excluded.training_date,session_id=excluded.session_id,
+      authorized_minutes=excluded.authorized_minutes,
+      authorized_regions=excluded.authorized_regions
     where held.expires_at <= pg_catalog.clock_timestamp()
     returning held.lease_id into v_written;
   if v_written is null then
@@ -332,9 +344,79 @@ begin
 end;
 $$;
 
+-- Renewal is a second authorization, not merely a timer extension.
+-- Other-device completed activity and worsening recovery invalidate the
+-- in-progress claim before its expiry can be pushed forward.
+create or replace function public.renew_training_workout_lease_v2(
+  p_lease_id uuid, p_device_id text
+)
+returns table(renewed boolean, expires_at timestamptz, reason text)
+language plpgsql security definer set search_path = ''
+as $
+declare
+  v_user uuid := auth.uid();
+  v_held public.training_workout_leases%rowtype;
+  v_region text;
+  v_status text;
+  v_observed timestamptz;
+  v_last_exposure timestamptz;
+  v_new_expiry timestamptz := pg_catalog.clock_timestamp()+interval '90 seconds';
+begin
+  if v_user is null then raise exception 'Authentication required' using errcode='42501'; end if;
+  if p_lease_id is null or length(coalesce(p_device_id,'')) not between 1 and 128 then
+    raise exception 'Invalid renewal request' using errcode='22023';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_user::text,91829));
+  select * into v_held from public.training_workout_leases
+    where athlete_id=v_user and lease_id=p_lease_id and device_id=p_device_id
+      and expires_at > pg_catalog.clock_timestamp() for update;
+  if not found or v_held.training_date is null or v_held.authorized_regions is null then
+    return query select false,null::timestamptz,'Lease expired, lost, or created by an outdated client'::text;
+    return;
+  end if;
+  if exists(select 1 from public.training_remote_exposures
+      where athlete_id=v_user and session_id=v_held.session_id
+        and training_date=v_held.training_date)
+    or exists(select 1 from public.training_remote_exposures
+      where athlete_id=v_user and completed_at > v_held.acquired_at) then
+    return query select false,null::timestamptz,'A new completed exposure requires fresh authorization'::text;
+    return;
+  end if;
+  foreach v_region in array array['general','achilles','upper_back']::text[] loop
+    if v_region <> 'general' and not (v_region=any(v_held.authorized_regions)) then continue; end if;
+    select status,observed_at into v_status,v_observed
+      from public.training_remote_recovery
+      where athlete_id=v_user and region=v_region
+      order by observed_at desc,event_id desc limit 1;
+    if v_status in ('worse','red_flag') then
+      return query select false,null::timestamptz,'New regional recovery restriction'::text;
+      return;
+    end if;
+    select max(completed_at) into v_last_exposure
+      from public.training_remote_exposures
+      where athlete_id=v_user
+        and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+        and v_region=any(regions);
+    if v_last_exposure is not null
+      and (v_status is distinct from 'stable'
+           or v_observed is null or v_observed <= v_last_exposure) then
+      return query select false,null::timestamptz,'Post-exposure regional assessment required'::text;
+      return;
+    end if;
+  end loop;
+  update public.training_workout_leases as held set
+    expires_at=v_new_expiry,updated_at=pg_catalog.clock_timestamp()
+    where held.athlete_id=v_user and held.lease_id=p_lease_id
+      and held.device_id=p_device_id
+    returning held.expires_at into v_new_expiry;
+  return query select true,v_new_expiry,null::text;
+end;
+$;
+
 -- Older acquire RPC bypasses the synchronized ledger. Revoke it during this
 -- rollout: old clients must fail closed rather than authorize unsynced load.
 revoke all on function public.acquire_training_workout_lease(text,text) from authenticated;
+revoke all on function public.renew_training_workout_lease(uuid,text) from authenticated;
 revoke all on function public.publish_training_remote_plan(date,jsonb) from public,anon;
 revoke all on function public.publish_training_remote_exposure(text,text,text,text,numeric,text[],timestamptz,date) from public,anon;
 revoke all on function public.publish_training_remote_recovery(text,date,jsonb) from public,anon;
@@ -345,3 +427,6 @@ grant execute on function public.publish_training_remote_exposure(text,text,text
 grant execute on function public.publish_training_remote_recovery(text,date,jsonb) to authenticated;
 grant execute on function public.read_training_remote_snapshot(date) to authenticated;
 grant execute on function public.acquire_training_workout_lease_v2(text,text,date,text,integer,text[]) to authenticated;
+
+revoke all on function public.renew_training_workout_lease_v2(uuid,text) from public,anon;
+grant execute on function public.renew_training_workout_lease_v2(uuid,text) to authenticated;
