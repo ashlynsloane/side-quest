@@ -32,6 +32,8 @@ export default function OnboardingFirstWeekScreen() {
   const [error, setError] = useState<string | null>(null);
   const [enduranceEvents, setEnduranceEvents] = useState<TrainingCalendarEvent[]>([]);
   const [enduranceWarning, setEnduranceWarning] = useState<string | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const currentAttempt = useRef(0);
   const started = useRef<string | null>(null);
   const activeAthleteId = useRef<string | null>(user?.id ?? null);
   activeAthleteId.current = user?.id ?? null;
@@ -43,9 +45,12 @@ export default function OnboardingFirstWeekScreen() {
 
   useEffect(() => {
     const athleteId = user?.id;
-    if (!athleteId || started.current === athleteId || exercises.length === 0) return;
-    started.current = athleteId;
-    const stillCurrent = () => mounted.current && activeAthleteId.current === athleteId;
+    const attemptKey = `${athleteId ?? 'signed-out'}:${retryAttempt}`;
+    if (!athleteId || started.current === attemptKey || exercises.length === 0) return;
+    started.current = attemptKey;
+    const attemptNumber = ++currentAttempt.current;
+    const stillCurrent = () => mounted.current && activeAthleteId.current === athleteId
+      && currentAttempt.current === attemptNumber;
     // The setup timestamp is durable and athlete-scoped. A restart after a
     // partial SQLite write must target the SAME week and generated block ID.
     const startedAt = onboardingState.firstWeekSetupStartedAt;
@@ -96,13 +101,21 @@ export default function OnboardingFirstWeekScreen() {
         setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
         setState('error');
       });
-  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, user?.id]);
+  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, retryAttempt, user?.id]);
 
   if (state === 'building') return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
 
   if (state === 'error' || !block) return <AppScreen eyebrow="FIRST DRAFT" title="The week needs one more review." subtitle={error ?? 'The draft could not be generated.'}><Surface style={styles.errorCard}><Text style={styles.errorTitle}>{block
       ? 'The strength plan was saved, but setup could not finish.'
-      : 'The first training block could not be saved.'}</Text><Text style={styles.body}>Open the advanced planner to review the detailed inputs, or return and change the fast-start answers.</Text></Surface><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
+      : 'The first training block could not be saved.'}</Text><Text style={styles.body}>You can retry the same first-week attempt without creating a new plan identity, or review the inputs in the advanced planner.</Text></Surface><Pressable
+    testID="sidequest-qa-retry-first-week" accessibilityRole="button"
+    onPress={() => {
+      setError(null);
+      setEnduranceWarning(null);
+      setState('building');
+      setRetryAttempt((current) => current + 1);
+    }}
+    style={styles.primary}><Text style={styles.primaryText}>Retry building this week</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
 
   const week = block.weeks[0];
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
