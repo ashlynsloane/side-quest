@@ -120,7 +120,8 @@ describe('synchronized authoritative ledger mobile protocol', () => {
     }]);
     const backend = {
       rpc: vi.fn(async (name: string) => ({
-        data: null, error: name === 'publish_training_remote_exposure'
+        data: name === 'publish_training_remote_plan' ? true : null,
+        error: name === 'publish_training_remote_exposure'
           ? { message: 'network down' } : null,
       })),
     };
