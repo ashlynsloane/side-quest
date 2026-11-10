@@ -10,6 +10,37 @@
 - `node scripts/audit-training-guardrail-integration.mjs` (cross-route contract)
 - Review any failed workflow; do not merge when the latest commit is red or pending.
 
+## Automated integration and regression coverage (executed in CI)
+
+The guardrail pipeline now includes two independent jobs:
+
+- **Guardrail validation:** planner and mobile TypeScript, planner unit/safety tests,
+  cross-route integration-contract audit, and
+  `pnpm exec vitest run apps/mobile/test`.
+- **Current repository regression:** V24–V26 feature contracts, all workspace
+  typechecks and tests, complete exercise-content and media validation, and
+  current runtime navigation contracts.
+- **Authorization-service integration tests** simulate scheduled and discretionary
+  starts, injury-specific symptoms, historical load reconciliation, 48-hour
+  cross-sport exposure, storage failure, and cross-athlete isolation.
+- **Actual mobile checkpoint-adapter tests** cover save/load, corrupt checkpoints,
+  missing storage, write errors, and athlete profile changes.
+- **Real SQLite integration tests** use Node's built-in SQLite engine to execute
+  schema constraints, idempotent audit events, transactional regional recovery
+  updates with rollback on failure, unreadable ledger records, and privacy export/deletion.
+
+These are *automated software tests*, not physical-device end-to-end tests.
+The SQLite test adapter exercises real SQL but does not replace Expo-SQLite
+platform testing on iOS and Android. The full historic `pnpm check` still
+contains obsolete V23 UI-text assertions; the current CI instead gates the
+listed V24–V26, runtime, catalog and workspace checks.
+
+**Catalog audit:** the combined exercise seed previously contained three
+duplicate gym-expansion definitions (barbell Romanian deadlift, bench press,
+cable chop) with conflicting metadata. The redundant expansion entries were
+removed while canonical definitions remain, so exercise loading inference is
+not dependent on ambiguous duplicate identities.
+
 ## Device-level test scenarios (not yet executed)
 
 | ID | Scenario | Expected result |
