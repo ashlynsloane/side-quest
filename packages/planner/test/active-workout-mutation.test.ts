@@ -70,4 +70,25 @@ describe('live workout substitutions cannot escalate dose', () => {
     incompatible.stations[0]!.exercises[0]!.unit = 'seconds';
     expect(assessActiveWorkoutMutation(original, incompatible).allowed).toBe(false);
   });
+  it('blocks increased calf-muscle loading even when Achilles was already a target', () => {
+    const original = make();
+    const lighter = change(original, { bodyRegions: [
+      { region: 'gastrocnemius', role: 'primary', load: 1 },
+    ] });
+    const heavier = change(lighter, { bodyRegions: [
+      { region: 'gastrocnemius', role: 'primary', load: 4 },
+    ] });
+    expect(assessActiveWorkoutMutation(lighter, heavier).allowed).toBe(false);
+  });
+  it('rejects a newly introduced impact movement despite equal duration', () => {
+    const original = make();
+    const modified = change(original, { movementPatterns: ['anti_extension','jump_hop'] });
+    expect(assessActiveWorkoutMutation(original, modified).allowed).toBe(false);
+  });
+  it('rejects corrupted demand metadata rather than treating NaN as a reduction', () => {
+    const original = make();
+    const modified = change(original, { impactLevel: Number.NaN as Exercise['impactLevel'] });
+    expect(assessActiveWorkoutMutation(original, modified).allowed).toBe(false);
+  });
+
 });
