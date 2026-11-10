@@ -34,9 +34,11 @@ const workout = {
 
 function rpc(responses: Record<string, unknown> = {}): WorkoutLeaseRpc {
   return {
-    rpc: vi.fn(async (name: string) => ({
+    rpc: vi.fn(async (name: string, args: Record<string, unknown>) => ({
       error: null,
-      data: name in responses ? responses[name] : true,
+      data: name in responses ? responses[name]
+        : name === 'publish_training_remote_exposure_batch'
+          ? (args.p_events as unknown[]).length : true,
     })),
   };
 }
@@ -99,16 +101,17 @@ describe('synchronized authoritative ledger mobile protocol', () => {
     }]);
     const backend = rpc();
     expect(await synchronizeRecordedTrainingExposure('athlete-1', backend)).toBe(2);
-    expect(backend.rpc).toHaveBeenCalledWith('publish_training_remote_exposure',
-      expect.objectContaining({
-        p_event_id: 'workout:actual-1', p_activity: 'strength',
-        p_minutes: 20, p_session_id: 'session-1',
-      }));
-    expect(backend.rpc).toHaveBeenCalledWith('publish_training_remote_exposure',
-      expect.objectContaining({
-        p_event_id: 'import:ride-1', p_activity: 'bike',
-        p_minutes: 30, p_regions: ['general','achilles'],
-      }));
+    expect(backend.rpc).toHaveBeenCalledWith('publish_training_remote_exposure_batch',
+      { p_events: expect.arrayContaining([
+        expect.objectContaining({
+          eventId: 'workout:actual-1', activity: 'strength',
+          minutes: 20, sessionId: 'session-1',
+        }),
+        expect.objectContaining({
+          eventId: 'import:ride-1', activity: 'bike',
+          minutes: 30, regions: ['general', 'achilles'],
+        }),
+      ]) });
   });
 
   it('denies the next cloud session if any pending local exposure could not be synchronized', async () => {
@@ -121,7 +124,7 @@ describe('synchronized authoritative ledger mobile protocol', () => {
     const backend = {
       rpc: vi.fn(async (name: string) => ({
         data: name === 'publish_training_remote_plan' ? true : null,
-        error: name === 'publish_training_remote_exposure'
+        error: name === 'publish_training_remote_exposure_batch'
           ? { message: 'network down' } : null,
       })),
     };
