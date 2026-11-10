@@ -43,5 +43,13 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Full monorepo regression suite
-        run: pnpm check
+      - name: Current V24-V26 feature contracts
+        run: pnpm check:v24
+      - name: All workspace typechecks
+        run: pnpm typecheck
+      - name: All workspace unit tests
+        run: pnpm test
+      - name: Exercise and media validations
+        run: pnpm validate:exercises && pnpm validate:media
+      - name: Runtime core integration contracts
+        run: pnpm check:runtime-core
