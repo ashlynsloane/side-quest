@@ -31,19 +31,33 @@
 | G15 | Edit plan to add more strength mid-day | Previously approved ceiling does not expand silently |
 | G16 | Move a planned session to another date | The previous date no longer authorizes that session |
 | G17 | Reduce a planned session's duration | The reduced dose becomes the maximum allowance |
-| G18 | Replace exercise with calf-loading option | Exercise-level muscle/joint inference still detects Achilles involvement |
+| G18 | Replace exercise with calf-loading option | Escalating muscle, joint, movement or duration load is rejected during an active session |
 | G19 | Import same-day cycling before Achilles-related strength | Triggers an overlap review |
 | G20 | Import same-day swimming before upper-back strength | Triggers an overlap review |
 | G21 | Correct completed workout duration | Previous audit dose is retracted and revised dose is counted once |
 | G22 | Delete completed workout | Deleted history does not remain as active budget load after reconciliation |
-| G23 | Restore account or change local profiles | Events stay scoped to the correct athlete |
+| G23 | Restore account or change local profiles | Events and live workout checkpoints stay scoped to the correct athlete; unowned legacy checkpoint is not auto-restored |
 | G24 | Save recovery while a plan is updated concurrently | Latest plan is retained; only explicitly checked recovery fields change |
 | G25 | Lose database write permission or fill storage | App reports failure; no false "saved" state or inferred completion |
-| G26 | Complete a workout at 11:59 pm, reopen after midnight | Local dates and histories remain consistent |
+| G26 | Leave a workout open across midnight | Timer stops, no unsupervised continuation; previous-day work can be saved as partial history |
 | G27 | Change device timezone while events are pending | No unreviewed load increase from a timezone mismatch |
 | G28 | Verify data export and deletion | Guardrail records follow local privacy controls |
 | G29 | Shared workout history already saved under idempotency key | Retry verifies the existing workout rather than fabricating a second |
 | G30 | Manually log strength after an earlier workout | Ledger reconciliation accounts for the extra exposure before another start |
+
+## Additional scenarios from the reliability pass
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| G31 | Attempt a second discretionary session after completed strength, with no saved daily plan | A typed exception cannot bypass the need for a new prescription |
+| G32 | Import a bike ride from yesterday and start Achilles-loading strength today | A rolling 48-hour overlap review appears |
+| G33 | Perform strength yesterday with only core-anterior regions and load Achilles today | Region-aware recent-strength assessment does not fabricate Achilles exposure |
+| G34 | Leave a workout paused longer than eight hours on the same day | Existing start authorization expires; no training continuation |
+| G35 | Mark significant pain or unable-to-train during a live session | Workout pauses; already performed activity can be saved |
+| G36 | Change to another athlete profile with a paused session on device | Previous athlete's session cannot be auto-restored under new profile |
+| G37 | Corrupt a saved workout checkpoint | Snapshot is rejected rather than partially trusted |
+| G38 | Corrupt a training event or workout history row | Authorization fails rather than ignoring possible already-performed load |
+| G39 | Save a zero-completion session | No fabricated minute of training is added to the ledger |
 
 ## Behavioral acceptance criteria
 
