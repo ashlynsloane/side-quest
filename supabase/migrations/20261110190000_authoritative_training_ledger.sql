@@ -367,9 +367,10 @@ begin
     raise exception 'Invalid renewal request' using errcode='22023';
   end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_user::text,91829));
-  select * into v_held from public.training_workout_leases
-    where athlete_id=v_user and lease_id=p_lease_id and device_id=p_device_id
-      and expires_at > pg_catalog.clock_timestamp() for update;
+  select * into v_held from public.training_workout_leases as held
+    where held.athlete_id=v_user and held.lease_id=p_lease_id
+      and held.device_id=p_device_id
+      and held.expires_at > pg_catalog.clock_timestamp() for update;
   if not found or v_held.training_date is null or v_held.authorized_regions is null then
     return query select false,null::timestamptz,'Lease expired, lost, or created by an outdated client'::text;
     return;
