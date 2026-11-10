@@ -52,12 +52,12 @@ done
 echo "Supabase staging migration preview for project $STAGING_PROJECT_REF"
 # --remote is explicit. Do not depend on a saved .temp/project-ref link,
 # which might point at production or a different account.
-supabase db push --remote "$STAGING_PROJECT_REF" --dry-run
+supabase db push --remote="$STAGING_PROJECT_REF" --dry-run
 
 if [[ "$MODE" == "plan" ]]; then
   echo "PLAN ONLY. No staging database was modified by this script."
   exit 0
 fi
 echo "Applying reviewed migration set to explicit STAGING project $STAGING_PROJECT_REF"
-supabase db push --remote "$STAGING_PROJECT_REF" --yes
+supabase db push --remote="$STAGING_PROJECT_REF" --yes
 echo "CLI migration push finished. Live postflight permissions and device QA remain REQUIRED."
