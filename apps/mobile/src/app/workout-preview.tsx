@@ -1,8 +1,9 @@
 import type { Exercise, ExerciseSwapReason, GeneratedWorkout } from '@circuit/domain';
+import type { TrainingGuardrailResult } from '@circuit/planner';
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
@@ -53,6 +54,9 @@ export default function WorkoutPreviewScreen() {
   const [roomBusy, setRoomBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [naming, setNaming] = useState(false);
+  const [startBusy, setStartBusy] = useState(false);
+  const [guardrailDecision, setGuardrailDecision] = useState<TrainingGuardrailResult | null>(null);
+  const [overrideReason, setOverrideReason] = useState('');
 
   useEffect(() => {
     if (!previewWorkout || originalWorkoutId.current === previewWorkout.id) return;
@@ -111,25 +115,43 @@ export default function WorkoutPreviewScreen() {
       && (activePlanLink?.sessionId ?? null) === (previewPlannedSession?.id ?? null),
   );
 
-  function start() {
-    if (!activeWorkout) {
-      beginWorkout(workout);
-      router.push('/active-workout' as Href);
-      return;
+  async function attemptStart(reason?: string) {
+    if (startBusy) return;
+    setStartBusy(true);
+    try {
+      const outcome = await beginWorkout(workout, reason ? { overrideReason: reason } : undefined);
+      if (outcome.started) {
+        setGuardrailDecision(null);
+        setOverrideReason('');
+        router.push('/active-workout' as Href);
+      } else {
+        setGuardrailDecision(outcome.result);
+      }
+    } catch (cause) {
+      Alert.alert('Could not start workout', cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setStartBusy(false);
     }
+  }
+
+  function start() {
     if (activeMatchesPreview) {
       router.push('/active-workout' as Href);
       return;
     }
-    Alert.alert(
-      'Replace the active workout?',
-      `${activeWorkout.name} is paused and saved. Starting this workout will replace that active session.`,
-      [
-        { text: 'Keep current workout', style: 'cancel' },
-        { text: 'Resume current', onPress: () => router.push('/active-workout' as Href) },
-        { text: 'Replace and start', style: 'destructive', onPress: () => { beginWorkout(workout); router.push('/active-workout' as Href); } },
-      ],
-    );
+    if (activeWorkout) {
+      Alert.alert(
+        'Replace the active workout?',
+        `${activeWorkout.name} is paused and saved. Starting this workout will replace that active session.`,
+        [
+          { text: 'Keep current workout', style: 'cancel' },
+          { text: 'Resume current', onPress: () => router.push('/active-workout' as Href) },
+          { text: 'Review new workout', onPress: () => void attemptStart() },
+        ],
+      );
+      return;
+    }
+    void attemptStart();
   }
 
   async function startTogether() {
@@ -220,6 +242,49 @@ export default function WorkoutPreviewScreen() {
         onClose={() => setEditing(false)}
         onSave={(edited) => { updatePreviewWorkout(edited); setEditing(false); setSaved(false); }}
       />
+      <Modal visible={Boolean(guardrailDecision)} transparent animationType="fade" onRequestClose={() => setGuardrailDecision(null)}>
+        <View style={{ flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.68)' }}>
+          <View style={{ padding: 22, borderRadius: 18, backgroundColor: tokens.surface, gap: 14 }}>
+            <Text style={{ color: tokens.text, fontSize: 19, fontWeight: '800' }}>
+              {guardrailDecision?.decision === 'stop' ? 'Training paused for safety' : 'Check your training ceiling'}
+            </Text>
+            <Text style={{ color: tokens.text, fontSize: 14, lineHeight: 22 }}>
+              {guardrailDecision?.reasons.join(' ')}
+            </Text>
+            {guardrailDecision?.decision !== 'stop' && guardrailDecision?.overrideAllowed !== false ? <>
+              <Text style={{ color: tokens.textMuted, fontSize: 13 }}>
+                You can request an exception, but it will be recorded. Feeling energetic alone is not evidence that additional load will be well tolerated.
+              </Text>
+              <TextInput
+                accessibilityLabel="Reason for overriding the training ceiling"
+                value={overrideReason}
+                onChangeText={setOverrideReason}
+                placeholder="Why is an exception appropriate today?"
+                placeholderTextColor={tokens.textMuted}
+                multiline
+                style={{ borderColor: tokens.border, borderWidth: 1, borderRadius: 10, padding: 12, minHeight: 75, color: tokens.text }}
+              />
+              <Pressable disabled={overrideReason.trim().length < 12 || startBusy}
+                accessibilityRole="button"
+                onPress={() => void attemptStart(overrideReason.trim())}
+                style={{ padding: 13, borderRadius: 10, backgroundColor: tokens.accent, opacity: overrideReason.trim().length < 12 || startBusy ? 0.4 : 1 }}>
+                <Text style={{ textAlign: 'center', color: tokens.canvas, fontWeight: '800' }}>Log exception and start</Text>
+              </Pressable>
+            </> : <Text style={{ color: tokens.textMuted, fontSize: 13 }}>
+              This limit requires a fresh recovery check or an updated prescription before this session can begin.
+            </Text>}
+            <Pressable accessibilityRole="button"
+              onPress={() => { setGuardrailDecision(null); router.push('/daily-training-ceiling' as Href); }}
+              style={{ padding: 12, borderWidth: 1, borderColor: tokens.border, borderRadius: 10 }}>
+              <Text style={{ color: tokens.text, textAlign: 'center', fontWeight: '700' }}>Update regional recovery</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => { setGuardrailDecision(null); setOverrideReason(''); }}
+              style={{ padding: 8 }}>
+              <Text style={{ color: tokens.textMuted, textAlign: 'center' }}>Keep today's current plan</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <ExerciseDemoModal exercise={demoExercise} visible={Boolean(demoExercise)} onClose={() => setDemoExercise(null)} />
       <ExerciseSwapModal exercise={swapTarget?.exercise ?? null} visible={Boolean(swapTarget)} busy={swapBusy} onClose={() => setSwapTarget(null)} onLoadCandidates={loadSwapCandidates} onChooseCandidate={(reason, candidateId) => void swap(reason, candidateId)} onPain={() => { setSwapTarget(null); router.push('/today-check-in' as Href); }} />
     </SafeAreaView>

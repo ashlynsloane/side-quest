@@ -8,6 +8,7 @@ import type {
 } from '@circuit/domain';
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import { evaluateWorkoutAuthorizationAge, evaluateActiveSessionRecovery } from '@circuit/planner';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useRouter, type Href } from 'expo-router';
@@ -33,6 +34,7 @@ import { WorkoutShareModal } from '@/components/workout-share-modal';
 import { V23Chip, V23Icon } from '@/components/v23-ui';
 import {
   getLatestExerciseLoads,
+  getActiveTrainingCheckIn,
   getSocialPreferences,
   getWorkoutLedgerEntry,
   listExercisePreferences,
@@ -50,10 +52,19 @@ import {
   clearLiveWorkoutSession,
   loadLiveWorkoutSession,
   saveLiveWorkoutSession,
+  updateLiveWorkoutCloudLease,
   type LiveWorkoutLoadValue as LoadValue,
   type LiveWorkoutRestEntry as RestEntry,
 } from '@/services/active-workout-persistence';
+import { createActiveSessionMonitor } from '@/services/active-session-monitor';
+import {
+  cloudWorkoutLeasesEnabled,
+  createCloudWorkoutLeaseMonitor,
+  renewCloudWorkoutLease,
+} from '@/services/cloud-workout-coordination';
 import { publishWorkoutActivity } from '@/services/social';
+import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
+import { loadDailyCeiling, recordTrainingEvent } from '@/services/training-guardrail-storage';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import {
   getWorkoutCuePreferences,
@@ -105,9 +116,25 @@ export default function ActiveWorkoutScreen() {
   const [cuePreferences, setCuePreferences] = useState<WorkoutCuePreferences>(() => getWorkoutCuePreferences());
   const [cueSettingsOpen, setCueSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [urgeOpen, setUrgeOpen] = useState(false);
+  const [urgeActivity, setUrgeActivity] = useState<'calf' | 'cycling' | 'strength' | 'walking' | 'other'>('calf');
+  const [urgeReason, setUrgeReason] = useState<'energy' | 'faster_progress' | 'restless'>('energy');
+  const [urgeSaved, setUrgeSaved] = useState(false);
+  const [urgeSaving, setUrgeSaving] = useState(false);
+  const [urgeError, setUrgeError] = useState<string | null>(null);
   const startedAt = useRef(new Date().toISOString());
+  const lastAuthorizedCheckpointAt = useRef(startedAt.current);
+  const [authorizationExpired, setAuthorizationExpired] = useState(false);
+  const requiresCloudLease = user?.mode === 'cloud' && cloudWorkoutLeasesEnabled();
+  const [cloudLeaseStatus, setCloudLeaseStatus] =
+    useState<'checking' | 'verified' | 'lost'>('checking');
+  const [requiresRecoveryReview, setRequiresRecoveryReview] = useState(false);
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
+  const savingCompletion = useRef(false);
+  const completionFractionRef = useRef(1);
+  const [completionSaved, setCompletionSaved] = useState(false);
+  const [completionSaveError, setCompletionSaveError] = useState<string | null>(null);
   const cueKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -116,8 +143,9 @@ export default function ActiveWorkoutScreen() {
       setSessionHydrated(true);
       return;
     }
+    if (!user?.id) { setSessionHydrated(false); return; }
     let live = true;
-    void loadLiveWorkoutSession().then((snapshot) => {
+    void loadLiveWorkoutSession(user.id).then((snapshot) => {
       if (!live) return;
       if (snapshot?.workout.id === workout.id) {
         const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
@@ -128,7 +156,7 @@ export default function ActiveWorkoutScreen() {
           Math.max(0, snapshot.remainingSeconds),
           snapshot.phase === 'work' ? (safeStation?.durationSeconds ?? snapshot.remainingSeconds) : Math.max(15, workout.request.restSeconds),
         ));
-        setRunning(restoredActiveWorkout ? false : snapshot.running);
+        setRunning(requiresCloudLease ? false : restoredActiveWorkout ? false : snapshot.running);
         setStationRounds(snapshot.stationRounds);
         setExerciseLoads(snapshot.exerciseLoads);
         setExerciseSets(snapshot.exerciseSets);
@@ -136,6 +164,10 @@ export default function ActiveWorkoutScreen() {
         setRestRounds(snapshot.restRounds);
         setRestLoadUnit(snapshot.restLoadUnit);
         startedAt.current = snapshot.startedAt;
+        lastAuthorizedCheckpointAt.current = snapshot.savedAt;
+        const freshness = evaluateWorkoutAuthorizationAge(snapshot.startedAt);
+        setAuthorizationExpired(!freshness.current);
+        if (!freshness.current) setRunning(false);
         const progressed = safeIndex > 0
           || snapshot.phase === 'rest'
           || snapshot.remainingSeconds < (safeStation?.durationSeconds ?? snapshot.remainingSeconds)
@@ -148,10 +180,105 @@ export default function ActiveWorkoutScreen() {
       } else {
         setRunning(true);
       }
-      setSessionHydrated(true);
+    }).catch((cause) => {
+      if (live) {
+        setRunning(false);
+        setResumeNotice(`Workout checkpoint could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    }).finally(() => {
+      if (live) setSessionHydrated(true);
     });
     return () => { live = false; };
-  }, [restoredActiveWorkout, workout?.id, workoutSessionReady]);
+  }, [requiresCloudLease, restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
+
+  useEffect(() => {
+    if (!workout || !sessionHydrated || phase === 'complete') return;
+    const verify = () => {
+      const freshness = evaluateWorkoutAuthorizationAge(startedAt.current);
+      if (!freshness.current) {
+        setAuthorizationExpired(true);
+        setRunning(false);
+      }
+    };
+    verify();
+    const interval = setInterval(verify, 15000);
+    return () => clearInterval(interval);
+  }, [workout?.id, sessionHydrated, phase]);
+
+  // Keep monitoring recovery throughout a live workout and after foregrounding.
+  // Each mount/account change owns one cancelable monitor with no overlapping
+  // database reads. Missing data pauses rather than silently resuming training.
+  useEffect(() => {
+    if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
+    const athleteId = user.id;
+    const monitor = createActiveSessionMonitor({
+      read: async () => {
+        const [checkIn, ceiling] = await Promise.all([
+          getActiveTrainingCheckIn(),
+          loadDailyCeiling(athleteId, localTrainingDate()),
+        ]);
+        return evaluateActiveSessionRecovery(
+          workout, startedAt.current, checkIn, ceiling,
+        );
+      },
+      onPause: () => {
+        setRequiresRecoveryReview(true);
+        setRunning(false);
+      },
+      subscribeForeground: (check) => {
+        const subscription = AppState.addEventListener('change', (status) => {
+          if (status === 'active') check();
+        });
+        return () => subscription.remove();
+      },
+    });
+    return monitor.start();
+  }, [workout, sessionHydrated, phase, user?.id]);
+
+  // A resumed cloud workout must renew the original server lease before the
+  // timer or activity controls are re-enabled. Losing it cannot be overridden
+  // by an old local checkpoint or a previously approved recovery check-in.
+  useEffect(() => {
+    if (!requiresCloudLease) {
+      setCloudLeaseStatus('verified');
+      return;
+    }
+    setCloudLeaseStatus('checking');
+    setRunning(false);
+    if (!sessionHydrated || !workout || !user?.id || phase === 'complete') return;
+    let live = true;
+    let stop: (() => void) | undefined;
+    const owner = user.id;
+    const lose = () => {
+      if (!live) return;
+      setCloudLeaseStatus('lost');
+      setRunning(false);
+    };
+    void loadLiveWorkoutSession(owner).then((snapshot) => {
+      if (!live) return;
+      if (!snapshot || snapshot.workout.id !== workout.id || !snapshot.cloudLease) {
+        lose();
+        return;
+      }
+      const monitor = createCloudWorkoutLeaseMonitor({
+        initialLease: snapshot.cloudLease,
+        renew: renewCloudWorkoutLease,
+        persist: (lease) => updateLiveWorkoutCloudLease(owner, workout.id, lease),
+        onVerified: () => {
+          if (live) setCloudLeaseStatus('verified');
+        },
+        onLost: lose,
+        subscribeForeground: (check) => {
+          const subscription = AppState.addEventListener('change', (status) => {
+            if (status === 'active') check();
+          });
+          return () => subscription.remove();
+        },
+      });
+      stop = monitor.start();
+    }).catch(lose);
+    return () => { live = false; stop?.(); };
+  }, [requiresCloudLease, sessionHydrated, workout?.id, user?.id, phase]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -176,11 +303,16 @@ export default function ActiveWorkoutScreen() {
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!workout || !sessionHydrated || phase === 'complete' || authorizationExpired || !user?.id) return;
     const timer = setTimeout(() => {
+      const now = new Date();
+      if (!evaluateWorkoutAuthorizationAge(startedAt.current, now).current) {
+        setAuthorizationExpired(true); setRunning(false); return;
+      }
+      lastAuthorizedCheckpointAt.current = now.toISOString();
       void saveLiveWorkoutSession({
         schemaVersion: 1,
-        savedAt: new Date().toISOString(),
+        savedAt: now.toISOString(),
         workout,
         startedAt: startedAt.current,
         stationIndex,
@@ -194,19 +326,28 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
+      }, user.id).catch((cause) => {
+        setRunning(false);
+        setResumeNotice(`Workout checkpoint was not saved: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
     }, 250);
     return () => clearTimeout(timer);
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, authorizationExpired, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!workout || !sessionHydrated || phase === 'complete' || authorizationExpired || !user?.id) return;
+    const athleteId = user.id;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       setRunning(false);
+      const now = new Date();
+      if (!evaluateWorkoutAuthorizationAge(startedAt.current, now).current) {
+        setAuthorizationExpired(true); return;
+      }
+      lastAuthorizedCheckpointAt.current = now.toISOString();
       void saveLiveWorkoutSession({
         schemaVersion: 1,
-        savedAt: new Date().toISOString(),
+        savedAt: now.toISOString(),
         workout,
         startedAt: startedAt.current,
         stationIndex,
@@ -220,10 +361,13 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
+      }, athleteId).catch((cause) => {
+        setRunning(false);
+        setResumeNotice(`Workout checkpoint was not saved: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
     });
     return () => subscription.remove();
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, authorizationExpired, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
     if (!resumeNotice) return;
@@ -232,10 +376,12 @@ export default function ActiveWorkoutScreen() {
   }, [resumeNotice]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || !running || phase === 'complete') return;
+    if (!workout || !sessionHydrated || authorizationExpired || requiresRecoveryReview
+        || (requiresCloudLease && cloudLeaseStatus !== 'verified')
+        || !running || phase === 'complete') return;
     const timer = setInterval(() => setRemainingSeconds((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
-  }, [phase, running, sessionHydrated, workout]);
+  }, [authorizationExpired, cloudLeaseStatus, requiresCloudLease, requiresRecoveryReview, phase, running, sessionHydrated, workout]);
 
   useEffect(() => {
     if (!workout || phase === 'complete') return;
@@ -254,14 +400,14 @@ export default function ActiveWorkoutScreen() {
   }, [cuePlayer, cuePreferences, phase, remainingSeconds, stationIndex, workout]);
 
   useEffect(() => {
-    if (!workout || remainingSeconds !== 0 || phase !== 'work') return;
+    if (!workout || authorizationExpired || requiresRecoveryReview || remainingSeconds !== 0 || phase !== 'work') return;
     setPhase('rest');
     setRunning(true);
     setRemainingSeconds(Math.max(15, workout.request.restSeconds));
     initializeRestLog(station ?? workout.stations[stationIndex]!);
     if (cuePreferences.audioEnabled) void completionPlayer.seekTo(0).then(() => completionPlayer.play()).catch(() => undefined);
     if (cuePreferences.hapticsEnabled) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
+  }, [authorizationExpired, requiresRecoveryReview, completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
 
   if (!workoutSessionReady || (workout && !sessionHydrated)) {
     return <SafeAreaView style={styles.safeArea}><View style={styles.missingCard}><Text style={styles.completeTitle}>Restoring workout…</Text><Text style={styles.helper}>Loading the last saved station and timer state.</Text></View></SafeAreaView>;
@@ -295,11 +441,15 @@ export default function ActiveWorkoutScreen() {
     setRestEntries((current) => Object.fromEntries(Object.entries(current).map(([key, value]) => [key, { ...value, unit }])));
   }
 
-  async function persistCompletion(completionFraction: number, override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> }) {
-    if (savedCompletion.current) return;
-    savedCompletion.current = true;
-    const timestamp = new Date().toISOString();
+  async function persistCompletion(completionFraction: number,
+    override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> },
+    finishedAt?: string) {
+    if (savedCompletion.current || savingCompletion.current) return;
+    savingCompletion.current = true;
+    completionFractionRef.current = completionFraction;
+    const timestamp = completedAt.current ?? finishedAt ?? new Date().toISOString();
     completedAt.current = timestamp;
+    try {
     const completedRounds = override?.stationRounds ?? stationRounds;
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
@@ -314,7 +464,17 @@ export default function ActiveWorkoutScreen() {
       plannedSessionId: activePlanLink?.sessionId,
       relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
     });
-    await clearLiveWorkoutSession();
+    if (user?.id) {
+      await recordActualWorkoutCompletion({
+        userId: user.id, workout: activeWorkout,
+        sessionId: activePlanLink?.sessionId, completedAt: timestamp, completionFraction, syncCloud: requiresCloudLease,
+      });
+    }
+    if (!user?.id) throw new Error('Athlete identity missing during completion');
+    await clearLiveWorkoutSession(user.id);
+    savedCompletion.current = true;
+    setCompletionSaved(true);
+    setCompletionSaveError(null);
     if (cloudEnabled && user?.mode === 'cloud') {
       const ledgerId = `${activeWorkout.id}_${timestamp}`;
       try {
@@ -323,6 +483,11 @@ export default function ActiveWorkoutScreen() {
       } catch {
         // Local completion remains authoritative if optional social publishing fails.
       }
+    }
+    } catch (cause) {
+      setCompletionSaveError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      savingCompletion.current = false;
     }
   }
 
@@ -380,6 +545,7 @@ export default function ActiveWorkoutScreen() {
   function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
 
   function pauseAndLeave() {
+    if (!user?.id) { Alert.alert('Cannot save', 'Athlete identity is missing.'); return; }
     setRunning(false);
     void saveLiveWorkoutSession({
       schemaVersion: 1,
@@ -397,7 +563,9 @@ export default function ActiveWorkoutScreen() {
       restRounds,
       restLoadUnit,
       planLink: activePlanLink ?? undefined,
-    }).then(() => router.replace('/' as Href));
+    }, user.id).then(() => router.replace('/' as Href)).catch((cause) => {
+      Alert.alert('Workout not saved', cause instanceof Error ? cause.message : String(cause));
+    });
   }
 
   function endEarly() {
@@ -409,6 +577,7 @@ export default function ActiveWorkoutScreen() {
   }
 
   async function finishAndExit() {
+    if (!savedCompletion.current) return;
     const completed = completedAt.current;
     if (completed && (sessionRpe !== null || energyAfter !== null || reflectionNotes.trim())) {
       const instanceId = `${activeWorkout.id}_${completed}`;
@@ -416,6 +585,32 @@ export default function ActiveWorkoutScreen() {
       setReflectionSaved(true);
     }
     clearActiveWorkout(); router.replace('/' as Href);
+  }
+
+  async function saveTrainingUrge() {
+    if (!user?.id || urgeSaving) return;
+    setUrgeSaving(true);
+    setUrgeError(null);
+    try {
+      const now = new Date();
+      await recordTrainingEvent(user.id, {
+        id: `urge:${activeWorkout.id}:${now.toISOString()}:${Math.random().toString(36).slice(2)}`,
+        occurredAt: now.toISOString(),
+        kind: 'urge',
+        note: JSON.stringify({
+          category: 'post_workout_add_more',
+          workoutId: activeWorkout.id,
+          plannedSessionId: activePlanLink?.sessionId,
+          activityConsidered: urgeActivity,
+          reason: urgeReason,
+        }),
+      }, localTrainingDate(now));
+      setUrgeSaved(true);
+    } catch (cause) {
+      setUrgeError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setUrgeSaving(false);
+    }
   }
 
   async function saveFavorite() { await saveFavoriteWorkout(activeWorkout); setSaved(true); }
@@ -435,10 +630,110 @@ export default function ActiveWorkoutScreen() {
       const exercisePreferences = await listExercisePreferences();
       const result = swapExerciseInWorkout({ workout: activeWorkout, stationId: swapTarget.stationId, exerciseId: swapTarget.exercise.id, reason, candidateId, context: { exercises, exercisePreferences } });
       if (!result.ok) { Alert.alert('Replacement unavailable', result.message); return; }
-      updateActiveWorkout(result.workout);
+      const mutation = updateActiveWorkout(result.workout);
+      if (!mutation.allowed) {
+        Alert.alert(
+          'This substitution changes your training ceiling',
+          mutation.reasons.join(' ') + ' End or pause the current workout and review a revised prescription before adding load.',
+          [{ text: 'Keep current exercise', style: 'cancel' },
+            { text: 'Review recovery', onPress: () => router.push('/daily-training-ceiling' as Href) }],
+        );
+        return;
+      }
       if (reason === 'dislike') await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       setSwapTarget(null);
     } finally { setSwapBusy(false); }
+  }
+
+  if (requiresCloudLease && cloudLeaseStatus !== 'verified' && phase !== 'complete') {
+    return <SafeAreaView style={styles.safeArea}>
+      <View style={styles.missingCard}>
+        <Text style={styles.eyebrow}>CLOUD WORKOUT COORDINATION</Text>
+        <Text style={styles.completeTitle}>{cloudLeaseStatus === 'checking'
+          ? 'Verifying your workout lock'
+          : 'Workout lock unavailable'}</Text>
+        <Text style={styles.helper}>{cloudLeaseStatus === 'checking'
+          ? 'Confirming that another device has not taken over this workout. Training remains paused until the server confirms your lease.'
+          : 'The server lease expired, was lost, or could not be verified. Do not continue training from this checkpoint. You can save work already completed or discard the unfinished workout.'}</Text>
+        {cloudLeaseStatus === 'lost' ? <>
+          <Pressable style={styles.primaryButton} onPress={() => {
+            const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+            setRunning(false);
+            setPhase('complete');
+            void persistCompletion(fraction);
+          }}>
+            <Text style={styles.primaryButtonText}>Save previously completed work</Text>
+          </Pressable>
+          <Pressable style={styles.outlineButton} onPress={() => {
+            clearActiveWorkout();
+            router.replace('/train' as Href);
+          }}>
+            <Text style={styles.outlineButtonText}>Discard unfinished session</Text>
+          </Pressable>
+        </> : null}
+      </View>
+    </SafeAreaView>;
+  }
+
+  if (requiresRecoveryReview && phase !== 'complete') {
+    return <SafeAreaView style={styles.safeArea}>
+      <View style={styles.missingCard}>
+        <Text style={styles.eyebrow}>WORKOUT PAUSED</Text>
+        <Text style={styles.completeTitle}>Training restriction needs review</Text>
+        <Text style={styles.helper}>
+          A new significant pain report, training pause, or unreadable check-in
+          prevents this active session from continuing. Record work already done,
+          then review your recovery before starting a new prescription.
+        </Text>
+        <Pressable onPress={() => {
+          const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+          setRunning(false);
+          setPhase('complete');
+          void persistCompletion(fraction);
+        }} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Save completed work and stop</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/today-check-in' as Href)}
+          style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>Review symptom check-in</Text>
+        </Pressable>
+        <Pressable onPress={() => {
+          clearActiveWorkout();
+          router.replace('/train' as Href);
+        }} style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>Discard unfinished session</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>;
+  }
+
+  if (authorizationExpired && phase !== 'complete') {
+    return <SafeAreaView style={styles.safeArea}>
+      <View style={styles.missingCard}>
+        <Text style={styles.eyebrow}>WORKOUT AUTHORIZATION EXPIRED</Text>
+        <Text style={styles.completeTitle}>Review before training again</Text>
+        <Text style={styles.helper}>
+          This workout began on an earlier day or exceeded the app's session-validity window.
+          Continuing it would add unreviewed loading. You may save the work already recorded,
+          or discard the unfinished session.
+        </Text>
+        {completionSaveError ? <Text style={styles.helper}>{completionSaveError}</Text> : null}
+        <Pressable onPress={() => {
+          const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+          setRunning(false);
+          setPhase('complete');
+          void persistCompletion(fraction, undefined, lastAuthorizedCheckpointAt.current);
+        }} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Save already completed activity</Text>
+        </Pressable>
+        <Pressable onPress={() => {
+          clearActiveWorkout();
+          router.replace('/train' as Href);
+        }} style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>Discard unfinished session</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>;
   }
 
   if (phase === 'complete') {
@@ -447,8 +742,33 @@ export default function ActiveWorkoutScreen() {
         <KeyboardSafeScreen contentContainerStyle={styles.completeContainer}>
           <Text style={styles.eyebrow}>WORKOUT COMPLETE</Text>
           <Text style={styles.completeTitle}>{activeWorkout.name}</Text>
-          <Text style={styles.helper}>{activePlanLink ? `${activePlanLink.sessionTitle} is now marked complete in your plan.` : 'Saved to training history.'} Review the work, add a private note, or share only the details you choose.</Text>
+          <Text style={styles.helper}>{completionSaved
+            ? 'Workout saved. The completed dose will count against today’s training budget.'
+            : completionSaveError
+              ? 'Workout save failed. Retry before leaving to preserve your training record.'
+              : 'Saving your completed workout and training budget…'}</Text>
+          {completionSaveError ? <View style={styles.card}>
+            <Text style={styles.helper}>{completionSaveError}</Text>
+            <Pressable accessibilityRole="button" style={styles.outlineButton}
+              onPress={() => void persistCompletion(completionFractionRef.current)}>
+              <Text style={styles.outlineButtonText}>Retry saving workout</Text>
+            </Pressable>
+          </View> : null}
           <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
+
+          <View style={styles.card}>
+            <Text style={styles.coachLabel}>TRAINING CEILING REACHED</Text>
+            <Text style={styles.cardTitle}>Your prescribed workout is enough for today.</Text>
+            <Text style={styles.helper}>Having energy left is not a reason to add sets, calf raises, cycling, or another workout. Review your recovery before progressing at the next planned exposure.</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="I feel tempted to add more training"
+              onPress={() => { setUrgeOpen(true); setUrgeSaved(false); setUrgeError(null); }}
+              style={styles.outlineButton}
+            >
+              <Text style={styles.outlineButtonText}>I want to do more</Text>
+            </Pressable>
+          </View>
 
           <CompletedWorkoutBodyMap regionLoads={completedSummary.regionLoads} />
           <Pressable onPress={() => setShareOpen(true)} style={styles.shareButton}><V23Icon name="more" color={tokens.accent} size={18} /><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Share workout summary</Text><Text style={styles.helper}>Choose exactly what appears. Pain, restrictions, and notes stay private.</Text></View><Text style={styles.shareChevron}>›</Text></Pressable>
@@ -474,8 +794,63 @@ export default function ActiveWorkoutScreen() {
 
           <Pressable onPress={() => router.push('/today-check-in' as Href)} style={styles.symptomButton}><Text style={styles.cardTitle}>Something hurt or tightened up?</Text><Text style={styles.helper}>Log the exact area separately so the next workout can adapt.</Text></Pressable>
           <Pressable onPress={() => void saveFavorite()} style={styles.outlineButton}><Text style={styles.outlineButtonText}>{saved ? '♥ Saved to favorites' : '♡ Save to favorites'}</Text></Pressable>
-          <Pressable onPress={() => void finishAndExit()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save workout and return to Today</Text></Pressable>
+          <Pressable disabled={!completionSaved} onPress={() => void finishAndExit()}
+            style={[styles.primaryButton, !completionSaved && { opacity: 0.45 }]}>
+            <Text style={styles.primaryButtonText}>{completionSaved ? 'Return to Today' : 'Saving workout…'}</Text>
+          </Pressable>
         </KeyboardSafeScreen>
+        <Modal visible={urgeOpen} animationType="fade" transparent
+          onRequestClose={() => setUrgeOpen(false)}>
+          <View style={{ flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.68)', padding: 20 }}>
+            <View style={{ backgroundColor: tokens.surface, borderRadius: 18, padding: 20, gap: 13 }}>
+              <Text style={{ color: tokens.text, fontWeight: '800', fontSize: 21 }}>Pause before adding training</Text>
+              <Text style={{ color: tokens.textMuted, lineHeight: 21 }}>
+                Your prescribed workout is finished. Having energy left does not mean you need to spend it on more training.
+              </Text>
+              {urgeSaved ? <>
+                <Text style={{ color: tokens.text, fontWeight: '700' }}>
+                  Urge recorded. The extra activity was not added or logged as completed.
+                </Text>
+              </> : <>
+                <Text style={{ color: tokens.text, fontWeight: '700' }}>What are you tempted to add?</Text>
+                {([
+                  ['calf', 'Extra calf raises'], ['cycling', 'Cycling'],
+                  ['strength', 'More strength'], ['walking', 'Longer walk'], ['other', 'Something else'],
+                ] as const).map(([value, label]) => <Pressable key={value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: urgeActivity === value }}
+                  onPress={() => setUrgeActivity(value)}
+                  style={{ borderColor: urgeActivity === value ? tokens.accent : tokens.border, borderWidth: 1, padding: 9, borderRadius: 9 }}>
+                  <Text style={{ color: tokens.text }}>{urgeActivity === value ? '● ' : '○ '}{label}</Text>
+                </Pressable>)}
+                <Text style={{ color: tokens.text, fontWeight: '700' }}>Why?</Text>
+                {([
+                  ['energy', 'I still have energy'],
+                  ['faster_progress', 'I want to improve faster'],
+                  ['restless', 'I feel restless'],
+                ] as const).map(([value, label]) => <Pressable key={value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: urgeReason === value }}
+                  onPress={() => setUrgeReason(value)}
+                  style={{ borderColor: urgeReason === value ? tokens.accent : tokens.border, borderWidth: 1, padding: 9, borderRadius: 9 }}>
+                  <Text style={{ color: tokens.text }}>{urgeReason === value ? '● ' : '○ '}{label}</Text>
+                </Pressable>)}
+                {urgeError ? <Text style={{ color: tokens.text }}>{urgeError}</Text> : null}
+                <Pressable disabled={urgeSaving || !user?.id} onPress={() => void saveTrainingUrge()}
+                  style={{ backgroundColor: tokens.accent, borderRadius: 10, padding: 12,
+                    opacity: urgeSaving || !user?.id ? 0.5 : 1 }}>
+                  <Text style={{ color: tokens.canvas, textAlign: 'center', fontWeight: '800' }}>
+                    {urgeSaving ? 'Recording…' : 'Record urge — no extra training'}
+                  </Text>
+                </Pressable>
+              </>}
+              <Pressable onPress={() => setUrgeOpen(false)}
+                style={{ borderWidth: 1, borderColor: tokens.border, padding: 12, borderRadius: 10 }}>
+                <Text style={{ color: tokens.text, fontWeight: '700', textAlign: 'center' }}>Finish at today's ceiling</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
         <WorkoutShareModal summary={completedSummary} visible={shareOpen} onClose={() => setShareOpen(false)} />
       </SafeAreaView>
     );

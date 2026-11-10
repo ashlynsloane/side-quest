@@ -82,7 +82,7 @@ export default function GenerateScreen() {
   const { exercises, customCount } = useExerciseCatalog();
 
   const router = useRouter();
-  const { previewWorkout: workout, setPreviewWorkout, beginWorkout } = useWorkoutContext();
+  const { previewWorkout: workout, setPreviewWorkout } = useWorkoutContext();
   const [workMinutes, setWorkMinutes] = useState<number>(40);
   const [focuses, setFocuses] = useState<BodyRegion[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<EquipmentId[]>(DEFAULT_EQUIPMENT);
@@ -290,8 +290,8 @@ export default function GenerateScreen() {
 
   function startWorkout() {
     if (!workout) return;
-    beginWorkout(workout);
-    router.push('/active-workout' as Href);
+    // Never start a new session without the shared guardrail gate.
+    router.push('/workout-preview' as Href);
   }
 
   const equipmentToShow = showAllEquipment ? allEquipment : QUICK_EQUIPMENT;

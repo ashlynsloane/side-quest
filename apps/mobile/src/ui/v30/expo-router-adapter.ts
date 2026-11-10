@@ -14,10 +14,26 @@ const TAB_ROUTES: Record<SideQuestPrimaryTab, string> = {
   you: '/(tabs)/profile',
 };
 
+/** Match runtime-intent route names to routes actually registered by Expo. */
+const CURRENT_EXPO_PATHS: Record<string, string> = {
+  '/check-in': '/today-check-in',
+  '/train/build': '/generate',
+  '/train/saved': '/favorites',
+  '/workout/preview': '/workout-preview',
+  '/workout-together': '/workout-together',
+};
+
+export function resolveCurrentExpoRoute(pathname: string): string {
+  return CURRENT_EXPO_PATHS[pathname] ?? pathname;
+}
+
 export function createExpoRouterAdapter(router: ExpoLikeRouter): SideQuestRouterAdapter {
   return {
     replaceTab: tab => router.replace?.(TAB_ROUTES[tab]),
-    push: (pathname, params) => router.push(params ? { pathname, params } : pathname),
+    push: (pathname, params) => {
+      const currentPath = resolveCurrentExpoRoute(pathname);
+      router.push(params ? { pathname: currentPath, params } : currentPath);
+    },
   };
 }
 

@@ -1,3 +1,19 @@
+export { evaluateActiveSessionRecovery } from './active-session-recovery';
+export type { ActiveSessionRecoveryDecision } from './active-session-recovery';
+export { requiresActiveWorkoutPause } from './active-workout-restriction';
+export { scopedLiveWorkoutStorageKey, LEGACY_LIVE_WORKOUT_KEY, LIVE_WORKOUT_KEY_PREFIX } from './live-workout-storage-policy';
+export { evaluateWorkoutAuthorizationAge, LIVE_WORKOUT_AUTHORIZATION_MAX_HOURS } from './workout-authorization-expiry';
+export { assessActiveWorkoutMutation } from './active-workout-mutation';
+export type { WorkoutMutationDecision } from './active-workout-mutation';
+export { summarizeTrainingUrges } from './training-urge-insights';
+export type { TrainingUrgeSummary, TrainingUrgeActivity, TrainingUrgeReason } from './training-urge-insights';
+export { planLedgerReconciliation, ledgerEventId } from './training-event-reconciliation';
+export type { LedgerExposure } from './training-event-reconciliation';
+export { affectedTrainingRegions } from './training-region-inference';
+export { assessCrossSportExposure } from './cross-sport-guardrail';
+export type { CrossSportExposure, CrossSportDecision, ExposureDiscipline } from './cross-sport-guardrail';
+export { evaluateTrainingAddition, hasRecordedTrainingLoadOnDate, reconcileDailyCeilingPlan, appendTrainingEvent, completedActivities } from './daily-training-guardrails';
+export type { ActivityDose, DailyTrainingCeiling, ProposedActivity, TrainingEvent, TrainingGuardrailResult, TrainingDecision, TrainingRegion, RecoveryStatus } from './daily-training-guardrails';
 import type {
   BodyRegion,
   EnduranceDiscipline,

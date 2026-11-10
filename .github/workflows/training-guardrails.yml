@@ -1,0 +1,124 @@
+name: Training guardrails integration
+on:
+  pull_request:
+    branches: [sq2-experience-rebuild]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit tracked credential and generated metadata paths
+        run: bash scripts/audit-tracked-sensitive-paths.sh
+      - name: Staging deployment must be explicit and production-safe
+        run: bash scripts/test-staging-training-ledger.sh
+      - name: Guardrail integration contract
+        run: node scripts/audit-training-guardrail-integration.mjs
+      - name: Planner typecheck
+        run: pnpm --dir packages/planner typecheck
+      - name: Mobile typecheck
+        run: pnpm --dir apps/mobile typecheck
+      - name: Planner test suite
+        run: pnpm --dir packages/planner test
+      - name: Mobile guardrail integration tests
+        run: pnpm exec vitest run apps/mobile/test
+
+  repository-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Current V24-V26 feature contracts
+        run: pnpm check:v24
+      - name: All workspace typechecks
+        run: pnpm typecheck
+      - name: All workspace unit tests
+        run: pnpm test
+      - name: Exercise and media validations
+        run: pnpm validate:exercises && pnpm validate:media
+      - name: Runtime core integration contracts
+        run: pnpm check:runtime-core
+
+  cloud-lease-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sidequest_lease_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sidequest_lease_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision isolated mock-auth PostgreSQL
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/workout-lease-ci-setup.sql
+      - name: Execute real Supabase lease migration
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/migrations/20261110150000_training_workout_leases.sql
+      - name: Verify athlete ownership, duplicate starts and expiry
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/workout-lease-ci-assertions.sql
+      - name: Race independent PostgreSQL connections for the same athlete
+        env:
+          PGPASSWORD: postgres
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGDATABASE: sidequest_lease_ci
+        run: bash supabase/tests/workout-lease-concurrency.sh
+      - name: Apply synchronized training ledger and atomic budget migration
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/migrations/20261110190000_authoritative_training_ledger.sql
+      - name: Verify server-side dose, regional recovery and privacy isolation
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/authoritative-ledger-ci-assertions.sql
+      - name: Race synchronized prescription and training-load authorization
+        env:
+          PGPASSWORD: postgres
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGDATABASE: sidequest_lease_ci
+        run: bash supabase/tests/authoritative-ledger-concurrency.sh
+      - name: Apply reviewed correction/retraction migration
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/migrations/20261110210000_reviewed_training_corrections.sql
+      - name: Verify correction decisions, audit isolation and effective dose
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/reviewed-training-corrections-ci-assertions.sql

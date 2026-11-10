@@ -47,9 +47,9 @@ expect('apps/mobile/src/app/pt-profile.tsx', [
   'excludedMovementPatterns: movementPatterns',
 ]);
 expect('apps/mobile/src/app/generate.tsx', [
-  'Protect an area today',
+  'Protect an area',
   '<PainBodyMap',
-  'Movements that hurt today',
+  'Movements that hurt',
   'regionRestrictions: mappedRestrictions.regionRestrictions',
   'excludedMovementPatterns',
 ]);

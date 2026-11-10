@@ -1,0 +1,34 @@
+-- Isolated CI-only stand-in for the Supabase auth schema/roles.
+-- Do not deploy this file to a real Supabase project.
+do $setup$
+begin
+  if not exists (select 1 from pg_roles where rolname='authenticated') then
+    create role authenticated nologin;
+  end if;
+  if not exists (select 1 from pg_roles where rolname='anon') then
+    create role anon nologin;
+  end if;
+  if not exists (select 1 from pg_roles where rolname='service_role') then
+    create role service_role nologin;
+  end if;
+end
+$setup$;
+
+create schema if not exists auth;
+create table if not exists auth.users (id uuid primary key);
+create or replace function auth.role()
+returns text language sql stable as $auth_role$
+  select nullif(current_setting('request.jwt.claim.role', true), '')
+$auth_role$;
+create or replace function auth.uid()
+returns uuid language sql stable as $$
+  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+$$;
+grant usage on schema public to authenticated;
+grant usage on schema auth to authenticated;
+grant execute on function auth.uid() to authenticated;
+insert into auth.users(id) values
+  ('00000000-0000-4000-8000-000000000001'),
+  ('00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000003')
+on conflict do nothing;

@@ -15,7 +15,7 @@ expect('apps/mobile/src/components/workout-editor-modal.tsx', [
   'REPS / SIDE', 'recalculateWorkout', 'Added by athlete before starting.',
 ]);
 expect('apps/mobile/src/app/workout-preview.tsx', [
-  'WorkoutEditorModal', 'Edit workout', 'Start workout', 'setPreviewWorkout(edited)',
+  'WorkoutEditorModal', 'Edit workout', 'Start workout', 'updatePreviewWorkout(edited)',
 ]);
 expect('apps/mobile/src/app/active-workout.tsx', [
   "type Phase = 'work' | 'rest' | 'complete'", 'REST + RECORD', 'Rounds completed',

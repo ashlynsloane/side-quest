@@ -102,3 +102,6 @@ build/
 *.log
 .DS_Store
 ios/Pods/
+
+# Generated Supabase remote link and project metadata (never commit)
+supabase/.temp/

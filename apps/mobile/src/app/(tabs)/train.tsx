@@ -8,13 +8,17 @@ import { V23Card, V23Chip, V23GroupedList, V23Icon, V23PrimaryButton, V23Row, V2
 import { getLatestTrainingBlock, listWorkoutLedgerEntries, type WorkoutLedgerEntry } from '@/services/database';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
+import {
+  navigateRecommendedTraining,
+  resolveRecommendedTrainingRoute,
+} from '@/services/guarded-workout-navigation';
 import type { DesignTokens } from '@/theme';
 
 export default function TrainTab() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { setPreviewWorkout } = useWorkoutContext();
+  const { openPlannedWorkoutPreview } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [lastWorkout, setLastWorkout] = useState<WorkoutLedgerEntry | null>(null);
 
@@ -26,16 +30,25 @@ export default function TrainTab() {
     return () => { live = false; };
   }, []));
 
-  const next = useMemo(() => nextSession(block), [block]);
-  const openNext = () => { if (next) { setPreviewWorkout(next.workout); router.push('/workout-preview' as Href); return; } router.push('/generate' as Href); };
+  const recommended = useMemo(() => resolveRecommendedTrainingRoute(block), [block]);
+  const next = recommended.kind !== 'build' ? recommended.session : null;
+  const isToday = recommended.kind === 'scheduled_today';
+  const openNext = () => navigateRecommendedTraining(recommended, {
+    openPlannedWorkoutPreview,
+    navigate: (route) => router.push(route as Href),
+  });
 
   return <V23Screen>
     <View style={styles.intro}><Text style={styles.pageTitle}>Train</Text><Text style={styles.pageBody}>Strength that fits the rest of your training.</Text></View>
 
     <V23Card elevated style={styles.heroCard}>
-      <View style={styles.heroTop}><View style={styles.heroCopy}><Text style={styles.kicker}>Recommended today</Text><Text style={styles.title}>{next?.title ?? 'Full-body strength'}</Text><Text style={styles.meta}>{next ? `${Math.round(next.workout.totalWorkSeconds / 60)} min · ${capitalize(next.intendedLoad)}` : '45–60 min · Moderate'}</Text></View><View style={styles.heroIcon}><V23Icon name="train" color={tokens.accent} size={28} /></View></View>
-      <Text style={styles.heroReason}>{next ? 'Placed to support the current block without crowding key endurance work.' : 'Generate a balanced session around your time, equipment, and restrictions.'}</Text>
-      <V23PrimaryButton onPress={openNext} icon="play">{next ? 'Start recommended workout' : 'Generate a workout'}</V23PrimaryButton>
+      <View style={styles.heroTop}><View style={styles.heroCopy}><Text style={styles.kicker}>{isToday ? 'Recommended today' : next ? 'Upcoming session' : 'Available training'}</Text><Text style={styles.title}>{next?.title ?? 'Full-body strength'}</Text><Text style={styles.meta}>{next ? `${Math.round(next.workout.totalWorkSeconds / 60)} min · ${capitalize(next.intendedLoad)}` : '45–60 min · Moderate'}</Text></View><View style={styles.heroIcon}><V23Icon name="train" color={tokens.accent} size={28} /></View></View>
+      <Text style={styles.heroReason}>{isToday
+        ? 'Placed to support your current training block, with the planned session identity retained.'
+        : next
+          ? 'This workout is planned for a future date. Review the calendar rather than starting it early.'
+          : 'Generate a balanced session around your time, equipment, and restrictions.'}</Text>
+      <V23PrimaryButton onPress={openNext} icon="play">{isToday ? 'Review today\'s workout' : next ? 'View upcoming plan' : 'Generate a workout'}</V23PrimaryButton>
     </V23Card>
 
     <V23SectionHeader>Choose a workout</V23SectionHeader>
@@ -54,7 +67,7 @@ export default function TrainTab() {
 }
 
 function Bullet({ children, tokens }: { children: string; tokens: DesignTokens }) { return <View style={stylesStatic.bulletRow}><View style={[stylesStatic.bulletDot, { backgroundColor: tokens.accent }]} /><Text style={[stylesStatic.bulletText, { color: tokens.text }]}>{children}</Text></View>; }
-function nextSession(block: TrainingBlockPlan | null): PlannedStrengthSession | null { if (!block) return null; const today = new Date().toISOString().slice(0, 10); return block.weeks.flatMap((week) => week.sessions).filter((session) => session.date >= today && !['completed', 'skipped'].includes(session.completionStatus)).sort((a, b) => a.date.localeCompare(b.date))[0] ?? null; }
+
 function capitalize(value: string) { return value.charAt(0).toUpperCase() + value.slice(1).replaceAll('_', ' '); }
 
 const stylesStatic = StyleSheet.create({ bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 9 }, bulletDot: { width: 5, height: 5, borderRadius: 3 }, bulletText: { fontSize: 15, lineHeight: 21 } });

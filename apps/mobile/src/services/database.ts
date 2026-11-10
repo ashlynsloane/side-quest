@@ -400,6 +400,28 @@ export async function initializeDatabase(): Promise<void> {
       ON training_adjustment_history(updated_at DESC);
 
 
+    CREATE TABLE IF NOT EXISTS daily_training_ceilings (
+      athlete_id TEXT NOT NULL,
+      training_date TEXT NOT NULL,
+      ceiling_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (athlete_id, training_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS training_guardrail_events (
+      athlete_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      training_date TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      PRIMARY KEY (athlete_id, id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_training_guardrail_events_day
+      ON training_guardrail_events(athlete_id, training_date, occurred_at);
+
     CREATE TABLE IF NOT EXISTS cloud_operation_queue (
       id TEXT PRIMARY KEY NOT NULL,
       kind TEXT NOT NULL,
@@ -2877,7 +2899,7 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue'] as const;
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue','daily_training_ceilings','training_guardrail_events'] as const;
 export async function exportLocalData():Promise<Record<string,unknown[]>>{await initializeDatabase();const output:Record<string,unknown[]>={};for(const table of EXPORT_TABLES){try{output[table]=await db.getAllAsync<Record<string,unknown>>(`SELECT * FROM ${table}`)}catch{output[table]=[]}}return output;}
 export async function deleteAllLocalData():Promise<void>{await initializeDatabase();await db.withTransactionAsync(async()=>{for(const table of EXPORT_TABLES){try{await db.runAsync(`DELETE FROM ${table}`)}catch{}}});}
 export async function countCompletedWorkouts():Promise<number>{await initializeDatabase();const row=await db.getFirstAsync<{total:number}>('SELECT COUNT(*) AS total FROM workout_ledger');return row?.total??0;}
@@ -2898,4 +2920,239 @@ export async function getEnduranceTrainingBalanceBetween({
     from,
     to,
   );
+}
+
+
+// Daily ceilings and assessment events are persisted in the athlete's SQLite database.
+// Event IDs are unique and all retries use INSERT OR IGNORE; planned workouts
+// must never be inferred to have been performed.
+export async function getStoredDailyTrainingCeiling(
+  athleteId: string, trainingDate: string,
+): Promise<import('@circuit/planner').DailyTrainingCeiling | null> {
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
+  await initializeDatabase();
+  const row = await db.getFirstAsync<{ ceiling_json: string }>(
+    'SELECT ceiling_json FROM daily_training_ceilings WHERE athlete_id = ? AND training_date = ?',
+    athleteId, trainingDate,
+  );
+  if (!row) return null;
+  try {
+    const result = JSON.parse(row.ceiling_json) as import('@circuit/planner').DailyTrainingCeiling;
+    if (result.date !== trainingDate || !Array.isArray(result.planned) || !result.recovery
+      || typeof result.restrictUnplanned !== 'boolean') {
+      throw new Error('Malformed daily training ceiling');
+    }
+    return result;
+  } catch {
+    // Corruption is not equivalent to an absent plan. An absent plan permits
+    // a documented discretionary start; corruption must prevent authorization.
+    throw new Error('Stored training ceiling is unreadable. Training authorization requires a data repair.');
+  }
+}
+
+export async function storeDailyTrainingCeiling(
+  athleteId: string,
+  ceiling: import('@circuit/planner').DailyTrainingCeiling,
+  overwrite = false,
+): Promise<void> {
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(ceiling.date) || !Array.isArray(ceiling.planned)) {
+    throw new Error('Invalid daily training ceiling');
+  }
+  await initializeDatabase();
+  const now = new Date().toISOString();
+  const statement = overwrite
+    ? `INSERT INTO daily_training_ceilings
+       (athlete_id, training_date, ceiling_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(athlete_id, training_date) DO UPDATE SET
+       ceiling_json = excluded.ceiling_json, updated_at = excluded.updated_at`
+    : `INSERT OR IGNORE INTO daily_training_ceilings
+       (athlete_id, training_date, ceiling_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`;
+  await db.runAsync(statement, athleteId, ceiling.date, JSON.stringify(ceiling), now, now);
+}
+
+export async function appendStoredTrainingGuardrailEvent(
+  athleteId: string, event: import('@circuit/planner').TrainingEvent,
+  trainingDate: string,
+): Promise<void> {
+  if (!athleteId || !event.id || !event.occurredAt ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) throw new Error('Invalid training guardrail event');
+  await initializeDatabase();
+  await db.runAsync(
+    `INSERT OR IGNORE INTO training_guardrail_events
+     (athlete_id, id, training_date, kind, occurred_at, event_json)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    athleteId, event.id, trainingDate, event.kind, event.occurredAt, JSON.stringify(event),
+  );
+}
+
+export async function listStoredTrainingGuardrailEvents(
+  athleteId: string, trainingDate: string,
+): Promise<import('@circuit/planner').TrainingEvent[]> {
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{ event_json: string }>(
+    'SELECT event_json FROM training_guardrail_events WHERE athlete_id = ? AND training_date = ? ORDER BY occurred_at, id',
+    athleteId, trainingDate,
+  );
+  return rows.map((row) => {
+    try {
+      const event = JSON.parse(row.event_json) as import('@circuit/planner').TrainingEvent;
+      if (!event || typeof event.id !== 'string' || !event.id ||
+          typeof event.occurredAt !== 'string' ||
+          !['prescribed','completed','unplanned','override','recovery','assessment','retracted','urge'].includes(event.kind)) {
+        throw new Error('Malformed training event');
+      }
+      return event;
+    } catch {
+      // Never drop an unreadable completed-activity row: that could restore
+      // a budget the athlete already used.
+      throw new Error('Stored training history is unreadable. Correct the record before increasing exercise.');
+    }
+  });
+}
+
+
+/**
+ * Atomically patch only explicitly assessed regions without overwriting
+ * the current plan, pause flag, or other athletes' readiness data.
+ */
+export async function saveObservedTrainingRecovery(
+  athleteId: string,
+  trainingDate: string,
+  updates: Partial<Record<import('@circuit/planner').TrainingRegion, import('@circuit/planner').RecoveryStatus>>,
+): Promise<void> {
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) {
+    throw new Error('Invalid athlete or training date');
+  }
+  const regions = ['general', 'achilles', 'upper_back'] as const;
+  const statuses = ['stable', 'uncertain', 'worse', 'red_flag'] as const;
+  const touched = regions.filter((region) => updates[region] !== undefined);
+  if (!touched.length || touched.some((region) => !statuses.includes(updates[region]!))) {
+    throw new Error('Specify a valid recovery status for at least one region');
+  }
+  await initializeDatabase();
+  await db.withExclusiveTransactionAsync(async (transaction) => {
+    const row = await transaction.getFirstAsync<{ ceiling_json: string }>(
+      'SELECT ceiling_json FROM daily_training_ceilings WHERE athlete_id = ? AND training_date = ?',
+      athleteId, trainingDate,
+    );
+    if (!row) throw new Error('Daily prescription is missing; update your plan before reporting recovery');
+    const existing = JSON.parse(row.ceiling_json) as import('@circuit/planner').DailyTrainingCeiling;
+    if (existing.date !== trainingDate) throw new Error('Stored training date mismatch');
+    const now = new Date().toISOString();
+    const next: import('@circuit/planner').DailyTrainingCeiling = {
+      ...existing,
+      recovery: { ...existing.recovery, ...updates },
+      recoveryObservedAt: {
+        ...existing.recoveryObservedAt,
+        ...Object.fromEntries(touched.map((region) => [region, now])),
+      },
+    };
+    await transaction.runAsync(
+      'UPDATE daily_training_ceilings SET ceiling_json = ?, updated_at = ? WHERE athlete_id = ? AND training_date = ?',
+      JSON.stringify(next), now, athleteId, trainingDate,
+    );
+    const eventId = `recovery:${trainingDate}:${now}:${Math.random().toString(36).slice(2)}`;
+    await transaction.runAsync(
+      `INSERT INTO training_guardrail_events
+       (athlete_id, id, training_date, kind, occurred_at, event_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      athleteId, eventId, trainingDate, 'recovery', now,
+      JSON.stringify({
+        id: eventId, kind: 'recovery', occurredAt: now,
+        trainingDate, note: JSON.stringify({ observed: Object.fromEntries(touched.map((region) => [region, updates[region]])) }),
+      }),
+    );
+  });
+}
+
+
+/**
+ * Strict read path for training authorization. General-purpose UI queries may
+ * tolerate malformed legacy rows, but a guardrail must never ignore them.
+ */
+export async function listWorkoutLedgerEntriesForGuardrails({
+  from, to, limit = 501, offset = 0,
+}: { from: string; to: string; limit?: number; offset?: number }): Promise<Array<{
+  id: string;
+  workout?: GeneratedWorkout;
+  startedAt: string;
+  completedAt: string;
+  completionFraction: number;
+  plannedSessionId?: string;
+  updatedAt: string;
+}>> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 501
+      || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid historical training page.');
+  }
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{
+    id: string; workout_json: string | null;
+    started_at: string; completed_at: string; completion_fraction: number;
+    planned_session_id: string | null; updated_at: string;
+  }>(
+    `SELECT id, workout_json, started_at, completed_at,
+       completion_fraction, planned_session_id, updated_at
+     FROM workout_ledger WHERE completed_at >= ? AND completed_at <= ?
+     ORDER BY completed_at DESC, id DESC LIMIT ? OFFSET ?`,
+    from, to, limit, offset,
+  );
+  return rows.map((row) => {
+    try {
+      const workout = row.workout_json ? JSON.parse(row.workout_json) as GeneratedWorkout : undefined;
+      if (!row.id || !Number.isFinite(row.completion_fraction) ||
+          row.completion_fraction < 0 || row.completion_fraction > 1 ||
+          !Number.isFinite(Date.parse(row.started_at)) ||
+          !Number.isFinite(Date.parse(row.completed_at)) || !row.updated_at ||
+          (workout && (!workout.id ||
+            !Number.isFinite(workout.estimatedElapsedSeconds) ||
+            workout.estimatedElapsedSeconds <= 0 ||
+            !Array.isArray(workout.stations)))) {
+        throw new Error('Invalid workout ledger fields');
+      }
+      return {
+        id: row.id, workout, startedAt: row.started_at,
+        completedAt: row.completed_at, completionFraction: row.completion_fraction,
+        plannedSessionId: row.planned_session_id ?? undefined,
+        updatedAt: row.updated_at,
+      };
+    } catch {
+      throw new Error('Workout history contains an unreadable entry. Training approval requires a history repair.');
+    }
+  });
+}
+
+/** Fail closed if any imported session in the queried range is malformed. */
+export async function listEnduranceActivitiesForGuardrails({
+  from, to, limit = 501, offset = 0,
+}: { from: string; to: string; limit?: number; offset?: number }): Promise<EnduranceActivity[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 501
+      || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid historical training page.');
+  }
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{ activity_json: string; start_at: string }>(
+    `SELECT activity_json, start_at FROM endurance_activities
+     WHERE start_at >= ? AND start_at <= ? AND deleted_at IS NULL
+     ORDER BY start_at DESC, id DESC LIMIT ? OFFSET ?`,
+    from, to, limit, offset,
+  );
+  return rows.map((row) => {
+    try {
+      const item = JSON.parse(row.activity_json) as EnduranceActivity;
+      if (!item || !item.id || item.startAt !== row.start_at ||
+          !Number.isFinite(Date.parse(item.startAt)) ||
+          !Number.isFinite(item.movingTimeSeconds) ||
+          item.movingTimeSeconds < 0 ||
+          !['run', 'bike', 'swim', 'strength', 'hiit'].includes(item.discipline)) {
+        throw new Error('Invalid endurance activity');
+      }
+      return item;
+    } catch {
+      throw new Error('Imported training contains an unreadable entry. Review the import before starting new loading.');
+    }
+  });
 }
