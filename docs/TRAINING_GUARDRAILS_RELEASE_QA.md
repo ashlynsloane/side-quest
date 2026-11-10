@@ -134,6 +134,27 @@ Native app-state and Expo-SQLite behavior still require on-device verification.
 | G46 | App killed after a successful checkpoint write and restarted | Same athlete restores the saved workout; another profile does not |
 | G47 | Leave app open but put device into foreground after new restriction saved | Immediate regional safety recheck occurs |
 
+## Cloud lease and native-emulator staging scenarios
+
+The PostgreSQL CI job executes a mock-authenticated database, the actual
+migration, and five independent-connection acquisition races. The client
+simulates lease renewal and failures in Vitest. **No real Supabase staging
+deployment or Android emulator test has been executed in this work.**
+
+| ID | Scenario | Required result |
+| --- | --- | --- |
+| G48 | Same cloud identity starts on phone A and B simultaneously | Exactly one server lease is granted; other device cannot start |
+| G49 | Cloud lease expires or renewal fails after going offline | Active timer and progression pause, completed work remains saveable |
+| G50 | Relaunch cloud account with a saved valid lease | Server renews original token before playback is unblocked |
+| G51 | Phone B joins shared room while same cloud account has an active solo lease on A | Room participant cannot begin without a second successful lease, so B remains blocked |
+| G52 | Shared session global clock finishes before phone B verifies a lease | No automatic full-completion record for an unverified participant |
+| G53 | Shared session reports worsening Achilles/back symptoms | Participant stops and may save only the prior portion, other phones keep independent clock |
+| G54 | Authenticated client tries direct SQL read/update or another device token | Database refuses unauthorized access or renewal |
+| G55 | Manually execute Android release startup smoke workflow | Native APK builds, launches, remains alive, and emits no matching fatal crash |
+| G56 | One device runs an older app without cloud locks enabled | Product cannot claim global enforcement; stage rollout requires all relevant devices protected |
+
+Full rollout details and known limits: [Cloud Workout Lease](CLOUD_WORKOUT_LEASE_ROLLOUT.md).
+
 ## Behavioral acceptance criteria
 
 1. The UI must not imply that an unused budget must be spent.
