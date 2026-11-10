@@ -400,6 +400,28 @@ export async function initializeDatabase(): Promise<void> {
       ON training_adjustment_history(updated_at DESC);
 
 
+    CREATE TABLE IF NOT EXISTS daily_training_ceilings (
+      athlete_id TEXT NOT NULL,
+      training_date TEXT NOT NULL,
+      ceiling_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (athlete_id, training_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS training_guardrail_events (
+      athlete_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      training_date TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      PRIMARY KEY (athlete_id, id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_training_guardrail_events_day
+      ON training_guardrail_events(athlete_id, training_date, occurred_at);
+
     CREATE TABLE IF NOT EXISTS cloud_operation_queue (
       id TEXT PRIMARY KEY NOT NULL,
       kind TEXT NOT NULL,
@@ -2898,4 +2920,76 @@ export async function getEnduranceTrainingBalanceBetween({
     from,
     to,
   );
+}
+
+
+// Daily ceilings and assessment events are persisted in the athlete's SQLite database.
+// Event IDs are unique and all retries use INSERT OR IGNORE; planned workouts
+// must never be inferred to have been performed.
+export async function getStoredDailyTrainingCeiling(
+  athleteId: string, trainingDate: string,
+): Promise<import('@circuit/planner').DailyTrainingCeiling | null> {
+  if (!athleteId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
+  await initializeDatabase();
+  const row = await db.getFirstAsync<{ ceiling_json: string }>(
+    'SELECT ceiling_json FROM daily_training_ceilings WHERE athlete_id = ? AND training_date = ?',
+    athleteId, trainingDate,
+  );
+  if (!row) return null;
+  try {
+    const result = JSON.parse(row.ceiling_json) as import('@circuit/planner').DailyTrainingCeiling;
+    return result.date === trainingDate && Array.isArray(result.planned) && !!result.recovery ? result : null;
+  } catch { return null; }
+}
+
+export async function storeDailyTrainingCeiling(
+  athleteId: string,
+  ceiling: import('@circuit/planner').DailyTrainingCeiling,
+  overwrite = false,
+): Promise<void> {
+  if (!athleteId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(ceiling.date) || !Array.isArray(ceiling.planned)) {
+    throw new Error('Invalid daily training ceiling');
+  }
+  await initializeDatabase();
+  const now = new Date().toISOString();
+  const statement = overwrite
+    ? `INSERT INTO daily_training_ceilings
+       (athlete_id, training_date, ceiling_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(athlete_id, training_date) DO UPDATE SET
+       ceiling_json = excluded.ceiling_json, updated_at = excluded.updated_at`
+    : `INSERT OR IGNORE INTO daily_training_ceilings
+       (athlete_id, training_date, ceiling_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`;
+  await db.runAsync(statement, athleteId, ceiling.date, JSON.stringify(ceiling), now, now);
+}
+
+export async function appendStoredTrainingGuardrailEvent(
+  athleteId: string, event: import('@circuit/planner').TrainingEvent,
+  trainingDate: string,
+): Promise<void> {
+  if (!athleteId || !event.id || !event.occurredAt ||
+      !/^\\d{4}-\\d{2}-\\d{2}$/.test(trainingDate)) throw new Error('Invalid training guardrail event');
+  await initializeDatabase();
+  await db.runAsync(
+    `INSERT OR IGNORE INTO training_guardrail_events
+     (athlete_id, id, training_date, kind, occurred_at, event_json)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    athleteId, event.id, trainingDate, event.kind, event.occurredAt, JSON.stringify(event),
+  );
+}
+
+export async function listStoredTrainingGuardrailEvents(
+  athleteId: string, trainingDate: string,
+): Promise<import('@circuit/planner').TrainingEvent[]> {
+  if (!athleteId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{ event_json: string }>(
+    'SELECT event_json FROM training_guardrail_events WHERE athlete_id = ? AND training_date = ? ORDER BY occurred_at, id',
+    athleteId, trainingDate,
+  );
+  return rows.flatMap((row) => {
+    try { return [JSON.parse(row.event_json) as import('@circuit/planner').TrainingEvent]; }
+    catch { return []; }
+  });
 }
