@@ -41,7 +41,7 @@ Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `
 ## Release blockers / remaining risks
 
 - **External endurance activities:** imported run/bike/swim/HIIT sessions and saved strength sessions now trigger rolling 48-hour tissue-overlap cautions, but are not converted to equivalent strength minutes or modeled with validated cumulative injury load. Walking without an imported session and missing data remain invisible. Cross-sport cumulative tissue exposure needs a dedicated model.
-- **Cross-device synchronization** of guardrail ceilings/events is not implemented; the SQLite ledger is local. Do not advertise synchronized limits.
+- **Cross-device synchronization** of guardrail ceilings/events is not implemented; the SQLite ledger is local. Authenticated active-session leases now have an off-by-default server-coordinated staging implementation, but synchronized load/recovery evidence and sequential activity prevention are still missing.
 - **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately. The start gate now reconciles saved workouts into missing events, but interruption during the active session, deleted-workout corrections, and legacy entries are now covered by planner unit tests; on-device database and offline recovery scenarios still require integration testing.
 - **Recovery evidence:** the timestamped regional check-in is self-reported and not clinician clearance. A stable symptom response does not guarantee a safe increase.
 - **Override workflow:** discretionary exceptions require a recorded reason, while mandatory recovery and prescribed loading constraints block workout starts. Exercise additions outside the app, imported activities, and every possible collaboration entry point need further audit. Consent prompts do not physically prevent athletes exercising.
@@ -65,6 +65,25 @@ Previously ambiguous exercise catalog identities were resolved by retaining
 the canonical barbell Romanian deadlift, barbell bench press, and cable chop
 definitions and removing redundant gym-expansion copies. Duplicate metadata
 could otherwise make the tissue-loading inference non-deterministic.
+
+## Cloud-profile active-session exclusivity (staged, OFF by default)
+
+A separate Supabase migration and an opt-in `EXPO_PUBLIC_DISTRIBUTED_WORKOUT_LOCKS`
+flag now provide server-coordinated, 90-second active-workout leases for
+authenticated cloud accounts. Solo and shared workout screens renew leases
+every 30 seconds and on foreground, and pause when verification fails.
+Local profiles have no shared cloud identity. The SQL migration has been
+verified in PostgreSQL CI, but **has not been deployed to the live project**;
+the opt-in flag must remain off until staging and real-device checks pass.
+
+**This is not cross-device daily loading enforcement.** Completion and
+regional recovery events remain local to each device. The same athlete
+could still sequentially train on device B after finishing on device A
+without device B observing that completed dose. Do not claim synchronized
+ceilings or safe return-to-sport decisions until an authoritative remote
+activity ledger and recovery synchronization exist.
+
+See [cloud lease rollout and guarantees](CLOUD_WORKOUT_LEASE_ROLLOUT.md).
 
 ## Manual QA
 
