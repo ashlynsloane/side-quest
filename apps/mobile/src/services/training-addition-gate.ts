@@ -12,7 +12,7 @@ import {
   type TrainingRegion,
 } from '@circuit/planner';
 import type { GeneratedWorkout, TrainingCheckIn } from '@circuit/domain';
-import { getActiveTrainingCheckIn, getLatestTrainingBlock, listEnduranceActivities, listWorkoutLedgerEntries } from './database';
+import { getActiveTrainingCheckIn, getLatestTrainingBlock, listEnduranceActivitiesForGuardrails, listWorkoutLedgerEntriesForGuardrails } from './database';
 import { loadDailyCeiling, loadTrainingEvents, recordTrainingEvent, saveDailyCeiling } from './training-guardrail-storage';
 
 export interface TrainingAdditionRequest {
@@ -107,7 +107,7 @@ export async function reconcileCompletedWorkoutHistory(userId: string, date: str
   const end = new Date(beginning.getTime());
   end.setDate(end.getDate() + 1);
   const [rows, history] = await Promise.all([
-    listWorkoutLedgerEntries({
+    listWorkoutLedgerEntriesForGuardrails({
       from: beginning.toISOString(),
       to: new Date(end.getTime() - 1).toISOString(),
       limit: 501,
@@ -152,7 +152,7 @@ async function crossSportOverlapFor(
   const beginning = new Date(`${date}T00:00:00`);
   const end = new Date(beginning.getTime());
   end.setDate(end.getDate() + 1);
-  const imported = await listEnduranceActivities({
+  const imported = await listEnduranceActivitiesForGuardrails({
     from: beginning.toISOString(),
     to: new Date(end.getTime() - 1).toISOString(),
     limit: 501,
