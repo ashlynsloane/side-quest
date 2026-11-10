@@ -20,6 +20,8 @@ export interface DailyTrainingCeiling {
   recovery: Partial<Record<TrainingRegion, RecoveryStatus>>;
   /** Requires a new prescription before unplanned exercise can be added. */
   restrictUnplanned: boolean;
+  /** A current explicit no-training check-in blocks starts and cannot be overridden. */
+  pauseTraining?: boolean;
 }
 
 export interface ProposedActivity extends ActivityDose {
@@ -41,6 +43,13 @@ export function evaluateTrainingAddition(
   if (!proposed.activity.trim() || !proposed.regions.length ||
       [proposed.minutes, proposed.sets].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))) {
     return { decision: 'stop', reasons: ['Invalid activity dose or missing affected regions.'], requiresReassessment: true };
+  }
+  if (ceiling.pauseTraining) {
+    return {
+      decision: 'stop',
+      reasons: ['An active check-in pauses training. Update the restriction before starting a workout.'],
+      requiresReassessment: true,
+    };
   }
   const regions = [...new Set<TrainingRegion>([...proposed.regions, 'general'])];
   if (regions.some((region) => ceiling.recovery[region] === 'red_flag')) {
