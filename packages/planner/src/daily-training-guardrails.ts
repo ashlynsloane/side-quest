@@ -108,15 +108,23 @@ export function evaluateTrainingAddition(
     (event.kind === 'completed' || event.kind === 'unplanned')
     && event.activity?.activity === proposed.activity
     && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
-    && (!planned.sessionId || event.activity?.sessionId === planned.sessionId)
   );
   const usedMinutes = performed.reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
   const usedSets = performed.reduce((sum, event) => sum + (event.activity?.sets ?? 0), 0);
-  if (usedMinutes >= (planned.minutes ?? Infinity) || usedSets >= (planned.sets ?? Infinity)) {
+  // Per-session bounds are checked above; the remaining daily budget includes
+  // *all* logged exposures of the same activity, including unscheduled ones.
+  const dailyPlans = ceiling.planned.filter((item) => item.activity === proposed.activity);
+  const dailyMinuteLimit = dailyPlans.every((item) => item.minutes !== undefined)
+    ? dailyPlans.reduce((sum, item) => sum + (item.minutes ?? 0), 0)
+    : Infinity;
+  const dailySetLimit = dailyPlans.every((item) => item.sets !== undefined)
+    ? dailyPlans.reduce((sum, item) => sum + (item.sets ?? 0), 0)
+    : Infinity;
+  if (usedMinutes >= dailyMinuteLimit || usedSets >= dailySetLimit) {
     return { decision: 'defer', reasons: ['The prescribed activity ceiling has already been reached today.'], requiresReassessment: true };
   }
-  if ((planned.minutes !== undefined && (proposed.minutes ?? 0) + usedMinutes > planned.minutes) ||
-      (planned.sets !== undefined && (proposed.sets ?? 0) + usedSets > planned.sets)) {
+  if ((dailyMinuteLimit !== Infinity && (proposed.minutes ?? 0) + usedMinutes > dailyMinuteLimit) ||
+      (dailySetLimit !== Infinity && (proposed.sets ?? 0) + usedSets > dailySetLimit)) {
     return { decision: 'modify', reasons: ["Previously completed training uses part of today's budget. Reduce the proposed dose."], requiresReassessment: false };
   }
   return { decision: 'allow', reasons: ['Within the remaining planned dose and reported recovery constraints.'], requiresReassessment: false };
