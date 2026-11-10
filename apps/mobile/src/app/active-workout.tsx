@@ -223,6 +223,7 @@ export default function ActiveWorkoutScreen() {
 
   useEffect(() => {
     if (!workout || !sessionHydrated || phase === 'complete') return;
+    const athleteId = user.id;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       setRunning(false);
@@ -242,7 +243,7 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
-      }, user.id).catch((cause) => {
+      }, athleteId).catch((cause) => {
         setRunning(false);
         setResumeNotice(`Workout checkpoint was not saved: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
