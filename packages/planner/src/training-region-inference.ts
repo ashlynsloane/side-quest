@@ -42,12 +42,12 @@ export function affectedTrainingRegions(workout: GeneratedWorkout): TrainingRegi
       continue;
     }
     for (const load of exercise.bodyRegions) {
-      if (load.load === 'none') continue;
+      if (load.load === 0) continue;
       if (ACHILLES_REGIONS.has(load.region)) regions.add('achilles');
       if (BACK_REGIONS.has(load.region)) regions.add('upper_back');
     }
     for (const load of exercise.jointLoads) {
-      if (load.load === 'none') continue;
+      if (load.load === 0) continue;
       if (ACHILLES_JOINTS.has(load.region)) regions.add('achilles');
       if (BACK_JOINTS.has(load.region)) regions.add('upper_back');
     }
