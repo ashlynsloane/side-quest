@@ -6,7 +6,7 @@ import {
   storeDailyTrainingCeiling,
   saveObservedTrainingRecovery,
 } from './database';
-import { publishRemoteRecovery } from './server-training-ledger';
+import { acknowledgeRemoteRecovery, publishRemoteRecovery } from './server-training-ledger';
 
 /**
  * Durable storage lives in the same per-athlete SQLite database as workouts.
@@ -46,7 +46,12 @@ export async function recordObservedRecovery(
   // If network/authentication fails, neither this device nor another should
   // interpret an unsynchronized 'stable' report as cloud clearance.
   if (options.syncCloud) {
-    await publishRemoteRecovery(userId, date, updates);
+    // Keep the upload journal until the same explicit observation has been
+    // stored locally. A retry must not fabricate a new server observation time.
+    const eventId = await publishRemoteRecovery(userId, date, updates);
+    await saveObservedTrainingRecovery(userId, date, updates);
+    acknowledgeRemoteRecovery(userId, date, eventId);
+    return;
   }
   await saveObservedTrainingRecovery(userId, date, updates);
 }
