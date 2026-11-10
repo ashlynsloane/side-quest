@@ -245,4 +245,23 @@ describe('daily training ceiling', () => {
     expect(result.overrideAllowed).not.toBe(false);
   });
 
+  it('requires a new prescription before bonus activity after work has already been completed', () => {
+    const history = [{
+      id: 'morning-session', occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09', kind: 'completed' as const,
+      activity: { activity: 'strength', minutes: 30, regions: ['general' as const] },
+    }];
+    const afterRecovery = { ...baseline, recoveryObservedAt: { general: '2026-11-09T18:00:00Z' } };
+    const extra = evaluateTrainingAddition(afterRecovery,
+      { activity: 'cycling', minutes: 15, regions: ['general'], scheduled: false }, history);
+    expect(extra.decision).toBe('defer');
+    expect(extra.overrideAllowed).toBe(false);
+  });
+  it('allows documentation-based discretion on a genuinely unplanned first session', () => {
+    const first = evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 20, regions: ['general'], scheduled: false });
+    expect(first.decision).toBe('defer');
+    expect(first.overrideAllowed).toBe(true);
+  });
+
 });
