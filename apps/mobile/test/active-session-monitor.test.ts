@@ -5,10 +5,10 @@ import type { ActiveSessionRecoveryDecision } from '@circuit/planner';
 const ok: ActiveSessionRecoveryDecision = { pause: false, reasons: [], affectedRegions: [] };
 const bad: ActiveSessionRecoveryDecision = { pause: true, reasons: ['Achilles worsening'], affectedRegions: [] };
 let foreground!: () => void;
-let unsubscribe: ReturnType<typeof vi.fn>;
+let unsubscribe = vi.fn(() => undefined);
 beforeEach(() => {
   vi.useFakeTimers();
-  unsubscribe = vi.fn();
+  unsubscribe = vi.fn(() => undefined);
 });
 afterEach(() => {
   vi.useRealTimers();
