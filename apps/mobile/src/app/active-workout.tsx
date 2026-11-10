@@ -54,7 +54,8 @@ import {
   type LiveWorkoutRestEntry as RestEntry,
 } from '@/services/active-workout-persistence';
 import { publishWorkoutActivity } from '@/services/social';
-import { recordActualWorkoutCompletion } from '@/services/training-addition-gate';
+import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
+import { recordTrainingEvent } from '@/services/training-guardrail-storage';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import {
   getWorkoutCuePreferences,
@@ -106,6 +107,12 @@ export default function ActiveWorkoutScreen() {
   const [cuePreferences, setCuePreferences] = useState<WorkoutCuePreferences>(() => getWorkoutCuePreferences());
   const [cueSettingsOpen, setCueSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [urgeOpen, setUrgeOpen] = useState(false);
+  const [urgeActivity, setUrgeActivity] = useState<'calf' | 'cycling' | 'strength' | 'walking' | 'other'>('calf');
+  const [urgeReason, setUrgeReason] = useState<'energy' | 'faster_progress' | 'restless'>('energy');
+  const [urgeSaved, setUrgeSaved] = useState(false);
+  const [urgeSaving, setUrgeSaving] = useState(false);
+  const [urgeError, setUrgeError] = useState<string | null>(null);
   const startedAt = useRef(new Date().toISOString());
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
@@ -440,6 +447,32 @@ export default function ActiveWorkoutScreen() {
     clearActiveWorkout(); router.replace('/' as Href);
   }
 
+  async function saveTrainingUrge() {
+    if (!user?.id || urgeSaving) return;
+    setUrgeSaving(true);
+    setUrgeError(null);
+    try {
+      const now = new Date();
+      await recordTrainingEvent(user.id, {
+        id: `urge:${activeWorkout.id}:${now.toISOString()}:${Math.random().toString(36).slice(2)}`,
+        occurredAt: now.toISOString(),
+        kind: 'urge',
+        note: JSON.stringify({
+          category: 'post_workout_add_more',
+          workoutId: activeWorkout.id,
+          plannedSessionId: activePlanLink?.sessionId,
+          activityConsidered: urgeActivity,
+          reason: urgeReason,
+        }),
+      }, localTrainingDate(now));
+      setUrgeSaved(true);
+    } catch (cause) {
+      setUrgeError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setUrgeSaving(false);
+    }
+  }
+
   async function saveFavorite() { await saveFavoriteWorkout(activeWorkout); setSaved(true); }
   async function recordFeedback(value: WorkoutDifficultyFeedback) { await saveWorkoutFeedback({ workoutInstanceId: `${activeWorkout.id}_${completedAt.current ?? startedAt.current}`, workoutId: activeWorkout.id, difficulty: value }); setFeedback(value); if (cuePreferences.hapticsEnabled) void Haptics.selectionAsync(); }
 
@@ -490,14 +523,7 @@ export default function ActiveWorkoutScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="I feel tempted to add more training"
-              onPress={() => Alert.alert(
-                'Pause before adding training',
-                'Your session is complete. Additional training is not required to make progress. Record any symptoms now and reconsider new loading after your next recovery check.',
-                [
-                  { text: 'Keep today complete', style: 'default' },
-                  { text: 'Log symptoms', onPress: () => router.push('/today-check-in' as Href) },
-                ],
-              )}
+              onPress={() => { setUrgeOpen(true); setUrgeSaved(false); setUrgeError(null); }}
               style={styles.outlineButton}
             >
               <Text style={styles.outlineButtonText}>I want to do more</Text>
@@ -533,6 +559,58 @@ export default function ActiveWorkoutScreen() {
             <Text style={styles.primaryButtonText}>{completionSaved ? 'Return to Today' : 'Saving workout…'}</Text>
           </Pressable>
         </KeyboardSafeScreen>
+        <Modal visible={urgeOpen} animationType="fade" transparent
+          onRequestClose={() => setUrgeOpen(false)}>
+          <View style={{ flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.68)', padding: 20 }}>
+            <View style={{ backgroundColor: tokens.surface, borderRadius: 18, padding: 20, gap: 13 }}>
+              <Text style={{ color: tokens.text, fontWeight: '800', fontSize: 21 }}>Pause before adding training</Text>
+              <Text style={{ color: tokens.textMuted, lineHeight: 21 }}>
+                Your prescribed workout is finished. Having energy left does not mean you need to spend it on more training.
+              </Text>
+              {urgeSaved ? <>
+                <Text style={{ color: tokens.text, fontWeight: '700' }}>
+                  Urge recorded. The extra activity was not added or logged as completed.
+                </Text>
+              </> : <>
+                <Text style={{ color: tokens.text, fontWeight: '700' }}>What are you tempted to add?</Text>
+                {([
+                  ['calf', 'Extra calf raises'], ['cycling', 'Cycling'],
+                  ['strength', 'More strength'], ['walking', 'Longer walk'], ['other', 'Something else'],
+                ] as const).map(([value, label]) => <Pressable key={value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: urgeActivity === value }}
+                  onPress={() => setUrgeActivity(value)}
+                  style={{ borderColor: urgeActivity === value ? tokens.accent : tokens.border, borderWidth: 1, padding: 9, borderRadius: 9 }}>
+                  <Text style={{ color: tokens.text }}>{urgeActivity === value ? '● ' : '○ '}{label}</Text>
+                </Pressable>)}
+                <Text style={{ color: tokens.text, fontWeight: '700' }}>Why?</Text>
+                {([
+                  ['energy', 'I still have energy'],
+                  ['faster_progress', 'I want to improve faster'],
+                  ['restless', 'I feel restless'],
+                ] as const).map(([value, label]) => <Pressable key={value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: urgeReason === value }}
+                  onPress={() => setUrgeReason(value)}
+                  style={{ borderColor: urgeReason === value ? tokens.accent : tokens.border, borderWidth: 1, padding: 9, borderRadius: 9 }}>
+                  <Text style={{ color: tokens.text }}>{urgeReason === value ? '● ' : '○ '}{label}</Text>
+                </Pressable>)}
+                {urgeError ? <Text style={{ color: tokens.text }}>{urgeError}</Text> : null}
+                <Pressable disabled={urgeSaving || !user?.id} onPress={() => void saveTrainingUrge()}
+                  style={{ backgroundColor: tokens.accent, borderRadius: 10, padding: 12,
+                    opacity: urgeSaving || !user?.id ? 0.5 : 1 }}>
+                  <Text style={{ color: tokens.canvas, textAlign: 'center', fontWeight: '800' }}>
+                    {urgeSaving ? 'Recording…' : 'Record urge — no extra training'}
+                  </Text>
+                </Pressable>
+              </>}
+              <Pressable onPress={() => setUrgeOpen(false)}
+                style={{ borderWidth: 1, borderColor: tokens.border, padding: 12, borderRadius: 10 }}>
+                <Text style={{ color: tokens.text, fontWeight: '700', textAlign: 'center' }}>Finish at today's ceiling</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
         <WorkoutShareModal summary={completedSummary} visible={shareOpen} onClose={() => setShareOpen(false)} />
       </SafeAreaView>
     );
