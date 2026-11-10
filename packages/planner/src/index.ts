@@ -1,3 +1,5 @@
+export { planLedgerReconciliation, ledgerEventId } from './training-event-reconciliation';
+export type { LedgerExposure } from './training-event-reconciliation';
 export { affectedTrainingRegions } from './training-region-inference';
 export { assessCrossSportExposure } from './cross-sport-guardrail';
 export type { CrossSportExposure, CrossSportDecision, ExposureDiscipline } from './cross-sport-guardrail';
