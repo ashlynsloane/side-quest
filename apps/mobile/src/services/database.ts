@@ -3074,8 +3074,8 @@ export async function saveObservedTrainingRecovery(
  * tolerate malformed legacy rows, but a guardrail must never ignore them.
  */
 export async function listWorkoutLedgerEntriesForGuardrails({
-  from, to, limit = 501,
-}: { from: string; to: string; limit?: number }): Promise<Array<{
+  from, to, limit = 501, offset = 0,
+}: { from: string; to: string; limit?: number; offset?: number }): Promise<Array<{
   id: string;
   workout?: GeneratedWorkout;
   startedAt: string;
@@ -3084,6 +3084,10 @@ export async function listWorkoutLedgerEntriesForGuardrails({
   plannedSessionId?: string;
   updatedAt: string;
 }>> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 501
+      || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid historical training page.');
+  }
   await initializeDatabase();
   const rows = await db.getAllAsync<{
     id: string; workout_json: string | null;
@@ -3093,8 +3097,8 @@ export async function listWorkoutLedgerEntriesForGuardrails({
     `SELECT id, workout_json, started_at, completed_at,
        completion_fraction, planned_session_id, updated_at
      FROM workout_ledger WHERE completed_at >= ? AND completed_at <= ?
-     ORDER BY completed_at DESC LIMIT ?`,
-    from, to, limit,
+     ORDER BY completed_at DESC, id DESC LIMIT ? OFFSET ?`,
+    from, to, limit, offset,
   );
   return rows.map((row) => {
     try {
@@ -3123,14 +3127,18 @@ export async function listWorkoutLedgerEntriesForGuardrails({
 
 /** Fail closed if any imported session in the queried range is malformed. */
 export async function listEnduranceActivitiesForGuardrails({
-  from, to, limit = 501,
-}: { from: string; to: string; limit?: number }): Promise<EnduranceActivity[]> {
+  from, to, limit = 501, offset = 0,
+}: { from: string; to: string; limit?: number; offset?: number }): Promise<EnduranceActivity[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 501
+      || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid historical training page.');
+  }
   await initializeDatabase();
   const rows = await db.getAllAsync<{ activity_json: string; start_at: string }>(
     `SELECT activity_json, start_at FROM endurance_activities
      WHERE start_at >= ? AND start_at <= ? AND deleted_at IS NULL
-     ORDER BY start_at DESC LIMIT ?`,
-    from, to, limit,
+     ORDER BY start_at DESC, id DESC LIMIT ? OFFSET ?`,
+    from, to, limit, offset,
   );
   return rows.map((row) => {
     try {
