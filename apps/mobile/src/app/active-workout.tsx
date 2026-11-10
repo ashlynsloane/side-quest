@@ -490,7 +490,16 @@ export default function ActiveWorkoutScreen() {
       const exercisePreferences = await listExercisePreferences();
       const result = swapExerciseInWorkout({ workout: activeWorkout, stationId: swapTarget.stationId, exerciseId: swapTarget.exercise.id, reason, candidateId, context: { exercises, exercisePreferences } });
       if (!result.ok) { Alert.alert('Replacement unavailable', result.message); return; }
-      updateActiveWorkout(result.workout);
+      const mutation = updateActiveWorkout(result.workout);
+      if (!mutation.allowed) {
+        Alert.alert(
+          'This substitution changes your training ceiling',
+          mutation.reasons.join(' ') + ' End or pause the current workout and review a revised prescription before adding load.',
+          [{ text: 'Keep current exercise', style: 'cancel' },
+            { text: 'Review recovery', onPress: () => router.push('/daily-training-ceiling' as Href) }],
+        );
+        return;
+      }
       if (reason === 'dislike') await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       setSwapTarget(null);
     } finally { setSwapBusy(false); }
