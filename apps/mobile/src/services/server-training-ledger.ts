@@ -468,8 +468,12 @@ export async function acquireSynchronizedWorkoutLease(
   if (!matching) throw new Error('The synchronized prescription does not contain this session.');
   const minutes = Math.ceil(workout.estimatedElapsedSeconds / 60);
   const regions = regionsFor(workout);
-  if (minutes > matching.minutes || regions.some((region) => !matching.regions.includes(region))) {
-    throw new Error('The modified workout exceeds the synchronized prescribed dose.');
+  // Full prescribed region coverage is mandatory: the server must not accept
+  // a narrower client region claim that omits a recovering Achilles or back.
+  // Changes to the anatomical scope require a newly reviewed prescription.
+  if (minutes > matching.minutes || regions.length !== matching.regions.length
+      || regions.some((region) => !matching.regions.includes(region))) {
+    throw new Error('The modified workout dose or tissue regions no longer match the synchronized prescription.');
   }
   await synchronizeRecordedTrainingExposure(userId, rpc);
   await assertAuthenticatedAthlete(userId, rpc);
