@@ -53,6 +53,13 @@ begin
   if not public.release_training_workout_lease(v_first.lease_id,'device-1') then
     raise exception 'Could not release completed session lease';
   end if;
+  -- A device crash or release without a completion upload must NOT restore
+  -- the original session's authorized dose.
+  select * into v_denied from public.acquire_training_workout_lease_v2(
+    'strength-A','device-2',v_date,'planned-A',30,array['general','achilles']::text[]);
+  if v_denied.granted then
+    raise exception 'Unreported reserved workout was restarted after release';
+  end if;
   v_completed_at := clock_timestamp()-interval '2 seconds';
   if not public.publish_training_remote_exposure(
       'completed-1','strength-A','planned-A','strength',30,
@@ -94,6 +101,7 @@ begin
   select public.read_training_remote_snapshot(v_date) into v_json;
   if jsonb_array_length(v_json->'exposures') <> 1
      or jsonb_array_length(v_json->'recovery') <> 2
+     or jsonb_array_length(v_json->'reservations') <> 2
      or (v_json->'plan') is distinct from v_plan then
     raise exception 'Snapshot did not return canonical plan/exposure/recovery';
   end if;
