@@ -15,6 +15,7 @@ import {
 import type { GeneratedWorkout, TrainingCheckIn } from '@circuit/domain';
 import { getActiveTrainingCheckIn, getLatestTrainingBlock, listEnduranceActivitiesForGuardrails, listWorkoutLedgerEntriesForGuardrails } from './database';
 import { loadDailyCeiling, loadTrainingEvents, recordTrainingEvent, saveDailyCeiling } from './training-guardrail-storage';
+import { synchronizeRecordedTrainingExposure } from './server-training-ledger';
 
 export interface TrainingAdditionRequest {
   userId: string;
@@ -308,7 +309,7 @@ export async function assessWorkoutStart({
 }
 
 export async function recordActualWorkoutCompletion({
-  userId, workout, completedAt, ledgerId,
+  userId, workout, completedAt, ledgerId, syncCloud = false,
 }: {
   userId: string;
   workout: GeneratedWorkout;
@@ -316,6 +317,7 @@ export async function recordActualWorkoutCompletion({
   completedAt: string;
   completionFraction: number;
   ledgerId?: string;
+  syncCloud?: boolean;
 }): Promise<void> {
   const date = localTrainingDate(new Date(completedAt));
   await reconcileCompletedWorkoutHistory(userId, date);
@@ -326,5 +328,11 @@ export async function recordActualWorkoutCompletion({
   if (!history.some((event) => event.kind === 'completed'
     && event.sourceId === expected && !retracted.has(event.id))) {
     throw new Error('Workout saved but its training-load record could not be verified. Retry reconciliation.');
+  }
+  // The local ledger is durable first. Remote upload is mandatory for cloud
+  // coordination, and an interrupted upload is retried via stable event IDs
+  // before any later cloud workout can obtain another server lease.
+  if (syncCloud) {
+    await synchronizeRecordedTrainingExposure(userId);
   }
 }
