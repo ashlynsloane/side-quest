@@ -10,9 +10,9 @@ import { getActiveTrainingCheckIn, saveCompletedWorkout } from '@/services/datab
 import { createActiveSessionMonitor } from '@/services/active-session-monitor';
 import { authorizedSharedParticipationFraction } from '@/services/shared-workout-participation';
 import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
+import { acquireSynchronizedWorkoutLease } from '@/services/server-training-ledger';
 import { loadDailyCeiling } from '@/services/training-guardrail-storage';
 import {
-  acquireCloudWorkoutLease,
   cloudWorkoutLeasesEnabled,
   createCloudWorkoutLeaseMonitor,
   releaseCloudWorkoutLease,
@@ -115,7 +115,10 @@ export default function TogetherSessionScreen() {
         // Room readiness was previously evaluated against this athlete's
         // ceiling. The shared-workout screen acquires a separate cloud lease
         // before any exercise can be recorded or shown as authorized.
-        lease = await acquireCloudWorkoutLease(room.workout.id);
+        lease = await acquireSynchronizedWorkoutLease(
+          owner, room.workout,
+          member?.planRelation === 'substitute_next' ? member.plannedSessionId : undefined,
+        );
         if (!live) {
           await releaseCloudWorkoutLease(lease).catch(() => undefined);
           return;
@@ -154,7 +157,8 @@ export default function TogetherSessionScreen() {
       live = false;
       stopMonitor?.();
     };
-  }, [requiresCloudLease, room?.id, room?.workout.id, user?.id, completionSaved]);
+  }, [requiresCloudLease, room?.id, room?.workout.id, user?.id, member?.planRelation,
+    member?.plannedSessionId, completionSaved]);
 
 
   // Shared sessions do not use WorkoutProvider. Enforce the same mid-session
