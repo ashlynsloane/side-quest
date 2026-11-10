@@ -272,9 +272,9 @@ export default function WorkoutPreviewScreen() {
               </Pressable>
             </> : null}
             <Pressable accessibilityRole="button"
-              onPress={() => { setGuardrailDecision(null); router.push('/today-check-in' as Href); }}
+              onPress={() => { setGuardrailDecision(null); router.push('/daily-training-ceiling' as Href); }}
               style={{ padding: 12, borderWidth: 1, borderColor: tokens.border, borderRadius: 10 }}>
-              <Text style={{ color: tokens.text, textAlign: 'center', fontWeight: '700' }}>Update recovery check-in</Text>
+              <Text style={{ color: tokens.text, textAlign: 'center', fontWeight: '700' }}>Update regional recovery</Text>
             </Pressable>
             <Pressable accessibilityRole="button" onPress={() => { setGuardrailDecision(null); setOverrideReason(''); }}
               style={{ padding: 8 }}>
