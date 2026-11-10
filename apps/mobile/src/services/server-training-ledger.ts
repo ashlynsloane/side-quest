@@ -55,6 +55,18 @@ function backend(provided?: Rpc): Rpc {
   if (!supabase) throw new Error('Synchronized training history requires authenticated cloud access.');
   return supabase as unknown as Rpc;
 }
+async function assertAuthenticatedAthlete(userId: string, provided?: Rpc): Promise<void> {
+  if (!userId) throw new Error('Missing cloud athlete identity.');
+  // Injected RPCs are reserved for deterministic unit and PostgreSQL-adapter
+  // tests. Production always verifies the authenticated Supabase user.
+  if (provided) return;
+  if (!supabase) throw new Error('Synchronized training requires cloud authentication.');
+  const { data, error } = await supabase.auth.getUser();
+  if (error || data.user?.id !== userId) {
+    throw new Error('Signed-in cloud identity changed while synchronizing training. Start again.');
+  }
+}
+
 async function call(rpc: Rpc, name: string, args: Record<string, unknown>): Promise<unknown> {
   const { data, error } = await rpc.rpc(name, args);
   if (error) throw new Error(`Synchronized training ledger rejected the update: ${error.message}`);
@@ -82,6 +94,7 @@ export async function publishRemoteDailyPlan(
   userId: string, date: string, rpc?: Rpc,
 ): Promise<RemoteTrainingSnapshot['plan']> {
   if (!userId || !validDay(date)) throw new Error('Invalid athlete or training date.');
+  await assertAuthenticatedAthlete(userId, rpc);
   const [saved, ceiling] = await Promise.all([
     getLatestTrainingBlock(), getStoredDailyTrainingCeiling(userId, date),
   ]);
@@ -108,6 +121,7 @@ export async function publishRemoteDailyPlan(
     p_training_date: date, p_sessions: sessions,
   });
   if (result !== true) throw new Error('Remote prescription was not confirmed.');
+  await assertAuthenticatedAthlete(userId, rpc);
   return sessions;
 }
 
@@ -143,6 +157,7 @@ export async function synchronizeRecordedTrainingExposure(
   userId: string, rpc?: Rpc,
 ): Promise<number> {
   if (!userId) throw new Error('Missing athlete for training synchronization.');
+  await assertAuthenticatedAthlete(userId, rpc);
   const now = new Date();
   const from = new Date(now.getTime() - 48 * 60 * 60 * 1000);
   const [workouts, endurance] = await Promise.all([
@@ -193,7 +208,11 @@ export async function synchronizeRecordedTrainingExposure(
       completedAt: entry.startAt, trainingDate: trainingDay(new Date(entry.startAt)),
     });
   }
-  for (const event of events) await publishRemoteExposure(event, rpc);
+  for (const event of events) {
+    await assertAuthenticatedAthlete(userId, rpc);
+    await publishRemoteExposure(event, rpc);
+  }
+  await assertAuthenticatedAthlete(userId, rpc);
   return events.length;
 }
 
@@ -202,9 +221,11 @@ export async function synchronizeRecordedTrainingExposure(
  * old "stable" observation that could falsely clear a newer loading event.
  */
 export async function publishRemoteRecovery(
-  date: string, observations: Partial<Record<TrainingRegion, RecoveryStatus>>,
+  userId: string, date: string,
+  observations: Partial<Record<TrainingRegion, RecoveryStatus>>,
   rpc?: Rpc,
 ): Promise<void> {
+  await assertAuthenticatedAthlete(userId, rpc);
   if (!validDay(date)) throw new Error('Invalid remote recovery date.');
   const regions: TrainingRegion[] = ['general','achilles','upper_back'];
   const values = Object.fromEntries(regions.filter((region) => observations[region] !== undefined)
@@ -219,11 +240,13 @@ export async function publishRemoteRecovery(
     p_event_id: id, p_training_date: date, p_observations: values,
   });
   if (result !== true) throw new Error('Cloud regional recovery was not confirmed.');
+  await assertAuthenticatedAthlete(userId, rpc);
 }
 
 export async function readRemoteTrainingSnapshot(
-  date: string, rpc?: Rpc,
+  userId: string, date: string, rpc?: Rpc,
 ): Promise<RemoteTrainingSnapshot> {
+  await assertAuthenticatedAthlete(userId, rpc);
   if (!validDay(date)) throw new Error('Invalid snapshot date.');
   const data = await call(backend(rpc), 'read_training_remote_snapshot', {
     p_training_date: date,
@@ -238,6 +261,7 @@ export async function readRemoteTrainingSnapshot(
       || !(snapshot.plan === null || Array.isArray(snapshot.plan))) {
     throw new Error('The synchronized training snapshot has invalid fields.');
   }
+  await assertAuthenticatedAthlete(userId, rpc);
   return snapshot;
 }
 
@@ -249,6 +273,7 @@ export async function acquireSynchronizedWorkoutLease(
   userId: string, workout: GeneratedWorkout, sessionId?: string, rpc?: Rpc,
 ): Promise<CloudWorkoutLease> {
   if (!cloudWorkoutLeasesEnabled()) throw new Error('Remote training ledger is not enabled.');
+  await assertAuthenticatedAthlete(userId, rpc);
   if (!sessionId) {
     throw new Error('Additional training requires a reviewed, synchronized prescription.');
   }
@@ -262,6 +287,7 @@ export async function acquireSynchronizedWorkoutLease(
     throw new Error('The modified workout exceeds the synchronized prescribed dose.');
   }
   await synchronizeRecordedTrainingExposure(userId, rpc);
+  await assertAuthenticatedAthlete(userId, rpc);
   return acquireCloudWorkoutLease(workout.id, rpc, {
     trainingDate: date, sessionId, minutes, regions,
   });
