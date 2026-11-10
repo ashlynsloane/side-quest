@@ -155,7 +155,7 @@ describe('synchronized authoritative ledger mobile protocol', () => {
 
   it('uses an explicit remote recovery RPC rather than stale local timestamps', async () => {
     const backend = rpc();
-    await publishRemoteRecovery(date, { achilles: 'worse' }, backend);
+    await publishRemoteRecovery('athlete-1', date, { achilles: 'worse' }, backend);
     expect(backend.rpc).toHaveBeenCalledWith('publish_training_remote_recovery',
       expect.objectContaining({
         p_training_date: date,
@@ -165,7 +165,7 @@ describe('synchronized authoritative ledger mobile protocol', () => {
 
   it('rejects malformed remote snapshot instead of treating it as no exposure', async () => {
     const backend = rpc({ read_training_remote_snapshot: null });
-    await expect(readRemoteTrainingSnapshot(date, backend))
+    await expect(readRemoteTrainingSnapshot('athlete-1', date, backend))
       .rejects.toThrow('unreadable');
   });
 
