@@ -15,34 +15,41 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 7. Completed solo and shared workouts are logged as completed exposures only **after** the existing training-history write succeeds. Saving failures do not silently mark a session completed.
 8. Before any new start, previously saved workouts are reconciled against the guardrail ledger; missing events are reconstructed with idempotent IDs.
 9. Imported same-day endurance training is inspected for possible Achilles or upper-back loading overlap. Overlap triggers a conservative reassessment; no direct minute-for-minute equivalence between sports is assumed.
-10. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Event IDs are idempotent.
+10. After completion, recovery must be explicitly rechecked before its result can justify another exposure; the last check-in cannot predate the workout. Calendar edits can narrow but not silently expand a budget.
+11. Edited and deleted workout records are reconciled through append-only retractions and revised completion events, preserving an auditable history.
+12. Post-workout urges can be recorded separately from completed activity, and the daily UI summarizes them without treating motivation as load.
+13. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Event IDs are idempotent.
 
 ## Decision policy
 
 | Input state | Decision |
 | --- | --- |
 | Invalid activity or red flag; training paused | stop |
-| Worsened / missing affected-region recovery | defer |
+| Worsened / missing affected-region recovery, or a stale pre-workout check-in | defer |
 | Unplanned activity under strict ceiling | defer |
 | Session ID absent or different from saved plan | defer |
 | Completed dose already exhausts budget | defer |
 | Proposed dose exceeds remaining budget | modify |
 | Planned, unconsumed, within budget, stable regions | allow |
 
-This is decision support, not automated medical clearance. Regions are conservatively inferred from current workout target-region metadata; a comprehensive exercise-level tissue-load model remains future work.
+This is decision support, not automated medical clearance. Regions are conservatively inferred from workout targets **and individual exercises' muscle, joint and movement-pattern metadata**. This is not a validated injury-load or tissue stress model.
 
 ## Validation
 
-Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `pnpm --dir apps/mobile typecheck`, and `pnpm --dir packages/planner test`. GitHub Actions runs these on pull requests and feature-branch pushes. Planned-but-unperformed work must not appear in completed-exposure history.
+Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `pnpm --dir apps/mobile typecheck`, and `pnpm --dir packages/planner test`. GitHub Actions runs these on pull requests, together with an integration-contract audit that checks for unguarded workout-entry paths. Planned-but-unperformed work must not appear in completed-exposure history.
 
 ## Release blockers / remaining risks
 
 - **External endurance activities:** imported run/bike/swim/HIIT sessions now trigger same-day tissue-overlap cautions, but are not converted to equivalent strength minutes or modeled with validated cumulative injury load. Walking without an imported session and missing data remain invisible. Cross-sport cumulative tissue exposure needs a dedicated model.
 - **Cross-device synchronization** of guardrail ceilings/events is not implemented; the SQLite ledger is local. Do not advertise synchronized limits.
-- **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately. The start gate now reconciles saved workouts into missing events, but interruption during the active session, deleted-workout corrections, and legacy entries still require integration tests.
-- **Recovery evidence:** the current independent regional check-in is self-reported and not clinician clearance. A stable symptom response does not guarantee a safe increase.
+- **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately. The start gate now reconciles saved workouts into missing events, but interruption during the active session, deleted-workout corrections, and legacy entries are now covered by planner unit tests; on-device database and offline recovery scenarios still require integration testing.
+- **Recovery evidence:** the timestamped regional check-in is self-reported and not clinician clearance. A stable symptom response does not guarantee a safe increase.
 - **Override workflow:** exercise additions outside the app, imported activities, and every possible collaboration entry point need further audit. Consent prompts do not physically prevent athletes exercising.
 - **Human device QA:** verify preview, recovery modal, interruption/relaunch, early exit, repeated starts, logged exceptions, shared-room behavior and offline database failures on supported platforms.
 - **Reliability:** load event histories bounded by date; add integration tests for database migrations and cross-session / cross-device races.
 
 Keep this PR in draft until the above release blockers are addressed or consciously scoped.
+
+## Manual QA
+
+See [the 30-scenario release QA matrix](TRAINING_GUARDRAILS_RELEASE_QA.md). No unexecuted device case is marked as passed.
