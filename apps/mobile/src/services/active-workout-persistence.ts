@@ -112,12 +112,29 @@ function isActiveWorkoutPlanLink(value: unknown): value is ActiveWorkoutPlanLink
 function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<LiveWorkoutSessionSnapshot>;
+  const workout = snapshot.workout;
+  if (!workout || !Array.isArray(workout.stations) || workout.stations.length === 0 ||
+      !workout.id || !Number.isFinite(workout.estimatedElapsedSeconds) ||
+      workout.estimatedElapsedSeconds <= 0 ||
+      !workout.stations.every((station) => station && station.id &&
+        Number.isFinite(station.durationSeconds) && station.durationSeconds > 0 &&
+        Array.isArray(station.exercises))) return false;
   return snapshot.schemaVersion === 1
-    && Boolean(snapshot.workout?.id)
     && typeof snapshot.startedAt === 'string'
+    && Number.isFinite(Date.parse(snapshot.startedAt))
+    && typeof snapshot.savedAt === 'string'
+    && Number.isFinite(Date.parse(snapshot.savedAt))
     && Number.isInteger(snapshot.stationIndex)
+    && snapshot.stationIndex! >= 0 && snapshot.stationIndex! < workout.stations.length
     && (snapshot.phase === 'work' || snapshot.phase === 'rest')
-    && typeof snapshot.remainingSeconds === 'number';
+    && typeof snapshot.remainingSeconds === 'number'
+    && Number.isFinite(snapshot.remainingSeconds) && snapshot.remainingSeconds >= 0
+    && typeof snapshot.running === 'boolean'
+    && Number.isInteger(snapshot.restRounds)
+    && snapshot.restRounds! >= 1 && snapshot.restRounds! <= 30
+    && !!snapshot.stationRounds && typeof snapshot.stationRounds === 'object'
+    && !!snapshot.exerciseSets && typeof snapshot.exerciseSets === 'object'
+    && !!snapshot.restEntries && typeof snapshot.restEntries === 'object';
 }
 
 export function createInitialLiveWorkoutSession(
