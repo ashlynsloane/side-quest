@@ -16,6 +16,7 @@ const persistence = vi.hoisted(() => ({
 }));
 vi.mock('../src/services/database', () => db);
 vi.mock('../src/services/training-guardrail-storage', () => persistence);
+vi.mock('../src/services/server-training-ledger', () => ({ synchronizeRecordedTrainingExposure: vi.fn(async () => 0) }));
 
 import {
   assessTrainingAddition,
