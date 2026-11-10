@@ -501,3 +501,49 @@ grant execute on function public.acquire_training_workout_lease_v2(text,text,dat
 
 revoke all on function public.renew_training_workout_lease_v2(uuid,text) from public,anon;
 grant execute on function public.renew_training_workout_lease_v2(uuid,text) to authenticated;
+
+
+-- Atomically upload a bounded batch of historical exposures. A failed or
+-- conflicting event aborts the ENTIRE batch; a transient outage therefore
+-- cannot silently skip older workouts while granting another start.
+create or replace function public.publish_training_remote_exposure_batch(
+  p_events jsonb
+)
+returns integer language plpgsql security definer set search_path = ''
+as $batch$
+declare
+  v_user uuid := auth.uid();
+  v_item jsonb;
+  v_count integer := 0;
+  v_regions text[];
+begin
+  if v_user is null then raise exception 'Authentication required' using errcode='42501'; end if;
+  if p_events is null or pg_catalog.jsonb_typeof(p_events) <> 'array'
+     or pg_catalog.jsonb_array_length(p_events) not between 1 and 100 then
+    raise exception 'Invalid exposure batch' using errcode='22023';
+  end if;
+  for v_item in select value from pg_catalog.jsonb_array_elements(p_events) as each(value) loop
+    if pg_catalog.jsonb_typeof(v_item) <> 'object'
+       or pg_catalog.jsonb_typeof(v_item->'regions') <> 'array' then
+      raise exception 'Invalid exposure batch event' using errcode='22023';
+    end if;
+    select pg_catalog.array_agg(item.region) into v_regions
+      from pg_catalog.jsonb_array_elements_text(v_item->'regions') as item(region);
+    perform public.publish_training_remote_exposure(
+      v_item->>'eventId',
+      v_item->>'workoutId',
+      v_item->>'sessionId',
+      v_item->>'activity',
+      (v_item->>'minutes')::numeric,
+      v_regions,
+      (v_item->>'completedAt')::timestamptz,
+      (v_item->>'trainingDate')::date
+    );
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end;
+$batch$;
+
+revoke all on function public.publish_training_remote_exposure_batch(jsonb) from public, anon;
+grant execute on function public.publish_training_remote_exposure_batch(jsonb) to authenticated;
