@@ -177,3 +177,29 @@ Full rollout details and known limits: [Cloud Workout Lease](CLOUD_WORKOUT_LEASE
 - **System clock anomalies and app/database errors:** verify behavior on real devices before rollout.
 
 **Release recommendation:** keep the PR in draft until G01–G30 are manually or automatically exercised, failures are addressed, and the product explicitly communicates remaining limitations.
+
+
+## Authoritative ledger correction and recovery supersession acceptance
+
+These cases are **automated in disposable PostgreSQL / mobile Vitest**, not
+a real two-device Supabase staging run. Gate release on reproducing the
+following cases using actual signed-in devices:
+
+| ID | Scenario | Required behavior |
+| --- | --- | --- |
+| L01 | One device requests a planned 20-minute session on a second device simultaneously | At most one active lease and one durable reservation |
+| L02 | A stale client submits only general region for general + Achilles prescription | Server denies without reserving any minutes |
+| L03 | Cancel/release a session after its actual work is completed; request unused-reservation retraction | Approval denied because session already has recorded completion |
+| L04 | Correct completed activity from 25 to 10 minutes | Request alone has no effect; privileged approval updates effective exposure while keeping original audit row |
+| L05 | Retry a corrected, original, or third unapproved minute count | Original and approved counts idempotent; third value denied |
+| L06 | Network loses "stable" recovery acknowledgement, then tomorrow Achilles becomes worse | Durable athlete-scoped journal supersedes old event; late stable cannot clear newer worse |
+| L07 | Retry restrictive supersession after lost response | Same new event ID; timestamp and tombstone remain immutable |
+| L08 | New upper-back red flag while cloud upload is unavailable | Local SQLite records stop; UI shows failure, and other device's server clearance must NOT be assumed changed |
+| L09 | Same athlete signs into a second device after import/edit/delete | Remote history readback and review status agree before allowing new load |
+| L10 | Account deletion and re-login | No previously erased athlete's recovery or correction history appears |
+| L11 | Timezone crossing midnight and duplicate offline arrivals | No new benign recovery ID bypasses pending journal or 90-day backfill boundary |
+| L12 | Unconfigured staging credentials, staging = production, or missing explicit apply confirmation | Script aborts without applying a migration |
+
+Code completion **does not** mean staging deployment. The active rollout
+flag remains OFF; do not merge or advertise production readiness until these
+manual and native-device acceptance gates have been independently recorded.
