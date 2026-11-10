@@ -13,7 +13,9 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 5. The athlete can report **overall, Achilles, and upper-back** recovery separately. A global normal check-in does not imply those tissue-specific recoveries are stable.
 6. A current `unable_to_train` check-in is a non-overridable pause, including if no daily budget exists.
 7. Completed solo and shared workouts are logged as completed exposures only **after** the existing training-history write succeeds. Saving failures do not silently mark a session completed.
-8. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Event IDs are idempotent.
+8. Before any new start, previously saved workouts are reconciled against the guardrail ledger; missing events are reconstructed with idempotent IDs.
+9. Imported same-day endurance training is inspected for possible Achilles or upper-back loading overlap. Overlap triggers a conservative reassessment; no direct minute-for-minute equivalence between sports is assumed.
+10. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Event IDs are idempotent.
 
 ## Decision policy
 
@@ -35,9 +37,9 @@ Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `
 
 ## Release blockers / remaining risks
 
-- **External endurance activities** (Garmin/TrainingPeaks/imported rides, runs, walks) are not yet deducted from these daily strength budgets. Cross-sport cumulative tissue exposure needs an integrated policy.
+- **External endurance activities:** imported run/bike/swim/HIIT sessions now trigger same-day tissue-overlap cautions, but are not converted to equivalent strength minutes or modeled with validated cumulative injury load. Walking without an imported session and missing data remain invisible. Cross-sport cumulative tissue exposure needs a dedicated model.
 - **Cross-device synchronization** of guardrail ceilings/events is not implemented; the SQLite ledger is local. Do not advertise synchronized limits.
-- **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately; a crash between them could temporarily undercount training. Add a reconciliation process using the authoritative completed-workout ledger.
+- **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately. The start gate now reconciles saved workouts into missing events, but interruption during the active session, deleted-workout corrections, and legacy entries still require integration tests.
 - **Recovery evidence:** the current independent regional check-in is self-reported and not clinician clearance. A stable symptom response does not guarantee a safe increase.
 - **Override workflow:** exercise additions outside the app, imported activities, and every possible collaboration entry point need further audit. Consent prompts do not physically prevent athletes exercising.
 - **Human device QA:** verify preview, recovery modal, interruption/relaunch, early exit, repeated starts, logged exceptions, shared-room behavior and offline database failures on supported platforms.
