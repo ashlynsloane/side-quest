@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
 import { saveCompletedWorkout } from '@/services/database';
+import { recordActualWorkoutCompletion } from '@/services/training-addition-gate';
 import {
   finishWorkoutRoom,
   getWorkoutRoomByCode,
@@ -38,6 +39,10 @@ export default function TogetherSessionScreen() {
   const [demo, setDemo] = useState<Exercise | null>(null);
   const [error, setError] = useState<string | null>(null);
   const persisted = useRef(false);
+  const persisting = useRef(false);
+  const completedAtRef = useRef<string | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const [completionSaved, setCompletionSaved] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -59,9 +64,11 @@ export default function TogetherSessionScreen() {
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
   const persist = useCallback(async (fraction: number) => {
-    if (!room || !user || persisted.current) return;
-    persisted.current = true;
-    const completedAt = new Date().toISOString();
+    if (!room || !user || persisted.current || persisting.current) return;
+    persisting.current = true;
+    const completedAt = completedAtRef.current ?? new Date().toISOString();
+    completedAtRef.current = completedAt;
+    try {
     const substitutesPlan = member?.planRelation === 'substitute_next' && Boolean(member.plannedSessionId);
     const shared = room.workout.sharedContext;
     await saveCompletedWorkout({
@@ -85,8 +92,27 @@ export default function TogetherSessionScreen() {
         replacementWorkoutName: room.workoutName,
       } : undefined,
     });
-    await markWorkoutRoomMemberComplete(room.id, user.id);
-    if (room.hostUserId === user.id && fraction >= .99) await finishWorkoutRoom(room.id, user.id);
+    await recordActualWorkoutCompletion({
+      userId: user.id,
+      workout: room.workout,
+      sessionId: substitutesPlan ? member?.plannedSessionId : undefined,
+      completedAt,
+      completionFraction: fraction,
+    });
+    persisted.current = true;
+    setCompletionSaved(true);
+    setCompletionError(null);
+    try {
+      await markWorkoutRoomMemberComplete(room.id, user.id);
+      if (room.hostUserId === user.id && fraction >= .99) await finishWorkoutRoom(room.id, user.id);
+    } catch {
+      // The private completed workout and local guardrail ledger remain authoritative.
+    }
+    } catch (cause) {
+      setCompletionError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      persisting.current = false;
+    }
   }, [room, user, member, rounds]);
 
   useEffect(() => { if (state?.kind === 'complete') void persist(1); }, [state?.kind, persist]);
@@ -100,7 +126,7 @@ export default function TogetherSessionScreen() {
     const fraction = Math.max(0, Math.min(1, state.elapsed / room.workout.estimatedElapsedSeconds));
     Alert.alert('Leave your shared workout?', 'This will not pause the other phones. Your completed portion can still be saved.', [
       { text: 'Stay', style: 'cancel' },
-      { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => { await persist(fraction); router.replace('/(tabs)/train' as Href); })() },
+      { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => { await persist(fraction); if (persisted.current) router.replace('/(tabs)/train' as Href); })() },
     ]);
   }
 
@@ -108,7 +134,22 @@ export default function TogetherSessionScreen() {
 
   if (state.kind === 'countdown') return <SafeAreaView style={styles.safe}><View style={styles.countdown}><Text style={styles.eyebrow}>EVERY PHONE STARTS TOGETHER</Text><Text style={styles.countNumber}>{state.remaining}</Text><Text style={styles.countTitle}>{room.workoutName}</Text><Text style={styles.body}>Get to your first station. The shared clock begins automatically.</Text></View></SafeAreaView>;
 
-  if (state.kind === 'complete') return <SafeAreaView style={styles.safe}><View style={styles.complete}><Text style={styles.eyebrow}>SHARED WORKOUT COMPLETE</Text><Text style={styles.completeTitle}>Same session. Your own result.</Text><Text style={styles.body}>Your rounds and completion are stored only in your athlete profile. Any selected substitution is recorded against your own plan, not your friend’s.</Text><Pressable onPress={() => router.replace('/(tabs)/train' as Href)} style={styles.primary}><Text style={styles.primaryText}>Done</Text></Pressable></View></SafeAreaView>;
+  if (state.kind === 'complete') return <SafeAreaView style={styles.safe}><View style={styles.complete}>
+    <Text style={styles.eyebrow}>SHARED WORKOUT COMPLETE</Text>
+    <Text style={styles.completeTitle}>Same session. Your own result.</Text>
+    <Text style={styles.body}>{completionSaved
+      ? 'Your completed dose is saved and counted in your personal training budget.'
+      : 'Saving your completed workout and personal training budget…'}</Text>
+    {completionError ? <><Text style={styles.body}>{completionError}</Text>
+      <Pressable onPress={() => void persist(1)} style={styles.secondary}>
+        <Text style={styles.secondaryText}>Retry saving</Text>
+      </Pressable></> : null}
+    <Pressable disabled={!completionSaved}
+      onPress={() => router.replace('/(tabs)/train' as Href)}
+      style={[styles.primary, !completionSaved && { opacity: 0.45 }]}>
+      <Text style={styles.primaryText}>{completionSaved ? 'Done' : 'Saving…'}</Text>
+    </Pressable>
+  </View></SafeAreaView>;
 
   const currentStation = station!;
   return <SafeAreaView style={styles.safe}>
