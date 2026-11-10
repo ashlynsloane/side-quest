@@ -60,9 +60,18 @@ export function assessActiveWorkoutMutation(
     for (let j = 0; j < originalStation.exercises.length; j += 1) {
       const old = originalStation.exercises[j]!;
       const next = nextStation.exercises[j]!;
-      if (!old.exerciseSnapshot || !next.exerciseSnapshot ||
+      const source = old.exerciseSnapshot;
+      const replacement = next.exerciseSnapshot;
+      if (!source || !replacement ||
+          !Array.isArray(source.bodyRegions) || !Array.isArray(replacement.bodyRegions) ||
+          !Array.isArray(source.jointLoads) || !Array.isArray(replacement.jointLoads) ||
+          !Array.isArray(source.movementPatterns) || !Array.isArray(replacement.movementPatterns) ||
+          ![source.impactLevel, source.balanceDemand, source.cardiovascularDemand,
+            replacement.impactLevel, replacement.balanceDemand,
+            replacement.cardiovascularDemand].every((value) =>
+            typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 4) ||
           old.unit !== next.unit || !finiteNonnegative(next.target)) {
-        fail('Changed exercise target or unit is not comparable.');
+        fail('Changed exercise metadata, target or unit cannot be safely compared.');
         continue;
       }
       if (next.target > old.target) {
@@ -72,6 +81,17 @@ export function assessActiveWorkoutMutation(
           next.exerciseSnapshot.balanceDemand > old.exerciseSnapshot.balanceDemand ||
           next.exerciseSnapshot.cardiovascularDemand > old.exerciseSnapshot.cardiovascularDemand) {
         fail('Replacement increases impact, balance or cardiovascular demand.');
+      }
+      for (const newLoad of replacement.bodyRegions) {
+        const prior = source.bodyRegions.find((item) => item.region === newLoad.region);
+        if (!Number.isFinite(newLoad.load) || newLoad.load < 0 || newLoad.load > 4 ||
+            (!prior && newLoad.load > 0) ||
+            (prior && newLoad.load > prior.load)) {
+          fail('Replacement introduces or increases muscle-region loading.');
+        }
+      }
+      if (replacement.movementPatterns.some((pattern) => !source.movementPatterns.includes(pattern))) {
+        fail('Replacement introduces an unreviewed movement pattern.');
       }
       for (const newLoad of next.exerciseSnapshot.jointLoads) {
         const prior = old.exerciseSnapshot.jointLoads.find((item) => item.region === newLoad.region);
