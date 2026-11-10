@@ -84,7 +84,7 @@ begin
       raise exception 'Invalid prescribed session' using errcode='22023';
     end if;
   end loop;
-  if (select count(distinct v->>'sessionId') from pg_catalog.jsonb_array_elements(p_sessions) v) <> v_count then
+  if (select count(distinct v.value->>'sessionId') from pg_catalog.jsonb_array_elements(p_sessions) as v(value)) <> v_count then
     raise exception 'Duplicate session IDs' using errcode='22023';
   end if;
 
@@ -170,7 +170,7 @@ begin
   if length(coalesce(p_event_id,'')) not between 1 and 128
      or p_training_date is null or abs(p_training_date - current_date) > 1
      or p_observations is null or jsonb_typeof(p_observations) <> 'object'
-     or jsonb_object_length(p_observations) not between 1 and 3 then
+     or (select count(*) from pg_catalog.jsonb_object_keys(p_observations)) not between 1 and 3 then
     raise exception 'Invalid regional recovery observation' using errcode='22023';
   end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_user::text, 91829));
@@ -274,15 +274,15 @@ begin
     return query select false,null::uuid,null::timestamptz,'No synchronized daily prescription'::text;
     return;
   end if;
-  select value into v_session from pg_catalog.jsonb_array_elements(v_plan)
-    where value->>'sessionId'=p_session_id;
+  select item.value into v_session from pg_catalog.jsonb_array_elements(v_plan) as item(value)
+    where item.value->>'sessionId'=p_session_id;
   if v_session is null or (v_session->>'minutes')::int < p_planned_minutes
-     or not (p_regions <@ array(select pg_catalog.jsonb_array_elements_text(v_session->'regions'))) then
+     or not (p_regions <@ array(select r.region from pg_catalog.jsonb_array_elements_text(v_session->'regions') as r(region))) then
     return query select false,null::uuid,null::timestamptz,'Workout exceeds synchronized prescription'::text;
     return;
   end if;
-  select coalesce(sum((value->>'minutes')::numeric),0) into v_budget
-    from pg_catalog.jsonb_array_elements(v_plan);
+  select coalesce(sum((item.value->>'minutes')::numeric),0) into v_budget
+    from pg_catalog.jsonb_array_elements(v_plan) as item(value);
   select coalesce(sum(minutes),0) into v_consumed
     from public.training_remote_exposures
     where athlete_id=v_user and training_date=p_training_date and activity='strength';
