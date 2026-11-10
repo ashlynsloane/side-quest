@@ -93,6 +93,15 @@ export default function DailyTrainingCeilingScreen() {
     event.trainingDate === date && event.activity === 'strength'
   ).reduce((sum, event) => sum + event.minutes, 0);
   const performedMinutes = synchronized ? remotelyPerformedMinutes : locallyPerformedMinutes;
+  const reservedSessionIds = new Set(remote?.reservations.filter((entry) =>
+    entry.trainingDate === date).map((entry) => entry.sessionId) ?? []);
+  const remoteReservedMinutes = remote?.reservations.filter((entry) =>
+    entry.trainingDate === date).reduce((sum, entry) => sum + entry.minutes, 0) ?? 0;
+  const unreservedActualMinutes = remote?.exposures.filter((entry) =>
+    entry.trainingDate === date && entry.activity === 'strength' &&
+    (!entry.sessionId || !reservedSessionIds.has(entry.sessionId))
+  ).reduce((sum, entry) => sum + entry.minutes, 0) ?? 0;
+  const remotePotentialMinutes = remoteReservedMinutes + unreservedActualMinutes;
 
   async function save() {
     if (!ceiling || !user?.id || saving || recheckedRegions.length === 0) return;
@@ -119,10 +128,10 @@ export default function DailyTrainingCeilingScreen() {
           <Text style={styles.cardTitle}>Today's strength budget</Text>
           {synchronized ? <>
             <Text style={styles.body}>Synchronized activity across devices: {remote
-              ? `${remotelyPerformedMinutes ?? 0} min reported today · ${remote.exposures.length} exposures in the last 48 hours`
+              ? `${remotelyPerformedMinutes ?? 0} min reported today · ${remote.exposures.length} exposures in the last 48 hours · ${remote.reservations.length} reserved starts today`
               : 'Awaiting verified server history'}</Text>
             <Text style={styles.body}>{remote && remote.plan
-              ? `Server remaining allowance: up to ${Math.max(0, remote.plan.reduce((total, session) => total + session.minutes, 0) - (remotelyPerformedMinutes ?? 0))} min (subject to recovery and session limits)`
+              ? `Server remaining allowance: up to ${Math.max(0, remote.plan.reduce((total, session) => total + session.minutes, 0) - remotePotentialMinutes)} min (counts reserved starts even if completion was not uploaded)`
               : 'No verified synchronized prescription: new cloud workouts are not authorized.'}</Text>
             {remote?.recovery.map((item) =>
               <Text key={item.region} style={styles.body}>
