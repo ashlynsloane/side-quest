@@ -7,6 +7,7 @@ import type {
   GeneratedWorkout,
 } from '@circuit/domain';
 import { buildActiveWorkoutPersistenceWrite, restoreActiveWorkoutCheckpoint, scopedLiveWorkoutStorageKey, LEGACY_LIVE_WORKOUT_KEY } from '@circuit/planner';
+import { releaseCloudWorkoutLease, validCloudWorkoutLease, type CloudWorkoutLease } from './cloud-workout-coordination';
 
 
 export const ACTIVE_WORKOUT_INDEX_KEY = 'sidequest.active-workout.current';
@@ -77,6 +78,8 @@ export interface LiveWorkoutSessionSnapshot {
   restRounds: number;
   restLoadUnit: 'lb' | 'kg';
   planLink?: ActiveWorkoutPlanLink;
+  /** Server-issued session token when cloud cross-device leases are enabled. */
+  cloudLease?: CloudWorkoutLease;
 }
 
 // v1 was unscoped and could expose one athlete's paused session to another
@@ -129,13 +132,15 @@ function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapsh
     && snapshot.restRounds! >= 1 && snapshot.restRounds! <= 30
     && !!snapshot.stationRounds && typeof snapshot.stationRounds === 'object'
     && !!snapshot.exerciseSets && typeof snapshot.exerciseSets === 'object'
-    && !!snapshot.restEntries && typeof snapshot.restEntries === 'object';
+    && !!snapshot.restEntries && typeof snapshot.restEntries === 'object'
+    && (snapshot.cloudLease === undefined || validCloudWorkoutLease(snapshot.cloudLease));
 }
 
 export function createInitialLiveWorkoutSession(
   workout: GeneratedWorkout,
   startedAt = new Date().toISOString(),
   planLink?: ActiveWorkoutPlanLink,
+  cloudLease?: CloudWorkoutLease,
 ): LiveWorkoutSessionSnapshot {
   return {
     schemaVersion: 1,
@@ -153,6 +158,7 @@ export function createInitialLiveWorkoutSession(
     restRounds: 1,
     restLoadUnit: 'lb',
     planLink,
+    cloudLease,
   };
 }
 
@@ -168,7 +174,27 @@ export async function saveLiveWorkoutSession(
 ): Promise<void> {
   const storage = requireLocalStorage();
   const key = scopedSessionKey(athleteId);
-  storage.setItem(key, JSON.stringify(snapshot));
+  const current = storage.getItem(key);
+  let next = snapshot;
+  if (current) {
+    let prior: unknown;
+    try { prior = JSON.parse(current); } catch { throw new Error('Previous workout checkpoint is unreadable.'); }
+    if (!isLiveWorkoutSession(prior)) throw new Error('Previous workout checkpoint is invalid.');
+    if (prior.workout.id !== snapshot.workout.id || prior.startedAt !== snapshot.startedAt) {
+      throw new Error('A different active workout is already saved for this athlete.');
+    }
+    if (Date.parse(prior.savedAt) > Date.parse(snapshot.savedAt)) {
+      // A delayed background checkpoint may not reverse a newer save.
+      return;
+    }
+    next = {
+      ...snapshot,
+      // Timer/rest state re-saves must not discard the remote lease token.
+      cloudLease: snapshot.cloudLease ?? prior.cloudLease,
+    };
+  }
+  if (!isLiveWorkoutSession(next)) throw new Error('Invalid workout checkpoint cannot be saved.');
+  storage.setItem(key, JSON.stringify(next));
 }
 
 export async function loadLiveWorkoutSession(
@@ -198,8 +224,20 @@ export async function loadLiveWorkoutSession(
 
 export async function clearLiveWorkoutSession(athleteId: string): Promise<void> {
   const storage = requireLocalStorage();
-  storage.removeItem(scopedSessionKey(athleteId));
+  const key = scopedSessionKey(athleteId);
+  const prior = storage.getItem(key);
+  storage.removeItem(key);
   // One-way cleanup: do not read or migrate unscoped legacy sessions because
   // ownership cannot be verified on a shared device.
   storage.removeItem(LEGACY_LIVE_SESSION_KEY);
+  if (prior) {
+    try {
+      const snapshot: unknown = JSON.parse(prior);
+      if (isLiveWorkoutSession(snapshot) && snapshot.cloudLease) {
+        // If offline, the remote lock expires after 90 seconds; it cannot
+        // authorize another device until the server expires it.
+        await releaseCloudWorkoutLease(snapshot.cloudLease).catch(() => undefined);
+      }
+    } catch { /* Malformed local data does not prevent local cleanup. */ }
+  }
 }
