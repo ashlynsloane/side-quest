@@ -467,7 +467,7 @@ export default function ActiveWorkoutScreen() {
     if (user?.id) {
       await recordActualWorkoutCompletion({
         userId: user.id, workout: activeWorkout,
-        sessionId: activePlanLink?.sessionId, completedAt: timestamp, completionFraction,
+        sessionId: activePlanLink?.sessionId, completedAt: timestamp, completionFraction, syncCloud: requiresCloudLease,
       });
     }
     if (!user?.id) throw new Error('Athlete identity missing during completion');
