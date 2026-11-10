@@ -127,3 +127,61 @@ begin
 end
 $privacy$;
 reset role;
+
+
+-- Historical exposure batches are indivisible, authenticated and idempotent.
+-- A conflicting second event must roll back a valid first event in the SAME
+-- batch; a failed partial import cannot masquerade as complete reconciliation.
+set role authenticated;
+select set_config('request.jwt.claim.sub',
+  '00000000-0000-4000-8000-000000000002',false);
+do $batch_tests$
+declare
+  v_date date := current_date;
+  v_now timestamptz := pg_catalog.clock_timestamp()-interval '15 minutes';
+  v_first jsonb;
+  v_second jsonb;
+  v_conflict jsonb;
+  v_failed boolean := false;
+  v_count integer;
+begin
+  v_first := pg_catalog.jsonb_build_object(
+    'eventId','batch-1','workoutId','history-1','sessionId',null,
+    'activity','bike','minutes',25,
+    'regions',pg_catalog.jsonb_build_array('general','achilles'),
+    'completedAt',v_now,'trainingDate',v_date);
+  v_second := pg_catalog.jsonb_build_object(
+    'eventId','batch-2','workoutId','history-2','sessionId',null,
+    'activity','run','minutes',15,
+    'regions',pg_catalog.jsonb_build_array('general','achilles'),
+    'completedAt',v_now,'trainingDate',v_date);
+  if public.publish_training_remote_exposure_batch(
+    pg_catalog.jsonb_build_array(v_first,v_second)) <> 2 then
+    raise exception 'Batch did not acknowledge both historical exposures';
+  end if;
+  if public.publish_training_remote_exposure_batch(
+    pg_catalog.jsonb_build_array(v_first,v_second)) <> 2 then
+    raise exception 'Exact batch retry should be idempotent';
+  end if;
+  select count(*) into v_count from public.training_remote_exposures
+    where athlete_id=auth.uid() and event_id in ('batch-1','batch-2');
+  if v_count <> 2 then raise exception 'Batch retry duplicated activity'; end if;
+
+  v_conflict := pg_catalog.jsonb_set(v_first,'{minutes}','99'::jsonb);
+  begin
+    perform public.publish_training_remote_exposure_batch(
+      pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_set(v_second,'{eventId}','"batch-should-rollback"'::jsonb),
+        v_conflict
+      ));
+  exception when unique_violation then
+    v_failed := true;
+  end;
+  if not v_failed then raise exception 'Conflicting historical revision was accepted'; end if;
+  if exists(select 1 from public.training_remote_exposures
+            where athlete_id=auth.uid() and event_id='batch-should-rollback') then
+    raise exception 'Earlier batch item survived a later conflict';
+  end if;
+end
+$batch_tests$;
+reset role;
