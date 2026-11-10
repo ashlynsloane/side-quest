@@ -9,6 +9,13 @@ export function cloudWorkoutLeasesEnabled(): boolean {
   return process.env.EXPO_PUBLIC_DISTRIBUTED_WORKOUT_LOCKS === 'true';
 }
 
+export interface RemoteWorkoutPrescription {
+  trainingDate: string;
+  sessionId: string;
+  minutes: number;
+  regions: string[];
+}
+
 export interface CloudWorkoutLease {
   leaseId: string;
   deviceId: string;
@@ -71,15 +78,32 @@ export function validCloudWorkoutLease(lease: unknown): lease is CloudWorkoutLea
 
 /** An unsuccessful RPC, malformed response or another-device lease denies a start. */
 export async function acquireCloudWorkoutLease(
-  workoutId: string, rpc?: WorkoutLeaseRpc,
+  workoutId: string, rpc?: WorkoutLeaseRpc, prescription?: RemoteWorkoutPrescription,
 ): Promise<CloudWorkoutLease> {
   if (!workoutId || workoutId.length > 128) throw new Error('Invalid workout identity.');
   const deviceId = getDeviceTag();
-  const row = await request(requireBackend(rpc), 'acquire_training_workout_lease', {
-    p_workout_id: workoutId, p_device_id: deviceId,
+  if (cloudWorkoutLeasesEnabled() && (!prescription || !prescription.sessionId ||
+      !/^\\d{4}-\\d{2}-\\d{2}$/.test(prescription.trainingDate) ||
+      !Number.isInteger(prescription.minutes) || prescription.minutes <= 0 ||
+      prescription.regions.length === 0)) {
+    throw new Error('A synchronized prescription is required before acquiring a cloud workout lease.');
+  }
+  const coordinated = cloudWorkoutLeasesEnabled();
+  const row = await request(requireBackend(rpc),
+    coordinated ? 'acquire_training_workout_lease_v2' : 'acquire_training_workout_lease', {
+    p_workout_id: workoutId,
+    p_device_id: deviceId,
+    ...(coordinated && prescription ? {
+      p_training_date: prescription.trainingDate,
+      p_session_id: prescription.sessionId,
+      p_planned_minutes: String(prescription.minutes),
+      p_regions: JSON.stringify(prescription.regions),
+    } : {}),
   });
   if (row.granted !== true) {
-    throw new Error('Another device has an active workout. Finish that session or wait for its lease to expire.');
+    throw new Error(typeof row.reason === 'string' && row.reason
+      ? row.reason
+      : 'Another device has an active workout. Finish that session or wait for its lease to expire.');
   }
   const lease = {
     leaseId: row.lease_id,
@@ -97,13 +121,17 @@ export async function renewCloudWorkoutLease(
   lease: CloudWorkoutLease, rpc?: WorkoutLeaseRpc,
 ): Promise<CloudWorkoutLease> {
   if (!validCloudWorkoutLease(lease)) throw new Error('Cloud workout lease is invalid.');
-  const row = await request(requireBackend(rpc), 'renew_training_workout_lease', {
+  const row = await request(requireBackend(rpc),
+    cloudWorkoutLeasesEnabled()
+      ? 'renew_training_workout_lease_v2'
+      : 'renew_training_workout_lease', {
     p_lease_id: lease.leaseId, p_device_id: lease.deviceId,
   });
   const renewed = { ...lease, expiresAt: row.expires_at };
   if (row.renewed !== true || !validCloudWorkoutLease(renewed) ||
       Date.parse(renewed.expiresAt) <= Date.now()) {
-    throw new Error('Cloud workout lease was lost or expired. Pause training and review the session.');
+    throw new Error(typeof row.reason === 'string' && row.reason
+      ? row.reason : 'Cloud workout lease was lost or expired. Pause training and review the session.');
   }
   return renewed;
 }
