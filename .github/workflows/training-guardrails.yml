@@ -27,3 +27,21 @@ jobs:
         run: pnpm --dir packages/planner test
       - name: Mobile guardrail integration tests
         run: pnpm exec vitest run apps/mobile/test
+
+  repository-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Full monorepo regression suite
+        run: pnpm check
