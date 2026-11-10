@@ -128,8 +128,9 @@ export default function ActiveWorkoutScreen() {
       setSessionHydrated(true);
       return;
     }
+    if (!user?.id) { setSessionHydrated(false); return; }
     let live = true;
-    void loadLiveWorkoutSession().then((snapshot) => {
+    void loadLiveWorkoutSession(user.id).then((snapshot) => {
       if (!live) return;
       if (snapshot?.workout.id === workout.id) {
         const safeIndex = Math.min(Math.max(0, snapshot.stationIndex), Math.max(0, workout.stations.length - 1));
@@ -160,10 +161,16 @@ export default function ActiveWorkoutScreen() {
       } else {
         setRunning(true);
       }
-      setSessionHydrated(true);
+    }).catch((cause) => {
+      if (live) {
+        setRunning(false);
+        setResumeNotice(`Workout checkpoint could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    }).finally(() => {
+      if (live) setSessionHydrated(true);
     });
     return () => { live = false; };
-  }, [restoredActiveWorkout, workout?.id, workoutSessionReady]);
+  }, [restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -188,7 +195,7 @@ export default function ActiveWorkoutScreen() {
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
     const timer = setTimeout(() => {
       void saveLiveWorkoutSession({
         schemaVersion: 1,
@@ -206,10 +213,13 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
+      }, user.id).catch((cause) => {
+        setRunning(false);
+        setResumeNotice(`Workout checkpoint was not saved: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
     }, 250);
     return () => clearTimeout(timer);
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
     if (!workout || !sessionHydrated || phase === 'complete') return;
@@ -232,10 +242,13 @@ export default function ActiveWorkoutScreen() {
         restRounds,
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
+      }, user.id).catch((cause) => {
+        setRunning(false);
+        setResumeNotice(`Workout checkpoint was not saved: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
     });
     return () => subscription.remove();
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout]);
+  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
     if (!resumeNotice) return;
@@ -334,7 +347,8 @@ export default function ActiveWorkoutScreen() {
         sessionId: activePlanLink?.sessionId, completedAt: timestamp, completionFraction,
       });
     }
-    await clearLiveWorkoutSession();
+    if (!user?.id) throw new Error('Athlete identity missing during completion');
+    await clearLiveWorkoutSession(user.id);
     savedCompletion.current = true;
     setCompletionSaved(true);
     setCompletionSaveError(null);
@@ -408,6 +422,7 @@ export default function ActiveWorkoutScreen() {
   function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
 
   function pauseAndLeave() {
+    if (!user?.id) { Alert.alert('Cannot save', 'Athlete identity is missing.'); return; }
     setRunning(false);
     void saveLiveWorkoutSession({
       schemaVersion: 1,
@@ -425,7 +440,9 @@ export default function ActiveWorkoutScreen() {
       restRounds,
       restLoadUnit,
       planLink: activePlanLink ?? undefined,
-    }).then(() => router.replace('/' as Href));
+    }, user.id).then(() => router.replace('/' as Href)).catch((cause) => {
+      Alert.alert('Workout not saved', cause instanceof Error ? cause.message : String(cause));
+    });
   }
 
   function endEarly() {
