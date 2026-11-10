@@ -98,6 +98,7 @@ export default function TogetherSessionScreen() {
       sessionId: substitutesPlan ? member?.plannedSessionId : undefined,
       completedAt,
       completionFraction: fraction,
+      ledgerId: `workout_together:${room.id}:${user.id}`,
     });
     persisted.current = true;
     setCompletionSaved(true);
