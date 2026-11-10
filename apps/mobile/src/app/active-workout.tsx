@@ -222,7 +222,7 @@ export default function ActiveWorkoutScreen() {
   }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete') return;
+    if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
     const athleteId = user.id;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
