@@ -102,17 +102,25 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let live = true;
-    void loadLiveWorkoutSession().then((snapshot) => {
+    setWorkoutSessionReady(false);
+    setActiveWorkout(null);
+    setActivePlanLink(null);
+    setRestoredActiveWorkout(false);
+    if (!user?.id) return () => { live = false; };
+    void loadLiveWorkoutSession(user.id).then((snapshot) => {
       if (!live) return;
       if (snapshot) {
         setActiveWorkout(snapshot.workout);
         setActivePlanLink(snapshot.planLink ?? null);
         setRestoredActiveWorkout(true);
       }
-      setWorkoutSessionReady(true);
+    }).catch(() => {
+      // No checkpoint is considered loaded if storage is unavailable.
+    }).finally(() => {
+      if (live) setWorkoutSessionReady(true);
     });
     return () => { live = false; };
-  }, []);
+  }, [user?.id]);
 
   const value = useMemo<WorkoutContextValue>(() => ({
     previewWorkout,
@@ -165,6 +173,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       };
       startingWorkout.current = true;
       try {
+      if (!workoutSessionReady) throw new Error('Active workout storage has not finished restoring');
       const planLink = buildPlanLink(plannedPreviewSource);
       const assessment = await assessWorkoutStart({
         userId: user.id,
@@ -174,7 +183,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       });
       if (!assessment.authorized) return { started: false, result: assessment.result };
       const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
-      await saveLiveWorkoutSession(snapshot);
+      await saveLiveWorkoutSession(snapshot, user.id);
       setActiveWorkout(workout);
       setActivePlanLink(planLink);
       setRestoredActiveWorkout(false);
@@ -196,7 +205,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setActiveWorkout(null);
       setActivePlanLink(null);
       setRestoredActiveWorkout(false);
-      void clearLiveWorkoutSession();
+      if (user?.id) void clearLiveWorkoutSession(user.id).catch(() => undefined);
     },
   }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady, user?.id]);
 
