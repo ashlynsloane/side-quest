@@ -363,4 +363,66 @@ describe('synchronized authoritative ledger mobile protocol', () => {
       .rejects.toThrow('unreadable');
   });
 
+  it('supersedes a timed-out stable observation with new worsening across dates', async () => {
+    const cache = new Map<string,string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => cache.get(key) ?? null,
+      setItem: (key: string,value: string) => { cache.set(key,value); },
+      removeItem: (key: string) => { cache.delete(key); },
+    });
+    let timeout = true;
+    const client: WorkoutLeaseRpc = {
+      rpc: vi.fn(async () => ({
+        data: timeout ? null : true,
+        error: timeout ? {message:'old response was lost'} : null,
+      })),
+    };
+    await expect(publishRemoteRecovery('athlete-1', date,
+      { achilles: 'stable' }, client)).rejects.toThrow('response was lost');
+    const previous = JSON.parse([...cache.values()][0]!) as {eventId:string; trainingDate:string};
+    expect(previous.trainingDate).toBe(date);
+    expect(cache.size).toBe(1);
+    vi.setSystemTime(new Date('2026-11-11T19:00:00.000Z'));
+    timeout = false;
+    const worseningId = await publishRemoteRecovery('athlete-1','2026-11-11',
+      { achilles: 'worse' }, client);
+    expect(worseningId).not.toBe(previous.eventId);
+    expect(client.rpc).toHaveBeenLastCalledWith(
+      'publish_training_remote_recovery_restrictive',
+      expect.objectContaining({
+        p_event_id: worseningId,
+        p_training_date: '2026-11-11',
+        p_observations: {achilles:'worse'},
+        p_superseded_event_id: previous.eventId,
+      }),
+    );
+    expect(() => acknowledgeRemoteRecovery('athlete-1',date,worseningId))
+      .toThrow('does not match');
+    expect(cache.size).toBe(1);
+    acknowledgeRemoteRecovery('athlete-1','2026-11-11',worseningId);
+    expect(cache.size).toBe(0);
+  });
+
+  it('does not create a fresh stable event to evade yesterday\'s pending recovery', async () => {
+    const cache = new Map<string,string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => cache.get(key) ?? null,
+      setItem: (key: string,value: string) => {cache.set(key,value);},
+      removeItem: (key: string) => {cache.delete(key);},
+    });
+    let fails = true;
+    const client: WorkoutLeaseRpc = {rpc: vi.fn(async () => ({
+      data: fails ? null : true,
+      error: fails ? {message:'timeout'} : null,
+    }))};
+    await expect(publishRemoteRecovery('athlete-1',date,
+      {achilles:'stable'},client)).rejects.toThrow('timeout');
+    vi.setSystemTime(new Date('2026-11-11T19:00:00.000Z'));
+    fails = false;
+    await expect(publishRemoteRecovery('athlete-1','2026-11-11',
+      {achilles:'stable'},client)).rejects.toThrow('pending recovery synchronization');
+    expect(client.rpc).toHaveBeenCalledTimes(1);
+    expect(cache.size).toBe(1);
+  });
+
 });
