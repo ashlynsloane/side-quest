@@ -46,7 +46,7 @@ export async function recordObservedRecovery(
   // If network/authentication fails, neither this device nor another should
   // interpret an unsynchronized 'stable' report as cloud clearance.
   if (options.syncCloud) {
-    await publishRemoteRecovery(date, updates);
+    await publishRemoteRecovery(userId, date, updates);
   }
   await saveObservedTrainingRecovery(userId, date, updates);
 }
