@@ -86,3 +86,11 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: psql -h localhost -p 5432 -U postgres -d sidequest_lease_ci -v ON_ERROR_STOP=1 -f supabase/tests/workout-lease-ci-assertions.sql
+      - name: Race independent PostgreSQL connections for the same athlete
+        env:
+          PGPASSWORD: postgres
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGDATABASE: sidequest_lease_ci
+        run: bash supabase/tests/workout-lease-concurrency.sh
