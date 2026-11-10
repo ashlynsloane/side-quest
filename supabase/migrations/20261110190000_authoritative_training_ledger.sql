@@ -356,11 +356,17 @@ begin
       (select max(completed_at) from public.training_remote_exposures
        where athlete_id=v_user and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
          and v_region=any(regions)),
-      (select max(acquired_at + authorized_minutes * interval '1 minute')
-       from public.training_remote_reservations
-       where athlete_id=v_user
-         and acquired_at >= pg_catalog.clock_timestamp()-interval '48 hours'
-         and v_region=any(regions))
+      (select max(reservation.acquired_at + reservation.authorized_minutes * interval '1 minute')
+       from public.training_remote_reservations as reservation
+       where reservation.athlete_id=v_user
+         and reservation.acquired_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+         and v_region=any(reservation.regions)
+         and not exists (
+           select 1 from public.training_remote_exposures as completed
+           where completed.athlete_id=reservation.athlete_id
+             and completed.training_date=reservation.training_date
+             and completed.session_id=reservation.session_id
+         ))
     ) into v_last_exposure;
     if v_last_exposure is not null
       and (v_latest_status is distinct from 'stable' or v_latest_observed is null
@@ -449,11 +455,18 @@ begin
        where athlete_id=v_user
          and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
          and v_region=any(regions)),
-      (select max(acquired_at + authorized_minutes * interval '1 minute')
-       from public.training_remote_reservations
-       where athlete_id=v_user and session_id <> v_held.session_id
-         and acquired_at >= pg_catalog.clock_timestamp()-interval '48 hours'
-         and v_region=any(regions))
+      (select max(reservation.acquired_at + reservation.authorized_minutes * interval '1 minute')
+       from public.training_remote_reservations as reservation
+       where reservation.athlete_id=v_user
+         and reservation.session_id <> v_held.session_id
+         and reservation.acquired_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+         and v_region=any(reservation.regions)
+         and not exists (
+           select 1 from public.training_remote_exposures as completed
+           where completed.athlete_id=reservation.athlete_id
+             and completed.training_date=reservation.training_date
+             and completed.session_id=reservation.session_id
+         ))
     ) into v_last_exposure;
     if v_last_exposure is not null
       and (v_status is distinct from 'stable'
