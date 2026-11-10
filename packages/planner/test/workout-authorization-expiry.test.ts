@@ -14,7 +14,7 @@ describe('live-session authorization age', () => {
     expect(evaluateWorkoutAuthorizationAge('bad date', new Date()).current).toBe(false);
     expect(evaluateWorkoutAuthorizationAge('2026-11-09T20:00:00-07:00',
       new Date('2026-11-09T19:00:00-07:00')).current).toBe(false);
-    expect(evaluateWorkoutAuthorizationAge('2026-11-09T23:59:00-07:00',
-      new Date('2026-11-10T00:01:00-07:00')).current).toBe(false);
+    expect(evaluateWorkoutAuthorizationAge('2026-11-09T23:59:00Z',
+      new Date('2026-11-10T00:01:00Z')).current).toBe(false);
   });
 });
