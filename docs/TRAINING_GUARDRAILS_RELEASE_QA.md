@@ -41,6 +41,37 @@ cable chop) with conflicting metadata. The redundant expansion entries were
 removed while canonical definitions remain, so exercise loading inference is
 not dependent on ambiguous duplicate identities.
 
+## Mobile navigation and interruption milestone
+
+Automated Vitest coverage now exercises the **production Train navigation
+resolver**, the **WorkoutProvider's start coordinator**, real Expo route-intent
+adapters, app-foreground regional recovery checks, and the live-checkpoint
+adapter. These tests use controlled navigation/storage doubles; they are not
+an actual finger-tap test against an iOS or Android simulator.
+
+- `apps/mobile/test/guarded-workout-navigation.test.ts`: today's plan retains
+  its scheduled ID; future sessions open the calendar, and completed sessions
+  are not offered as today's workout.
+- `apps/mobile/test/guarded-workout-start.test.ts`: persisted checkpoints
+  precede playback, concurrent taps serialize, in-flight account switches
+  prevent activation, failed writes do not start workouts.
+- `apps/mobile/test/runtime-navigation-integration.test.ts`: runtime
+  commands travel through the real router adapter, including start, resume,
+  route aliases and error handling.
+- `apps/mobile/test/active-session-monitor.test.ts`: foreground/resume
+  events, interval checks, invalid storage, concurrent reads, and unmounted
+  responses.
+- `apps/mobile/test/workout-lifecycle-integration.test.ts`: start, save,
+  simulated process restart, restore, corrupted snapshots, sign-out/profile
+  switches, and checkpoint deletion.
+- `packages/planner/test/active-session-recovery.test.ts`: newly worsened
+  Achilles/back symptoms or newly uncertain recovery can interrupt a live
+  workout, including when an earlier start was authorized.
+
+These checks do not establish **cross-device** authorization consistency,
+which requires a separate authenticated server-side coordination mechanism.
+Native app-state and Expo-SQLite behavior still require on-device verification.
+
 ## Device-level test scenarios (not yet executed)
 
 | ID | Scenario | Expected result |
@@ -89,6 +120,15 @@ not dependent on ambiguous duplicate identities.
 | G37 | Corrupt a saved workout checkpoint | Snapshot is rejected rather than partially trusted |
 | G38 | Corrupt a training event or workout history row | Authorization fails rather than ignoring possible already-performed load |
 | G39 | Save a zero-completion session | No fabricated minute of training is added to the ledger |
+
+| G40 | Start planned workout from visible Train tab | Preview retains scheduled session ID and date; upcoming sessions open Plan |
+| G41 | Double-tap workout start during a slow network/disk operation | At most one authorization and one checkpoint; no duplicate active session |
+| G42 | Change local profile while authorization or checkpoint save is in flight | Previous athlete's start cannot become the new athlete's session |
+| G43 | Report worsening Achilles or upper-back symptoms during an active workout | Session pauses on next foreground/periodic review; existing work can be saved |
+| G44 | Background app while region-check database read is in flight, then switch profiles | Late old-profile response cannot resume or clear new-profile active state |
+| G45 | Denied start dispatched through legacy runtime navigation | Never navigates to active workout playback |
+| G46 | App killed after a successful checkpoint write and restarted | Same athlete restores the saved workout; another profile does not |
+| G47 | Leave app open but put device into foreground after new restriction saved | Immediate regional safety recheck occurs |
 
 ## Behavioral acceptance criteria
 
