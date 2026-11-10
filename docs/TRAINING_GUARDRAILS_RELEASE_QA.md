@@ -121,6 +121,10 @@ Native app-state and Expo-SQLite behavior still require on-device verification.
 | G38 | Corrupt a training event or workout history row | Authorization fails rather than ignoring possible already-performed load |
 | G39 | Save a zero-completion session | No fabricated minute of training is added to the ledger |
 
+## Additional mobile-runtime device scenarios
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
 | G40 | Start planned workout from visible Train tab | Preview retains scheduled session ID and date; upcoming sessions open Plan |
 | G41 | Double-tap workout start during a slow network/disk operation | At most one authorization and one checkpoint; no duplicate active session |
 | G42 | Change local profile while authorization or checkpoint save is in flight | Previous athlete's start cannot become the new athlete's session |
