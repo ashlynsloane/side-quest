@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendTrainingEvent, completedActivities, evaluateTrainingAddition, reconcileDailyCeilingPlan } from '../src/daily-training-guardrails';
+import { appendTrainingEvent, completedActivities, evaluateTrainingAddition, hasRecordedTrainingLoadOnDate, reconcileDailyCeilingPlan } from '../src/daily-training-guardrails';
 
 const baseline = {
   date: '2026-11-09',
@@ -262,6 +262,21 @@ describe('daily training ceiling', () => {
       { activity: 'strength', minutes: 20, regions: ['general'], scheduled: false });
     expect(first.decision).toBe('defer');
     expect(first.overrideAllowed).toBe(true);
+  });
+
+  it('finds actual load without a prescription and ignores explicit retractions', () => {
+    const events = [{
+      id: 'workout-1', kind: 'completed' as const, occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', minutes: 20, regions: ['general' as const] },
+    }];
+    expect(hasRecordedTrainingLoadOnDate(events, '2026-11-09')).toBe(true);
+    expect(hasRecordedTrainingLoadOnDate(events, '2026-11-10')).toBe(false);
+    const retraction = {
+      id: 'retracted:workout-1', kind: 'retracted' as const, retractsEventId: 'workout-1',
+      occurredAt: '2026-11-09T18:00:00Z', trainingDate: '2026-11-09',
+    };
+    expect(hasRecordedTrainingLoadOnDate([...events, retraction], '2026-11-09')).toBe(false);
   });
 
 });
