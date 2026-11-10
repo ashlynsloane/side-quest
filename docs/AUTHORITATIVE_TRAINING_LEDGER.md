@@ -29,6 +29,9 @@ as complete history.
   training date. Strength, run, bike, swim and HIIT are currently supported.
   Replays must match exactly or fail; altered local histories do not silently
   erase exposure.
+- `training_remote_recovery_supersessions`: athlete-scoped tombstones prevent
+  delayed, unresolved benign recovery events from overriding a later worsening
+  assessment. Each replacement is itself immutable and restrictive.
 - `training_remote_recovery`: append-only explicitly rechecked regions
   (general, Achilles, upper back) with statuses stable/uncertain/worse/red_flag.
   **Observation timestamps are assigned by PostgreSQL**, so delayed local
@@ -56,7 +59,8 @@ permissions. On account erasure, foreign keys cascade the athlete's records.
    supports devices that were offline for weeks, but records older than
    the server's 90-day acceptance limit need a separate archive policy.
 5. Call `acquire_training_workout_lease_v2`. In one database transaction it
-   locks that athlete's authorization, verifies a matching session and
+   locks that athlete's authorization, verifies the FULL immutable prescribed
+   region set (so a stale client cannot omit an Achilles/back region), a matching session and
    remaining allowance, checks completed *and reserved* load, tests regional
    recovery after the most recent possible exposure, and reserves the dose
    while acquiring an exclusive active lease.
@@ -87,10 +91,15 @@ even if local policy allowed a documented exception.
   More than 5,000 local records in one category is a fail-closed review condition,
   not a silent truncation. An explicit correction and archive workflow is
   required before production enablement.
-- **Pending recovery review:** an interrupted recovery upload is held in
-  durable local storage and must be retried with the same region/status values
-  before a new distinct symptom report can be submitted. This avoids
-  rewriting older observations as newly observed timestamps.
+- **Pending recovery review:** one durable event journal per athlete persists
+  across calendar dates. An unresolved "stable"/"uncertain" upload must reuse its
+  original event ID; a new benign report cannot bypass it by waiting until
+  tomorrow. A newly explicit **worse/red_flag-only** report can supersede the
+  pending event using an atomic server tombstone. Any delayed older "stable"
+  RPC is rejected, even when the old report was never previously stored.
+  When a restrictive cloud report fails, its restrictive fields are still
+  persisted in local SQLite to stop this device; **another device is not
+  guaranteed to know until server delivery succeeds**.
 - **Disconnected other phone:** exposure performed fully offline on phone A
   cannot be visible to server or phone B until A reconnects and uploads.
   A server reservation protects an authorized Side Quest session, but it
@@ -190,7 +199,8 @@ A correction is NOT a local UPDATE or DELETE on the cloud ledger:
    the same immutable event ID; any third, unreviewed value is rejected.
    An approved unused reservation can free budget for a **different** prescribed
    session, but its session identity remains consumed permanently, preventing
-   the previously started session from being restarted.
+   the previously started session from being restarted. A reservation with
+   any linked completed exposure cannot be approved as "never started".
 
 **Current mobile scope:** the typed `requestRemoteTrainingCorrection` and
 `readRemoteTrainingCorrections` APIs are implemented and unit-tested. There is
@@ -228,10 +238,37 @@ physical clients. Required controlled sequence:
 5. Repeat for an unused reservation and a rejected or cross-athlete request.
    Verify the original session remains non-reusable, and that an active lease
    prevents approval. Then test a permitted *different* scheduled session.
-6. Test old clients, revoked permissions, account erasure, stale devices,
+6. Test delayed benign recovery reports arriving both before and after a
+   newer worsening report, including across local dates. Confirm that the
+   old event is tombstoned, the new restrictive check wins, and the offline
+   phone persists its own STOP signal.
+7. Test old clients, revoked permissions, account erasure, stale devices,
    timezone/DST changes, disconnects, re-login and clinical red flags. Only
    after explicit review should a staging build enable the feature flag.
 
-The first two migration tests and the new correction test are run against
-disposable PostgreSQL 16 in CI, **not** against Supabase Auth or real devices.
+All three migrations and correction/recovery supersession tests are run against
+isolated PostgreSQL 16 in CI, **not** against Supabase Auth or real devices.
 This separation is required for a reliable release decision.
+
+
+## Security and staging deployment safeguards
+
+`scripts/staging-training-ledger.sh plan` is a nonmutating, explicit-project
+Supabase CLI dry run. `apply` requires both the project ref matching its
+independent confirmation variable and a distinct production ref. It never
+uses the linked project implicitly. The CLI may list **all pending local
+migrations**, not only the ledger's three migrations: inspect every pending
+migration and verify the intended target manually before any apply.
+
+No secret values, project connection metadata, service-role tokens or
+database passwords belong in commits, Expo public configuration, or GitHub
+Actions logs. The generated `supabase/.temp/` directory is untracked and
+ignored in the working branch. Old Git history containing previously tracked
+nonsecret project metadata is not erased by this cleanup.
+
+**Remaining release blockers:** no dedicated Supabase staging project has been
+configured and tested; no real authenticated two-device test was executed; the
+athlete correction UX, approval console, prior-history amendment outbox and
+plan revision protocol are not complete. This is not clinically validated
+return-to-sport clearance. Keep the cloud feature OFF and this PR unmerged
+until those explicitly reviewed release gates are satisfied.
