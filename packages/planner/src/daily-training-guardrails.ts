@@ -187,3 +187,34 @@ export function completedActivities(history: readonly TrainingEvent[]): Activity
   return history.filter((event) => event.kind === 'completed' && event.activity)
     .map((event) => event.activity as ActivityDose);
 }
+
+/**
+ * A newly edited calendar must not silently increase an existing daily budget.
+ * Retain previously approved session IDs only while they still belong to this
+ * day; lower doses apply immediately, but higher doses require an explicit
+ * new plan review. Completed planned sessions remain in the budget baseline
+ * so their historical load is still counted against today's total.
+ */
+export function reconcileDailyCeilingPlan(
+  previous: DailyTrainingCeiling,
+  currentSessions: readonly ActivityDose[],
+): DailyTrainingCeiling {
+  const planned = previous.planned.flatMap((original) => {
+    const current = currentSessions.find((item) =>
+      item.activity === original.activity &&
+      !!item.sessionId && item.sessionId === original.sessionId
+    );
+    if (!current) return [];
+    return [{
+      ...original,
+      minutes: original.minutes === undefined ? current.minutes
+        : current.minutes === undefined ? original.minutes
+          : Math.min(original.minutes, current.minutes),
+      sets: original.sets === undefined ? current.sets
+        : current.sets === undefined ? original.sets
+          : Math.min(original.sets, current.sets),
+      regions: [...new Set<TrainingRegion>([...original.regions, ...current.regions])],
+    }];
+  });
+  return { ...previous, planned };
+}
