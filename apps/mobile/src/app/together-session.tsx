@@ -241,6 +241,7 @@ export default function TogetherSessionScreen() {
       completedAt,
       completionFraction: fraction,
       ledgerId: `workout_together:${room.id}:${user.id}`,
+      syncCloud: requiresCloudLease,
     });
     if (requiresCloudLease) {
       // Release only this athlete's room token after the private load record
