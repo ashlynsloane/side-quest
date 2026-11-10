@@ -81,8 +81,11 @@ export function evaluateTrainingAddition(
       requiresReassessment: true,
     };
   }
+  const retractedIds = new Set(history.filter((event) => event.kind === 'retracted')
+    .map((event) => event.retractsEventId).filter((id): id is string => Boolean(id)));
   const performedToday = history.filter((event) =>
-    (event.kind === 'completed' || event.kind === 'unplanned')
+    !retractedIds.has(event.id)
+    && (event.kind === 'completed' || event.kind === 'unplanned')
     && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
     && !!event.activity
   );
@@ -168,7 +171,9 @@ export interface TrainingEvent {
   id: string;
   occurredAt: string;
   trainingDate?: string;
-  kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery' | 'assessment';
+  kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery' | 'assessment' | 'retracted';
+  /** Reference to a previously recorded activity event that no longer counts. */
+  retractsEventId?: string;
   activity?: ActivityDose;
   note?: string;
 }
@@ -184,7 +189,9 @@ export function appendTrainingEvent(
 }
 
 export function completedActivities(history: readonly TrainingEvent[]): ActivityDose[] {
-  return history.filter((event) => event.kind === 'completed' && event.activity)
+  const retractedIds = new Set(history.filter((event) => event.kind === 'retracted')
+    .map((event) => event.retractsEventId).filter((id): id is string => Boolean(id)));
+  return history.filter((event) => event.kind === 'completed' && event.activity && !retractedIds.has(event.id))
     .map((event) => event.activity as ActivityDose);
 }
 
