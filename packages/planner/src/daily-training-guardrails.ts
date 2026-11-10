@@ -18,6 +18,8 @@ export interface DailyTrainingCeiling {
   date: string;
   planned: ActivityDose[];
   recovery: Partial<Record<TrainingRegion, RecoveryStatus>>;
+  /** Timestamp of the athlete's last explicit response for each affected region. */
+  recoveryObservedAt?: Partial<Record<TrainingRegion, string>>;
   /** Requires a new prescription before unplanned exercise can be added. */
   restrictUnplanned: boolean;
   /** A current explicit no-training check-in blocks starts and cannot be overridden. */
@@ -79,6 +81,28 @@ export function evaluateTrainingAddition(
       requiresReassessment: true,
     };
   }
+  const performedToday = history.filter((event) =>
+    (event.kind === 'completed' || event.kind === 'unplanned')
+    && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
+    && !!event.activity
+  );
+  // The last recovery observation must come AFTER the last recorded exposure
+  // to that region; otherwise feeling good before a workout could unlock more.
+  for (const region of regions) {
+    const observed = ceiling.recoveryObservedAt?.[region];
+    const laterExposure = performedToday.some((event) =>
+      (event.activity?.regions.includes(region) || region === 'general') &&
+      (!observed || !Number.isFinite(Date.parse(observed)) ||
+       Date.parse(event.occurredAt) > Date.parse(observed))
+    );
+    if (laterExposure) {
+      return {
+        decision: 'defer',
+        reasons: [`A ${region.replaceAll('_', ' ')} recovery check is required after the latest completed training exposure.`],
+        requiresReassessment: true,
+      };
+    }
+  }
   const planned = matchingPlan;
   if (!proposed.scheduled || !planned) {
     return {
@@ -104,11 +128,20 @@ export function evaluateTrainingAddition(
       requiresReassessment: false,
     };
   }
-  const performed = history.filter((event) =>
-    (event.kind === 'completed' || event.kind === 'unplanned')
-    && event.activity?.activity === proposed.activity
-    && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === ceiling.date
+  const performed = performedToday.filter((event) =>
+    event.activity?.activity === proposed.activity
   );
+  // A saved session cannot be started twice merely because it used fewer
+  // minutes than prescribed. Continuing requires a new explicit decision.
+  if (planned.sessionId && performed.some((event) =>
+    event.activity?.sessionId === planned.sessionId
+  )) {
+    return {
+      decision: 'defer',
+      reasons: ['This planned session already has completed activity recorded. Review its recovery before starting it again.'],
+      requiresReassessment: true,
+    };
+  }
   const usedMinutes = performed.reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
   const usedSets = performed.reduce((sum, event) => sum + (event.activity?.sets ?? 0), 0);
   // Per-session bounds are checked above; the remaining daily budget includes
