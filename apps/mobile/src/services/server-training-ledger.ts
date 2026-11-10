@@ -148,7 +148,7 @@ export async function synchronizeRecordedTrainingExposure(
   if (workouts.length >= 501 || endurance.length >= 501) {
     throw new Error('Training history exceeds the synchronized safety review limit.');
   }
-  const events: RemoteTrainingExposure[] = workouts.map((entry) => {
+  const events: RemoteTrainingExposure[] = workouts.map((entry): RemoteTrainingExposure => {
     const elapsed = entry.workout
       ? entry.workout.estimatedElapsedSeconds * entry.completionFraction / 60
       : (Date.parse(entry.completedAt) - Date.parse(entry.startedAt)) / 60_000;
