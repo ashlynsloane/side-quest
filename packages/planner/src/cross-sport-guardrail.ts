@@ -15,6 +15,10 @@ export interface CrossSportDecision {
   conflict: boolean;
   affectedRegions: TrainingRegion[];
   reasons: string[];
+  /** Most recent relevant exposure per region, when timestamps are valid. */
+  lastExposureAt?: Partial<Record<TrainingRegion, string>>;
+  /** No valid timestamp: a reported recovery observation cannot be compared. */
+  unknownTimingRegions?: TrainingRegion[];
 }
 
 /**
@@ -29,6 +33,8 @@ export function assessCrossSportExposure(
 ): CrossSportDecision {
   const concerns = new Set<TrainingRegion>();
   const labels = new Set<string>();
+  const lastExposureAt: Partial<Record<TrainingRegion, string>> = {};
+  const unknownTiming = new Set<TrainingRegion>();
   const now = window ? Date.parse(window.now) : NaN;
   if (window && (!Number.isFinite(now) || !Number.isFinite(window.lookbackHours) ||
       window.lookbackHours <= 0)) {
@@ -50,19 +56,27 @@ export function assessCrossSportExposure(
       ? entry.regions.includes('upper_back')
       : entry.discipline === 'swim' || entry.discipline === 'hiit'
         || entry.discipline === 'strength' || entry.discipline === 'unknown';
-    if (achilles && proposedRegions.includes('achilles')) {
-      concerns.add('achilles');
+    const mark = (region: TrainingRegion) => {
+      concerns.add(region);
       labels.add(entry.discipline);
-    }
-    if (upperBack && proposedRegions.includes('upper_back')) {
-      concerns.add('upper_back');
-      labels.add(entry.discipline);
-    }
+      const time = Date.parse(entry.occurredAt ?? '');
+      if (!Number.isFinite(time)) {
+        unknownTiming.add(region);
+        return;
+      }
+      const previous = Date.parse(lastExposureAt[region] ?? '');
+      if (!Number.isFinite(previous) || time > previous)
+        lastExposureAt[region] = new Date(time).toISOString();
+    };
+    if (achilles && proposedRegions.includes('achilles')) mark('achilles');
+    if (upperBack && proposedRegions.includes('upper_back')) mark('upper_back');
   }
   if (!concerns.size) return { conflict: false, affectedRegions: [], reasons: [] };
   return {
     conflict: true,
     affectedRegions: [...concerns],
+    lastExposureAt,
+    unknownTimingRegions: [...unknownTiming],
     reasons: [
       `Recent ${[...labels].join('/')} activity overlaps a recovering region loaded by this session. Review combined exposure before adding more training.`,
     ],
