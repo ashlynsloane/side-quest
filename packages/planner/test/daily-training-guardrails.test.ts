@@ -225,4 +225,24 @@ describe('daily training ceiling', () => {
     }, { activity: 'strength', minutes: 35, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
   });
 
+  it('requires fresh recovery rather than permitting a text-only override', () => {
+    const unknown = { ...baseline, recovery: { general: 'uncertain' as const } };
+    const result = evaluateTrainingAddition(unknown,
+      { activity: 'strength', minutes: 20, regions: ['general'], scheduled: true });
+    expect(result.decision).toBe('defer');
+    expect(result.overrideAllowed).toBe(false);
+  });
+  it('does not override a prescribed ceiling by entering explanatory text', () => {
+    const result = evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 80, regions: ['general'], scheduled: true });
+    expect(result.decision).toBe('modify');
+    expect(result.overrideAllowed).toBe(false);
+  });
+  it('retains a documented discretionary path for truly unplanned activity', () => {
+    const result = evaluateTrainingAddition(baseline,
+      { activity: 'cycling', minutes: 12, regions: ['general'], scheduled: false });
+    expect(result.decision).toBe('defer');
+    expect(result.overrideAllowed).not.toBe(false);
+  });
+
 });
