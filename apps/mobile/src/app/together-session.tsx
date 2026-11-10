@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
 import { getActiveTrainingCheckIn, saveCompletedWorkout } from '@/services/database';
 import { createActiveSessionMonitor } from '@/services/active-session-monitor';
+import { authorizedSharedParticipationFraction } from '@/services/shared-workout-participation';
 import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
 import { loadDailyCeiling } from '@/services/training-guardrail-storage';
 import {
@@ -188,17 +189,15 @@ export default function TogetherSessionScreen() {
 
   const state = useMemo(() => room?.startsAt ? timeline(room.workout, room.startsAt, now) : null, [room, now]);
   const cloudAuthorizedFraction = useCallback((): number => {
-    if (!room?.startsAt || firstVerifiedAt.current === null) return 0;
-    const beganAt = Date.parse(room.startsAt);
-    if (!Number.isFinite(beganAt) || room.workout.estimatedElapsedSeconds <= 0) return 0;
-    const endAt = cloudLeaseStatus === 'verified'
-      ? Date.now()
-      : Math.min(lastVerifiedAt.current ?? Date.now(), Date.now());
-    return Math.max(0, Math.min(1,
-      (endAt - Math.max(beganAt, firstVerifiedAt.current)) /
-      (room.workout.estimatedElapsedSeconds * 1000),
-    ));
-  }, [room, cloudLeaseStatus]);
+    return authorizedSharedParticipationFraction({
+      startsAt: room?.startsAt ?? '',
+      workoutSeconds: room?.workout.estimatedElapsedSeconds ?? 0,
+      firstVerifiedAt: firstVerifiedAt.current,
+      lastVerifiedAt: lastVerifiedAt.current,
+      leaseStatus: cloudLeaseStatus,
+      now: Date.now(),
+    });
+  }, [room?.startsAt, room?.workout.estimatedElapsedSeconds, cloudLeaseStatus]);
 
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
@@ -264,7 +263,7 @@ export default function TogetherSessionScreen() {
     if (state?.kind !== 'complete' || sharedRecoveryBlocked) return;
     // The shared clock is global; it is not evidence this device's athlete
     // participated while the lease was absent or denied.
-    if (requiresCloudLease && firstVerifiedAt.current === null) return;
+    if (requiresCloudLease && cloudAuthorizedFraction() <= 0) return;
     void persist(requiresCloudLease ? cloudAuthorizedFraction() : 1);
   }, [state?.kind, persist, requiresCloudLease, cloudAuthorizedFraction, sharedRecoveryBlocked]);
 
