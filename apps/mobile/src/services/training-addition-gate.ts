@@ -228,11 +228,28 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
     ])];
     const crossSport = await crossSportOverlapFor(regions);
     if (crossSport.conflict) {
+      // A prior bike/run/strength exposure is not "cleared" by an earlier
+      // regional symptom check. An explicit post-exposure recheck is needed
+      // before even a documented discretionary exception can be considered.
+      const missingPostExposureEvidence = crossSport.affectedRegions.some((region) => {
+        const lastExposure = crossSport.lastExposureAt?.[region];
+        const observedAt = ceiling?.recoveryObservedAt?.[region];
+        return (crossSport.unknownTimingRegions ?? []).includes(region)
+          || !lastExposure || !observedAt
+          || !Number.isFinite(Date.parse(observedAt))
+          || Date.parse(observedAt) < Date.parse(lastExposure);
+      });
       result = {
         decision: 'defer',
-        reasons: [...result.reasons, ...crossSport.reasons],
+        reasons: [
+          ...result.reasons,
+          ...crossSport.reasons,
+          ...(missingPostExposureEvidence
+            ? ['A regional recovery check after the most recent overlapping activity is required before reconsidering training.']
+            : []),
+        ],
         requiresReassessment: true,
-        overrideAllowed: result.overrideAllowed,
+        overrideAllowed: missingPostExposureEvidence ? false : result.overrideAllowed,
       };
     }
   }
