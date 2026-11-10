@@ -77,7 +77,7 @@ create or replace function public.publish_training_remote_recovery(
   p_event_id text, p_training_date date, p_observations jsonb
 )
 returns boolean language plpgsql security definer set search_path = ''
-as $
+as $recovery_verified$
 declare
   v_user uuid := auth.uid();
   v_region text;
@@ -128,7 +128,7 @@ begin
   end loop;
   return true;
 end;
-$;
+$recovery_verified$;
 
 -- A superseding report can only be strictly restrictive. A benign/stable
 -- replacement must still wait for the old pending observation to resolve.
