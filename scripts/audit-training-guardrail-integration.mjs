@@ -112,7 +112,7 @@ const contracts = [
   ['Cloud lease required before a cloud-profile workout starts',
     'apps/mobile/src/state/workout-context.tsx',
     [/cloudWorkoutLeasesEnabled\(\)/, /user\?\.mode === 'cloud'/,
-      /acquireRemoteLease: acquireCloudWorkoutLease/,
+      /acquireRemoteLease: \(/, /acquireSynchronizedWorkoutLease\(/,
       /releaseRemoteLease: releaseCloudWorkoutLease/]],
   ['Server lease owned through complete solo workout lifecycle',
     'apps/mobile/src/app/active-workout.tsx',
