@@ -32,11 +32,13 @@ athlete's active workout lease** while the lease is valid.
 - Local-only profiles still operate locally: they do **not** have a shared
   server identity and are **not** protected against another phone.
 
-**Not yet solved:** A completed workout on device A is not yet synced into
-device B's daily dose or injury-specific recovery history. A lease prevents
-overlapping active sessions, **not sequential extra training** after A has
-completed and released it. Offline/unlogged activity is also unknown. Do not
-describe this as complete multi-device load enforcement or medical clearance.
+**New synchronized ledger (still disabled and undeployed):** a second
+migration adds immutable completed exposures, explicit server-timestamped
+regional recovery, an immutable daily prescription and conservative
+server-reserved session doses. Cloud starts and renewals use v2 RPCs to
+evaluate the shared history atomically. **This does not capture offline,
+unlogged, unsynchronized legacy builds or medically validate any tissue-load
+calculation.** See [authoritative ledger specification](AUTHORITATIVE_TRAINING_LEDGER.md).
 
 ## Prerequisites to enable (not executed here)
 
@@ -76,16 +78,22 @@ The existing guardrail workflow runs:
 Android emulator build-and-launch workflow, not an executed device test or
 release gate. Even if it passes, it will not verify cross-device cloud behavior.
 
-## Follow-on architecture for real cross-device load limits
+## Updated synchronized-ledger rollout
 
-A server-side, athlete-scoped **completed-exposure ledger** and current
-regional recovery observations must become authoritative to all devices.
-Daily-start authorization should be computed in a single transaction against
-the synchronized plan, committed actuals, current symptom restrictions and
-active lease. Design for offline capture/reconciliation, server timestamps,
-idempotency, date/time-zone transitions, account erasure and retried uploads.
-Until that is implemented and tested, Side Quest's daily training ceilings
-are still **per-device**, not a coordinated global physiological budget.
+The former follow-on architecture has been implemented in a **second staged
+migration**, `20261110190000_authoritative_training_ledger.sql`.
+Cloud workouts now synchronize recorded actuals before the v2 start RPC;
+the server checks immutable daily planned dose, completed exposures,
+session reservations and latest regional recovery in one transaction.
+A successful lease is renewed only while remote restrictions still permit it.
+PostgreSQL CI tests the migration and genuine concurrent acquisition;
+this has not been deployed to live Supabase.
 
-The selected 90-second TTL, 30-second renewal and any symptom thresholds are
-product policies; they are not clinical or physiological safety thresholds.
+**Still not solved:** complete offline/legacy activity ingestion, reviewed
+amendments to the initial plan, local correction/retraction propagation,
+atomic account-switch behavior on physical devices, and prospective clinical
+validation. Device-local and external-source exercise history remains
+self-reported. See the [ledger rollout guide](AUTHORITATIVE_TRAINING_LEDGER.md).
+
+The selected 90-second TTL, 30-second renewal and recovery thresholds remain
+product policies, not clinical physiological safety thresholds.
