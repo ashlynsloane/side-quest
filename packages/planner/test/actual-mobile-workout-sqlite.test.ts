@@ -381,6 +381,23 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await ledger()).toHaveLength(0);
   });
 
+  it('keeps default equipment initialization in the verified source athlete database', async () => {
+    await service.withVerifiedAthleteDatabase('synthetic-athlete-one', async () => {
+      const profiles = await service.ensureDefaultEquipmentProfiles();
+      expect(profiles).toHaveLength(3);
+      await service.getRecentRegionExposures();
+      await service.getPreviousExerciseIds();
+    });
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect(await service.listEquipmentProfiles()).toHaveLength(0);
+    await expect(service.withVerifiedAthleteDatabase('synthetic-athlete-one', async () => {
+      await service.ensureDefaultEquipmentProfiles();
+    })).rejects.toThrow('Athlete profile changed');
+    expect(await service.listEquipmentProfiles()).toHaveLength(0);
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect(await service.listEquipmentProfiles()).toHaveLength(3);
+  });
+
   it('rejects athlete A first-week writes if their generator resolves after activating B', async () => {
     let finishGeneration!: () => void;
     const generated = new Promise<void>((resolve) => { finishGeneration = resolve; });
