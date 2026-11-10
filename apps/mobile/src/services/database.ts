@@ -3067,3 +3067,84 @@ export async function saveObservedTrainingRecovery(
     );
   });
 }
+
+
+/**
+ * Strict read path for training authorization. General-purpose UI queries may
+ * tolerate malformed legacy rows, but a guardrail must never ignore them.
+ */
+export async function listWorkoutLedgerEntriesForGuardrails({
+  from, to, limit = 501,
+}: { from: string; to: string; limit?: number }): Promise<Array<{
+  id: string;
+  workout?: GeneratedWorkout;
+  startedAt: string;
+  completedAt: string;
+  completionFraction: number;
+  plannedSessionId?: string;
+  updatedAt: string;
+}>> {
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{
+    id: string; workout_json: string | null;
+    started_at: string; completed_at: string; completion_fraction: number;
+    planned_session_id: string | null; updated_at: string;
+  }>(
+    `SELECT id, workout_json, started_at, completed_at,
+       completion_fraction, planned_session_id, updated_at
+     FROM workout_ledger WHERE completed_at >= ? AND completed_at <= ?
+     ORDER BY completed_at DESC LIMIT ?`,
+    from, to, limit,
+  );
+  return rows.map((row) => {
+    try {
+      const workout = row.workout_json ? JSON.parse(row.workout_json) as GeneratedWorkout : undefined;
+      if (!row.id || !Number.isFinite(row.completion_fraction) ||
+          row.completion_fraction < 0 || row.completion_fraction > 1 ||
+          !Number.isFinite(Date.parse(row.started_at)) ||
+          !Number.isFinite(Date.parse(row.completed_at)) || !row.updated_at ||
+          (workout && (!workout.id ||
+            !Number.isFinite(workout.estimatedElapsedSeconds) ||
+            workout.estimatedElapsedSeconds <= 0 ||
+            !Array.isArray(workout.stations)))) {
+        throw new Error('Invalid workout ledger fields');
+      }
+      return {
+        id: row.id, workout, startedAt: row.started_at,
+        completedAt: row.completed_at, completionFraction: row.completion_fraction,
+        plannedSessionId: row.planned_session_id ?? undefined,
+        updatedAt: row.updated_at,
+      };
+    } catch {
+      throw new Error('Workout history contains an unreadable entry. Training approval requires a history repair.');
+    }
+  });
+}
+
+/** Fail closed if any imported session in the queried range is malformed. */
+export async function listEnduranceActivitiesForGuardrails({
+  from, to, limit = 501,
+}: { from: string; to: string; limit?: number }): Promise<EnduranceActivity[]> {
+  await initializeDatabase();
+  const rows = await db.getAllAsync<{ activity_json: string; start_at: string }>(
+    `SELECT activity_json, start_at FROM endurance_activities
+     WHERE start_at >= ? AND start_at <= ? AND deleted_at IS NULL
+     ORDER BY start_at DESC LIMIT ?`,
+    from, to, limit,
+  );
+  return rows.map((row) => {
+    try {
+      const item = JSON.parse(row.activity_json) as EnduranceActivity;
+      if (!item || !item.id || item.startAt !== row.start_at ||
+          !Number.isFinite(Date.parse(item.startAt)) ||
+          !Number.isFinite(item.movingTimeSeconds) ||
+          item.movingTimeSeconds < 0 ||
+          !['run', 'bike', 'swim', 'strength', 'hiit'].includes(item.discipline)) {
+        throw new Error('Invalid endurance activity');
+      }
+      return item;
+    } catch {
+      throw new Error('Imported training contains an unreadable entry. Review the import before starting new loading.');
+    }
+  });
+}
