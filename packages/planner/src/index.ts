@@ -9,7 +9,7 @@ export type { LedgerExposure } from './training-event-reconciliation';
 export { affectedTrainingRegions } from './training-region-inference';
 export { assessCrossSportExposure } from './cross-sport-guardrail';
 export type { CrossSportExposure, CrossSportDecision, ExposureDiscipline } from './cross-sport-guardrail';
-export { evaluateTrainingAddition, reconcileDailyCeilingPlan, appendTrainingEvent, completedActivities } from './daily-training-guardrails';
+export { evaluateTrainingAddition, hasRecordedTrainingLoadOnDate, reconcileDailyCeilingPlan, appendTrainingEvent, completedActivities } from './daily-training-guardrails';
 export type { ActivityDose, DailyTrainingCeiling, ProposedActivity, TrainingEvent, TrainingGuardrailResult, TrainingDecision, TrainingRegion, RecoveryStatus } from './daily-training-guardrails';
 import type {
   BodyRegion,
