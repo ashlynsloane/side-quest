@@ -56,6 +56,130 @@ revoke all on table public.training_remote_correction_requests from public,anon,
 revoke all on table public.training_remote_correction_decisions from public,anon,authenticated;
 revoke all on table public.training_remote_approved_amendments from public,anon,authenticated;
 
+
+-- An unresolved earlier observation (e.g. a timed-out "stable" RPC) can
+-- NEVER land after a later restrictive update and make that region clear.
+-- This tombstone works even if the earlier event had not yet been inserted.
+create table public.training_remote_recovery_supersessions (
+  athlete_id uuid not null references auth.users(id) on delete cascade,
+  prior_event_id text not null check (length(prior_event_id) between 1 and 128),
+  replacement_event_id text not null check (length(replacement_event_id) between 1 and 128),
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  primary key(athlete_id,prior_event_id),
+  unique (athlete_id,replacement_event_id)
+);
+alter table public.training_remote_recovery_supersessions enable row level security;
+revoke all on table public.training_remote_recovery_supersessions from public,anon,authenticated;
+
+-- Reimplement normal immutable recovery to check supersession under the
+-- SAME athlete advisory lock. The timestamp is taken AFTER acquiring it.
+create or replace function public.publish_training_remote_recovery(
+  p_event_id text, p_training_date date, p_observations jsonb
+)
+returns boolean language plpgsql security definer set search_path = ''
+as $
+declare
+  v_user uuid := auth.uid();
+  v_region text;
+  v_status text;
+  v_observed timestamptz;
+  v_existing text;
+  v_previous jsonb;
+begin
+  if v_user is null then raise exception 'Authentication required' using errcode='42501'; end if;
+  if length(coalesce(p_event_id,'')) not between 1 and 128
+     or p_training_date is null or abs(p_training_date - current_date) > 1
+     or p_observations is null or jsonb_typeof(p_observations) <> 'object'
+     or (select count(*) from pg_catalog.jsonb_object_keys(p_observations)) not between 1 and 3 then
+    raise exception 'Invalid regional recovery observation' using errcode='22023';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_user::text, 91829));
+  if exists (select 1 from public.training_remote_recovery_supersessions
+     where athlete_id=v_user and prior_event_id=p_event_id) then
+    raise exception 'Earlier recovery observation was superseded; do not replay stale clearance'
+      using errcode='23505';
+  end if;
+  v_observed := pg_catalog.clock_timestamp();
+  -- A retry is exactly the same observation: it cannot append an extra
+  -- region with a newer timestamp under an older event ID.
+  select pg_catalog.jsonb_object_agg(region,status) into v_previous
+    from public.training_remote_recovery
+    where athlete_id=v_user and event_id=p_event_id;
+  if v_previous is not null then
+    if v_previous is distinct from p_observations then
+      raise exception 'Recovery event ID reused with different regions or symptoms'
+        using errcode='23505';
+    end if;
+    return true;
+  end if;
+  for v_region,v_status in select key,value from pg_catalog.jsonb_each_text(p_observations) loop
+    if v_region not in ('general','achilles','upper_back')
+       or v_status not in ('stable','uncertain','worse','red_flag') then
+      raise exception 'Invalid recovery region or status' using errcode='22023';
+    end if;
+    insert into public.training_remote_recovery(athlete_id,event_id,region,status,training_date,observed_at)
+    values(v_user,p_event_id,v_region,v_status,p_training_date,v_observed)
+    on conflict do nothing;
+    select status into v_existing from public.training_remote_recovery
+      where athlete_id=v_user and event_id=p_event_id and region=v_region;
+    if v_existing is distinct from v_status then
+      raise exception 'Recovery observation ID reused with conflicting status' using errcode='23505';
+    end if;
+  end loop;
+  return true;
+end;
+$;
+
+-- A superseding report can only be strictly restrictive. A benign/stable
+-- replacement must still wait for the old pending observation to resolve.
+create or replace function public.publish_training_remote_recovery_restrictive(
+  p_event_id text, p_training_date date, p_observations jsonb,
+  p_superseded_event_id text
+)
+returns boolean language plpgsql security definer set search_path = ''
+as $restrictive$
+declare
+  v_user uuid := auth.uid();
+  v_existing text;
+begin
+  if v_user is null then raise exception 'Authentication required' using errcode='42501'; end if;
+  if length(coalesce(p_event_id,'')) not between 1 and 128
+     or length(coalesce(p_superseded_event_id,'')) not between 1 and 128
+     or p_event_id=p_superseded_event_id
+     or p_training_date is null or abs(p_training_date-current_date) > 1
+     or p_observations is null or pg_catalog.jsonb_typeof(p_observations) <> 'object'
+     or (select count(*) from pg_catalog.jsonb_object_keys(p_observations)) not between 1 and 3
+     or exists (select 1 from pg_catalog.jsonb_each_text(p_observations) as report(region,status)
+        where report.region not in ('general','achilles','upper_back')
+          or report.status not in ('worse','red_flag')) then
+    raise exception 'A superseding recovery report must be explicitly restrictive'
+      using errcode='22023';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_user::text,91829));
+  insert into public.training_remote_recovery_supersessions(
+    athlete_id,prior_event_id,replacement_event_id
+  ) values(v_user,p_superseded_event_id,p_event_id) on conflict do nothing;
+  select replacement_event_id into v_existing
+    from public.training_remote_recovery_supersessions
+    where athlete_id=v_user and prior_event_id=p_superseded_event_id;
+  if v_existing is distinct from p_event_id then
+    raise exception 'Earlier recovery event superseded by a different event ID'
+      using errcode='23505';
+  end if;
+  if not public.publish_training_remote_recovery(
+      p_event_id,p_training_date,p_observations) then
+    raise exception 'Superseding restrictive observation could not be confirmed'
+      using errcode='23505';
+  end if;
+  return true;
+end;
+$restrictive$;
+
+revoke all on function public.publish_training_remote_recovery_restrictive(text,date,jsonb,text)
+  from public,anon;
+grant execute on function public.publish_training_remote_recovery_restrictive(text,date,jsonb,text)
+  to authenticated;
+
 -- A correction is a separate auditable request, never a client overwrite.
 create or replace function public.request_training_remote_correction(
   p_request_id text, p_target_type text, p_target_id text,
