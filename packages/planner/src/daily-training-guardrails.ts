@@ -36,6 +36,10 @@ export function evaluateTrainingAddition(
   ceiling: DailyTrainingCeiling,
   proposed: ProposedActivity,
 ): TrainingGuardrailResult {
+  if (!proposed.activity.trim() || !proposed.regions.length ||
+      [proposed.minutes, proposed.sets].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))) {
+    return { decision: 'stop', reasons: ['Invalid activity dose or missing affected regions.'], requiresReassessment: true };
+  }
   const regions = [...new Set<TrainingRegion>([...proposed.regions, 'general'])];
   if (regions.some((region) => ceiling.recovery[region] === 'red_flag')) {
     return {
@@ -65,6 +69,13 @@ export function evaluateTrainingAddition(
       reasons: ['Feeling energetic does not automatically authorize additional training. Request a plan adjustment.'],
       requiresReassessment: true,
     };
+  }
+  if (proposed.regions.some((region) => !planned.regions.includes(region))) {
+    return { decision: 'defer', reasons: ['Proposed activity loads regions not covered by its prescription.'], requiresReassessment: true };
+  }
+  if ((proposed.minutes !== undefined && planned.minutes === undefined) ||
+      (proposed.sets !== undefined && planned.sets === undefined)) {
+    return { decision: 'modify', reasons: ['This dose dimension was not prescribed.'], requiresReassessment: true };
   }
   if (
     (proposed.minutes ?? 0) > (planned.minutes ?? 0) ||
