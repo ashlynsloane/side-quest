@@ -102,7 +102,7 @@ export function evaluateTrainingAddition(
   }
   if ((planned.minutes !== undefined && (proposed.minutes ?? 0) + usedMinutes > planned.minutes) ||
       (planned.sets !== undefined && (proposed.sets ?? 0) + usedSets > planned.sets)) {
-    return { decision: 'modify', reasons: ['Previously completed training uses part of today\\'s budget. Reduce the proposed dose.'], requiresReassessment: false };
+    return { decision: 'modify', reasons: ["Previously completed training uses part of today's budget. Reduce the proposed dose."], requiresReassessment: false };
   }
   return { decision: 'allow', reasons: ['Within the remaining planned dose and reported recovery constraints.'], requiresReassessment: false };
 }
