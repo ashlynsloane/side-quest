@@ -7,7 +7,7 @@ function make(): GeneratedWorkout {
     id: 'core', bodyRegions: [{ region: 'core_anterior', role: 'primary', load: 1 }],
     jointLoads: [], movementPatterns: ['anti_extension'],
     impactLevel: 0, balanceDemand: 0, cardiovascularDemand: 0,
-  } as Exercise;
+  } as unknown as Exercise;
   return {
     id: 'one', name: 'Workout', createdAt: '', randomSeed: '1',
     request: {} as GeneratedWorkout['request'],
