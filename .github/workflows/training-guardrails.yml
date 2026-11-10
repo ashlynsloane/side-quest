@@ -17,6 +17,8 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Audit tracked credential and generated metadata paths
+        run: bash scripts/audit-tracked-sensitive-paths.sh
       - name: Staging deployment must be explicit and production-safe
         run: bash scripts/test-staging-training-ledger.sh
       - name: Guardrail integration contract
