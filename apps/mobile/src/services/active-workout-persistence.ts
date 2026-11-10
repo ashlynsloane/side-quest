@@ -6,7 +6,7 @@ import type {
   ActiveWorkoutRestoreResult,
   GeneratedWorkout,
 } from '@circuit/domain';
-import { buildActiveWorkoutPersistenceWrite, restoreActiveWorkoutCheckpoint } from '@circuit/planner';
+import { buildActiveWorkoutPersistenceWrite, restoreActiveWorkoutCheckpoint, scopedLiveWorkoutStorageKey, LEGACY_LIVE_WORKOUT_KEY } from '@circuit/planner';
 
 
 export const ACTIVE_WORKOUT_INDEX_KEY = 'sidequest.active-workout.current';
@@ -81,13 +81,8 @@ export interface LiveWorkoutSessionSnapshot {
 
 // v1 was unscoped and could expose one athlete's paused session to another
 // athlete who signs in on the same device. Never auto-restore that key.
-const LEGACY_LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
-const LIVE_SESSION_KEY_PREFIX = 'sidequest.live-workout.session.v2.';
-
-function scopedSessionKey(athleteId: string): string {
-  if (!athleteId.trim()) throw new Error('An athlete ID is required for live workout storage');
-  return `${LIVE_SESSION_KEY_PREFIX}${encodeURIComponent(athleteId)}`;
-}
+const LEGACY_LIVE_SESSION_KEY = LEGACY_LIVE_WORKOUT_KEY;
+const scopedSessionKey = scopedLiveWorkoutStorageKey;
 
 type StorageLike = {
   getItem(key: string): string | null;
