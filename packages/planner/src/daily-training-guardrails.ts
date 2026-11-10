@@ -51,7 +51,13 @@ export function evaluateTrainingAddition(
       requiresReassessment: true,
     };
   }
-  const regions = [...new Set<TrainingRegion>([...proposed.regions, 'general'])];
+  const matchingPlan = ceiling.planned.find((item) =>
+    item.activity === proposed.activity && (!item.sessionId || item.sessionId === proposed.sessionId));
+  const regions = [...new Set<TrainingRegion>([
+    ...proposed.regions,
+    ...(matchingPlan?.regions ?? []),
+    'general',
+  ])];
   if (regions.some((region) => ceiling.recovery[region] === 'red_flag')) {
     return {
       decision: 'stop',
@@ -73,7 +79,7 @@ export function evaluateTrainingAddition(
       requiresReassessment: true,
     };
   }
-  const planned = ceiling.planned.find((item) => item.activity === proposed.activity && (!item.sessionId || item.sessionId === proposed.sessionId));
+  const planned = matchingPlan;
   if (!proposed.scheduled || !planned) {
     return {
       decision: ceiling.restrictUnplanned ? 'defer' : 'modify',
