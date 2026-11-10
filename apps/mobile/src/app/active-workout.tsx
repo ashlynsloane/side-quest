@@ -54,6 +54,7 @@ import {
   type LiveWorkoutRestEntry as RestEntry,
 } from '@/services/active-workout-persistence';
 import { publishWorkoutActivity } from '@/services/social';
+import { recordActualWorkoutCompletion } from '@/services/training-addition-gate';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import {
   getWorkoutCuePreferences,
@@ -108,6 +109,10 @@ export default function ActiveWorkoutScreen() {
   const startedAt = useRef(new Date().toISOString());
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
+  const savingCompletion = useRef(false);
+  const completionFractionRef = useRef(1);
+  const [completionSaved, setCompletionSaved] = useState(false);
+  const [completionSaveError, setCompletionSaveError] = useState<string | null>(null);
   const cueKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -296,10 +301,12 @@ export default function ActiveWorkoutScreen() {
   }
 
   async function persistCompletion(completionFraction: number, override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> }) {
-    if (savedCompletion.current) return;
-    savedCompletion.current = true;
-    const timestamp = new Date().toISOString();
+    if (savedCompletion.current || savingCompletion.current) return;
+    savingCompletion.current = true;
+    completionFractionRef.current = completionFraction;
+    const timestamp = completedAt.current ?? new Date().toISOString();
     completedAt.current = timestamp;
+    try {
     const completedRounds = override?.stationRounds ?? stationRounds;
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
@@ -314,7 +321,16 @@ export default function ActiveWorkoutScreen() {
       plannedSessionId: activePlanLink?.sessionId,
       relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
     });
+    if (user?.id) {
+      await recordActualWorkoutCompletion({
+        userId: user.id, workout: activeWorkout,
+        sessionId: activePlanLink?.sessionId, completedAt: timestamp, completionFraction,
+      });
+    }
     await clearLiveWorkoutSession();
+    savedCompletion.current = true;
+    setCompletionSaved(true);
+    setCompletionSaveError(null);
     if (cloudEnabled && user?.mode === 'cloud') {
       const ledgerId = `${activeWorkout.id}_${timestamp}`;
       try {
@@ -323,6 +339,11 @@ export default function ActiveWorkoutScreen() {
       } catch {
         // Local completion remains authoritative if optional social publishing fails.
       }
+    }
+    } catch (cause) {
+      setCompletionSaveError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      savingCompletion.current = false;
     }
   }
 
@@ -409,6 +430,7 @@ export default function ActiveWorkoutScreen() {
   }
 
   async function finishAndExit() {
+    if (!savedCompletion.current) return;
     const completed = completedAt.current;
     if (completed && (sessionRpe !== null || energyAfter !== null || reflectionNotes.trim())) {
       const instanceId = `${activeWorkout.id}_${completed}`;
@@ -447,7 +469,18 @@ export default function ActiveWorkoutScreen() {
         <KeyboardSafeScreen contentContainerStyle={styles.completeContainer}>
           <Text style={styles.eyebrow}>WORKOUT COMPLETE</Text>
           <Text style={styles.completeTitle}>{activeWorkout.name}</Text>
-          <Text style={styles.helper}>{activePlanLink ? `${activePlanLink.sessionTitle} is now marked complete in your plan.` : 'Saved to training history.'} Review the work, add a private note, or share only the details you choose.</Text>
+          <Text style={styles.helper}>{completionSaved
+            ? 'Workout saved. The completed dose will count against today’s training budget.'
+            : completionSaveError
+              ? 'Workout save failed. Retry before leaving to preserve your training record.'
+              : 'Saving your completed workout and training budget…'}</Text>
+          {completionSaveError ? <View style={styles.card}>
+            <Text style={styles.helper}>{completionSaveError}</Text>
+            <Pressable accessibilityRole="button" style={styles.outlineButton}
+              onPress={() => void persistCompletion(completionFractionRef.current)}>
+              <Text style={styles.outlineButtonText}>Retry saving workout</Text>
+            </Pressable>
+          </View> : null}
           <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
 
           <View style={styles.card}>
@@ -495,7 +528,10 @@ export default function ActiveWorkoutScreen() {
 
           <Pressable onPress={() => router.push('/today-check-in' as Href)} style={styles.symptomButton}><Text style={styles.cardTitle}>Something hurt or tightened up?</Text><Text style={styles.helper}>Log the exact area separately so the next workout can adapt.</Text></Pressable>
           <Pressable onPress={() => void saveFavorite()} style={styles.outlineButton}><Text style={styles.outlineButtonText}>{saved ? '♥ Saved to favorites' : '♡ Save to favorites'}</Text></Pressable>
-          <Pressable onPress={() => void finishAndExit()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save workout and return to Today</Text></Pressable>
+          <Pressable disabled={!completionSaved} onPress={() => void finishAndExit()}
+            style={[styles.primaryButton, !completionSaved && { opacity: 0.45 }]}>
+            <Text style={styles.primaryButtonText}>{completionSaved ? 'Return to Today' : 'Saving workout…'}</Text>
+          </Pressable>
         </KeyboardSafeScreen>
         <WorkoutShareModal summary={completedSummary} visible={shareOpen} onClose={() => setShareOpen(false)} />
       </SafeAreaView>
