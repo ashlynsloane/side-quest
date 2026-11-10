@@ -31,6 +31,26 @@ create index if not exists training_remote_exposure_recent
   on public.training_remote_exposures(athlete_id, completed_at desc);
 create index if not exists training_remote_exposure_day
   on public.training_remote_exposures(athlete_id, training_date);
+-- A start is a potential dose even when a phone crashes before uploading
+-- completion. Reservations are never deleted by a client, and count at the
+-- prescribed maximum until a separately reviewed correction workflow exists.
+create table if not exists public.training_remote_reservations (
+  athlete_id uuid not null references auth.users(id) on delete cascade,
+  training_date date not null,
+  session_id text not null,
+  workout_id text not null,
+  authorized_minutes integer not null check (authorized_minutes between 1 and 720),
+  regions text[] not null,
+  acquired_at timestamptz not null default pg_catalog.clock_timestamp(),
+  primary key (athlete_id,training_date,session_id),
+  constraint training_remote_reservation_regions check (
+    cardinality(regions) between 1 and 3
+    and regions <@ array['general','achilles','upper_back']::text[]
+  )
+);
+create index if not exists training_remote_reservation_recent
+  on public.training_remote_reservations(athlete_id,acquired_at desc);
+
 create table if not exists public.training_remote_recovery (
   athlete_id uuid not null references auth.users(id) on delete cascade,
   event_id text not null,
@@ -46,6 +66,7 @@ create index if not exists training_remote_recovery_recent
 alter table public.training_remote_plans enable row level security;
 alter table public.training_remote_exposures enable row level security;
 alter table public.training_remote_recovery enable row level security;
+alter table public.training_remote_reservations enable row level security;
 
 -- Bind the lease to the exact plan decision so each renewal can re-check
 -- centrally reported symptoms and completed exposure.
@@ -57,6 +78,7 @@ alter table public.training_workout_leases
 revoke all on table public.training_remote_plans from public, anon, authenticated;
 revoke all on table public.training_remote_exposures from public, anon, authenticated;
 revoke all on table public.training_remote_recovery from public, anon, authenticated;
+revoke all on table public.training_remote_reservations from public, anon, authenticated;
 
 -- The first synchronized plan is immutable. A later local edit cannot expand
 -- the remote daily allowance or fabricate another approved session.
@@ -228,6 +250,15 @@ begin
       from public.training_remote_exposures
       where athlete_id=v_user and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
     ),'[]'::jsonb),
+    'reservations',coalesce((
+      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+        'sessionId',session_id,'workoutId',workout_id,
+        'minutes',authorized_minutes,'regions',regions,
+        'acquiredAt',acquired_at,'trainingDate',training_date
+      ) order by acquired_at)
+      from public.training_remote_reservations
+      where athlete_id=v_user and training_date=p_training_date
+    ),'[]'::jsonb),
     'recovery',coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
         'region',region,'status',status,'observedAt',observed_at
@@ -257,6 +288,7 @@ declare
   v_session jsonb;
   v_budget numeric;
   v_consumed numeric;
+  v_reserved numeric;
   v_last_exposure timestamptz;
   v_latest_status text;
   v_latest_observed timestamptz;
@@ -291,10 +323,20 @@ begin
   end if;
   select coalesce(sum((item.value->>'minutes')::numeric),0) into v_budget
     from pg_catalog.jsonb_array_elements(v_plan) as item(value);
-  select coalesce(sum(minutes),0) into v_consumed
-    from public.training_remote_exposures
-    where athlete_id=v_user and training_date=p_training_date and activity='strength';
-  if v_consumed + p_planned_minutes > v_budget
+  select coalesce(sum(authorized_minutes),0) into v_reserved
+    from public.training_remote_reservations
+    where athlete_id=v_user and training_date=p_training_date;
+  select coalesce(sum(exposure.minutes),0) into v_consumed
+    from public.training_remote_exposures as exposure
+    where exposure.athlete_id=v_user and exposure.training_date=p_training_date
+      and exposure.activity='strength'
+      and not exists(select 1 from public.training_remote_reservations as reservation
+        where reservation.athlete_id=exposure.athlete_id
+          and reservation.training_date=exposure.training_date
+          and reservation.session_id=exposure.session_id);
+  if v_reserved + v_consumed + p_planned_minutes > v_budget
+     or exists(select 1 from public.training_remote_reservations
+       where athlete_id=v_user and training_date=p_training_date and session_id=p_session_id)
      or exists(select 1 from public.training_remote_exposures
        where athlete_id=v_user and training_date=p_training_date and session_id=p_session_id) then
     return query select false,null::uuid,null::timestamptz,'Training dose already used on another device'::text;
@@ -310,10 +352,16 @@ begin
       return query select false,null::uuid,null::timestamptz,'A synchronized regional recovery restriction blocks this workout'::text;
       return;
     end if;
-    select max(completed_at) into v_last_exposure
-      from public.training_remote_exposures
-      where athlete_id=v_user and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
-        and v_region=any(regions);
+    select greatest(
+      (select max(completed_at) from public.training_remote_exposures
+       where athlete_id=v_user and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+         and v_region=any(regions)),
+      (select max(acquired_at + authorized_minutes * interval '1 minute')
+       from public.training_remote_reservations
+       where athlete_id=v_user
+         and acquired_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+         and v_region=any(regions))
+    ) into v_last_exposure;
     if v_last_exposure is not null
       and (v_latest_status is distinct from 'stable' or v_latest_observed is null
            or v_latest_observed <= v_last_exposure) then
@@ -339,6 +387,9 @@ begin
   if v_written is null then
     return query select false,null::uuid,null::timestamptz,'Another device owns the workout lease'::text;
   else
+    insert into public.training_remote_reservations(
+      athlete_id,training_date,session_id,workout_id,authorized_minutes,regions
+    ) values (v_user,p_training_date,p_session_id,p_workout_id,p_planned_minutes,p_regions);
     return query select true,v_written,v_expiry,null::text;
   end if;
 end;
@@ -393,11 +444,17 @@ begin
       return query select false,null::timestamptz,'New regional recovery restriction'::text;
       return;
     end if;
-    select max(completed_at) into v_last_exposure
-      from public.training_remote_exposures
-      where athlete_id=v_user
-        and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
-        and v_region=any(regions);
+    select greatest(
+      (select max(completed_at) from public.training_remote_exposures
+       where athlete_id=v_user
+         and completed_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+         and v_region=any(regions)),
+      (select max(acquired_at + authorized_minutes * interval '1 minute')
+       from public.training_remote_reservations
+       where athlete_id=v_user and session_id <> v_held.session_id
+         and acquired_at >= pg_catalog.clock_timestamp()-interval '48 hours'
+         and v_region=any(regions))
+    ) into v_last_exposure;
     if v_last_exposure is not null
       and (v_status is distinct from 'stable'
            or v_observed is null or v_observed <= v_last_exposure) then
