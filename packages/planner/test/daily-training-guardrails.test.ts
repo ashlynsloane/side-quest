@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendTrainingEvent, completedActivities, evaluateTrainingAddition } from '../src/daily-training-guardrails';
+import { appendTrainingEvent, completedActivities, evaluateTrainingAddition, reconcileDailyCeilingPlan } from '../src/daily-training-guardrails';
 
 const baseline = {
   date: '2026-11-09',
@@ -160,6 +160,39 @@ describe('daily training ceiling', () => {
     }];
     expect(evaluateTrainingAddition(ceiling,
       { activity: 'strength', sessionId: 's2', minutes: 20, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
+  });
+
+  it('never increases approved minutes after a plan revision', () => {
+    const original = { ...baseline, planned: [
+      { activity: 'strength', sessionId: 'A', minutes: 35, regions: ['general' as const] },
+    ] };
+    const result = reconcileDailyCeilingPlan(original, [
+      { activity: 'strength', sessionId: 'A', minutes: 60, regions: ['general', 'achilles'] },
+    ]);
+    expect(result.planned).toEqual([
+      { activity: 'strength', sessionId: 'A', minutes: 35, regions: ['general', 'achilles'] },
+    ]);
+  });
+  it('tightens limits after calendar reductions and rejects moved sessions', () => {
+    const original = { ...baseline, planned: [
+      { activity: 'strength', sessionId: 'A', minutes: 35, regions: ['general' as const] },
+      { activity: 'strength', sessionId: 'B', minutes: 20, regions: ['general' as const] },
+    ] };
+    const result = reconcileDailyCeilingPlan(original, [
+      { activity: 'strength', sessionId: 'A', minutes: 25, regions: ['general'] },
+    ]);
+    expect(result.planned).toHaveLength(1);
+    expect(result.planned[0]?.minutes).toBe(25);
+  });
+  it('does not silently authorize newly added sessions halfway through a day', () => {
+    const original = { ...baseline, planned: [
+      { activity: 'strength', sessionId: 'A', minutes: 30, regions: ['general' as const] },
+    ] };
+    const result = reconcileDailyCeilingPlan(original, [
+      { activity: 'strength', sessionId: 'A', minutes: 30, regions: ['general'] },
+      { activity: 'strength', sessionId: 'B', minutes: 30, regions: ['general'] },
+    ]);
+    expect(result.planned.map((item) => item.sessionId)).toEqual(['A']);
   });
 
 });
