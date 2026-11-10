@@ -5,7 +5,7 @@ import {
   listEnduranceActivitiesForGuardrails,
   listWorkoutLedgerEntriesForGuardrails,
 } from './database';
-import { loadDailyCeiling } from './training-guardrail-storage';
+import { getStoredDailyTrainingCeiling } from './database';
 import {
   acquireCloudWorkoutLease, cloudWorkoutLeasesEnabled,
   type CloudWorkoutLease, type WorkoutLeaseRpc,
@@ -75,7 +75,7 @@ export async function publishRemoteDailyPlan(
 ): Promise<RemoteTrainingSnapshot['plan']> {
   if (!userId || !validDay(date)) throw new Error('Invalid athlete or training date.');
   const [saved, ceiling] = await Promise.all([
-    getLatestTrainingBlock(), loadDailyCeiling(userId, date),
+    getLatestTrainingBlock(), getStoredDailyTrainingCeiling(userId, date),
   ]);
   const planned = saved?.block.weeks.flatMap((week) => week.sessions)
     .filter((session) => session.date === date && session.completionStatus !== 'skipped') ?? [];
@@ -246,7 +246,7 @@ export async function acquireSynchronizedWorkoutLease(
   const date = trainingDay();
   const sessions = await publishRemoteDailyPlan(userId, date, rpc);
   const matching = sessions?.find((session) => session.sessionId === sessionId);
-  if (!matching) throw new Error('Today's synchronized prescription does not contain this session.');
+  if (!matching) throw new Error('The synchronized prescription does not contain this session.');
   const minutes = Math.ceil(workout.estimatedElapsedSeconds / 60);
   const regions = regionsFor(workout);
   if (minutes > matching.minutes || regions.some((region) => !matching.regions.includes(region))) {
