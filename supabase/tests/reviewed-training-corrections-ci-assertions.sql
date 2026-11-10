@@ -226,3 +226,70 @@ begin
 end
 $privacy$;
 reset role;
+
+-- A reserved workout with a reported completion is NOT a never-started dose.
+-- The requested correction must remain pending, not erase history on approval.
+insert into auth.users(id) values ('00000000-0000-4000-8000-000000000005')
+  on conflict do nothing;
+set role authenticated;
+select set_config('request.jwt.claim.sub',
+  '00000000-0000-4000-8000-000000000005',false);
+do $completed_reservation_setup$
+declare
+  v_claim record;
+begin
+  perform public.publish_training_remote_plan(current_date,jsonb_build_array(
+    jsonb_build_object('sessionId','actually-done','minutes',20,
+      'regions',jsonb_build_array('general')),
+    jsonb_build_object('sessionId','next-planned','minutes',20,
+      'regions',jsonb_build_array('general'))
+  ));
+  select * into v_claim from public.acquire_training_workout_lease_v2(
+    'session-done','device-completed',current_date,'actually-done',20,
+    array['general']::text[]);
+  if not v_claim.granted then
+    raise exception 'Test fixture could not acquire completed session lease: %',v_claim.reason;
+  end if;
+  perform public.release_training_workout_lease(v_claim.lease_id,'device-completed');
+  perform public.publish_training_remote_exposure(
+    'reported-done','session-done','actually-done','strength',20,
+    array['general']::text[],clock_timestamp()-interval '1 second',current_date);
+  perform public.request_training_remote_correction(
+    'false-unused-request','reservation','actually-done',current_date,
+    'retract',null,'never_started');
+end
+$completed_reservation_setup$;
+reset role;
+
+set role service_role;
+select set_config('request.jwt.claim.role','service_role',false);
+do $completed_reservation_denial$
+begin
+  begin
+    perform public.review_training_remote_correction(
+      '00000000-0000-4000-8000-000000000005',
+      'false-unused-request','approved','CASE-NO-DONE-RETRACT');
+    raise exception 'Completed workout reservation was incorrectly retracted';
+  exception when sqlstate '55000' then
+    null;
+  end;
+end
+$completed_reservation_denial$;
+reset role;
+
+set role authenticated;
+select set_config('request.jwt.claim.sub',
+  '00000000-0000-4000-8000-000000000005',false);
+do $completed_reservation_still_active$
+declare
+  v_snap jsonb;
+begin
+  select public.read_training_remote_snapshot(current_date) into v_snap;
+  if jsonb_array_length(v_snap->'reservations') <> 1
+     or jsonb_array_length(v_snap->'exposures') <> 1
+     or (public.read_training_remote_corrections(100)->0->>'outcome') is not null then
+    raise exception 'Denied completion correction changed effective load or review state';
+  end if;
+end
+$completed_reservation_still_active$;
+reset role;
