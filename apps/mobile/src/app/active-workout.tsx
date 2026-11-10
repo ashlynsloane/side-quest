@@ -8,7 +8,7 @@ import type {
 } from '@circuit/domain';
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
-import { evaluateWorkoutAuthorizationAge } from '@circuit/planner';
+import { evaluateWorkoutAuthorizationAge, requiresActiveWorkoutPause } from '@circuit/planner';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useRouter, type Href } from 'expo-router';
@@ -34,6 +34,7 @@ import { WorkoutShareModal } from '@/components/workout-share-modal';
 import { V23Chip, V23Icon } from '@/components/v23-ui';
 import {
   getLatestExerciseLoads,
+  getActiveTrainingCheckIn,
   getSocialPreferences,
   getWorkoutLedgerEntry,
   listExercisePreferences,
@@ -117,6 +118,7 @@ export default function ActiveWorkoutScreen() {
   const startedAt = useRef(new Date().toISOString());
   const lastAuthorizedCheckpointAt = useRef(startedAt.current);
   const [authorizationExpired, setAuthorizationExpired] = useState(false);
+  const [requiresRecoveryReview, setRequiresRecoveryReview] = useState(false);
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
   const savingCompletion = useRef(false);
@@ -192,6 +194,31 @@ export default function ActiveWorkoutScreen() {
     const interval = setInterval(verify, 15000);
     return () => clearInterval(interval);
   }, [workout?.id, sessionHydrated, phase]);
+
+  // New explicit training restrictions should interrupt a session, not just
+  // block tomorrow's start. Once interrupted, the athlete saves partial work
+  // or discards this session and obtains a fresh prescription.
+  useEffect(() => {
+    if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
+    let live = true;
+    const review = () => {
+      void getActiveTrainingCheckIn().then((checkIn) => {
+        if (!live) return;
+        if (requiresActiveWorkoutPause(checkIn)) {
+          setRequiresRecoveryReview(true);
+          setRunning(false);
+        }
+      }).catch(() => {
+        if (live) {
+          setRequiresRecoveryReview(true);
+          setRunning(false);
+        }
+      });
+    };
+    review();
+    const interval = setInterval(review, 30000);
+    return () => { live = false; clearInterval(interval); };
+  }, [workout?.id, sessionHydrated, phase, user?.id]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -289,10 +316,10 @@ export default function ActiveWorkoutScreen() {
   }, [resumeNotice]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || authorizationExpired || !running || phase === 'complete') return;
+    if (!workout || !sessionHydrated || authorizationExpired || requiresRecoveryReview || !running || phase === 'complete') return;
     const timer = setInterval(() => setRemainingSeconds((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
-  }, [authorizationExpired, phase, running, sessionHydrated, workout]);
+  }, [authorizationExpired, requiresRecoveryReview, phase, running, sessionHydrated, workout]);
 
   useEffect(() => {
     if (!workout || phase === 'complete') return;
@@ -311,14 +338,14 @@ export default function ActiveWorkoutScreen() {
   }, [cuePlayer, cuePreferences, phase, remainingSeconds, stationIndex, workout]);
 
   useEffect(() => {
-    if (!workout || authorizationExpired || remainingSeconds !== 0 || phase !== 'work') return;
+    if (!workout || authorizationExpired || requiresRecoveryReview || remainingSeconds !== 0 || phase !== 'work') return;
     setPhase('rest');
     setRunning(true);
     setRemainingSeconds(Math.max(15, workout.request.restSeconds));
     initializeRestLog(station ?? workout.stations[stationIndex]!);
     if (cuePreferences.audioEnabled) void completionPlayer.seekTo(0).then(() => completionPlayer.play()).catch(() => undefined);
     if (cuePreferences.hapticsEnabled) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [authorizationExpired, completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
+  }, [authorizationExpired, requiresRecoveryReview, completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
 
   if (!workoutSessionReady || (workout && !sessionHydrated)) {
     return <SafeAreaView style={styles.safeArea}><View style={styles.missingCard}><Text style={styles.completeTitle}>Restoring workout…</Text><Text style={styles.helper}>Loading the last saved station and timer state.</Text></View></SafeAreaView>;
@@ -554,6 +581,38 @@ export default function ActiveWorkoutScreen() {
       if (reason === 'dislike') await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       setSwapTarget(null);
     } finally { setSwapBusy(false); }
+  }
+
+  if (requiresRecoveryReview && phase !== 'complete') {
+    return <SafeAreaView style={styles.safeArea}>
+      <View style={styles.missingCard}>
+        <Text style={styles.eyebrow}>WORKOUT PAUSED</Text>
+        <Text style={styles.completeTitle}>Training restriction needs review</Text>
+        <Text style={styles.helper}>
+          A new significant pain report, training pause, or unreadable check-in
+          prevents this active session from continuing. Record work already done,
+          then review your recovery before starting a new prescription.
+        </Text>
+        <Pressable onPress={() => {
+          const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+          setRunning(false);
+          setPhase('complete');
+          void persistCompletion(fraction);
+        }} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Save completed work and stop</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/today-check-in' as Href)}
+          style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>Review symptom check-in</Text>
+        </Pressable>
+        <Pressable onPress={() => {
+          clearActiveWorkout();
+          router.replace('/train' as Href);
+        }} style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>Discard unfinished session</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>;
   }
 
   if (authorizationExpired && phase !== 'complete') {
