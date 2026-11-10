@@ -1,3 +1,4 @@
+export { affectedTrainingRegions } from './training-region-inference';
 export { assessCrossSportExposure } from './cross-sport-guardrail';
 export type { CrossSportExposure, CrossSportDecision, ExposureDiscipline } from './cross-sport-guardrail';
 export { evaluateTrainingAddition, appendTrainingEvent, completedActivities } from './daily-training-guardrails';
