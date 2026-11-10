@@ -26,7 +26,11 @@ export interface GuardedStartDependencies {
   persist(snapshot: LiveWorkoutSessionSnapshot, athleteId: string): Promise<void>;
   discardPersisted(athleteId: string): Promise<void>;
   /** Enabled only for authenticated accounts after the server migration. */
-  acquireRemoteLease?: (workoutId: string) => Promise<CloudWorkoutLease>;
+  acquireRemoteLease?: (
+    workout: GeneratedWorkout,
+    planLink: ActiveWorkoutPlanLink | null,
+    athleteId: string,
+  ) => Promise<CloudWorkoutLease>;
   releaseRemoteLease?: (lease: CloudWorkoutLease) => Promise<void>;
   onStarted(
     workout: GeneratedWorkout,
@@ -105,7 +109,7 @@ export function createGuardedWorkoutStartGate() {
             if (!deps.releaseRemoteLease) {
               throw new Error('Remote workout lease requires a release handler.');
             }
-            remoteLease = await deps.acquireRemoteLease(workout.id);
+            remoteLease = await deps.acquireRemoteLease(workout, planLink, owner);
           }
           if (!validOwner()) {
             return defer('The athlete profile changed while acquiring the workout lock.');
