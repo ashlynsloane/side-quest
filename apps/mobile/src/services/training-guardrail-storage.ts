@@ -1,9 +1,10 @@
-import type { DailyTrainingCeiling, TrainingEvent } from '@circuit/planner';
+import type { DailyTrainingCeiling, TrainingEvent, RecoveryStatus, TrainingRegion } from '@circuit/planner';
 import {
   appendStoredTrainingGuardrailEvent,
   getStoredDailyTrainingCeiling,
   listStoredTrainingGuardrailEvents,
   storeDailyTrainingCeiling,
+  saveObservedTrainingRecovery,
 } from './database';
 
 /**
@@ -32,4 +33,12 @@ export async function recordTrainingEvent(
   userId: string, event: TrainingEvent, trainingDate: string,
 ): Promise<void> {
   await appendStoredTrainingGuardrailEvent(userId, { ...event, trainingDate }, trainingDate);
+}
+
+/** Persist only explicitly rechecked regions, preserving the latest plan. */
+export async function recordObservedRecovery(
+  userId: string, date: string,
+  updates: Partial<Record<TrainingRegion, RecoveryStatus>>,
+): Promise<void> {
+  await saveObservedTrainingRecovery(userId, date, updates);
 }
