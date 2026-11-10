@@ -341,8 +341,12 @@ begin
   end if;
   select item.value into v_session from pg_catalog.jsonb_array_elements(v_plan) as item(value)
     where item.value->>'sessionId'=p_session_id;
+  -- The server must authorize ALL tissue regions in the immutable plan.
+  -- A stale or buggy device must not omit Achilles/back to dodge recovery.
+  -- Compare as sets so harmless order differences do not matter.
   if v_session is null or (v_session->>'minutes')::int < p_planned_minutes
-     or not (p_regions <@ array(select r.region from pg_catalog.jsonb_array_elements_text(v_session->'regions') as r(region))) then
+     or not (p_regions <@ array(select r.region from pg_catalog.jsonb_array_elements_text(v_session->'regions') as r(region)))
+     or not (array(select r.region from pg_catalog.jsonb_array_elements_text(v_session->'regions') as r(region)) <@ p_regions) then
     return query select false,null::uuid,null::timestamptz,'Workout exceeds synchronized prescription'::text;
     return;
   end if;
