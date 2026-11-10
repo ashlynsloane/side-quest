@@ -1,3 +1,5 @@
+export { assessActiveWorkoutMutation } from './active-workout-mutation';
+export type { WorkoutMutationDecision } from './active-workout-mutation';
 export { summarizeTrainingUrges } from './training-urge-insights';
 export type { TrainingUrgeSummary, TrainingUrgeActivity, TrainingUrgeReason } from './training-urge-insights';
 export { planLedgerReconciliation, ledgerEventId } from './training-event-reconciliation';
