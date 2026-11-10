@@ -29,7 +29,9 @@ declare
 begin
   perform public.publish_training_remote_plan(v_day,jsonb_build_array(
     jsonb_build_object('sessionId','corr-A','minutes',30,'regions',jsonb_build_array('general')),
-    jsonb_build_object('sessionId','corr-B','minutes',20,'regions',jsonb_build_array('general'))
+    jsonb_build_object('sessionId','corr-B','minutes',20,'regions',jsonb_build_array('general')),
+    jsonb_build_object('sessionId','region-guard','minutes',10,
+      'regions',jsonb_build_array('general','achilles'))
   ));
   perform public.publish_training_remote_exposure('correction-bike','bike-id',null,'bike',
     25,array['general']::text[],v_original,v_day);
@@ -200,6 +202,12 @@ begin
     'corr-workout-A','phone-4',current_date,'corr-A',30,array['general']::text[]);
   if v_denied.granted then
     raise exception 'Correction allowed reuse of an already claimed session ID';
+  end if;
+  -- A client must NOT underreport the Achilles region from an approved plan.
+  select * into v_denied from public.acquire_training_workout_lease_v2(
+    'region-cheat','phone-4',current_date,'region-guard',10,array['general']::text[]);
+  if v_denied.granted or v_denied.reason is distinct from 'Workout exceeds synchronized prescription' then
+    raise exception 'Reduced client region list bypassed Achilles recovery gating';
   end if;
   select * into v_eligible from public.acquire_training_workout_lease_v2(
     'corr-workout-B','phone-4',current_date,'corr-B',20,array['general']::text[]);
