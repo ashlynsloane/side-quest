@@ -8,6 +8,7 @@ import type {
 } from '@circuit/domain';
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import { evaluateWorkoutAuthorizationAge } from '@circuit/planner';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useRouter, type Href } from 'expo-router';
@@ -114,6 +115,8 @@ export default function ActiveWorkoutScreen() {
   const [urgeSaving, setUrgeSaving] = useState(false);
   const [urgeError, setUrgeError] = useState<string | null>(null);
   const startedAt = useRef(new Date().toISOString());
+  const lastAuthorizedCheckpointAt = useRef(startedAt.current);
+  const [authorizationExpired, setAuthorizationExpired] = useState(false);
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
   const savingCompletion = useRef(false);
@@ -149,6 +152,10 @@ export default function ActiveWorkoutScreen() {
         setRestRounds(snapshot.restRounds);
         setRestLoadUnit(snapshot.restLoadUnit);
         startedAt.current = snapshot.startedAt;
+        lastAuthorizedCheckpointAt.current = snapshot.savedAt;
+        const freshness = evaluateWorkoutAuthorizationAge(snapshot.startedAt);
+        setAuthorizationExpired(!freshness.current);
+        if (!freshness.current) setRunning(false);
         const progressed = safeIndex > 0
           || snapshot.phase === 'rest'
           || snapshot.remainingSeconds < (safeStation?.durationSeconds ?? snapshot.remainingSeconds)
@@ -171,6 +178,20 @@ export default function ActiveWorkoutScreen() {
     });
     return () => { live = false; };
   }, [restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
+
+  useEffect(() => {
+    if (!workout || !sessionHydrated || phase === 'complete') return;
+    const verify = () => {
+      const freshness = evaluateWorkoutAuthorizationAge(startedAt.current);
+      if (!freshness.current) {
+        setAuthorizationExpired(true);
+        setRunning(false);
+      }
+    };
+    verify();
+    const interval = setInterval(verify, 15000);
+    return () => clearInterval(interval);
+  }, [workout?.id, sessionHydrated, phase]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -195,11 +216,16 @@ export default function ActiveWorkoutScreen() {
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
+    if (!workout || !sessionHydrated || phase === 'complete' || authorizationExpired || !user?.id) return;
     const timer = setTimeout(() => {
+      const now = new Date();
+      if (!evaluateWorkoutAuthorizationAge(startedAt.current, now).current) {
+        setAuthorizationExpired(true); setRunning(false); return;
+      }
+      lastAuthorizedCheckpointAt.current = now.toISOString();
       void saveLiveWorkoutSession({
         schemaVersion: 1,
-        savedAt: new Date().toISOString(),
+        savedAt: now.toISOString(),
         workout,
         startedAt: startedAt.current,
         stationIndex,
@@ -219,17 +245,22 @@ export default function ActiveWorkoutScreen() {
       });
     }, 250);
     return () => clearTimeout(timer);
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
+  }, [activePlanLink, authorizationExpired, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, running, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
+    if (!workout || !sessionHydrated || phase === 'complete' || authorizationExpired || !user?.id) return;
     const athleteId = user.id;
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       setRunning(false);
+      const now = new Date();
+      if (!evaluateWorkoutAuthorizationAge(startedAt.current, now).current) {
+        setAuthorizationExpired(true); return;
+      }
+      lastAuthorizedCheckpointAt.current = now.toISOString();
       void saveLiveWorkoutSession({
         schemaVersion: 1,
-        savedAt: new Date().toISOString(),
+        savedAt: now.toISOString(),
         workout,
         startedAt: startedAt.current,
         stationIndex,
@@ -249,7 +280,7 @@ export default function ActiveWorkoutScreen() {
       });
     });
     return () => subscription.remove();
-  }, [activePlanLink, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
+  }, [activePlanLink, authorizationExpired, exerciseLoads, exerciseSets, phase, remainingSeconds, restEntries, restLoadUnit, restRounds, sessionHydrated, stationIndex, stationRounds, workout, user?.id]);
 
   useEffect(() => {
     if (!resumeNotice) return;
@@ -258,10 +289,10 @@ export default function ActiveWorkoutScreen() {
   }, [resumeNotice]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || !running || phase === 'complete') return;
+    if (!workout || !sessionHydrated || authorizationExpired || !running || phase === 'complete') return;
     const timer = setInterval(() => setRemainingSeconds((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
-  }, [phase, running, sessionHydrated, workout]);
+  }, [authorizationExpired, phase, running, sessionHydrated, workout]);
 
   useEffect(() => {
     if (!workout || phase === 'complete') return;
@@ -280,14 +311,14 @@ export default function ActiveWorkoutScreen() {
   }, [cuePlayer, cuePreferences, phase, remainingSeconds, stationIndex, workout]);
 
   useEffect(() => {
-    if (!workout || remainingSeconds !== 0 || phase !== 'work') return;
+    if (!workout || authorizationExpired || remainingSeconds !== 0 || phase !== 'work') return;
     setPhase('rest');
     setRunning(true);
     setRemainingSeconds(Math.max(15, workout.request.restSeconds));
     initializeRestLog(station ?? workout.stations[stationIndex]!);
     if (cuePreferences.audioEnabled) void completionPlayer.seekTo(0).then(() => completionPlayer.play()).catch(() => undefined);
     if (cuePreferences.hapticsEnabled) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
+  }, [authorizationExpired, completionPlayer, cuePreferences.audioEnabled, cuePreferences.hapticsEnabled, phase, remainingSeconds, station, stationIndex, workout]);
 
   if (!workoutSessionReady || (workout && !sessionHydrated)) {
     return <SafeAreaView style={styles.safeArea}><View style={styles.missingCard}><Text style={styles.completeTitle}>Restoring workout…</Text><Text style={styles.helper}>Loading the last saved station and timer state.</Text></View></SafeAreaView>;
@@ -321,11 +352,13 @@ export default function ActiveWorkoutScreen() {
     setRestEntries((current) => Object.fromEntries(Object.entries(current).map(([key, value]) => [key, { ...value, unit }])));
   }
 
-  async function persistCompletion(completionFraction: number, override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> }) {
+  async function persistCompletion(completionFraction: number,
+    override?: { stationRounds: Record<string, number>; exerciseLoads: Record<string, LoadValue>; exerciseSets: Record<string, LoggedSet[]> },
+    finishedAt?: string) {
     if (savedCompletion.current || savingCompletion.current) return;
     savingCompletion.current = true;
     completionFractionRef.current = completionFraction;
-    const timestamp = completedAt.current ?? new Date().toISOString();
+    const timestamp = completedAt.current ?? finishedAt ?? new Date().toISOString();
     completedAt.current = timestamp;
     try {
     const completedRounds = override?.stationRounds ?? stationRounds;
@@ -521,6 +554,35 @@ export default function ActiveWorkoutScreen() {
       if (reason === 'dislike') await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       setSwapTarget(null);
     } finally { setSwapBusy(false); }
+  }
+
+  if (authorizationExpired && phase !== 'complete') {
+    return <SafeAreaView style={styles.safeArea}>
+      <View style={styles.missingCard}>
+        <Text style={styles.eyebrow}>WORKOUT AUTHORIZATION EXPIRED</Text>
+        <Text style={styles.completeTitle}>Review before training again</Text>
+        <Text style={styles.helper}>
+          This workout began on an earlier day or exceeded the app's session-validity window.
+          Continuing it would add unreviewed loading. You may save the work already recorded,
+          or discard the unfinished session.
+        </Text>
+        {completionSaveError ? <Text style={styles.helper}>{completionSaveError}</Text> : null}
+        <Pressable onPress={() => {
+          const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+          setRunning(false);
+          setPhase('complete');
+          void persistCompletion(fraction, undefined, lastAuthorizedCheckpointAt.current);
+        }} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Save already completed activity</Text>
+        </Pressable>
+        <Pressable onPress={() => {
+          clearActiveWorkout();
+          router.replace('/train' as Href);
+        }} style={styles.outlineButton}>
+          <Text style={styles.outlineButtonText}>Discard unfinished session</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>;
   }
 
   if (phase === 'complete') {
