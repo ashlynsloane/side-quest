@@ -34,4 +34,17 @@ describe('daily training ceiling', () => {
     expect(completedActivities(appendTrainingEvent(history, { ...prescribed, id: 'b', kind: 'completed' }))).toHaveLength(1);
     expect(() => appendTrainingEvent(history, prescribed)).toThrow();
   });
+  it('rejects negative and non-finite doses', () => {
+    for (const minutes of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(evaluateTrainingAddition(baseline, { activity: 'strength', minutes, regions: ['general'], scheduled: true }).decision).toBe('stop');
+    }
+  });
+  it('does not allow an unprescribed dose dimension', () => {
+    expect(evaluateTrainingAddition(baseline, { activity: 'strength', sets: 4, regions: ['general'], scheduled: true }).decision).toBe('modify');
+  });
+  it('rejects affected regions omitted from the matching prescription', () => {
+    expect(evaluateTrainingAddition({ ...baseline, recovery: { general: 'stable', achilles: 'stable' } },
+      { activity: 'strength', minutes: 35, regions: ['general', 'achilles'], scheduled: true }).decision).toBe('defer');
+  });
+
 });
