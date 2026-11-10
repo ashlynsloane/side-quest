@@ -1,6 +1,7 @@
 import {
   evaluateTrainingAddition,
   assessCrossSportExposure,
+  affectedTrainingRegions,
   type ActivityDose,
   type DailyTrainingCeiling,
   type ProposedActivity,
@@ -30,15 +31,7 @@ export function localTrainingDate(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-function regionsForWorkout(workout: GeneratedWorkout): TrainingRegion[] {
-  const values = workout.targetRegions.map((region) => String(region).toLowerCase()).join(' ');
-  const regions: TrainingRegion[] = ['general'];
-  if (/calf|ankle|foot|lower_leg|hamstring|quadricep|glute|hip|leg/.test(values)) regions.push('achilles');
-  if (/upper_back|back|shoulder|scapul|thorac|lat|trap|chest/.test(values)) regions.push('upper_back');
-  // Unknown target-region nomenclature is not clearance for a sensitive area.
-  if (!workout.targetRegions.length) regions.push('achilles', 'upper_back');
-  return regions;
-}
+const regionsForWorkout = affectedTrainingRegions;
 
 function recoveryFor(checkIn: TrainingCheckIn | null): Partial<Record<TrainingRegion, RecoveryStatus>> {
   // General check-in does not automatically certify recovering tissue.
