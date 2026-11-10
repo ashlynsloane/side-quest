@@ -1,0 +1,27 @@
+name: Training guardrails integration
+on:
+  pull_request:
+    branches: [sq2-experience-rebuild]
+  push:
+    branches: [feature/training-ceiling-guardrails]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Planner typecheck
+        run: pnpm --dir packages/planner typecheck
+      - name: Mobile typecheck
+        run: pnpm --dir apps/mobile typecheck
+      - name: Planner test suite
+        run: pnpm --dir packages/planner test
