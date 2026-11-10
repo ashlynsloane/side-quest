@@ -1,5 +1,6 @@
 import {
   evaluateTrainingAddition,
+  assessCrossSportExposure,
   type ActivityDose,
   type DailyTrainingCeiling,
   type ProposedActivity,
@@ -8,7 +9,7 @@ import {
   type TrainingRegion,
 } from '@circuit/planner';
 import type { GeneratedWorkout, TrainingCheckIn } from '@circuit/domain';
-import { getActiveTrainingCheckIn, getLatestTrainingBlock, listWorkoutLedgerEntries } from './database';
+import { getActiveTrainingCheckIn, getLatestTrainingBlock, listEnduranceActivities, listWorkoutLedgerEntries } from './database';
 import { loadDailyCeiling, loadTrainingEvents, recordTrainingEvent, saveDailyCeiling } from './training-guardrail-storage';
 
 export interface TrainingAdditionRequest {
@@ -108,6 +109,32 @@ async function reconcileCompletedWorkoutHistory(userId: string, date: string): P
   }
 }
 
+async function crossSportOverlapFor(
+  date: string,
+  regions: readonly TrainingRegion[],
+): Promise<ReturnType<typeof assessCrossSportExposure>> {
+  const beginning = new Date(`${date}T00:00:00`);
+  const end = new Date(beginning.getTime());
+  end.setDate(end.getDate() + 1);
+  const imported = await listEnduranceActivities({
+    from: beginning.toISOString(),
+    to: new Date(end.getTime() - 1).toISOString(),
+    limit: 501,
+  });
+  if (imported.length >= 501) throw new Error('Too many endurance activities for a reliable daily assessment.');
+  const completed = imported.filter((item) =>
+    localTrainingDate(new Date(item.startAt)) === date
+    && Date.parse(item.startAt) <= Date.now()
+    && !item.deletedAt
+    && item.classification !== 'ignored'
+  );
+  return assessCrossSportExposure(regions, completed.map((item) => ({
+    id: item.id,
+    discipline: item.discipline,
+    minutes: item.movingTimeSeconds / 60,
+  })));
+}
+
 export async function assessTrainingAddition(request: TrainingAdditionRequest): Promise<TrainingGuardrailResult> {
   await reconcileCompletedWorkoutHistory(request.userId, request.date);
   const [ceiling, history] = await Promise.all([
@@ -115,7 +142,7 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
     loadTrainingEvents(request.userId, request.date),
   ]);
   const activeCheckIn = ceiling ? null : await getActiveTrainingCheckIn();
-  const result: TrainingGuardrailResult = ceiling
+  let result: TrainingGuardrailResult = ceiling
     ? evaluateTrainingAddition(ceiling, request.proposed, history)
     : activeCheckIn?.status === 'unable_to_train'
       ? {
@@ -128,6 +155,22 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
         reasons: ['No approved daily training ceiling is available. Review the plan and recovery check-in first.'],
         requiresReassessment: true,
       };
+  if (result.decision !== 'stop') {
+    const matching = ceiling?.planned.find((item) =>
+      item.activity === request.proposed.activity
+      && (!item.sessionId || item.sessionId === request.proposed.sessionId));
+    const regions = [...new Set<TrainingRegion>([
+      ...request.proposed.regions, ...(matching?.regions ?? []),
+    ])];
+    const crossSport = await crossSportOverlapFor(request.date, regions);
+    if (crossSport.conflict) {
+      result = {
+        decision: 'defer',
+        reasons: [...result.reasons, ...crossSport.reasons],
+        requiresReassessment: true,
+      };
+    }
+  }
   await recordTrainingEvent(request.userId, {
     id: request.requestId,
     occurredAt: request.occurredAt,
