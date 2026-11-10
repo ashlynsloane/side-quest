@@ -64,7 +64,7 @@ export default function OnboardingFirstWeekScreen() {
     }
     const weekStartDate = nextLocalMonday(referenceDate);
     const seed = firstWeekAttemptSeed(params, weekStartDate);
-    void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate })
+    void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }, athleteId)
       .then(async (result) => {
         // Both identity checks matter: user changes during generation AND
         // while waiting for the SQLite activation/write queue must fail closed.
@@ -148,6 +148,7 @@ async function buildFirstWeek(
   params: Params,
   exercises: Parameters<typeof generateTrainingBlock>[1]['exercises'],
   attempt: { weekStartDate: string; seed: string; referenceDate: Date },
+  athleteId: string,
 ): Promise<{ goal: PerformanceGoal; block: TrainingBlockPlan }> {
   const goalType = parseGoal(params.goal);
   const totalHours = clamp(Number(params.hours) || 10, 3, 25);
@@ -176,9 +177,19 @@ async function buildFirstWeek(
     createdAt: now,
     updatedAt: now,
   };
-  const profiles = await ensureDefaultEquipmentProfiles();
-  const equipment = equipmentFor(params.equipment, profiles);
-  const [recentRegionExposures, previousExerciseIds] = await Promise.all([getRecentRegionExposures(), getPreviousExerciseIds()]);
+  // Default equipment initialization is itself a SQLite WRITE. Gather all
+  // athlete-specific source evidence under the same ownership lock as final
+  // persistence; otherwise a mid-generation profile switch could mix A's
+  // prior exercises with B's database or initialize B's equipment for A.
+  const evidence = await withVerifiedAthleteDatabase(athleteId, async () => {
+    const profiles = await ensureDefaultEquipmentProfiles();
+    const [recentRegionExposures, previousExerciseIds] = await Promise.all([
+      getRecentRegionExposures(), getPreviousExerciseIds(),
+    ]);
+    return { profiles, recentRegionExposures, previousExerciseIds };
+  });
+  const equipment = equipmentFor(params.equipment, evidence.profiles);
+  const { recentRegionExposures, previousExerciseIds } = evidence;
   const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: attempt.weekStartDate, availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
