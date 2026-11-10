@@ -1,0 +1,60 @@
+name: Android native startup smoke (manual)
+
+# Experimental, intentionally not part of the required PR gate.
+# Creates a real release APK, launches it in a fresh Android emulator and
+# checks that the process survives startup without a fatal exception.
+# Requires no live Supabase credentials; cloud leases remain disabled.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-native-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      EXPO_PUBLIC_DISTRIBUTED_WORKOUT_LOCKS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: pnpm install --frozen-lockfile
+      - name: Generate native Android project from Expo config
+        run: pnpm --dir apps/mobile exec expo prebuild --platform android --no-install --non-interactive --clean
+      - name: Assemble and launch APK on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 3072M
+          disk-size: 6000M
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            cd apps/mobile
+            ./android/gradlew :app:assembleRelease --no-daemon
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
+            adb shell monkey -p com.ashlynsloanesteam.sidequest -c android.intent.category.LAUNCHER 1
+            sleep 20
+            adb shell pidof com.ashlynsloanesteam.sidequest >/dev/null
+            adb logcat -d -t 2000 > /tmp/sidequest-android-logcat.txt
+            if grep -A 15 'FATAL EXCEPTION' /tmp/sidequest-android-logcat.txt | grep -q 'com.ashlynsloanesteam.sidequest'; then
+              echo 'Side Quest encountered an Android runtime fatal exception'
+              exit 1
+            fi
+            adb shell uiautomator dump /sdcard/sidequest-window.xml >/dev/null
+            adb pull /sdcard/sidequest-window.xml /tmp/sidequest-window.xml >/dev/null
+            test -s /tmp/sidequest-window.xml
+            echo 'Android release APK installed, launched and remained active.'
