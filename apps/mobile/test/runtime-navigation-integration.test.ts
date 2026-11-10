@@ -35,8 +35,8 @@ describe('runtime navigation adapter with installed Expo routes', () => {
   it('routes the tab controls to actual registered Expo paths', () => {
     const { adapter, navigation } = harness();
     const navigationRuntime = createRuntimeOrchestrator({ router: adapter });
-    navigationRuntime.navigateToTab('plan');
-    navigationRuntime.navigateToTab('train');
+    navigationRuntime.navigateToTab?.('plan');
+    navigationRuntime.navigateToTab?.('train');
     expect(navigation.map((v) => v.to)).toEqual(['/(tabs)/plan', '/(tabs)/train']);
     expect(navigationRuntime.getActiveTab?.()).toBe('train');
   });
@@ -45,7 +45,8 @@ describe('runtime navigation adapter with installed Expo routes', () => {
     const { adapter, navigation } = harness();
     const runtime = createRuntimeOrchestrator({ router: adapter });
     runtime.dispatch({ workspace: 'train',
-      action: { kind: 'preview_workout', workoutId: 'workout-7' },
+      action: { kind: 'preview_workout', workoutId: 'workout-7',
+        actionId: 'preview-7', label: 'Preview', accessibilityLabel: 'Preview workout' },
     });
     await flush();
     expect(navigation[0]?.to).toEqual({
@@ -83,7 +84,8 @@ describe('real runtime command and workout authorization boundary', () => {
       },
     });
     const runtime = createRuntimeOrchestrator({ router: adapter, commands });
-    runtime.dispatch({ workspace: 'today', action: { kind: 'start', actionId: 'session-1' } });
+    runtime.dispatch({ workspace: 'today', action: { kind: 'start', actionId: 'session-1', label: 'Start',
+      accessibilityLabel: 'Start workout', primary: true } });
     await vi.waitFor(() => expect(navigation).toHaveLength(1));
     expect(audits).toEqual(['authorization', 'durable checkpoint', 'active']);
     expect(navigation[0]?.to).toBe('/active-workout');
@@ -114,7 +116,8 @@ describe('real runtime command and workout authorization boundary', () => {
     });
     const runtime = createRuntimeOrchestrator({ router: adapter, commands });
     runtime.dispatch({ workspace: 'train', action: {
-      kind: 'start_workout', workoutId: 'workout-1',
+      kind: 'start_workout', workoutId: 'workout-1', actionId: 'start-1',
+      label: 'Start', accessibilityLabel: 'Start workout',
     } });
     await flush();
     expect(navigation).toHaveLength(0);
@@ -146,7 +149,8 @@ describe('real runtime command and workout authorization boundary', () => {
         onError,
       },
     });
-    runtime.dispatch({ workspace: 'today', action: { kind: 'start', actionId: 'S1' } });
+    runtime.dispatch({ workspace: 'today', action: { kind: 'start', actionId: 'S1', label: 'Start',
+      accessibilityLabel: 'Start workout', primary: true } });
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
     expect(navigation).toHaveLength(0);
   });
