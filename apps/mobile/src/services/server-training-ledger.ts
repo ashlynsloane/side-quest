@@ -339,11 +339,16 @@ export async function synchronizeRecordedTrainingExposure(
  */
 type PendingRecovery = {
   eventId: string;
+  trainingDate: string;
   values: Partial<Record<TrainingRegion, RecoveryStatus>>;
+  supersededEventId?: string;
 };
 
-function pendingRecoveryKey(userId: string, date: string): string {
-  return `sidequest.pending-cloud-recovery.v1:${encodeURIComponent(userId)}:${date}`;
+/** One journal per athlete rather than per date. A pending report from
+ * yesterday cannot be ignored by creating a new "stable" report today.
+ */
+function pendingRecoveryKey(userId: string): string {
+  return `sidequest.pending-cloud-recovery.v2:${encodeURIComponent(userId)}`;
 }
 
 function recoveryStorage(): {
@@ -356,8 +361,16 @@ function recoveryStorage(): {
   return storage;
 }
 
-/** A failed network acknowledgement must retry the SAME recovery event ID,
- * preserving the server's original observation timestamp.
+function recoveryEventId(date: string): string {
+  return `recovery:${date}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * An exact retry uses the prior server event ID. When a still-unresolved
+ * observation is followed by explicitly WORSENED symptoms, a new restrictive
+ * report may supersede it. The backend atomically tombstones the older ID so
+ * a delayed "stable" packet cannot arrive after the newer worsening report.
+ * A benign/new "stable" report can NEVER supersede an unresolved event.
  */
 export async function publishRemoteRecovery(
   userId: string, date: string,
@@ -366,63 +379,89 @@ export async function publishRemoteRecovery(
 ): Promise<string> {
   await assertAuthenticatedAthlete(userId, rpc);
   if (!validDay(date)) throw new Error('Invalid remote recovery date.');
-  const regions: TrainingRegion[] = ['general','achilles','upper_back'];
+  const regions: TrainingRegion[] = ['general', 'achilles', 'upper_back'];
   const values = Object.fromEntries(regions.filter((region) => observations[region] !== undefined)
     .map((region) => [region, observations[region]])) as PendingRecovery['values'];
   if (!Object.keys(values).length
       || Object.values(values).some((value) =>
-        !['stable','uncertain','worse','red_flag'].includes(String(value)))) {
+        !['stable', 'uncertain', 'worse', 'red_flag'].includes(String(value)))) {
     throw new Error('An explicit regional recovery report is required.');
   }
+
   const storage = recoveryStorage();
-  const key = pendingRecoveryKey(userId, date);
+  const key = pendingRecoveryKey(userId);
+  const existing = storage.getItem(key);
   let pending: PendingRecovery;
-  const previous = storage.getItem(key);
-  if (previous) {
+  if (existing) {
     let parsed: unknown;
-    try { parsed = JSON.parse(previous); } catch {
+    try { parsed = JSON.parse(existing); } catch {
       throw new Error('Pending recovery upload is unreadable; review before retrying.');
     }
-    const candidate = parsed as PendingRecovery | null;
-    if (!candidate || typeof candidate.eventId !== 'string'
-        || !candidate.eventId.startsWith(`recovery:${date}:`)
-        || !candidate.values || typeof candidate.values !== 'object') {
+    const previous = parsed as PendingRecovery | null;
+    if (!previous || typeof previous.eventId !== 'string'
+        || !validDay(previous.trainingDate)
+        || !previous.eventId.startsWith(`recovery:${previous.trainingDate}:`)
+        || !previous.values || typeof previous.values !== 'object'
+        || !Object.keys(previous.values).length
+        || Object.entries(previous.values).some(([region, status]) =>
+          !regions.includes(region as TrainingRegion)
+          || !['stable', 'uncertain', 'worse', 'red_flag'].includes(String(status)))
+        || (previous.supersededEventId !== undefined &&
+          (typeof previous.supersededEventId !== 'string'
+           || !previous.supersededEventId.startsWith('recovery:')))) {
       throw new Error('Pending recovery upload is invalid; review before retrying.');
     }
-    if (JSON.stringify(candidate.values) !== JSON.stringify(values)) {
-      throw new Error('Complete the pending recovery synchronization before changing symptoms.');
+    if (previous.trainingDate === date
+        && JSON.stringify(previous.values) === JSON.stringify(values)) {
+      pending = previous;
+    } else if (Object.values(values).every((status) =>
+      status === 'worse' || status === 'red_flag')) {
+      // Only a wholly restrictive, freshly reviewed report may replace a
+      // pending event. Persist its ID before the network request.
+      pending = {
+        eventId: recoveryEventId(date), trainingDate: date, values,
+        supersededEventId: previous.eventId,
+      };
+      storage.setItem(key, JSON.stringify(pending));
+    } else {
+      throw new Error('Complete the pending recovery synchronization before submitting a nonrestrictive assessment.');
     }
-    pending = candidate;
   } else {
-    pending = {
-      eventId: `recovery:${date}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
-      values,
-    };
-    // Write-ahead journal: a crash after server acceptance must not generate
-    // a fresh "stable" timestamp for an older observation on retry.
+    pending = { eventId: recoveryEventId(date), trainingDate: date, values };
     storage.setItem(key, JSON.stringify(pending));
   }
-  const result = await call(backend(rpc), 'publish_training_remote_recovery', {
-    p_event_id: pending.eventId, p_training_date: date, p_observations: values,
-  });
+  const result = await call(
+    backend(rpc),
+    pending.supersededEventId
+      ? 'publish_training_remote_recovery_restrictive'
+      : 'publish_training_remote_recovery',
+    {
+      p_event_id: pending.eventId,
+      p_training_date: pending.trainingDate,
+      p_observations: pending.values,
+      ...(pending.supersededEventId ? {
+        p_superseded_event_id: pending.supersededEventId,
+      } : {}),
+    },
+  );
   if (result !== true) throw new Error('Cloud regional recovery was not confirmed.');
   await assertAuthenticatedAthlete(userId, rpc);
   return pending.eventId;
 }
 
-/** Acknowledge only after the matching local observation is also durable. */
+/** Acknowledge only after the matching LOCAL observation is also durable. */
 export function acknowledgeRemoteRecovery(
   userId: string, date: string, eventId: string,
 ): void {
   const storage = recoveryStorage();
-  const key = pendingRecoveryKey(userId, date);
+  const key = pendingRecoveryKey(userId);
   const raw = storage.getItem(key);
   if (!raw) throw new Error('Recovery sync acknowledgement has no pending event.');
   let pending: PendingRecovery;
   try { pending = JSON.parse(raw) as PendingRecovery; } catch {
     throw new Error('Recovery sync acknowledgement is unreadable.');
   }
-  if (pending.eventId !== eventId) {
+  if (pending.eventId !== eventId || pending.trainingDate !== date) {
     throw new Error('Recovery sync acknowledgement does not match the pending event.');
   }
   storage.removeItem(key);
