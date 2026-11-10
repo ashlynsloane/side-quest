@@ -450,6 +450,27 @@ export default function ActiveWorkoutScreen() {
           <Text style={styles.helper}>{activePlanLink ? `${activePlanLink.sessionTitle} is now marked complete in your plan.` : 'Saved to training history.'} Review the work, add a private note, or share only the details you choose.</Text>
           <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
 
+          <View style={styles.card}>
+            <Text style={styles.coachLabel}>TRAINING CEILING REACHED</Text>
+            <Text style={styles.cardTitle}>Your prescribed workout is enough for today.</Text>
+            <Text style={styles.helper}>Having energy left is not a reason to add sets, calf raises, cycling, or another workout. Review your recovery before progressing at the next planned exposure.</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="I feel tempted to add more training"
+              onPress={() => Alert.alert(
+                'Pause before adding training',
+                'Your session is complete. Additional training is not required to make progress. Record any symptoms now and reconsider new loading after your next recovery check.',
+                [
+                  { text: 'Keep today complete', style: 'default' },
+                  { text: 'Log symptoms', onPress: () => router.push('/today-check-in' as Href) },
+                ],
+              )}
+              style={styles.outlineButton}
+            >
+              <Text style={styles.outlineButtonText}>I want to do more</Text>
+            </Pressable>
+          </View>
+
           <CompletedWorkoutBodyMap regionLoads={completedSummary.regionLoads} />
           <Pressable onPress={() => setShareOpen(true)} style={styles.shareButton}><V23Icon name="more" color={tokens.accent} size={18} /><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Share workout summary</Text><Text style={styles.helper}>Choose exactly what appears. Pain, restrictions, and notes stay private.</Text></View><Text style={styles.shareChevron}>›</Text></Pressable>
 
