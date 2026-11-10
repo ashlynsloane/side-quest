@@ -12,7 +12,7 @@ const db = vi.hoisted(() => ({
 vi.mock('../src/services/database', () => db);
 
 import {
-  acquireSynchronizedWorkoutLease, publishRemoteDailyPlan,
+  acknowledgeRemoteRecovery, acquireSynchronizedWorkoutLease, publishRemoteDailyPlan,
   publishRemoteExposure, publishRemoteRecovery, readRemoteTrainingSnapshot,
   synchronizeRecordedTrainingExposure,
 } from '../src/services/server-training-ledger';
@@ -237,6 +237,45 @@ describe('synchronized authoritative ledger mobile protocol', () => {
     expect(client.rpc).not.toHaveBeenCalledWith(
       'acquire_training_workout_lease_v2', expect.anything(),
     );
+  });
+
+  it('retries a recovery upload with the SAME event ID after a lost acknowledgement', async () => {
+    const cache = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => cache.get(key) ?? null,
+      setItem: (key: string, value: string) => { cache.set(key, value); },
+      removeItem: (key: string) => { cache.delete(key); },
+    });
+    let fails = true;
+    const backend: WorkoutLeaseRpc = {
+      rpc: vi.fn(async () => ({
+        data: fails ? null : true,
+        error: fails ? { message: 'timeout after remote commit' } : null,
+      })),
+    };
+    await expect(publishRemoteRecovery('athlete-1', date, {
+      achilles: 'stable',
+    }, backend)).rejects.toThrow('timeout');
+    expect(cache.size).toBe(1);
+    const pending = JSON.parse([...cache.values()][0]!) as { eventId: string };
+    fails = false;
+    const recoveredId = await publishRemoteRecovery('athlete-1', date, {
+      achilles: 'stable',
+    }, backend);
+    expect(recoveredId).toBe(pending.eventId);
+    expect(backend.rpc).toHaveBeenLastCalledWith(
+      'publish_training_remote_recovery',
+      expect.objectContaining({ p_event_id: pending.eventId }),
+    );
+    await expect(publishRemoteRecovery('athlete-1', date, {
+      achilles: 'worse',
+    }, backend)).rejects.toThrow('pending recovery synchronization');
+    acknowledgeRemoteRecovery('athlete-1', date, recoveredId);
+    expect(cache.size).toBe(0);
+    const nextId = await publishRemoteRecovery('athlete-1', date, {
+      achilles: 'worse',
+    }, backend);
+    expect(nextId).not.toBe(recoveredId);
   });
 
 });
