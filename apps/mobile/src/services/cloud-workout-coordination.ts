@@ -83,7 +83,7 @@ export async function acquireCloudWorkoutLease(
   if (!workoutId || workoutId.length > 128) throw new Error('Invalid workout identity.');
   const deviceId = getDeviceTag();
   if (cloudWorkoutLeasesEnabled() && (!prescription || !prescription.sessionId ||
-      !/^\\d{4}-\\d{2}-\\d{2}$/.test(prescription.trainingDate) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(prescription.trainingDate) ||
       !Number.isInteger(prescription.minutes) || prescription.minutes <= 0 ||
       prescription.regions.length === 0)) {
     throw new Error('A synchronized prescription is required before acquiring a cloud workout lease.');
