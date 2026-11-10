@@ -170,6 +170,16 @@ begin
       where athlete_id=p_athlete_id and session_id=v_request.target_id
         and training_date=v_request.training_date
     ) then raise exception 'Reservation correction target missing' using errcode='22023'; end if;
+    -- A reservation may be retired only when no completed session is linked.
+    -- A completed workout must never be hidden by an "unused" reservation claim.
+    if v_request.target_type='reservation' and exists (
+      select 1 from public.training_remote_exposures
+      where athlete_id=p_athlete_id and session_id=v_request.target_id
+        and training_date=v_request.training_date
+    ) then
+      raise exception 'Completed workout prevents reservation retraction'
+        using errcode='55000';
+    end if;
   end if;
   insert into public.training_remote_correction_decisions(
     athlete_id,request_id,outcome,review_reference
