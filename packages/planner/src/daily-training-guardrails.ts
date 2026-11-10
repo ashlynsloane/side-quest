@@ -35,6 +35,8 @@ export interface TrainingGuardrailResult {
   decision: TrainingDecision;
   reasons: string[];
   requiresReassessment: boolean;
+  /** False means the app requires rechecking or changing the plan, not a text-only exception. */
+  overrideAllowed?: boolean;
 }
 
 export function evaluateTrainingAddition(
@@ -101,6 +103,7 @@ export function evaluateTrainingAddition(
       decision: 'defer',
       reasons: ['Symptoms worsened in a region loaded by this activity. Reassess before proceeding.'],
       requiresReassessment: true,
+      overrideAllowed: false,
     };
   }
   if (regions.some((region) => !ceiling.recovery[region] || ceiling.recovery[region] === 'uncertain')) {
@@ -108,6 +111,7 @@ export function evaluateTrainingAddition(
       decision: 'defer',
       reasons: ['Recovery is not confirmed for every affected region; missing data is not clearance.'],
       requiresReassessment: true,
+      overrideAllowed: false,
     };
   }
   const retractedIds = new Set(history.filter((event) => event.kind === 'retracted')
@@ -142,6 +146,7 @@ export function evaluateTrainingAddition(
         decision: 'defer',
         reasons: [`A ${region.replaceAll('_', ' ')} recovery check is required after the latest completed training exposure.`],
         requiresReassessment: true,
+        overrideAllowed: false,
       };
     }
   }
@@ -168,6 +173,7 @@ export function evaluateTrainingAddition(
       decision: 'modify',
       reasons: ['Proposed activity exceeds the prescribed ceiling. Use the planned dose.'],
       requiresReassessment: false,
+      overrideAllowed: false,
     };
   }
   const performed = performedToday.filter((event) =>
@@ -182,6 +188,7 @@ export function evaluateTrainingAddition(
       decision: 'defer',
       reasons: ['This planned session already has completed activity recorded. Review its recovery before starting it again.'],
       requiresReassessment: true,
+      overrideAllowed: false,
     };
   }
   const usedMinutes = performed.reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
@@ -200,7 +207,7 @@ export function evaluateTrainingAddition(
   }
   if ((dailyMinuteLimit !== Infinity && (proposed.minutes ?? 0) + usedMinutes > dailyMinuteLimit) ||
       (dailySetLimit !== Infinity && (proposed.sets ?? 0) + usedSets > dailySetLimit)) {
-    return { decision: 'modify', reasons: ["Previously completed training uses part of today's budget. Reduce the proposed dose."], requiresReassessment: false };
+    return { decision: 'modify', reasons: ["Previously completed training uses part of today's budget. Reduce the proposed dose."], requiresReassessment: false, overrideAllowed: false };
   }
   return { decision: 'allow', reasons: ['Within the remaining planned dose and reported recovery constraints.'], requiresReassessment: false };
 }
