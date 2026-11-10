@@ -145,30 +145,53 @@ export async function reconcileCompletedWorkoutHistory(userId: string, date: str
   }
 }
 
+const RECENT_EXPOSURE_REVIEW_HOURS = 48;
+
+/**
+ * Recent training is a precautionary overlap signal, not an inferred dose of
+ * Achilles or thoracic load. A past workout may be relevant even if it fell
+ * on a different calendar day.
+ */
 async function crossSportOverlapFor(
-  date: string,
   regions: readonly TrainingRegion[],
 ): Promise<ReturnType<typeof assessCrossSportExposure>> {
-  const beginning = new Date(`${date}T00:00:00`);
-  const end = new Date(beginning.getTime());
-  end.setDate(end.getDate() + 1);
-  const imported = await listEnduranceActivitiesForGuardrails({
-    from: beginning.toISOString(),
-    to: new Date(end.getTime() - 1).toISOString(),
-    limit: 501,
-  });
-  if (imported.length >= 501) throw new Error('Too many endurance activities for a reliable daily assessment.');
-  const completed = imported.filter((item) =>
-    localTrainingDate(new Date(item.startAt)) === date
-    && Date.parse(item.startAt) <= Date.now()
-    && !item.deletedAt
-    && item.classification !== 'ignored'
+  const now = new Date();
+  const from = new Date(now.getTime() - RECENT_EXPOSURE_REVIEW_HOURS * 60 * 60 * 1000);
+  const [imported, workouts] = await Promise.all([
+    listEnduranceActivitiesForGuardrails({
+      from: from.toISOString(), to: now.toISOString(), limit: 501,
+    }),
+    listWorkoutLedgerEntriesForGuardrails({
+      from: from.toISOString(), to: now.toISOString(), limit: 501,
+    }),
+  ]);
+  if (imported.length >= 501 || workouts.length >= 501) {
+    throw new Error('Recent training history exceeds the safe review limit.');
+  }
+  const importedExposures = imported.filter((activity) => {
+    const started = Date.parse(activity.startAt);
+    return Number.isFinite(started) && started <= now.getTime()
+      && !activity.deletedAt && activity.classification !== 'ignored';
+  }).map((activity) => ({
+    id: activity.id,
+    discipline: activity.discipline,
+    minutes: activity.movingTimeSeconds / 60,
+    occurredAt: activity.startAt,
+  }));
+  const workoutExposures = workouts.map((entry) => ({
+    id: entry.id,
+    discipline: 'strength' as const,
+    minutes: entry.workout
+      ? Math.max(0, entry.workout.estimatedElapsedSeconds * entry.completionFraction / 60)
+      : Math.max(0, (Date.parse(entry.completedAt) - Date.parse(entry.startedAt)) / 60000),
+    occurredAt: entry.completedAt,
+    regions: entry.workout ? regionsForWorkout(entry.workout)
+      : ['general', 'achilles', 'upper_back'] as TrainingRegion[],
+  }));
+  return assessCrossSportExposure(
+    regions, [...importedExposures, ...workoutExposures],
+    { now: now.toISOString(), lookbackHours: RECENT_EXPOSURE_REVIEW_HOURS },
   );
-  return assessCrossSportExposure(regions, completed.map((item) => ({
-    id: item.id,
-    discipline: item.discipline,
-    minutes: item.movingTimeSeconds / 60,
-  })));
 }
 
 export async function assessTrainingAddition(request: TrainingAdditionRequest): Promise<TrainingGuardrailResult> {
@@ -198,7 +221,7 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
     const regions = [...new Set<TrainingRegion>([
       ...request.proposed.regions, ...(matching?.regions ?? []),
     ])];
-    const crossSport = await crossSportOverlapFor(request.date, regions);
+    const crossSport = await crossSportOverlapFor(regions);
     if (crossSport.conflict) {
       result = {
         decision: 'defer',
