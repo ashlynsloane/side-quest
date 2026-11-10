@@ -204,6 +204,7 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
         decision: 'defer',
         reasons: [...result.reasons, ...crossSport.reasons],
         requiresReassessment: true,
+        overrideAllowed: result.overrideAllowed,
       };
     }
   }
@@ -250,7 +251,8 @@ export async function assessWorkoutStart({
   });
   if (result.decision === 'allow') return { result, authorized: true };
   // Safety red flags cannot be bypassed from this interface.
-  if (result.decision === 'stop' || !overrideReason?.trim()) return { result, authorized: false };
+  if (result.decision === 'stop' || result.overrideAllowed === false ||
+      !overrideReason?.trim()) return { result, authorized: false };
   await recordTrainingEvent(userId, {
     id: `override:${workout.id}:${now.toISOString()}:${Math.random().toString(36).slice(2)}`,
     occurredAt: now.toISOString(),
