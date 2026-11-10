@@ -2938,8 +2938,16 @@ export async function getStoredDailyTrainingCeiling(
   if (!row) return null;
   try {
     const result = JSON.parse(row.ceiling_json) as import('@circuit/planner').DailyTrainingCeiling;
-    return result.date === trainingDate && Array.isArray(result.planned) && !!result.recovery ? result : null;
-  } catch { return null; }
+    if (result.date !== trainingDate || !Array.isArray(result.planned) || !result.recovery
+      || typeof result.restrictUnplanned !== 'boolean') {
+      throw new Error('Malformed daily training ceiling');
+    }
+    return result;
+  } catch {
+    // Corruption is not equivalent to an absent plan. An absent plan permits
+    // a documented discretionary start; corruption must prevent authorization.
+    throw new Error('Stored training ceiling is unreadable. Training authorization requires a data repair.');
+  }
 }
 
 export async function storeDailyTrainingCeiling(
@@ -2988,9 +2996,20 @@ export async function listStoredTrainingGuardrailEvents(
     'SELECT event_json FROM training_guardrail_events WHERE athlete_id = ? AND training_date = ? ORDER BY occurred_at, id',
     athleteId, trainingDate,
   );
-  return rows.flatMap((row) => {
-    try { return [JSON.parse(row.event_json) as import('@circuit/planner').TrainingEvent]; }
-    catch { return []; }
+  return rows.map((row) => {
+    try {
+      const event = JSON.parse(row.event_json) as import('@circuit/planner').TrainingEvent;
+      if (!event || typeof event.id !== 'string' || !event.id ||
+          typeof event.occurredAt !== 'string' ||
+          !['prescribed','completed','unplanned','override','recovery','assessment','retracted','urge'].includes(event.kind)) {
+        throw new Error('Malformed training event');
+      }
+      return event;
+    } catch {
+      // Never drop an unreadable completed-activity row: that could restore
+      // a budget the athlete already used.
+      throw new Error('Stored training history is unreadable. Correct the record before increasing exercise.');
+    }
   });
 }
 
