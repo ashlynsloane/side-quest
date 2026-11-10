@@ -125,9 +125,7 @@ export async function publishRemoteDailyPlan(
   return sessions;
 }
 
-export async function publishRemoteExposure(
-  event: RemoteTrainingExposure, rpc?: Rpc,
-): Promise<void> {
+export function validateRemoteExposure(event: RemoteTrainingExposure): void {
   if (!event.eventId || event.eventId.length > 128
       || !event.workoutId || event.workoutId.length > 128
       || (event.sessionId?.length ?? 0) > 128
@@ -136,6 +134,12 @@ export async function publishRemoteExposure(
       || !Number.isFinite(Date.parse(event.completedAt))) {
     throw new Error('Invalid remote training exposure; the record needs repair.');
   }
+}
+
+export async function publishRemoteExposure(
+  event: RemoteTrainingExposure, rpc?: Rpc,
+): Promise<void> {
+  validateRemoteExposure(event);
   const response = await call(backend(rpc), 'publish_training_remote_exposure', {
     p_event_id: event.eventId,
     p_workout_id: event.workoutId,
@@ -149,9 +153,15 @@ export async function publishRemoteExposure(
   if (response !== true) throw new Error('Cloud training exposure was not confirmed.');
 }
 
-/** Strict, idempotent backfill of all available 48h local actuals.
- * Missing/corrupted history and any network error DENY new cloud starts.
- * No deleted or ignored import is silently made into a completed dose.
+/**
+ * Backfill up to 89 days of recorded workouts and endurance imports before a
+ * remote authorization. The server rejects events older than 90 days.
+ * Stable paginated reads prevent a dense history from silently truncating.
+ * An exact remote event ID is immutable; corrected/deleted records therefore
+ * require a reviewed amendment flow rather than optimistic overwrite.
+ *
+ * All uploads are bounded atomic batches, retried idempotently. The next
+ * remote start is DENIED on incomplete data, bad history or any RPC error.
  */
 export async function synchronizeRecordedTrainingExposure(
   userId: string, rpc?: Rpc,
@@ -159,18 +169,36 @@ export async function synchronizeRecordedTrainingExposure(
   if (!userId) throw new Error('Missing athlete for training synchronization.');
   await assertAuthenticatedAthlete(userId, rpc);
   const now = new Date();
-  const from = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-  const [workouts, endurance] = await Promise.all([
-    listWorkoutLedgerEntriesForGuardrails({
-      from: from.toISOString(), to: now.toISOString(), limit: 501,
-    }),
-    listEnduranceActivitiesForGuardrails({
-      from: from.toISOString(), to: now.toISOString(), limit: 501,
-    }),
-  ]);
-  if (workouts.length >= 501 || endurance.length >= 501) {
-    throw new Error('Training history exceeds the synchronized safety review limit.');
+  const from = new Date(now.getTime() - 89 * 24 * 60 * 60 * 1000);
+  const pageSize = 200;
+  const maxEntries = 5000;
+
+  async function pages<T>(
+    read: (offset: number) => Promise<T[]>,
+  ): Promise<T[]> {
+    const all: T[] = [];
+    for (let offset = 0; offset <= maxEntries; offset += pageSize) {
+      const page = await read(offset);
+      if (!Array.isArray(page) || page.length > pageSize) {
+        throw new Error('Historical training returned an invalid page.');
+      }
+      all.push(...page);
+      if (all.length > maxEntries) {
+        throw new Error('Historical training is too large for the bounded safe synchronization.');
+      }
+      if (page.length < pageSize) return all;
+    }
+    throw new Error('Historical training pagination could not finish safely.');
   }
+
+  const [workouts, endurance] = await Promise.all([
+    pages((offset) => listWorkoutLedgerEntriesForGuardrails({
+      from: from.toISOString(), to: now.toISOString(), limit: pageSize, offset,
+    })),
+    pages((offset) => listEnduranceActivitiesForGuardrails({
+      from: from.toISOString(), to: now.toISOString(), limit: pageSize, offset,
+    })),
+  ]);
   const events: RemoteTrainingExposure[] = workouts.map((entry): RemoteTrainingExposure => {
     const elapsed = entry.workout
       ? entry.workout.estimatedElapsedSeconds * entry.completionFraction / 60
@@ -208,9 +236,19 @@ export async function synchronizeRecordedTrainingExposure(
       completedAt: entry.startAt, trainingDate: trainingDay(new Date(entry.startAt)),
     });
   }
-  for (const event of events) {
+  // Validate the whole collected history before ANY batch is written.
+  // An invalid record is not interpreted as a missing workout.
+  for (const event of events) validateRemoteExposure(event);
+  const client = backend(rpc);
+  for (let index = 0; index < events.length; index += 100) {
     await assertAuthenticatedAthlete(userId, rpc);
-    await publishRemoteExposure(event, rpc);
+    const batch = events.slice(index, index + 100);
+    const result = await call(client, 'publish_training_remote_exposure_batch', {
+      p_events: batch,
+    });
+    if (result !== batch.length) {
+      throw new Error('The synchronized exposure batch was not fully confirmed.');
+    }
   }
   await assertAuthenticatedAthlete(userId, rpc);
   return events.length;
