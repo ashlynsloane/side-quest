@@ -530,7 +530,7 @@ begin
         'acquiredAt',acquired_at,'trainingDate',training_date
       ) order by acquired_at)
       from public.training_remote_effective_reservations
-      where athlete_id=v_user and training_date=p_training_date
+      where athlete_id=v_user and training_date=p_training_date and not retracted
     ),'[]'::jsonb),
     'recovery',coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
