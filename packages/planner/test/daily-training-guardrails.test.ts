@@ -195,4 +195,34 @@ describe('daily training ceiling', () => {
     expect(result.planned.map((item) => item.sessionId)).toEqual(['A']);
   });
 
+  it('fails closed on corrupted recovery states and malformed plan doses', () => {
+    const invalidRecovery = { ...baseline, recovery: { general: 'cleared' as 'stable' } };
+    expect(evaluateTrainingAddition(invalidRecovery,
+      { activity: 'strength', minutes: 20, regions: ['general'], scheduled: true }).decision).toBe('stop');
+    const invalidPlan = { ...baseline, planned: [
+      { activity: 'strength', minutes: Number.NaN, regions: ['general' as const] },
+    ] };
+    expect(evaluateTrainingAddition(invalidPlan,
+      { activity: 'strength', minutes: 20, regions: ['general'], scheduled: true }).decision).toBe('stop');
+  });
+  it('does not let negative recorded work expand the daily budget', () => {
+    const history = [{
+      id: 'bad', occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09', kind: 'completed' as const,
+      activity: { activity: 'strength', minutes: -10, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 20, regions: ['general'], scheduled: true }, history).decision).toBe('stop');
+  });
+  it('accepts a zero-minute historical entry without granting extra workout time', () => {
+    const history = [{
+      id: 'not-done', occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09', kind: 'completed' as const,
+      activity: { activity: 'strength', minutes: 0, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition({
+      ...baseline, recoveryObservedAt: { general: '2026-11-09T17:00:00Z' },
+    }, { activity: 'strength', minutes: 35, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
+  });
+
 });
