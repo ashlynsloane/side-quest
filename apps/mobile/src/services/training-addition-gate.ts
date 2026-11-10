@@ -3,6 +3,7 @@ import {
   assessCrossSportExposure,
   affectedTrainingRegions,
   reconcileDailyCeilingPlan,
+  planLedgerReconciliation,
   type ActivityDose,
   type DailyTrainingCeiling,
   type ProposedActivity,
@@ -100,38 +101,46 @@ export async function getEffectiveDailyCeiling(
  * guardrail-event commit. This also imports earlier sessions into the budget.
  * No prescription is ever treated as a completion.
  */
-async function reconcileCompletedWorkoutHistory(userId: string, date: string): Promise<void> {
+export async function reconcileCompletedWorkoutHistory(userId: string, date: string): Promise<void> {
   const beginning = new Date(`${date}T00:00:00`);
   const end = new Date(beginning.getTime());
   end.setDate(end.getDate() + 1);
-  const history = await listWorkoutLedgerEntries({
-    from: beginning.toISOString(),
-    to: new Date(end.getTime() - 1).toISOString(),
-    limit: 501,
-  });
-  if (history.length >= 501) throw new Error('Daily workout-history reconciliation limit reached.');
-  for (const entry of history) {
-    if (localTrainingDate(new Date(entry.completedAt)) !== date) continue;
-    const estimate = entry.workout
-      ? entry.workout.estimatedElapsedSeconds * entry.completionFraction / 60
-      : (Date.parse(entry.completedAt) - Date.parse(entry.startedAt)) / 60000;
-    if (!Number.isFinite(estimate) || estimate < 0) {
-      throw new Error('Workout history includes an invalid duration; review training history before adding load.');
-    }
-    await recordTrainingEvent(userId, {
-      id: entry.workout
-        ? `completed:${entry.workout.id}:${entry.completedAt}`
-        : `completed:ledger:${entry.id}`,
-      occurredAt: entry.completedAt,
-      kind: 'completed',
-      activity: {
-        activity: 'strength',
-        sessionId: entry.plannedSessionId,
-        minutes: Math.max(1, Math.ceil(estimate)),
-        regions: entry.workout ? regionsForWorkout(entry.workout) : ['general', 'achilles', 'upper_back'],
-      },
-      note: entry.workout ? undefined : 'Reconciled legacy or manually logged strength workout; duration estimated.',
-    }, date);
+  const [rows, history] = await Promise.all([
+    listWorkoutLedgerEntries({
+      from: beginning.toISOString(),
+      to: new Date(end.getTime() - 1).toISOString(),
+      limit: 501,
+    }),
+    loadTrainingEvents(userId, date),
+  ]);
+  if (rows.length >= 501) throw new Error('Daily workout history is too large for a safe reconciliation.');
+  const ledger = rows.filter((entry) => localTrainingDate(new Date(entry.completedAt)) === date)
+    .map((entry) => {
+      const estimatedMinutes = entry.workout
+        ? entry.workout.estimatedElapsedSeconds * entry.completionFraction / 60
+        : (Date.parse(entry.completedAt) - Date.parse(entry.startedAt)) / 60000;
+      if (!Number.isFinite(estimatedMinutes) || estimatedMinutes < 0 || !entry.updatedAt) {
+        throw new Error('Completed workout history requires review before loading can progress.');
+      }
+      return {
+        ledgerId: entry.id,
+        revision: entry.updatedAt,
+        completedAt: entry.completedAt,
+        legacyEventIds: [
+          entry.workout ? `completed:${entry.workout.id}:${entry.completedAt}` : '',
+          `completed:ledger:${entry.id}`,
+        ].filter(Boolean),
+        activity: {
+          activity: 'strength',
+          sessionId: entry.plannedSessionId,
+          minutes: Math.max(1, Math.ceil(estimatedMinutes)),
+          regions: entry.workout ? regionsForWorkout(entry.workout) : ['general', 'achilles', 'upper_back'] as TrainingRegion[],
+        },
+      };
+    });
+  const events = planLedgerReconciliation(date, ledger, history, new Date().toISOString());
+  for (const event of events) {
+    await recordTrainingEvent(userId, event, date);
   }
 }
 
@@ -251,25 +260,23 @@ export async function assessWorkoutStart({
 }
 
 export async function recordActualWorkoutCompletion({
-  userId, workout, sessionId, completedAt, completionFraction,
+  userId, workout, completedAt, ledgerId,
 }: {
   userId: string;
   workout: GeneratedWorkout;
   sessionId?: string;
   completedAt: string;
   completionFraction: number;
+  ledgerId?: string;
 }): Promise<void> {
-  const fraction = Number.isFinite(completionFraction) ? Math.max(0, Math.min(1, completionFraction)) : 0;
-  // This event records an estimate from actually saved completion, not the prescription.
-  await recordTrainingEvent(userId, {
-    id: `completed:${workout.id}:${completedAt}`,
-    occurredAt: completedAt,
-    kind: 'completed',
-    activity: {
-      activity: 'strength',
-      sessionId,
-      minutes: Math.ceil(workout.estimatedElapsedSeconds / 60 * fraction),
-      regions: regionsForWorkout(workout),
-    },
-  }, localTrainingDate(new Date(completedAt)));
+  const date = localTrainingDate(new Date(completedAt));
+  await reconcileCompletedWorkoutHistory(userId, date);
+  const expected = ledgerId ?? `${workout.id}_${completedAt}`;
+  const history = await loadTrainingEvents(userId, date);
+  const retracted = new Set(history.filter((event) => event.kind === 'retracted')
+    .map((event) => event.retractsEventId));
+  if (!history.some((event) => event.kind === 'completed'
+    && event.sourceId === expected && !retracted.has(event.id))) {
+    throw new Error('Workout saved but its training-load record could not be verified. Retry reconciliation.');
+  }
 }
