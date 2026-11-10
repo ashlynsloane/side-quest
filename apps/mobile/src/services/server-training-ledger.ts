@@ -159,9 +159,9 @@ export async function synchronizeRecordedTrainingExposure(
       eventId: `workout:${entry.id}`,
       workoutId: entry.workout?.id ?? entry.id,
       sessionId: entry.plannedSessionId ?? null,
-      activity: 'strength',
+      activity: 'strength' as const,
       minutes: Math.ceil(elapsed),
-      regions: entry.workout ? regionsFor(entry.workout) : ['general','achilles','upper_back'],
+      regions: entry.workout ? regionsFor(entry.workout) : ['general','achilles','upper_back'] as TrainingRegion[],
       completedAt: entry.completedAt,
       trainingDate: trainingDay(new Date(entry.completedAt)),
     };
