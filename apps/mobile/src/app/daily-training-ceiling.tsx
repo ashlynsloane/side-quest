@@ -99,7 +99,7 @@ export default function DailyTrainingCeilingScreen() {
           <Text style={styles.cardTitle}>{region.name}</Text>
           <Text style={styles.body}>{region.detail}</Text>
           <Text style={styles.body}>{ceiling.recoveryObservedAt?.[region.id]
-            ? `Last explicitly checked: ${new Date(ceiling.recoveryObservedAt[region.id]).toLocaleString()}`
+            ? `Last explicitly checked: ${new Date(ceiling.recoveryObservedAt[region.id]!).toLocaleString()}`
             : 'No explicit recovery observation recorded today'}</Text>
           {OPTIONS.map((option) => <Pressable
             key={option.value} accessibilityRole="radio"
