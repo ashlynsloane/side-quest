@@ -29,13 +29,13 @@ describe('affected training regions', () => {
   });
   it('recognizes ankle joint loading even when target is core', () => {
     const w = workout(['core_anterior'], {
-      jointLoads: [{ region: 'ankle' as JointRegion, load: 'moderate' }],
+      jointLoads: [{ region: 'ankle' as JointRegion, load: 2 }],
     });
     expect(affectedTrainingRegions(w)).toContain('achilles');
   });
   it('recognizes exercise-level thoracic loading', () => {
     const w = workout(['core_anterior'], {
-      bodyRegions: [{ region: 'upper_back', role: 'stabilizer', load: 'low' }],
+      bodyRegions: [{ region: 'upper_back', role: 'stabilizer', load: 1 }],
     });
     expect(affectedTrainingRegions(w)).toContain('upper_back');
   });
