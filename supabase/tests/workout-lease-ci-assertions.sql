@@ -49,7 +49,7 @@ begin
   select * into other_renewal
     from public.renew_training_workout_lease(first_lease.lease_id,'device-B');
   if other_renewal.renewed then
-    raise exception 'Non-owner device renewed somebody else\'s lease';
+    raise exception 'Non-owner device renewed another device lease';
   end if;
 
   select * into renewed
