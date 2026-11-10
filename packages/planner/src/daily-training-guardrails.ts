@@ -94,7 +94,7 @@ export function evaluateTrainingAddition(
 export interface TrainingEvent {
   id: string;
   occurredAt: string;
-  kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery';
+  kind: 'prescribed' | 'completed' | 'unplanned' | 'override' | 'recovery' | 'assessment';
   activity?: ActivityDose;
   note?: string;
 }
