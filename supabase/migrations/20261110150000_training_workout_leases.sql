@@ -81,12 +81,12 @@ begin
   if v_user is null then
     raise exception 'An authenticated user is required' using errcode = '42501';
   end if;
-  update public.training_workout_leases
+  update public.training_workout_leases as held
     set expires_at = v_expiry, updated_at = pg_catalog.clock_timestamp()
-    where athlete_id = v_user and lease_id = p_lease_id
-      and device_id = p_device_id
-      and expires_at > pg_catalog.clock_timestamp()
-    returning training_workout_leases.expires_at into v_written;
+    where held.athlete_id = v_user and held.lease_id = p_lease_id
+      and held.device_id = p_device_id
+      and held.expires_at > pg_catalog.clock_timestamp()
+    returning held.expires_at into v_written;
   if v_written is null then
     return query select false, null::timestamptz;
   else
