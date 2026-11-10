@@ -49,6 +49,85 @@ export interface RemoteTrainingSnapshot {
   recovery: RemoteTrainingRecovery[];
 }
 
+/** Athlete correction requests are immutable proposals. Their effect on
+ * authorization is ZERO until a privileged reviewer approves an amendment.
+ * Stable request IDs must be persisted by the caller before an uncertain retry.
+ */
+export interface RemoteTrainingCorrectionRequest {
+  requestId: string;
+  targetType: 'exposure' | 'reservation';
+  targetId: string;
+  trainingDate: string;
+  action: 'retract' | 'replace_minutes';
+  correctedMinutes: number | null;
+  reasonCode: 'duplicate' | 'import_error' | 'duration_error' | 'never_started' | 'other';
+}
+export interface RemoteTrainingCorrectionRecord extends RemoteTrainingCorrectionRequest {
+  requestedAt: string;
+  outcome: 'approved' | 'rejected' | null;
+  reviewReference: string | null;
+  decidedAt: string | null;
+}
+
+const correctionReasons = new Set<RemoteTrainingCorrectionRequest['reasonCode']>([
+  'duplicate', 'import_error', 'duration_error', 'never_started', 'other',
+]);
+
+export async function requestRemoteTrainingCorrection(
+  userId: string, request: RemoteTrainingCorrectionRequest, rpc?: WorkoutLeaseRpc,
+): Promise<void> {
+  await assertAuthenticatedAthlete(userId, rpc);
+  if (!request.requestId || request.requestId.length > 128
+      || !request.targetId || request.targetId.length > 128
+      || !validDay(request.trainingDate)
+      || !['exposure', 'reservation'].includes(request.targetType)
+      || !['retract', 'replace_minutes'].includes(request.action)
+      || !correctionReasons.has(request.reasonCode)
+      || (request.action === 'retract' && request.correctedMinutes !== null)
+      || (request.action === 'replace_minutes' && (
+        request.targetType !== 'exposure' || request.correctedMinutes === null
+        || !Number.isFinite(request.correctedMinutes)
+        || request.correctedMinutes <= 0 || request.correctedMinutes > 1440
+        || Math.round(request.correctedMinutes * 100) !== request.correctedMinutes * 100
+      ))) {
+    throw new Error('Invalid reviewed correction request.');
+  }
+  const result = await call(backend(rpc), 'request_training_remote_correction', {
+    p_request_id: request.requestId,
+    p_target_type: request.targetType,
+    p_target_id: request.targetId,
+    p_training_date: request.trainingDate,
+    p_action: request.action,
+    p_corrected_minutes: request.correctedMinutes,
+    p_reason_code: request.reasonCode,
+  });
+  if (result !== true) throw new Error('Correction request was not confirmed.');
+  await assertAuthenticatedAthlete(userId, rpc);
+}
+
+/** Only reports the server's review status. Never grants local clearance. */
+export async function readRemoteTrainingCorrections(
+  userId: string, rpc?: WorkoutLeaseRpc,
+): Promise<RemoteTrainingCorrectionRecord[]> {
+  await assertAuthenticatedAthlete(userId, rpc);
+  const data = await call(backend(rpc), 'read_training_remote_corrections', {
+    p_limit: 100,
+  });
+  if (!Array.isArray(data) || data.length > 100 || data.some((item: unknown) => {
+    if (!item || typeof item !== 'object') return true;
+    const row = item as Partial<RemoteTrainingCorrectionRecord>;
+    return typeof row.requestId !== 'string' || !row.requestId
+      || !['exposure', 'reservation'].includes(String(row.targetType))
+      || !['retract', 'replace_minutes'].includes(String(row.action))
+      || !validDay(String(row.trainingDate))
+      || !['approved', 'rejected', null].includes(row.outcome ?? null);
+  })) {
+    throw new Error('The remote correction audit is unreadable.');
+  }
+  await assertAuthenticatedAthlete(userId, rpc);
+  return data as RemoteTrainingCorrectionRecord[];
+}
+
 type Rpc = WorkoutLeaseRpc;
 function backend(provided?: Rpc): Rpc {
   if (provided) return provided;
