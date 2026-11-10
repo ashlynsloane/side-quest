@@ -20,6 +20,7 @@ import {
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
 import { assessWorkoutStart } from '@/services/training-addition-gate';
+import { createGuardedWorkoutStartGate } from '@/services/guarded-workout-start';
 import { useAuth } from '@/state/auth-context';
 import {
   generateWorkoutForAssignedTrainingSpace,
@@ -91,7 +92,11 @@ function resolvePlannedSessionForTrainingSpace(session: PlannedStrengthSession):
 
 export function WorkoutProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const startingWorkout = useRef(false);
+  const startGate = useRef(createGuardedWorkoutStartGate()).current;
+  const latestAthleteId = useRef<string | null>(null);
+  latestAthleteId.current = user?.id ?? null;
+  const restoredForAthlete = useRef<string | null>(null);
+  const activeWorkoutSnapshot = useRef<GeneratedWorkout | null>(null);
   const [previewWorkout, setPreviewWorkoutState] = useState<GeneratedWorkout | null>(null);
   const [previewExplanation, setPreviewExplanation] = useState<WorkoutRecommendationExplanation | null>(null);
   const [plannedPreviewSource, setPlannedPreviewSource] = useState<PlannedPreviewSource | null>(null);
@@ -99,9 +104,12 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
   const [activePlanLink, setActivePlanLink] = useState<ActiveWorkoutPlanLink | null>(null);
   const [workoutSessionReady, setWorkoutSessionReady] = useState(false);
   const [restoredActiveWorkout, setRestoredActiveWorkout] = useState(false);
+  activeWorkoutSnapshot.current = activeWorkout;
 
   useEffect(() => {
     let live = true;
+    restoredForAthlete.current = null;
+    activeWorkoutSnapshot.current = null;
     setWorkoutSessionReady(false);
     setActiveWorkout(null);
     setActivePlanLink(null);
@@ -110,6 +118,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
     void loadLiveWorkoutSession(user.id).then((snapshot) => {
       if (!live) return;
       if (snapshot) {
+        activeWorkoutSnapshot.current = snapshot.workout;
         setActiveWorkout(snapshot.workout);
         setActivePlanLink(snapshot.planLink ?? null);
         setRestoredActiveWorkout(true);
@@ -117,7 +126,10 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
     }).catch(() => {
       // No checkpoint is considered loaded if storage is unavailable.
     }).finally(() => {
-      if (live) setWorkoutSessionReady(true);
+      if (live) {
+        restoredForAthlete.current = user.id;
+        setWorkoutSessionReady(true);
+      }
     });
     return () => { live = false; };
   }, [user?.id]);
@@ -155,42 +167,24 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
     async beginWorkout(workout, options) {
-      if (startingWorkout.current) return {
-        started: false,
-        result: {
-          decision: 'defer' as const,
-          reasons: ['A workout-start assessment is already in progress.'],
-          requiresReassessment: true,
-        },
-      };
-      if (!user?.id) return {
-        started: false,
-        result: {
-          decision: 'defer' as const,
-          reasons: ['Sign in or use a local athlete profile before starting a session.'],
-          requiresReassessment: true,
-        },
-      };
-      startingWorkout.current = true;
-      try {
-      if (!workoutSessionReady) throw new Error('Active workout storage has not finished restoring');
       const planLink = buildPlanLink(plannedPreviewSource);
-      const assessment = await assessWorkoutStart({
-        userId: user.id,
-        workout,
-        sessionId: planLink?.sessionId,
-        overrideReason: options?.overrideReason,
+      return startGate.begin(workout, planLink, options?.overrideReason, {
+        activeAthleteId: () => latestAthleteId.current,
+        restoredForAthlete: (athleteId) =>
+          workoutSessionReady && restoredForAthlete.current === athleteId,
+        hasActiveSession: () => activeWorkoutSnapshot.current !== null,
+        assess: assessWorkoutStart,
+        createSnapshot: (proposed, source) =>
+          createInitialLiveWorkoutSession(proposed, new Date().toISOString(), source ?? undefined),
+        persist: saveLiveWorkoutSession,
+        discardPersisted: clearLiveWorkoutSession,
+        onStarted(proposed, source) {
+          activeWorkoutSnapshot.current = proposed;
+          setActiveWorkout(proposed);
+          setActivePlanLink(source);
+          setRestoredActiveWorkout(false);
+        },
       });
-      if (!assessment.authorized) return { started: false, result: assessment.result };
-      const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
-      await saveLiveWorkoutSession(snapshot, user.id);
-      setActiveWorkout(workout);
-      setActivePlanLink(planLink);
-      setRestoredActiveWorkout(false);
-      return { started: true, result: assessment.result };
-      } finally {
-        startingWorkout.current = false;
-      }
     },
     updateActiveWorkout(workout) {
       if (!activeWorkout) return {
@@ -198,14 +192,29 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
         reasons: ['No authorized workout is active.'],
       };
       const decision = assessActiveWorkoutMutation(activeWorkout, workout);
-      if (decision.allowed) setActiveWorkout(workout);
+      if (decision.allowed) {
+        activeWorkoutSnapshot.current = workout;
+        setActiveWorkout(workout);
+      }
       return decision;
     },
     clearActiveWorkout() {
+      const owner = latestAthleteId.current;
+      // Do not approve another start until the previous checkpoint has been
+      // durably removed. A failed delete must not be mistaken for clearance.
+      restoredForAthlete.current = null;
+      activeWorkoutSnapshot.current = null;
       setActiveWorkout(null);
       setActivePlanLink(null);
       setRestoredActiveWorkout(false);
-      if (user?.id) void clearLiveWorkoutSession(user.id).catch(() => undefined);
+      if (owner) {
+        void clearLiveWorkoutSession(owner).then(() => {
+          if (latestAthleteId.current === owner) restoredForAthlete.current = owner;
+        }).catch(() => {
+          // Keep starts disabled; reload will retry restoring the existing
+          // checkpoint rather than silently allowing a second session.
+        });
+      }
     },
   }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady, user?.id]);
 
