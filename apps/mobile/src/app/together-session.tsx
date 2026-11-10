@@ -62,6 +62,17 @@ export default function TogetherSessionScreen() {
   const lastVerifiedAt = useRef<number | null>(null);
 
   useEffect(() => {
+    // Reusing a shared-session screen for another account or room must never
+    // carry forward participation/identity from its previous occupant.
+    firstVerifiedAt.current = null;
+    lastVerifiedAt.current = null;
+    persisted.current = false;
+    completedAtRef.current = null;
+    setCompletionSaved(false);
+    setCompletionError(null);
+  }, [user?.id, room?.id]);
+
+  useEffect(() => {
     void (async () => {
       try {
         const next = await getWorkoutRoomByCode(code);
@@ -145,14 +156,14 @@ export default function TogetherSessionScreen() {
     if (!room?.startsAt || firstVerifiedAt.current === null) return 0;
     const beganAt = Date.parse(room.startsAt);
     if (!Number.isFinite(beganAt) || room.workout.estimatedElapsedSeconds <= 0) return 0;
-    const endAt = Math.min(
-      lastVerifiedAt.current ?? Date.now(), Date.now(),
-    );
+    const endAt = cloudLeaseStatus === 'verified'
+      ? Date.now()
+      : Math.min(lastVerifiedAt.current ?? Date.now(), Date.now());
     return Math.max(0, Math.min(1,
       (endAt - Math.max(beganAt, firstVerifiedAt.current)) /
       (room.workout.estimatedElapsedSeconds * 1000),
     ));
-  }, [room]);
+  }, [room, cloudLeaseStatus]);
 
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
@@ -196,7 +207,7 @@ export default function TogetherSessionScreen() {
     if (requiresCloudLease) {
       // Release only this athlete's room token after the private load record
       // has been committed. An offline release expires server-side.
-      await clearSharedWorkoutCloudLease(user.id, room.id);
+      await clearSharedWorkoutCloudLease(user.id, room.id).catch(() => undefined);
     }
     persisted.current = true;
     setCompletionSaved(true);
@@ -257,7 +268,14 @@ export default function TogetherSessionScreen() {
         </Pressable> : null}
       {completionError ? <Text style={styles.body}>{completionError}</Text> : null}
       <Pressable style={styles.secondary}
-        onPress={() => router.replace('/(tabs)/train' as Href)}>
+        onPress={() => {
+          if (user?.id && room?.id) {
+            void clearSharedWorkoutCloudLease(user.id, room.id)
+              .finally(() => router.replace('/(tabs)/train' as Href));
+          } else {
+            router.replace('/(tabs)/train' as Href);
+          }
+        }}>
         <Text style={styles.secondaryText}>Leave shared workout</Text>
       </Pressable>
     </View></SafeAreaView>;
