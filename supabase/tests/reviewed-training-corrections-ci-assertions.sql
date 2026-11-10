@@ -337,19 +337,21 @@ begin
     raise exception 'Superseded late stable report was wrongly accepted';
   exception when unique_violation then null;
   end;
-  if exists (select 1 from public.read_training_remote_snapshot(v_day) as snap,
-    lateral pg_catalog.jsonb_array_elements(snap->'recovery') x(value)
+  if exists (select 1 from pg_catalog.jsonb_array_elements(
+      (public.read_training_remote_snapshot(v_day))->'recovery') x(value)
     where x.value->>'region'='achilles' and x.value->>'status'='stable') then
     raise exception 'The late stable attempt cleared worse symptoms';
   end if;
-  select observed_at into v_first from public.training_remote_recovery
-    where athlete_id='00000000-0000-4000-8000-000000000006'
-      and event_id='new-worse' and region='achilles';
+  select (x.value->>'observedAt')::timestamptz into v_first
+    from pg_catalog.jsonb_array_elements(
+      (public.read_training_remote_snapshot(v_day))->'recovery') x(value)
+    where x.value->>'region'='achilles';
   perform public.publish_training_remote_recovery_restrictive(
     'new-worse',v_day,'{"achilles":"worse"}'::jsonb,'lost-stable');
-  if (select observed_at from public.training_remote_recovery
-    where athlete_id='00000000-0000-4000-8000-000000000006'
-      and event_id='new-worse' and region='achilles') <> v_first then
+  if (select (x.value->>'observedAt')::timestamptz
+    from pg_catalog.jsonb_array_elements(
+      (public.read_training_remote_snapshot(v_day))->'recovery') x(value)
+    where x.value->>'region'='achilles') <> v_first then
     raise exception 'Restrictive retry changed server observation timestamp';
   end if;
   begin
@@ -371,9 +373,10 @@ begin
     'arrived-stable',v_day,'{"upper_back":"stable"}'::jsonb);
   perform public.publish_training_remote_recovery_restrictive(
     'new-red-flag',v_day,'{"upper_back":"red_flag"}'::jsonb,'arrived-stable');
-  select status into v_latest from public.training_remote_recovery
-    where athlete_id='00000000-0000-4000-8000-000000000006'
-      and region='upper_back' order by observed_at desc,event_id desc limit 1;
+  select x.value->>'status' into v_latest
+    from pg_catalog.jsonb_array_elements(
+      (public.read_training_remote_snapshot(v_day))->'recovery') x(value)
+    where x.value->>'region'='upper_back';
   if v_latest <> 'red_flag' then
     raise exception 'Server observation order did not preserve latest red flag';
   end if;
