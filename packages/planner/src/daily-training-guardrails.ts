@@ -159,11 +159,11 @@ export function evaluateTrainingAddition(
     };
   }
   if (proposed.regions.some((region) => !planned.regions.includes(region))) {
-    return { decision: 'defer', reasons: ['Proposed activity loads regions not covered by its prescription.'], requiresReassessment: true };
+    return { decision: 'defer', reasons: ['Proposed activity loads regions not covered by its prescription.'], requiresReassessment: true, overrideAllowed: false };
   }
   if ((proposed.minutes !== undefined && planned.minutes === undefined) ||
       (proposed.sets !== undefined && planned.sets === undefined)) {
-    return { decision: 'modify', reasons: ['This dose dimension was not prescribed.'], requiresReassessment: true };
+    return { decision: 'modify', reasons: ['This dose dimension was not prescribed.'], requiresReassessment: true, overrideAllowed: false };
   }
   if (
     (proposed.minutes ?? 0) > (planned.minutes ?? 0) ||
