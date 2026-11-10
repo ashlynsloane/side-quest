@@ -47,9 +47,13 @@ permissions. On account erasure, foreign keys cascade the athlete's records.
 2. Verify current Supabase account identity against the expected athlete.
 3. Attempt to publish the athlete's immutable **today** prescription. A changed
    local plan cannot increase an existing server prescription.
-4. Strictly load and upload the device's recorded workouts and endurance
-   imports from the previous 48 hours using stable, idempotent event IDs.
-   An upload failure blocks a new cloud start.
+4. Strictly load and upload up to **89 days** of the device's recorded
+   workouts and endurance imports, using stable, paginated queries and
+   immutable event IDs. Upload in batches of at most 100 events within
+   atomic PostgreSQL transactions. A failed, conflicting, or partially
+   acknowledged batch blocks the next cloud start. This longer window
+   supports devices that were offline for weeks, but records older than
+   the server's 90-day acceptance limit need a separate archive policy.
 5. Call `acquire_training_workout_lease_v2`. In one database transaction it
    locks that athlete's authorization, verifies a matching session and
    remaining allowance, checks completed *and reserved* load, tests regional
@@ -62,8 +66,12 @@ permissions. On account erasure, foreign keys cascade the athlete's records.
    reporting cloud completion. Failed upload remains a visible retryable
    error; a later start will retry the same immutable event IDs.
 8. A new regional review is published to the server **before** local
-   clearance is updated. Reports must be new explicit check-ins; old
-   saved "stable" statuses are not bulk-imported as new evidence.
+   clearance is updated. A durable per-athlete write-ahead event preserves
+   the **same event ID** when a network acknowledgement or local save fails,
+   preventing a retry from getting a falsely later server timestamp. Only
+   after local persistence succeeds is that pending event acknowledged.
+   The server rejects changed regions/statuses under an existing event ID.
+   Old saved "stable" statuses are never imported as new observations.
 9. The daily-ceiling view reads server exposures, reservations and regional
    statuses. Reserved potential minutes and reported actual minutes are
    displayed separately, avoiding double-counting a completed reservation.
@@ -73,6 +81,15 @@ even if local policy allowed a documented exception.
 
 ## Failure modes and important limits
 
+- **Historical backfill:** a bounded 89-day window can still miss records
+  older than 89 days and cannot resolve corrected/deleted historical events.
+  More than 5,000 local records in one category is a fail-closed review condition,
+  not a silent truncation. An explicit correction and archive workflow is
+  required before production enablement.
+- **Pending recovery review:** an interrupted recovery upload is held in
+  durable local storage and must be retried with the same region/status values
+  before a new distinct symptom report can be submitted. This avoids
+  rewriting older observations as newly observed timestamps.
 - **Disconnected other phone:** exposure performed fully offline on phone A
   cannot be visible to server or phone B until A reconnects and uploads.
   A server reservation protects an authorized Side Quest session, but it
@@ -110,7 +127,9 @@ denial, post-load recovery requirements, budget exhaustion, remote renewal
 interruption and reserved starts. A separate two-connection race verifies
 only one start wins and creates exactly one server reservation.
 The mobile Vitest suite checks upload ordering, a missing plan, offline
-sync denial, data validation, and remote recovery RPC calls.
+sync denial, data validation, 89-day backfill, pagination, bounded atomic
+batch acknowledgements, and stable retry IDs for regional recovery. PostgreSQL
+also checks batch rollback and immutable recovery event replay.
 
 **CI is not a substitute for Supabase staging or native multi-device tests.**
 
