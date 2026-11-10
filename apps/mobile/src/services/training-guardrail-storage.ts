@@ -47,7 +47,7 @@ export function loadTrainingEvents(userId: string, store: Store = storage()): Tr
 
 /** Idempotent append for retries; does not infer completion from a prescription. */
 export function recordTrainingEvent(userId: string, event: TrainingEvent, store: Store = storage()): TrainingEvent[] {
-  if (!event.id || !event.occurredAt || !['prescribed','completed','unplanned','override','recovery'].includes(event.kind)) {
+  if (!event.id || !event.occurredAt || !['prescribed','completed','unplanned','override','recovery','assessment'].includes(event.kind)) {
     throw new Error('Invalid training event');
   }
   const history = loadTrainingEvents(userId, store);
