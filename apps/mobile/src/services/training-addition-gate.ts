@@ -2,6 +2,7 @@ import {
   evaluateTrainingAddition,
   assessCrossSportExposure,
   affectedTrainingRegions,
+  reconcileDailyCeilingPlan,
   type ActivityDose,
   type DailyTrainingCeiling,
   type ProposedActivity,
@@ -42,24 +43,56 @@ function recoveryFor(checkIn: TrainingCheckIn | null): Partial<Record<TrainingRe
 }
 
 /** Establish the day's ceiling only from the saved training block, never from an ad hoc request. */
-async function ensurePrescribedCeiling(userId: string, date: string): Promise<DailyTrainingCeiling | null> {
-  const existing = await loadDailyCeiling(userId, date);
-  const checkIn = await getActiveTrainingCheckIn();
-  if (existing) return { ...existing, pauseTraining: checkIn?.status === 'unable_to_train' };
-  const saved = await getLatestTrainingBlock();
+export async function getEffectiveDailyCeiling(
+  userId: string, date: string,
+): Promise<DailyTrainingCeiling | null> {
+  const [existing, checkIn, saved] = await Promise.all([
+    loadDailyCeiling(userId, date),
+    getActiveTrainingCheckIn(),
+    getLatestTrainingBlock(),
+  ]);
+  // Keep completed sessions in the day's original budget. A completed session
+  // may not be restarted but its load must still count against the total.
   const sessions = saved?.block.weeks.flatMap((week) => week.sessions).filter(
-    (session) => session.date === date && session.completionStatus !== 'completed' && session.completionStatus !== 'skipped',
+    (session) => session.date === date && session.completionStatus !== 'skipped',
   ) ?? [];
-  if (!sessions.length) return null;
-  const planned: ActivityDose[] = sessions.map((session) => ({
+  const currentPlan: ActivityDose[] = sessions.map((session) => ({
     activity: 'strength',
     sessionId: session.id,
     minutes: Math.ceil(session.workout.estimatedElapsedSeconds / 60),
     regions: regionsForWorkout(session.workout),
   }));
-  const ceiling: DailyTrainingCeiling = { date, planned, recovery: recoveryFor(checkIn), restrictUnplanned: true, pauseTraining: checkIn?.status === 'unable_to_train' };
+  if (existing) {
+    const reconciled = reconcileDailyCeilingPlan(existing, currentPlan);
+    // A new active pain report invalidates prior general clearance without
+    // erasing the athlete's independent region-specific check-in history.
+    const invalidatesGeneral = checkIn?.status === 'tightness_pain'
+      || checkIn?.status === 'muscle_soreness';
+    return {
+      ...reconciled,
+      recovery: {
+        ...reconciled.recovery,
+        ...(invalidatesGeneral ? { general: 'uncertain' as const } : {}),
+      },
+      pauseTraining: checkIn?.status === 'unable_to_train',
+    };
+  }
+  const activeSessions = sessions.filter((session) =>
+    session.completionStatus !== 'completed',
+  );
+  if (!activeSessions.length) return null;
+  const ceiling: DailyTrainingCeiling = {
+    date,
+    planned: currentPlan,
+    recovery: recoveryFor(checkIn),
+    restrictUnplanned: true,
+    pauseTraining: checkIn?.status === 'unable_to_train',
+  };
   await saveDailyCeiling(userId, ceiling);
-  return loadDailyCeiling(userId, date);
+  // Another route may have saved the first ceiling while we were checking.
+  const stored = await loadDailyCeiling(userId, date);
+  if (!stored) return null;
+  return reconcileDailyCeilingPlan(stored, currentPlan);
 }
 
 /**
@@ -131,7 +164,7 @@ async function crossSportOverlapFor(
 export async function assessTrainingAddition(request: TrainingAdditionRequest): Promise<TrainingGuardrailResult> {
   await reconcileCompletedWorkoutHistory(request.userId, request.date);
   const [ceiling, history] = await Promise.all([
-    ensurePrescribedCeiling(request.userId, request.date),
+    getEffectiveDailyCeiling(request.userId, request.date),
     loadTrainingEvents(request.userId, request.date),
   ]);
   const activeCheckIn = ceiling ? null : await getActiveTrainingCheckIn();
