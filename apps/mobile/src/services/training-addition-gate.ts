@@ -134,7 +134,7 @@ export async function reconcileCompletedWorkoutHistory(userId: string, date: str
         activity: {
           activity: 'strength',
           sessionId: entry.plannedSessionId,
-          minutes: Math.max(1, Math.ceil(estimatedMinutes)),
+          minutes: estimatedMinutes > 0 ? Math.ceil(estimatedMinutes) : 0,
           regions: entry.workout ? regionsForWorkout(entry.workout) : ['general', 'achilles', 'upper_back'] as TrainingRegion[],
         },
       };
