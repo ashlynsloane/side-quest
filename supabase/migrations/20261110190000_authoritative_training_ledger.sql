@@ -352,7 +352,7 @@ create or replace function public.renew_training_workout_lease_v2(
 )
 returns table(renewed boolean, expires_at timestamptz, reason text)
 language plpgsql security definer set search_path = ''
-as $
+as $remote_renew$
 declare
   v_user uuid := auth.uid();
   v_held public.training_workout_leases%rowtype;
@@ -411,7 +411,7 @@ begin
     returning held.expires_at into v_new_expiry;
   return query select true,v_new_expiry,null::text;
 end;
-$;
+$remote_renew$;
 
 -- Older acquire RPC bypasses the synchronized ledger. Revoke it during this
 -- rollout: old clients must fail closed rather than authorize unsynced load.
