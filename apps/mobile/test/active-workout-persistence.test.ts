@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GeneratedWorkout } from '@circuit/domain';
 
 vi.mock('expo-sqlite/localStorage/install', () => ({}));
+vi.mock('../src/services/supabase', () => ({ supabase: null }));
 
 import {
   createInitialLiveWorkoutSession,
