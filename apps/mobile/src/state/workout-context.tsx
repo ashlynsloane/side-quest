@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -90,6 +91,7 @@ function resolvePlannedSessionForTrainingSpace(session: PlannedStrengthSession):
 
 export function WorkoutProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const startingWorkout = useRef(false);
   const [previewWorkout, setPreviewWorkoutState] = useState<GeneratedWorkout | null>(null);
   const [previewExplanation, setPreviewExplanation] = useState<WorkoutRecommendationExplanation | null>(null);
   const [plannedPreviewSource, setPlannedPreviewSource] = useState<PlannedPreviewSource | null>(null);
@@ -145,6 +147,14 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
     async beginWorkout(workout, options) {
+      if (startingWorkout.current) return {
+        started: false,
+        result: {
+          decision: 'defer' as const,
+          reasons: ['A workout-start assessment is already in progress.'],
+          requiresReassessment: true,
+        },
+      };
       if (!user?.id) return {
         started: false,
         result: {
@@ -153,6 +163,8 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
           requiresReassessment: true,
         },
       };
+      startingWorkout.current = true;
+      try {
       const planLink = buildPlanLink(plannedPreviewSource);
       const assessment = await assessWorkoutStart({
         userId: user.id,
@@ -167,6 +179,9 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setActivePlanLink(planLink);
       setRestoredActiveWorkout(false);
       return { started: true, result: assessment.result };
+      } finally {
+        startingWorkout.current = false;
+      }
     },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
