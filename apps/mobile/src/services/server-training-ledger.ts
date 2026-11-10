@@ -38,6 +38,14 @@ export interface RemoteTrainingSnapshot {
     regions: TrainingRegion[];
   }> | null;
   exposures: RemoteTrainingExposure[];
+  reservations: Array<{
+    sessionId: string;
+    workoutId: string;
+    minutes: number;
+    regions: TrainingRegion[];
+    acquiredAt: string;
+    trainingDate: string;
+  }>;
   recovery: RemoteTrainingRecovery[];
 }
 
@@ -225,7 +233,8 @@ export async function readRemoteTrainingSnapshot(
   }
   const snapshot = data as RemoteTrainingSnapshot;
   if (snapshot.trainingDate !== date || !Number.isFinite(Date.parse(snapshot.readAt))
-      || !Array.isArray(snapshot.exposures) || !Array.isArray(snapshot.recovery)
+      || !Array.isArray(snapshot.exposures) || !Array.isArray(snapshot.reservations)
+      || !Array.isArray(snapshot.recovery)
       || !(snapshot.plan === null || Array.isArray(snapshot.plan))) {
     throw new Error('The synchronized training snapshot has invalid fields.');
   }
