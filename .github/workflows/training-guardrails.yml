@@ -25,3 +25,5 @@ jobs:
         run: pnpm --dir apps/mobile typecheck
       - name: Planner test suite
         run: pnpm --dir packages/planner test
+      - name: Mobile authorization service integration tests
+        run: pnpm exec vitest run apps/mobile/test/training-addition-gate.test.ts
