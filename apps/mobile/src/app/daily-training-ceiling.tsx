@@ -76,7 +76,7 @@ export default function DailyTrainingCeilingScreen() {
     let live = true;
     setRemote(null);
     setRemoteError(null);
-    void readRemoteTrainingSnapshot(date).then((snapshot) => {
+    void readRemoteTrainingSnapshot(user.id, date).then((snapshot) => {
       if (live) setRemote(snapshot);
     }).catch((error) => {
       if (live) setRemoteError(error instanceof Error ? error.message : String(error));
