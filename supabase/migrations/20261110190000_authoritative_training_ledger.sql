@@ -195,6 +195,7 @@ declare
   v_status text;
   v_observed timestamptz := pg_catalog.clock_timestamp();
   v_existing text;
+  v_previous jsonb;
 begin
   if v_user is null then raise exception 'Authentication required' using errcode='42501'; end if;
   if length(coalesce(p_event_id,'')) not between 1 and 128
@@ -204,6 +205,18 @@ begin
     raise exception 'Invalid regional recovery observation' using errcode='22023';
   end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_user::text, 91829));
+  -- A retry is exactly the same observation: it cannot append an extra
+  -- region with a newer timestamp under an older event ID.
+  select pg_catalog.jsonb_object_agg(region,status) into v_previous
+    from public.training_remote_recovery
+    where athlete_id=v_user and event_id=p_event_id;
+  if v_previous is not null then
+    if v_previous is distinct from p_observations then
+      raise exception 'Recovery event ID reused with different regions or symptoms'
+        using errcode='23505';
+    end if;
+    return true;
+  end if;
   for v_region,v_status in select key,value from pg_catalog.jsonb_each_text(p_observations) loop
     if v_region not in ('general','achilles','upper_back')
        or v_status not in ('stable','uncertain','worse','red_flag') then
