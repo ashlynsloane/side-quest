@@ -1,6 +1,7 @@
 import type { GeneratedWorkout } from '@circuit/domain';
 import type { TrainingGuardrailResult } from '@circuit/planner';
 import type { ActiveWorkoutPlanLink, LiveWorkoutSessionSnapshot } from './active-workout-persistence';
+import type { CloudWorkoutLease } from './cloud-workout-coordination';
 
 export interface GuardedStartOutcome {
   started: boolean;
@@ -20,9 +21,13 @@ export interface GuardedStartDependencies {
   createSnapshot(
     workout: GeneratedWorkout,
     planLink: ActiveWorkoutPlanLink | null,
+    remoteLease?: CloudWorkoutLease,
   ): LiveWorkoutSessionSnapshot;
   persist(snapshot: LiveWorkoutSessionSnapshot, athleteId: string): Promise<void>;
   discardPersisted(athleteId: string): Promise<void>;
+  /** Enabled only for authenticated accounts after the server migration. */
+  acquireRemoteLease?: (workoutId: string) => Promise<CloudWorkoutLease>;
+  releaseRemoteLease?: (lease: CloudWorkoutLease) => Promise<void>;
   onStarted(
     workout: GeneratedWorkout,
     planLink: ActiveWorkoutPlanLink | null,
@@ -90,16 +95,44 @@ export function createGuardedWorkoutStartGate() {
           return defer('The athlete profile or active session changed during authorization.');
         }
 
-        const checkpoint = deps.createSnapshot(workout, planLink);
-        await deps.persist(checkpoint, owner);
-        if (!validOwner()) {
-          // A profile change while persistence is in flight cannot activate
-          // the stale athlete's checkpoint in the new athlete's UI.
-          await deps.discardPersisted(owner);
-          return defer('The athlete profile changed while saving the workout.');
+        // Local authorization alone does not protect against another device.
+        // Cloud accounts can demand a server-issued, athlete-scoped lease.
+        let remoteLease: CloudWorkoutLease | undefined;
+        let attemptedCheckpointWrite = false;
+        let activated = false;
+        try {
+          if (deps.acquireRemoteLease) {
+            if (!deps.releaseRemoteLease) {
+              throw new Error('Remote workout lease requires a release handler.');
+            }
+            remoteLease = await deps.acquireRemoteLease(workout.id);
+          }
+          if (!validOwner()) {
+            return defer('The athlete profile changed while acquiring the workout lock.');
+          }
+          const checkpoint = deps.createSnapshot(workout, planLink, remoteLease);
+          attemptedCheckpointWrite = true;
+          await deps.persist(checkpoint, owner);
+          if (!validOwner()) {
+            return defer('The athlete profile changed while saving the workout.');
+          }
+          deps.onStarted(workout, planLink);
+          activated = true;
+          return { started: true, result: assessment.result };
+        } finally {
+          if (!activated) {
+            // A partially succeeded local write must be removed even if its
+            // Promise rejected. The server token is separately released. A
+            // remote release failure still has a short expiry and cannot be
+            // converted into an unauthorized start.
+            if (attemptedCheckpointWrite) {
+              await deps.discardPersisted(owner).catch(() => undefined);
+            }
+            if (remoteLease) {
+              await deps.releaseRemoteLease?.(remoteLease).catch(() => undefined);
+            }
+          }
         }
-        deps.onStarted(workout, planLink);
-        return { started: true, result: assessment.result };
       } finally {
         starting = false;
       }
