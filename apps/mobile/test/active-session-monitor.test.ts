@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActiveSessionMonitor } from '../src/services/active-session-monitor';
+import type { ActiveSessionRecoveryDecision } from '@circuit/planner';
 
-const ok = { pause: false, reasons: [], affectedRegions: [] };
-const bad = { pause: true, reasons: ['Achilles worsening'], affectedRegions: [] };
+const ok: ActiveSessionRecoveryDecision = { pause: false, reasons: [], affectedRegions: [] };
+const bad: ActiveSessionRecoveryDecision = { pause: true, reasons: ['Achilles worsening'], affectedRegions: [] };
 let foreground!: () => void;
 let unsubscribe: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -12,14 +13,14 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-function create(read: () => Promise<typeof ok>) {
+function create(read: () => Promise<ActiveSessionRecoveryDecision>) {
   const onPause = vi.fn();
   const monitor = createActiveSessionMonitor({
     read,
     onPause,
     subscribeForeground: (handler) => {
       foreground = handler;
-      return unsubscribe;
+      return () => { unsubscribe(); };
     },
     intervalMs: 1000,
   });
@@ -67,8 +68,8 @@ describe('live workout interruption monitor', () => {
     expect(onPause.mock.calls[0]?.[0][0]).toContain('could not be verified');
   });
   it('coalesces overlapping foreground and interval checks', async () => {
-    let finish!: (value: typeof ok) => void;
-    const read = vi.fn(() => new Promise<typeof ok>((resolve) => { finish = resolve; }));
+    let finish!: (value: ActiveSessionRecoveryDecision) => void;
+    const read = vi.fn(() => new Promise<ActiveSessionRecoveryDecision>((resolve) => { finish = resolve; }));
     const { monitor } = create(read);
     const stop = monitor.start();
     foreground();
