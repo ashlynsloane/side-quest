@@ -199,6 +199,20 @@ describe('native synthetic UI automation contract', () => {
     }
   });
 
+  it('keeps first-week retries scoped to the verified athlete and render attempt', () => {
+    const screen = source('apps/mobile/src/app/onboarding-first-week.tsx');
+    const db = source('apps/mobile/src/services/database.ts');
+    expect(screen).toContain("buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }, athleteId)");
+    expect(screen).toContain("await withVerifiedAthleteDatabase(athleteId, async () => {");
+    expect(screen).toContain("const evidence = await withVerifiedAthleteDatabase(athleteId, async () => {");
+    expect(screen).toContain('resultAttemptKey !== expectedAttemptKey');
+    expect(screen).toContain('currentAttempt.current === attemptNumber');
+    expect(screen).toContain('setRetryAttempt((current) => current + 1)');
+    expect(screen).toContain('testID="sidequest-qa-retry-first-week"');
+    expect(db).toContain('export async function withVerifiedAthleteDatabase<T>');
+    expect(db).toContain('runWithDatabaseActivationLock');
+  });
+
   it('runs exactly one synthetic athlete from onboarding through restart', () => {
     const wrapperPairs: Array<[string, string, string]> = [
       ['synthetic-onboarding-first-week.yaml', 'synthetic-profile-entry.yaml', 'synthetic-onboarding-steps.yaml'],
