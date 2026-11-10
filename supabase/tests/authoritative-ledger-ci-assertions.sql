@@ -163,8 +163,10 @@ begin
     pg_catalog.jsonb_build_array(v_first,v_second)) <> 2 then
     raise exception 'Exact batch retry should be idempotent';
   end if;
-  select count(*) into v_count from public.training_remote_exposures
-    where athlete_id=auth.uid() and event_id in ('batch-1','batch-2');
+  select count(*) into v_count from pg_catalog.jsonb_array_elements(
+      (public.read_training_remote_snapshot(v_date))->'exposures'
+    ) as item(value)
+    where item.value->>'eventId' in ('batch-1','batch-2');
   if v_count <> 2 then raise exception 'Batch retry duplicated activity'; end if;
 
   v_conflict := pg_catalog.jsonb_set(v_first,'{minutes}','99'::jsonb);
@@ -178,8 +180,10 @@ begin
     v_failed := true;
   end;
   if not v_failed then raise exception 'Conflicting historical revision was accepted'; end if;
-  if exists(select 1 from public.training_remote_exposures
-            where athlete_id=auth.uid() and event_id='batch-should-rollback') then
+  if exists(select 1 from pg_catalog.jsonb_array_elements(
+      (public.read_training_remote_snapshot(v_date))->'exposures'
+    ) as item(value)
+    where item.value->>'eventId'='batch-should-rollback') then
     raise exception 'Earlier batch item survived a later conflict';
   end if;
 end
