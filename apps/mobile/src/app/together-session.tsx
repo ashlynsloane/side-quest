@@ -2,11 +2,23 @@ import type { Exercise, GeneratedWorkout, WorkoutStation } from '@circuit/domain
 import { useKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
 import { saveCompletedWorkout } from '@/services/database';
 import { recordActualWorkoutCompletion } from '@/services/training-addition-gate';
+import {
+  acquireCloudWorkoutLease,
+  cloudWorkoutLeasesEnabled,
+  createCloudWorkoutLeaseMonitor,
+  releaseCloudWorkoutLease,
+  renewCloudWorkoutLease,
+} from '@/services/cloud-workout-coordination';
+import {
+  clearSharedWorkoutCloudLease,
+  loadSharedWorkoutCloudLease,
+  storeSharedWorkoutCloudLease,
+} from '@/services/shared-workout-cloud-lease';
 import {
   finishWorkoutRoom,
   getWorkoutRoomByCode,
@@ -43,6 +55,11 @@ export default function TogetherSessionScreen() {
   const completedAtRef = useRef<string | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
   const [completionSaved, setCompletionSaved] = useState(false);
+  const requiresCloudLease = user?.mode === 'cloud' && cloudWorkoutLeasesEnabled();
+  const [cloudLeaseStatus, setCloudLeaseStatus] =
+    useState<'checking' | 'verified' | 'lost'>('checking');
+  const firstVerifiedAt = useRef<number | null>(null);
+  const lastVerifiedAt = useRef<number | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -59,8 +76,84 @@ export default function TogetherSessionScreen() {
     })();
   }, [code, user?.id]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(timer); }, []);
+  useEffect(() => {
+    if (!requiresCloudLease) {
+      setCloudLeaseStatus('verified');
+      return;
+    }
+    setCloudLeaseStatus('checking');
+    if (!room || !user?.id || completionSaved) return;
+    let live = true;
+    let stopMonitor: (() => void) | undefined;
+    const owner = user.id;
+    const roomId = room.id;
+    const lose = () => {
+      if (!live) return;
+      lastVerifiedAt.current = Date.now();
+      setCloudLeaseStatus('lost');
+    };
+    void (async () => {
+      let lease = loadSharedWorkoutCloudLease(owner, roomId);
+      if (!lease) {
+        // Room readiness was previously evaluated against this athlete's
+        // ceiling. The shared-workout screen acquires a separate cloud lease
+        // before any exercise can be recorded or shown as authorized.
+        lease = await acquireCloudWorkoutLease(room.workout.id);
+        if (!live) {
+          await releaseCloudWorkoutLease(lease).catch(() => undefined);
+          return;
+        }
+        try {
+          storeSharedWorkoutCloudLease(owner, roomId, lease);
+        } catch (cause) {
+          await releaseCloudWorkoutLease(lease).catch(() => undefined);
+          throw cause;
+        }
+      }
+      if (!live) return;
+      const monitor = createCloudWorkoutLeaseMonitor({
+        initialLease: lease,
+        renew: renewCloudWorkoutLease,
+        persist: async (renewed) => {
+          storeSharedWorkoutCloudLease(owner, roomId, renewed);
+        },
+        onVerified: () => {
+          if (!live) return;
+          if (firstVerifiedAt.current === null) firstVerifiedAt.current = Date.now();
+          lastVerifiedAt.current = Date.now();
+          setCloudLeaseStatus('verified');
+        },
+        onLost: lose,
+        subscribeForeground: (check) => {
+          const subscription = AppState.addEventListener('change', (status) => {
+            if (status === 'active') check();
+          });
+          return () => subscription.remove();
+        },
+      });
+      stopMonitor = monitor.start();
+    })().catch(lose);
+    return () => {
+      live = false;
+      stopMonitor?.();
+    };
+  }, [requiresCloudLease, room?.id, room?.workout.id, user?.id, completionSaved]);
+
 
   const state = useMemo(() => room?.startsAt ? timeline(room.workout, room.startsAt, now) : null, [room, now]);
+  const cloudAuthorizedFraction = useCallback((): number => {
+    if (!room?.startsAt || firstVerifiedAt.current === null) return 0;
+    const beganAt = Date.parse(room.startsAt);
+    if (!Number.isFinite(beganAt) || room.workout.estimatedElapsedSeconds <= 0) return 0;
+    const endAt = Math.min(
+      lastVerifiedAt.current ?? Date.now(), Date.now(),
+    );
+    return Math.max(0, Math.min(1,
+      (endAt - Math.max(beganAt, firstVerifiedAt.current)) /
+      (room.workout.estimatedElapsedSeconds * 1000),
+    ));
+  }, [room]);
+
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
   const persist = useCallback(async (fraction: number) => {
@@ -100,6 +193,11 @@ export default function TogetherSessionScreen() {
       completionFraction: fraction,
       ledgerId: `workout_together:${room.id}:${user.id}`,
     });
+    if (requiresCloudLease) {
+      // Release only this athlete's room token after the private load record
+      // has been committed. An offline release expires server-side.
+      await clearSharedWorkoutCloudLease(user.id, room.id);
+    }
     persisted.current = true;
     setCompletionSaved(true);
     setCompletionError(null);
@@ -114,9 +212,15 @@ export default function TogetherSessionScreen() {
     } finally {
       persisting.current = false;
     }
-  }, [room, user, member, rounds]);
+  }, [room, user, member, rounds, requiresCloudLease]);
 
-  useEffect(() => { if (state?.kind === 'complete') void persist(1); }, [state?.kind, persist]);
+  useEffect(() => {
+    if (state?.kind !== 'complete') return;
+    // The shared clock is global; it is not evidence this device's athlete
+    // participated while the lease was absent or denied.
+    if (requiresCloudLease && firstVerifiedAt.current === null) return;
+    void persist(requiresCloudLease ? cloudAuthorizedFraction() : 1);
+  }, [state?.kind, persist, requiresCloudLease, cloudAuthorizedFraction]);
 
   function changeRounds(delta: number) {
     if (!station) return;
@@ -124,7 +228,9 @@ export default function TogetherSessionScreen() {
   }
   function leaveEarly() {
     if (!room || !state) { router.replace('/(tabs)/train' as Href); return; }
-    const fraction = Math.max(0, Math.min(1, state.elapsed / room.workout.estimatedElapsedSeconds));
+    const fraction = requiresCloudLease
+      ? cloudAuthorizedFraction()
+      : Math.max(0, Math.min(1, state.elapsed / room.workout.estimatedElapsedSeconds));
     Alert.alert('Leave your shared workout?', 'This will not pause the other phones. Your completed portion can still be saved.', [
       { text: 'Stay', style: 'cancel' },
       { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => { await persist(fraction); if (persisted.current) router.replace('/(tabs)/train' as Href); })() },
@@ -132,6 +238,30 @@ export default function TogetherSessionScreen() {
   }
 
   if (error || !room || !state) return <SafeAreaView style={styles.safe}><View style={styles.center}><Text style={styles.title}>{error ? 'Could not open shared workout' : 'Synchronizing room…'}</Text>{error ? <Text style={styles.body}>{error}</Text> : null}<Pressable onPress={() => router.replace('/workout-together' as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Return</Text></Pressable></View></SafeAreaView>;
+
+  if (requiresCloudLease && cloudLeaseStatus !== 'verified' && state.kind !== 'complete') {
+    return <SafeAreaView style={styles.safe}><View style={styles.center}>
+      <Text style={styles.eyebrow}>SHARED WORKOUT SAFETY LOCK</Text>
+      <Text style={styles.title}>{cloudLeaseStatus === 'checking'
+        ? 'Verifying your device'
+        : 'Shared training is paused'}</Text>
+      <Text style={styles.body}>{cloudLeaseStatus === 'checking'
+        ? 'The shared clock may be running, but this athlete cannot begin until the cloud lock is verified.'
+        : 'A workout is active on another device, or this device lost its server lease. Do not continue from this phone.'}</Text>
+      {cloudLeaseStatus === 'lost' && firstVerifiedAt.current !== null ?
+        <Pressable style={styles.primary} onPress={() => void (async () => {
+          await persist(cloudAuthorizedFraction());
+          if (persisted.current) router.replace('/(tabs)/train' as Href);
+        })()}>
+          <Text style={styles.primaryText}>Save previously completed portion</Text>
+        </Pressable> : null}
+      {completionError ? <Text style={styles.body}>{completionError}</Text> : null}
+      <Pressable style={styles.secondary}
+        onPress={() => router.replace('/(tabs)/train' as Href)}>
+        <Text style={styles.secondaryText}>Leave shared workout</Text>
+      </Pressable>
+    </View></SafeAreaView>;
+  }
 
   if (state.kind === 'countdown') return <SafeAreaView style={styles.safe}><View style={styles.countdown}><Text style={styles.eyebrow}>EVERY PHONE STARTS TOGETHER</Text><Text style={styles.countNumber}>{state.remaining}</Text><Text style={styles.countTitle}>{room.workoutName}</Text><Text style={styles.body}>Get to your first station. The shared clock begins automatically.</Text></View></SafeAreaView>;
 
