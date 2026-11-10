@@ -17,6 +17,8 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Staging deployment must be explicit and production-safe
+        run: bash scripts/test-staging-training-ledger.sh
       - name: Guardrail integration contract
         run: node scripts/audit-training-guardrail-integration.mjs
       - name: Planner typecheck
