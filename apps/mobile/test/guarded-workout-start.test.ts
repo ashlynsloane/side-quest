@@ -126,4 +126,72 @@ describe('actual workout-provider start boundary', () => {
       userId: 'A', sessionId: 'session-42', overrideReason: 'reviewed',
     }));
   });
+  it('requires the server-issued lease to be acquired before saving a cloud checkpoint', async () => {
+    const lease = {
+      leaseId: '00000000-0000-4000-8000-000000000001',
+      deviceId: 'device-A',
+      expiresAt: new Date(Date.now() + 90_000).toISOString(),
+    };
+    deps.acquireRemoteLease = vi.fn(async () => {
+      audit.push('cloud:acquire');
+      return lease;
+    });
+    deps.releaseRemoteLease = vi.fn(async () => { audit.push('cloud:release'); });
+    deps.createSnapshot = vi.fn((_workout, _source, token) => {
+      expect(token).toEqual(lease);
+      return { workout, cloudLease: token } as never;
+    });
+    const result = await gate.begin(workout, null, undefined, deps);
+    expect(result.started).toBe(true);
+    expect(audit).toEqual(['assess:A', 'cloud:acquire', 'persist:A', 'active']);
+    expect(deps.releaseRemoteLease).not.toHaveBeenCalled();
+  });
+
+  it('never commits a workout when another device holds the cloud lease', async () => {
+    deps.acquireRemoteLease = vi.fn(async () => {
+      throw new Error('Another device has an active workout');
+    });
+    deps.releaseRemoteLease = vi.fn(async () => undefined);
+    await expect(gate.begin(workout, null, undefined, deps))
+      .rejects.toThrow('Another device');
+    expect(deps.persist).not.toHaveBeenCalled();
+    expect(deps.onStarted).not.toHaveBeenCalled();
+  });
+
+  it('releases the cloud lease if local checkpoint storage fails', async () => {
+    const lease = {
+      leaseId: '00000000-0000-4000-8000-000000000001',
+      deviceId: 'device-A',
+      expiresAt: new Date(Date.now() + 90_000).toISOString(),
+    };
+    deps.acquireRemoteLease = vi.fn(async () => lease);
+    deps.releaseRemoteLease = vi.fn(async () => { audit.push('cloud:release'); });
+    deps.persist = vi.fn(async () => { throw new Error('checkpoint disk full'); });
+    await expect(gate.begin(workout, null, undefined, deps)).rejects.toThrow('checkpoint disk full');
+    expect(deps.releaseRemoteLease).toHaveBeenCalledWith(lease);
+    expect(deps.discardPersisted).toHaveBeenCalledWith('A');
+    expect(deps.onStarted).not.toHaveBeenCalled();
+  });
+
+  it('cleans up an acquired lease after an in-flight account switch', async () => {
+    const wait = pending();
+    deps.acquireRemoteLease = vi.fn(async () => {
+      await wait.promise;
+      return {
+        leaseId: '00000000-0000-4000-8000-000000000001',
+        deviceId: 'device-A',
+        expiresAt: new Date(Date.now() + 90_000).toISOString(),
+      };
+    });
+    deps.releaseRemoteLease = vi.fn(async () => { audit.push('cloud:release'); });
+    const first = gate.begin(workout, null, undefined, deps);
+    await Promise.resolve();
+    athlete = 'B';
+    hydratedFor = 'B';
+    wait.done();
+    expect((await first).started).toBe(false);
+    expect(deps.releaseRemoteLease).toHaveBeenCalledOnce();
+    expect(deps.persist).not.toHaveBeenCalled();
+  });
+
 });
