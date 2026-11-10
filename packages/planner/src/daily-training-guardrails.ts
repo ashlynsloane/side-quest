@@ -152,9 +152,7 @@ export function evaluateTrainingAddition(
   }
   const planned = matchingPlan;
   if (!proposed.scheduled || !planned) {
-    const alreadyLoadedToday = performedToday.some((event) =>
-      (event.activity?.minutes ?? 0) > 0 || (event.activity?.sets ?? 0) > 0
-    );
+    const alreadyLoadedToday = hasRecordedTrainingLoadOnDate(history, ceiling.date);
     return {
       decision: ceiling.restrictUnplanned ? 'defer' : 'modify',
       reasons: [alreadyLoadedToday && ceiling.restrictUnplanned
@@ -216,6 +214,23 @@ export function evaluateTrainingAddition(
     return { decision: 'modify', reasons: ["Previously completed training uses part of today's budget. Reduce the proposed dose."], requiresReassessment: false, overrideAllowed: false };
   }
   return { decision: 'allow', reasons: ['Within the remaining planned dose and reported recovery constraints.'], requiresReassessment: false };
+}
+
+/**
+ * Shared definition of performed loading for callers with and without a
+ * daily prescription. Retracted events cannot reactivate a spent budget.
+ */
+export function hasRecordedTrainingLoadOnDate(
+  history: readonly TrainingEvent[], date: string,
+): boolean {
+  const retracted = new Set(history.filter((event) => event.kind === 'retracted')
+    .map((event) => event.retractsEventId));
+  return history.some((event) =>
+    (event.kind === 'completed' || event.kind === 'unplanned')
+    && !retracted.has(event.id)
+    && (event.trainingDate ?? event.occurredAt.slice(0, 10)) === date
+    && ((event.activity?.minutes ?? 0) > 0 || (event.activity?.sets ?? 0) > 0)
+  );
 }
 
 /** Append-only facts; prescriptions are never automatically logged as completed. */
