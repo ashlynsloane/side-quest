@@ -2993,3 +2993,58 @@ export async function listStoredTrainingGuardrailEvents(
     catch { return []; }
   });
 }
+
+
+/**
+ * Atomically patch only explicitly assessed regions without overwriting
+ * the current plan, pause flag, or other athletes' readiness data.
+ */
+export async function saveObservedTrainingRecovery(
+  athleteId: string,
+  trainingDate: string,
+  updates: Partial<Record<import('@circuit/planner').TrainingRegion, import('@circuit/planner').RecoveryStatus>>,
+): Promise<void> {
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) {
+    throw new Error('Invalid athlete or training date');
+  }
+  const regions = ['general', 'achilles', 'upper_back'] as const;
+  const statuses = ['stable', 'uncertain', 'worse', 'red_flag'] as const;
+  const touched = regions.filter((region) => updates[region] !== undefined);
+  if (!touched.length || touched.some((region) => !statuses.includes(updates[region]!))) {
+    throw new Error('Specify a valid recovery status for at least one region');
+  }
+  await initializeDatabase();
+  await db.withExclusiveTransactionAsync(async (transaction) => {
+    const row = await transaction.getFirstAsync<{ ceiling_json: string }>(
+      'SELECT ceiling_json FROM daily_training_ceilings WHERE athlete_id = ? AND training_date = ?',
+      athleteId, trainingDate,
+    );
+    if (!row) throw new Error('Daily prescription is missing; update your plan before reporting recovery');
+    const existing = JSON.parse(row.ceiling_json) as import('@circuit/planner').DailyTrainingCeiling;
+    if (existing.date !== trainingDate) throw new Error('Stored training date mismatch');
+    const now = new Date().toISOString();
+    const next: import('@circuit/planner').DailyTrainingCeiling = {
+      ...existing,
+      recovery: { ...existing.recovery, ...updates },
+      recoveryObservedAt: {
+        ...existing.recoveryObservedAt,
+        ...Object.fromEntries(touched.map((region) => [region, now])),
+      },
+    };
+    await transaction.runAsync(
+      'UPDATE daily_training_ceilings SET ceiling_json = ?, updated_at = ? WHERE athlete_id = ? AND training_date = ?',
+      JSON.stringify(next), now, athleteId, trainingDate,
+    );
+    const eventId = `recovery:${trainingDate}:${now}:${Math.random().toString(36).slice(2)}`;
+    await transaction.runAsync(
+      `INSERT INTO training_guardrail_events
+       (athlete_id, id, training_date, kind, occurred_at, event_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      athleteId, eventId, trainingDate, 'recovery', now,
+      JSON.stringify({
+        id: eventId, kind: 'recovery', occurredAt: now,
+        trainingDate, note: JSON.stringify({ observed: Object.fromEntries(touched.map((region) => [region, updates[region]])) }),
+      }),
+    );
+  });
+}
