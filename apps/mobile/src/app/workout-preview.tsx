@@ -251,7 +251,7 @@ export default function WorkoutPreviewScreen() {
             <Text style={{ color: tokens.text, fontSize: 14, lineHeight: 22 }}>
               {guardrailDecision?.reasons.join(' ')}
             </Text>
-            {guardrailDecision?.decision !== 'stop' ? <>
+            {guardrailDecision?.decision !== 'stop' && guardrailDecision?.overrideAllowed !== false ? <>
               <Text style={{ color: tokens.textMuted, fontSize: 13 }}>
                 You can request an exception, but it will be recorded. Feeling energetic alone is not evidence that additional load will be well tolerated.
               </Text>
@@ -270,7 +270,9 @@ export default function WorkoutPreviewScreen() {
                 style={{ padding: 13, borderRadius: 10, backgroundColor: tokens.accent, opacity: overrideReason.trim().length < 12 || startBusy ? 0.4 : 1 }}>
                 <Text style={{ textAlign: 'center', color: tokens.canvas, fontWeight: '800' }}>Log exception and start</Text>
               </Pressable>
-            </> : null}
+            </> : <Text style={{ color: tokens.textMuted, fontSize: 13 }}>
+              This limit requires a fresh recovery check or an updated prescription before this session can begin.
+            </Text>}
             <Pressable accessibilityRole="button"
               onPress={() => { setGuardrailDecision(null); router.push('/daily-training-ceiling' as Href); }}
               style={{ padding: 12, borderWidth: 1, borderColor: tokens.border, borderRadius: 10 }}>
