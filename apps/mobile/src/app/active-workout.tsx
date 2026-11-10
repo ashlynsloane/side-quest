@@ -52,10 +52,16 @@ import {
   clearLiveWorkoutSession,
   loadLiveWorkoutSession,
   saveLiveWorkoutSession,
+  updateLiveWorkoutCloudLease,
   type LiveWorkoutLoadValue as LoadValue,
   type LiveWorkoutRestEntry as RestEntry,
 } from '@/services/active-workout-persistence';
 import { createActiveSessionMonitor } from '@/services/active-session-monitor';
+import {
+  cloudWorkoutLeasesEnabled,
+  createCloudWorkoutLeaseMonitor,
+  renewCloudWorkoutLease,
+} from '@/services/cloud-workout-coordination';
 import { publishWorkoutActivity } from '@/services/social';
 import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
 import { loadDailyCeiling, recordTrainingEvent } from '@/services/training-guardrail-storage';
@@ -119,6 +125,9 @@ export default function ActiveWorkoutScreen() {
   const startedAt = useRef(new Date().toISOString());
   const lastAuthorizedCheckpointAt = useRef(startedAt.current);
   const [authorizationExpired, setAuthorizationExpired] = useState(false);
+  const requiresCloudLease = user?.mode === 'cloud' && cloudWorkoutLeasesEnabled();
+  const [cloudLeaseStatus, setCloudLeaseStatus] =
+    useState<'checking' | 'verified' | 'lost'>('checking');
   const [requiresRecoveryReview, setRequiresRecoveryReview] = useState(false);
   const completedAt = useRef<string | null>(null);
   const savedCompletion = useRef(false);
@@ -147,7 +156,7 @@ export default function ActiveWorkoutScreen() {
           Math.max(0, snapshot.remainingSeconds),
           snapshot.phase === 'work' ? (safeStation?.durationSeconds ?? snapshot.remainingSeconds) : Math.max(15, workout.request.restSeconds),
         ));
-        setRunning(restoredActiveWorkout ? false : snapshot.running);
+        setRunning(requiresCloudLease ? false : restoredActiveWorkout ? false : snapshot.running);
         setStationRounds(snapshot.stationRounds);
         setExerciseLoads(snapshot.exerciseLoads);
         setExerciseSets(snapshot.exerciseSets);
@@ -180,7 +189,7 @@ export default function ActiveWorkoutScreen() {
       if (live) setSessionHydrated(true);
     });
     return () => { live = false; };
-  }, [restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
+  }, [requiresCloudLease, restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
 
   useEffect(() => {
     if (!workout || !sessionHydrated || phase === 'complete') return;
@@ -225,6 +234,51 @@ export default function ActiveWorkoutScreen() {
     });
     return monitor.start();
   }, [workout, sessionHydrated, phase, user?.id]);
+
+  // A resumed cloud workout must renew the original server lease before the
+  // timer or activity controls are re-enabled. Losing it cannot be overridden
+  // by an old local checkpoint or a previously approved recovery check-in.
+  useEffect(() => {
+    if (!requiresCloudLease) {
+      setCloudLeaseStatus('verified');
+      return;
+    }
+    setCloudLeaseStatus('checking');
+    setRunning(false);
+    if (!sessionHydrated || !workout || !user?.id || phase === 'complete') return;
+    let live = true;
+    let stop: (() => void) | undefined;
+    const owner = user.id;
+    const lose = () => {
+      if (!live) return;
+      setCloudLeaseStatus('lost');
+      setRunning(false);
+    };
+    void loadLiveWorkoutSession(owner).then((snapshot) => {
+      if (!live) return;
+      if (!snapshot || snapshot.workout.id !== workout.id || !snapshot.cloudLease) {
+        lose();
+        return;
+      }
+      const monitor = createCloudWorkoutLeaseMonitor({
+        initialLease: snapshot.cloudLease,
+        renew: renewCloudWorkoutLease,
+        persist: (lease) => updateLiveWorkoutCloudLease(owner, workout.id, lease),
+        onVerified: () => {
+          if (live) setCloudLeaseStatus('verified');
+        },
+        onLost: lose,
+        subscribeForeground: (check) => {
+          const subscription = AppState.addEventListener('change', (status) => {
+            if (status === 'active') check();
+          });
+          return () => subscription.remove();
+        },
+      });
+      stop = monitor.start();
+    }).catch(lose);
+    return () => { live = false; stop?.(); };
+  }, [requiresCloudLease, sessionHydrated, workout?.id, user?.id, phase]);
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -322,10 +376,12 @@ export default function ActiveWorkoutScreen() {
   }, [resumeNotice]);
 
   useEffect(() => {
-    if (!workout || !sessionHydrated || authorizationExpired || requiresRecoveryReview || !running || phase === 'complete') return;
+    if (!workout || !sessionHydrated || authorizationExpired || requiresRecoveryReview
+        || (requiresCloudLease && cloudLeaseStatus !== 'verified')
+        || !running || phase === 'complete') return;
     const timer = setInterval(() => setRemainingSeconds((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
-  }, [authorizationExpired, requiresRecoveryReview, phase, running, sessionHydrated, workout]);
+  }, [authorizationExpired, cloudLeaseStatus, requiresCloudLease, requiresRecoveryReview, phase, running, sessionHydrated, workout]);
 
   useEffect(() => {
     if (!workout || phase === 'complete') return;
@@ -587,6 +643,36 @@ export default function ActiveWorkoutScreen() {
       if (reason === 'dislike') await saveExercisePreference({ exerciseId: swapTarget.exercise.id, preference: 'disliked', familiarity: 'familiar' });
       setSwapTarget(null);
     } finally { setSwapBusy(false); }
+  }
+
+  if (requiresCloudLease && cloudLeaseStatus !== 'verified' && phase !== 'complete') {
+    return <SafeAreaView style={styles.safeArea}>
+      <View style={styles.missingCard}>
+        <Text style={styles.eyebrow}>CLOUD WORKOUT COORDINATION</Text>
+        <Text style={styles.completeTitle}>{cloudLeaseStatus === 'checking'
+          ? 'Verifying your workout lock'
+          : 'Workout lock unavailable'}</Text>
+        <Text style={styles.helper}>{cloudLeaseStatus === 'checking'
+          ? 'Confirming that another device has not taken over this workout. Training remains paused until the server confirms your lease.'
+          : 'The server lease expired, was lost, or could not be verified. Do not continue training from this checkpoint. You can save work already completed or discard the unfinished workout.'}</Text>
+        {cloudLeaseStatus === 'lost' ? <>
+          <Pressable style={styles.primaryButton} onPress={() => {
+            const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0;
+            setRunning(false);
+            setPhase('complete');
+            void persistCompletion(fraction);
+          }}>
+            <Text style={styles.primaryButtonText}>Save previously completed work</Text>
+          </Pressable>
+          <Pressable style={styles.outlineButton} onPress={() => {
+            clearActiveWorkout();
+            router.replace('/train' as Href);
+          }}>
+            <Text style={styles.outlineButtonText}>Discard unfinished session</Text>
+          </Pressable>
+        </> : null}
+      </View>
+    </SafeAreaView>;
   }
 
   if (requiresRecoveryReview && phase !== 'complete') {
