@@ -76,15 +76,22 @@ Local profiles have no shared cloud identity. The SQL migration has been
 verified in PostgreSQL CI, but **has not been deployed to the live project**;
 the opt-in flag must remain off until staging and real-device checks pass.
 
-**This is not cross-device daily loading enforcement.** Completion and
-regional recovery events remain local to each device. The same athlete
-could still sequentially train on device B after finishing on device A
-without device B observing that completed dose. Do not claim synchronized
-ceilings or safe return-to-sport decisions until an authoritative remote
-activity ledger and recovery synchronization exist.
+**New staged synchronized dose enforcement:** the second migration
+`20261110190000_authoritative_training_ledger.sql` adds server-side
+completed exposure/recovery histories and immutable reservations. Every
+new cloud start publishes recent recorded work and the daily prescription
+before a transaction checks shared actuals, potential reserved work, and
+post-exposure recovery. Server status is visible separately from local
+training history in the daily-ceiling screen.
+
+This remains OFF by default and **has not been deployed**. A phone that is
+offline or running an older/nonparticipating client cannot reliably submit
+new information, and unlogged exercise remains invisible. A verified server
+claim is a product-level authorization, never medical clearance. See the
+[staged ledger rollout guide](AUTHORITATIVE_TRAINING_LEDGER.md).
 
 See [cloud lease rollout and guarantees](CLOUD_WORKOUT_LEASE_ROLLOUT.md).
 
 ## Manual QA
 
-See [the 39-scenario release QA matrix](TRAINING_GUARDRAILS_RELEASE_QA.md). No unexecuted device case is marked as passed.
+See [the expanded release QA matrix](TRAINING_GUARDRAILS_RELEASE_QA.md). No unexecuted device case is marked as passed.
