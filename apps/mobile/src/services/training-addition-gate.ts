@@ -35,9 +35,10 @@ export function localTrainingDate(now = new Date()): string {
 
 const regionsForWorkout = affectedTrainingRegions;
 
-function recoveryFor(checkIn: TrainingCheckIn | null): Partial<Record<TrainingRegion, RecoveryStatus>> {
+function recoveryFor(checkIn: TrainingCheckIn | null, date: string): Partial<Record<TrainingRegion, RecoveryStatus>> {
   // General check-in does not automatically certify recovering tissue.
-  const general: RecoveryStatus = checkIn?.status === 'normal'
+  const general: RecoveryStatus = checkIn?.status === 'normal' &&
+    localTrainingDate(new Date(checkIn.createdAt)) === date
     ? 'stable'
     : checkIn?.status === 'unable_to_train' ? 'worse' : 'uncertain';
   return { general, achilles: 'uncertain', upper_back: 'uncertain' };
@@ -85,7 +86,7 @@ export async function getEffectiveDailyCeiling(
   const ceiling: DailyTrainingCeiling = {
     date,
     planned: currentPlan,
-    recovery: recoveryFor(checkIn),
+    recovery: recoveryFor(checkIn, date),
     restrictUnplanned: true,
     pauseTraining: checkIn?.status === 'unable_to_train',
   };
