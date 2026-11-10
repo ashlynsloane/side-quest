@@ -40,31 +40,30 @@ function regionsForWorkout(workout: GeneratedWorkout): TrainingRegion[] {
 }
 
 function recoveryFor(checkIn: TrainingCheckIn | null): Partial<Record<TrainingRegion, RecoveryStatus>> {
-  const status: RecoveryStatus = checkIn?.status === 'normal'
+  // General check-in does not automatically certify recovering tissue.
+  const general: RecoveryStatus = checkIn?.status === 'normal'
     ? 'stable'
-    : checkIn?.status === 'unable_to_train'
-      ? 'worse'
-      : 'uncertain';
-  return { general: status, achilles: status, upper_back: status };
+    : checkIn?.status === 'unable_to_train' ? 'worse' : 'uncertain';
+  return { general, achilles: 'uncertain', upper_back: 'uncertain' };
 }
 
 /** Establish the day's ceiling only from the saved training block, never from an ad hoc request. */
 async function ensurePrescribedCeiling(userId: string, date: string): Promise<DailyTrainingCeiling | null> {
   const existing = await loadDailyCeiling(userId, date);
-  if (existing) return existing;
+  const checkIn = await getActiveTrainingCheckIn();
+  if (existing) return { ...existing, pauseTraining: checkIn?.status === 'unable_to_train' };
   const saved = await getLatestTrainingBlock();
   const sessions = saved?.block.weeks.flatMap((week) => week.sessions).filter(
     (session) => session.date === date && session.completionStatus !== 'completed' && session.completionStatus !== 'skipped',
   ) ?? [];
   if (!sessions.length) return null;
-  const checkIn = await getActiveTrainingCheckIn();
   const planned: ActivityDose[] = sessions.map((session) => ({
     activity: 'strength',
     sessionId: session.id,
     minutes: Math.ceil(session.workout.estimatedElapsedSeconds / 60),
     regions: regionsForWorkout(session.workout),
   }));
-  const ceiling: DailyTrainingCeiling = { date, planned, recovery: recoveryFor(checkIn), restrictUnplanned: true };
+  const ceiling: DailyTrainingCeiling = { date, planned, recovery: recoveryFor(checkIn), restrictUnplanned: true, pauseTraining: checkIn?.status === 'unable_to_train' };
   await saveDailyCeiling(userId, ceiling);
   return loadDailyCeiling(userId, date);
 }
@@ -74,13 +73,20 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
     ensurePrescribedCeiling(request.userId, request.date),
     loadTrainingEvents(request.userId, request.date),
   ]);
+  const activeCheckIn = ceiling ? null : await getActiveTrainingCheckIn();
   const result: TrainingGuardrailResult = ceiling
     ? evaluateTrainingAddition(ceiling, request.proposed, history)
-    : {
-      decision: 'defer',
-      reasons: ['No approved daily training ceiling is available. Review the plan and recovery check-in first.'],
-      requiresReassessment: true,
-    };
+    : activeCheckIn?.status === 'unable_to_train'
+      ? {
+        decision: 'stop',
+        reasons: ['Your active check-in pauses training. Update it before starting a workout.'],
+        requiresReassessment: true,
+      }
+      : {
+        decision: 'defer',
+        reasons: ['No approved daily training ceiling is available. Review the plan and recovery check-in first.'],
+        requiresReassessment: true,
+      };
   await recordTrainingEvent(request.userId, {
     id: request.requestId,
     occurredAt: request.occurredAt,
