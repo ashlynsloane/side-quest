@@ -2899,7 +2899,7 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue'] as const;
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue','daily_training_ceilings','training_guardrail_events'] as const;
 export async function exportLocalData():Promise<Record<string,unknown[]>>{await initializeDatabase();const output:Record<string,unknown[]>={};for(const table of EXPORT_TABLES){try{output[table]=await db.getAllAsync<Record<string,unknown>>(`SELECT * FROM ${table}`)}catch{output[table]=[]}}return output;}
 export async function deleteAllLocalData():Promise<void>{await initializeDatabase();await db.withTransactionAsync(async()=>{for(const table of EXPORT_TABLES){try{await db.runAsync(`DELETE FROM ${table}`)}catch{}}});}
 export async function countCompletedWorkouts():Promise<number>{await initializeDatabase();const row=await db.getFirstAsync<{total:number}>('SELECT COUNT(*) AS total FROM workout_ledger');return row?.total??0;}
@@ -2929,7 +2929,7 @@ export async function getEnduranceTrainingBalanceBetween({
 export async function getStoredDailyTrainingCeiling(
   athleteId: string, trainingDate: string,
 ): Promise<import('@circuit/planner').DailyTrainingCeiling | null> {
-  if (!athleteId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
   await initializeDatabase();
   const row = await db.getFirstAsync<{ ceiling_json: string }>(
     'SELECT ceiling_json FROM daily_training_ceilings WHERE athlete_id = ? AND training_date = ?',
@@ -2947,7 +2947,7 @@ export async function storeDailyTrainingCeiling(
   ceiling: import('@circuit/planner').DailyTrainingCeiling,
   overwrite = false,
 ): Promise<void> {
-  if (!athleteId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(ceiling.date) || !Array.isArray(ceiling.planned)) {
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(ceiling.date) || !Array.isArray(ceiling.planned)) {
     throw new Error('Invalid daily training ceiling');
   }
   await initializeDatabase();
@@ -2969,7 +2969,7 @@ export async function appendStoredTrainingGuardrailEvent(
   trainingDate: string,
 ): Promise<void> {
   if (!athleteId || !event.id || !event.occurredAt ||
-      !/^\\d{4}-\\d{2}-\\d{2}$/.test(trainingDate)) throw new Error('Invalid training guardrail event');
+      !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) throw new Error('Invalid training guardrail event');
   await initializeDatabase();
   await db.runAsync(
     `INSERT OR IGNORE INTO training_guardrail_events
@@ -2982,7 +2982,7 @@ export async function appendStoredTrainingGuardrailEvent(
 export async function listStoredTrainingGuardrailEvents(
   athleteId: string, trainingDate: string,
 ): Promise<import('@circuit/planner').TrainingEvent[]> {
-  if (!athleteId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
+  if (!athleteId || !/^\d{4}-\d{2}-\d{2}$/.test(trainingDate)) throw new Error('Invalid athlete or training date');
   await initializeDatabase();
   const rows = await db.getAllAsync<{ event_json: string }>(
     'SELECT event_json FROM training_guardrail_events WHERE athlete_id = ? AND training_date = ? ORDER BY occurred_at, id',
