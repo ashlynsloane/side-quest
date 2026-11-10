@@ -35,6 +35,7 @@ declare
   v_renew record;
   v_denied record;
   v_json jsonb;
+  v_completed_at timestamptz;
 begin
   if not public.publish_training_remote_plan(v_date,v_plan) then
     raise exception 'First plan was not created';
@@ -52,17 +53,17 @@ begin
   if not public.release_training_workout_lease(v_first.lease_id,'device-1') then
     raise exception 'Could not release completed session lease';
   end if;
+  v_completed_at := clock_timestamp()-interval '2 seconds';
   if not public.publish_training_remote_exposure(
       'completed-1','strength-A','planned-A','strength',30,
-      array['general','achilles']::text[],clock_timestamp()-interval '2 seconds',v_date) then
+      array['general','achilles']::text[],v_completed_at,v_date) then
     raise exception 'Exposure was not recorded';
   end if;
   -- An identical retry is an upsert no-op, not duplicated dose.
   if not public.publish_training_remote_exposure(
       'completed-1','strength-A','planned-A','strength',30,
       array['general','achilles']::text[],
-      (select completed_at from public.training_remote_exposures
-       where event_id='completed-1' and athlete_id=auth.uid()),v_date) then
+      v_completed_at,v_date) then
     raise exception 'Idempotent exposure retry failed';
   end if;
 
