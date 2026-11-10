@@ -201,6 +201,13 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
     loadTrainingEvents(request.userId, request.date),
   ]);
   const activeCheckIn = ceiling ? null : await getActiveTrainingCheckIn();
+  const retracted = new Set(history.filter((event) => event.kind === 'retracted')
+    .map((event) => event.retractsEventId));
+  const anyActualTrainingToday = history.some((event) =>
+    (event.kind === 'completed' || event.kind === 'unplanned')
+    && !retracted.has(event.id)
+    && ((event.activity?.minutes ?? 0) > 0 || (event.activity?.sets ?? 0) > 0)
+  );
   let result: TrainingGuardrailResult = ceiling
     ? evaluateTrainingAddition(ceiling, request.proposed, history)
     : activeCheckIn?.status === 'unable_to_train'
@@ -211,8 +218,11 @@ export async function assessTrainingAddition(request: TrainingAdditionRequest): 
       }
       : {
         decision: 'defer',
-        reasons: ['No approved daily training ceiling is available. Review the plan and recovery check-in first.'],
+        reasons: [anyActualTrainingToday
+          ? 'Training is already recorded today. An additional session requires a new prescription.'
+          : 'No approved daily training ceiling is available. Review the plan and recovery check-in first.'],
         requiresReassessment: true,
+        overrideAllowed: !anyActualTrainingToday,
       };
   if (result.decision !== 'stop') {
     const matching = ceiling?.planned.find((item) =>
