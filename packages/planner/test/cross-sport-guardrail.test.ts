@@ -62,4 +62,20 @@ describe('cross-sport overlap precautions', () => {
     })).toThrow();
   });
 
+  it('reports the latest overlapping tissue exposure time for regional reassessment', () => {
+    const result = assessCrossSportExposure(['achilles'], [
+      { id: 'bike-1', discipline: 'bike', minutes: 20, occurredAt: '2026-11-08T12:00:00Z' },
+      { id: 'bike-2', discipline: 'bike', minutes: 10, occurredAt: '2026-11-09T10:00:00Z' },
+    ], { now: '2026-11-09T20:00:00Z', lookbackHours: 48 });
+    expect(result.lastExposureAt?.achilles).toBe('2026-11-09T10:00:00.000Z');
+    expect(result.unknownTimingRegions).toEqual([]);
+  });
+  it('flags overlapping activity without a usable timestamp as unverified recovery evidence', () => {
+    const result = assessCrossSportExposure(['upper_back'], [
+      { id: 'legacy-swim', discipline: 'swim', minutes: 20 },
+    ], { now: '2026-11-09T20:00:00Z', lookbackHours: 48 });
+    expect(result.conflict).toBe(true);
+    expect(result.unknownTimingRegions).toContain('upper_back');
+  });
+
 });
