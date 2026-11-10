@@ -21,8 +21,9 @@ import {
 } from '@/services/active-workout-persistence';
 import { assessWorkoutStart } from '@/services/training-addition-gate';
 import { createGuardedWorkoutStartGate } from '@/services/guarded-workout-start';
+import { acquireSynchronizedWorkoutLease } from '@/services/server-training-ledger';
 import {
-  acquireCloudWorkoutLease, cloudWorkoutLeasesEnabled,
+  cloudWorkoutLeasesEnabled,
   releaseCloudWorkoutLease,
 } from '@/services/cloud-workout-coordination';
 import { useAuth } from '@/state/auth-context';
@@ -183,7 +184,8 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
             proposed, new Date().toISOString(), source ?? undefined, lease,
           ),
         ...(user?.mode === 'cloud' && cloudWorkoutLeasesEnabled() ? {
-          acquireRemoteLease: acquireCloudWorkoutLease,
+          acquireRemoteLease: (proposed, source, owner) =>
+            acquireSynchronizedWorkoutLease(owner, proposed, source?.sessionId),
           releaseRemoteLease: releaseCloudWorkoutLease,
         } : {}),
         persist: saveLiveWorkoutSession,
