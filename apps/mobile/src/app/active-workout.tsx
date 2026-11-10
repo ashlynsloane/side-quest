@@ -55,6 +55,7 @@ import {
   type LiveWorkoutLoadValue as LoadValue,
   type LiveWorkoutRestEntry as RestEntry,
 } from '@/services/active-workout-persistence';
+import { createActiveSessionMonitor } from '@/services/active-session-monitor';
 import { publishWorkoutActivity } from '@/services/social';
 import { localTrainingDate, recordActualWorkoutCompletion } from '@/services/training-addition-gate';
 import { loadDailyCeiling, recordTrainingEvent } from '@/services/training-guardrail-storage';
@@ -195,40 +196,34 @@ export default function ActiveWorkoutScreen() {
     return () => clearInterval(interval);
   }, [workout?.id, sessionHydrated, phase]);
 
-  // New explicit training restrictions should interrupt a session, not just
-  // block tomorrow's start. Once interrupted, the athlete saves partial work
-  // or discards this session and obtains a fresh prescription.
+  // Keep monitoring recovery throughout a live workout and after foregrounding.
+  // Each mount/account change owns one cancelable monitor with no overlapping
+  // database reads. Missing data pauses rather than silently resuming training.
   useEffect(() => {
     if (!workout || !sessionHydrated || phase === 'complete' || !user?.id) return;
-    let live = true;
     const athleteId = user.id;
-    const review = () => {
-      void Promise.all([
-        getActiveTrainingCheckIn(),
-        loadDailyCeiling(athleteId, localTrainingDate()),
-      ]).then(([checkIn, ceiling]) => {
-        if (!live) return;
-        const decision = evaluateActiveSessionRecovery(
+    const monitor = createActiveSessionMonitor({
+      read: async () => {
+        const [checkIn, ceiling] = await Promise.all([
+          getActiveTrainingCheckIn(),
+          loadDailyCeiling(athleteId, localTrainingDate()),
+        ]);
+        return evaluateActiveSessionRecovery(
           workout, startedAt.current, checkIn, ceiling,
         );
-        if (decision.pause) {
-          setRequiresRecoveryReview(true);
-          setRunning(false);
-        }
-      }).catch(() => {
-        if (live) {
-          // Unreadable or unavailable recovery storage is not clearance.
-          setRequiresRecoveryReview(true);
-          setRunning(false);
-        }
-      });
-    };
-    review();
-    const interval = setInterval(review, 15000);
-    const subscription = AppState.addEventListener('change', (status) => {
-      if (status === 'active') review();
+      },
+      onPause: () => {
+        setRequiresRecoveryReview(true);
+        setRunning(false);
+      },
+      subscribeForeground: (check) => {
+        const subscription = AppState.addEventListener('change', (status) => {
+          if (status === 'active') check();
+        });
+        return () => subscription.remove();
+      },
     });
-    return () => { live = false; clearInterval(interval); subscription.remove(); };
+    return monitor.start();
   }, [workout, sessionHydrated, phase, user?.id]);
 
   const station = workout?.stations[stationIndex] ?? null;
