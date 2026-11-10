@@ -1,8 +1,8 @@
 # Synchronized Training Ledger — Staged Architecture and Release Gate
 
-**Status: implemented in draft code, verified in local PostgreSQL CI, not deployed.**
+**Status: implemented in draft code; PostgreSQL CI is the required verification gate. Not deployed.**
 The cloud gate remains OFF unless `EXPO_PUBLIC_DISTRIBUTED_WORKOUT_LOCKS=true`,
-and **both** migrations are applied. This is self-reported training data, not
+and **all three** migrations are applied in order. This is self-reported training data, not
 independently measured physiological load or clinical clearance.
 
 ## Goal
@@ -18,7 +18,8 @@ as complete history.
 - `training_remote_plans`: first approved daily session list. Athlete, date,
   session ID, dose in minutes and broad tissue regions. The first snapshot is
   immutable. Revised plans need a **future reviewed amendment protocol**,
-  not an automatic client overwrite.
+  not an automatic client overwrite. The reviewed amendment protocol below
+  does not authorize daily plan expansion.
 - `training_remote_reservations`: one persistent row per athlete/date/session.
   Created atomically when a lease starts. It conservatively counts the whole
   prescribed session, including when the device crashes, leaves, or fails to
@@ -149,3 +150,88 @@ also checks batch rollback and immutable recovery event replay.
    as new server observations.
 6. Only after those tests enable the public flag for a controlled staging
    build. Keep production disabled, PR in draft and unmerged until reviewed.
+
+## Reviewed correction/retraction protocol (third migration; feature OFF)
+
+Migration `20261110210000_reviewed_training_corrections.sql` follows
+`20261110150000_training_workout_leases.sql` and
+`20261110190000_authoritative_training_ledger.sql`. Applying only two
+migrations is no longer sufficient for this branch's contract.
+
+A correction is NOT a local UPDATE or DELETE on the cloud ledger:
+
+1. The authenticated athlete submits `request_training_remote_correction`
+   with a durable request ID, an existing original event/session ID and date,
+   one predefined reason code, and either `retract` or `replace_minutes`.
+   `replace_minutes` is supported for completed exposure events only.
+   Reservations can only be requested for retraction when they were genuinely
+   unused. The athlete must reuse the same request ID on uncertain retry.
+2. The new request does not change the authorization budget, region history,
+   snapshot or workout lease. Rejected requests have no effect. A pending
+   correction is NOT confirmation that the physical activity did not happen.
+3. An authorized human reviewer examines the original and proposed record,
+   external activity provenance where available, and whether any work actually
+   occurred. **Only a trusted server with the Supabase service-role credential**
+   may call `review_training_remote_correction`. The service credential must
+   never be distributed with the mobile client, exposed in Expo config or
+   stored in a public CI log.
+4. A reviewer approves or rejects with an 8–128 character case/reference ID.
+   Approval is blocked while an unexpired workout lease exists for the athlete.
+   A decision is immutable and idempotent; a target can have at most one
+   approved amendment in this first version. Further revisions require a
+   separately reviewed successor design.
+5. The original exposure/reservation row is retained for audit. Private
+   effective-ledger views apply **approved** minute amendments and retractions
+   to the dose and 48-hour regional checks. The snapshot reflects the effective
+   records; `read_training_remote_corrections` separately reports the
+   athlete's own request/decision audit.
+6. An approved corrected exposure may be synchronized using either the
+   originally recorded minutes or the approved replacement minutes under
+   the same immutable event ID; any third, unreviewed value is rejected.
+   An approved unused reservation can free budget for a **different** prescribed
+   session, but its session identity remains consumed permanently, preventing
+   the previously started session from being restarted.
+
+**Current mobile scope:** the typed `requestRemoteTrainingCorrection` and
+`readRemoteTrainingCorrections` APIs are implemented and unit-tested. There is
+not yet a user-facing correction form, reviewer web console, durable correction
+outbox, or deletion/edit detection that automatically opens a request. Athletes
+cannot approve corrections. Until those interfaces and workflow checks exist,
+changed local entries without an approved amendment may block synchronization,
+which is the intentional fail-closed behavior.
+
+**No automatic recovery rewriting.** Incorrect recovery observations are not
+retroactively erased by this migration; a fresh explicit regional check can
+supersede an old observation at a new server timestamp. Plans likewise remain
+immutable and cannot silently expand.
+
+## Dedicated Supabase staging gate (not executed)
+
+The current PR cannot claim staging deployment because it does not contain
+a dedicated staging project ID, service-role authentication, or two enrolled
+physical clients. Required controlled sequence:
+
+1. Create/select a *nonproduction* Supabase project and validate that its
+   project ref cannot resolve to production. Back up the staging database.
+2. Apply all **three** migrations in timestamp order using the Supabase CLI
+   or reviewed SQL migration process. Do not apply the mock-auth CI setup.
+   Verify privileged RPC grants, RLS, and that old v1 lease acquisition
+   is revoked for authenticated athletes.
+3. Use an isolated test athlete and two independently authenticated mobile
+   devices. Reproduce concurrent start, one permitted lease, crash-reservation,
+   imported bike/swim/run backfill, recovery after exposure, and network-loss
+   retries.
+4. Request a duration correction on phone A. Before approval, verify phone B
+   still counts the original minutes. Review on a **trusted server**, verify
+   exactly one approved amendment, and confirm both phones see the revised
+   effective snapshot. Attempt an unapproved third value and expect denial.
+5. Repeat for an unused reservation and a rejected or cross-athlete request.
+   Verify the original session remains non-reusable, and that an active lease
+   prevents approval. Then test a permitted *different* scheduled session.
+6. Test old clients, revoked permissions, account erasure, stale devices,
+   timezone/DST changes, disconnects, re-login and clinical red flags. Only
+   after explicit review should a staging build enable the feature flag.
+
+The first two migration tests and the new correction test are run against
+disposable PostgreSQL 16 in CI, **not** against Supabase Auth or real devices.
+This separation is required for a reliable release decision.
