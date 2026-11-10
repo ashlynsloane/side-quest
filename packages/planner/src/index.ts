@@ -1,3 +1,4 @@
+export { requiresActiveWorkoutPause } from './active-workout-restriction';
 export { scopedLiveWorkoutStorageKey, LEGACY_LIVE_WORKOUT_KEY, LIVE_WORKOUT_KEY_PREFIX } from './live-workout-storage-policy';
 export { evaluateWorkoutAuthorizationAge, LIVE_WORKOUT_AUTHORIZATION_MAX_HOURS } from './workout-authorization-expiry';
 export { assessActiveWorkoutMutation } from './active-workout-mutation';
