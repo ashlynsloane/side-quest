@@ -190,7 +190,7 @@ create view public.training_remote_effective_exposures as
 select e.athlete_id,e.event_id,e.workout_id,e.session_id,e.activity,
   case when a.action='replace_minutes' then a.corrected_minutes else e.minutes end as minutes,
   e.regions,e.completed_at,e.training_date,e.recorded_at,
-  (a.action='retract') as retracted
+  coalesce(a.action='retract',false) as retracted
 from public.training_remote_exposures e
 left join public.training_remote_approved_amendments a
   on a.athlete_id=e.athlete_id and a.target_type='exposure'
@@ -198,7 +198,7 @@ left join public.training_remote_approved_amendments a
 create view public.training_remote_effective_reservations as
 select r.athlete_id,r.training_date,r.session_id,r.workout_id,
   r.authorized_minutes,r.regions,r.acquired_at,
-  (a.action='retract') as retracted
+  coalesce(a.action='retract',false) as retracted
 from public.training_remote_reservations r
 left join public.training_remote_approved_amendments a
   on a.athlete_id=r.athlete_id and a.target_type='reservation'
