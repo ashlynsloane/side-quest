@@ -3,6 +3,7 @@ import type { GeneratedWorkout } from '@circuit/domain';
 import { createGuardedWorkoutStartGate } from '../src/services/guarded-workout-start';
 
 vi.mock('expo-sqlite/localStorage/install', () => ({}));
+vi.mock('../src/services/supabase', () => ({ supabase: null }));
 import {
   clearLiveWorkoutSession,
   createInitialLiveWorkoutSession,
