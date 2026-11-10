@@ -19,7 +19,7 @@ import { useWorkoutContext } from '@/state/workout-context';
 
 export default function FavoritesScreen() {
   const router = useRouter();
-  const { setPreviewWorkout, beginWorkout } = useWorkoutContext();
+  const { setPreviewWorkout } = useWorkoutContext();
   const [favorites, setFavorites] = useState<FavoriteWorkoutRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -39,8 +39,9 @@ export default function FavoritesScreen() {
   }
 
   function startWorkout(workout: GeneratedWorkout) {
-    beginWorkout({ ...workout, source: 'favorite_exact' });
-    router.push('/active-workout' as Href);
+    // Route every new session through the guarded workout preview.
+    setPreviewWorkout({ ...workout, source: 'favorite_exact' });
+    router.push('/workout-preview' as Href);
   }
 
   async function removeFavorite(id: string) {
