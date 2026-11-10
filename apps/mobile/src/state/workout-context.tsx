@@ -21,6 +21,10 @@ import {
 } from '@/services/active-workout-persistence';
 import { assessWorkoutStart } from '@/services/training-addition-gate';
 import { createGuardedWorkoutStartGate } from '@/services/guarded-workout-start';
+import {
+  acquireCloudWorkoutLease, cloudWorkoutLeasesEnabled,
+  releaseCloudWorkoutLease,
+} from '@/services/cloud-workout-coordination';
 import { useAuth } from '@/state/auth-context';
 import {
   generateWorkoutForAssignedTrainingSpace,
@@ -174,8 +178,14 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
           workoutSessionReady && restoredForAthlete.current === athleteId,
         hasActiveSession: () => activeWorkoutSnapshot.current !== null,
         assess: assessWorkoutStart,
-        createSnapshot: (proposed, source) =>
-          createInitialLiveWorkoutSession(proposed, new Date().toISOString(), source ?? undefined),
+        createSnapshot: (proposed, source, lease) =>
+          createInitialLiveWorkoutSession(
+            proposed, new Date().toISOString(), source ?? undefined, lease,
+          ),
+        ...(user?.mode === 'cloud' && cloudWorkoutLeasesEnabled() ? {
+          acquireRemoteLease: acquireCloudWorkoutLease,
+          releaseRemoteLease: releaseCloudWorkoutLease,
+        } : {}),
         persist: saveLiveWorkoutSession,
         discardPersisted: clearLiveWorkoutSession,
         onStarted(proposed, source) {
