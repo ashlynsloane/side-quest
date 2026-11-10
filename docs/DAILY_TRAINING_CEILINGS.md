@@ -18,7 +18,7 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 10. After completion, recovery must be explicitly rechecked before its result can justify another exposure; the last check-in cannot predate the workout. A paused live workout cannot resume training across a calendar-day change or beyond an eight-hour authorization window; previously recorded work may be saved as partial. Calendar edits can narrow but not silently expand a budget.
 11. Edited and deleted workout records are reconciled through append-only retractions and revised completion events, preserving an auditable history.
 12. Post-workout urges can be recorded separately from completed activity, and the daily UI summarizes them without treating motivation as load.
-13. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Live workout checkpoints now have athlete-scoped storage keys and reject malformed snapshots; legacy unscoped sessions are deliberately not auto-restored to avoid cross-account leakage. Event IDs are idempotent.
+13. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Live workout checkpoints now have athlete-scoped storage keys and reject malformed snapshots; legacy unscoped sessions are deliberately not auto-restored to avoid cross-account leakage. A new explicit no-training restriction or significant pain report can interrupt a workout already in progress. Event IDs are idempotent.
 
 ## Decision policy
 
@@ -48,8 +48,10 @@ Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `
 - **Human device QA:** verify preview, recovery modal, interruption/relaunch, early exit, repeated starts, logged exceptions, shared-room behavior and offline database failures on supported platforms.
 - **Reliability:** local persisted sessions are now athlete-scoped and expire after eight hours or a date change, but device QA must validate migrations, local-day rollover, interrupted writes and cross-session / cross-device races. The eight-hour expiry is a conservative product policy, not a clinical exercise threshold.
 
+Bonus workouts after a recorded exposure must go through a revised prescription, including when the original daily plan is missing. Recorded activity is never inferred from an athlete's motivation or an unsaved recommendation.
+
 Keep this PR in draft until the above release blockers are addressed or consciously scoped.
 
 ## Manual QA
 
-See [the 30-scenario release QA matrix](TRAINING_GUARDRAILS_RELEASE_QA.md). No unexecuted device case is marked as passed.
+See [the 39-scenario release QA matrix](TRAINING_GUARDRAILS_RELEASE_QA.md). No unexecuted device case is marked as passed.
