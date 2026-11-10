@@ -152,10 +152,16 @@ export function evaluateTrainingAddition(
   }
   const planned = matchingPlan;
   if (!proposed.scheduled || !planned) {
+    const alreadyLoadedToday = performedToday.some((event) =>
+      (event.activity?.minutes ?? 0) > 0 || (event.activity?.sets ?? 0) > 0
+    );
     return {
       decision: ceiling.restrictUnplanned ? 'defer' : 'modify',
-      reasons: ['Feeling energetic does not automatically authorize additional training. Request a plan adjustment.'],
+      reasons: [alreadyLoadedToday && ceiling.restrictUnplanned
+        ? 'Additional unscheduled training after a completed exposure requires a new prescription, not just an exception.'
+        : 'Feeling energetic does not automatically authorize additional training. Request a plan adjustment.'],
       requiresReassessment: true,
+      overrideAllowed: !(alreadyLoadedToday && ceiling.restrictUnplanned),
     };
   }
   if (proposed.regions.some((region) => !planned.regions.includes(region))) {
