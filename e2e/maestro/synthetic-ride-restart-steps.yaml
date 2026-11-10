@@ -6,10 +6,11 @@ appId: com.sidequest.synthetic.qa
 - stopApp
 - launchApp
 - extendedWaitUntil:
-    visible: "Today"
+    visible:
+      id: "sidequest-qa-week-tab"
     timeout: 30000
 - tapOn:
-    text: "Week, tab, .*"
+    id: "sidequest-qa-week-tab"
     retryTapIfNoChange: true
 - scrollUntilVisible:
     element: "Inspect full training history"
