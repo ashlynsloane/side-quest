@@ -219,7 +219,9 @@ describe('native synthetic UI automation contract', () => {
     expect(onboarding).toContain('visible: "Build your first week."');
     const ride = source('e2e/maestro/synthetic-completed-ride-steps.yaml');
     expect(ride).toContain('- launchApp');
-    expect(ride).toContain('- tapOn: "Week"');
+    expect(ride).toContain('id: "sidequest-qa-week-tab"');
+    expect(source('apps/mobile/src/app/(tabs)/_layout.tsx'))
+      .toContain("tabBarButtonTestID: 'sidequest-qa-week-tab'");
     const restart = source('e2e/maestro/synthetic-ride-restart-steps.yaml');
     // Native inspection showed the labels include trailing intensity context.
     expect(ride).toContain('assertVisible: "75 minutes.*"');
@@ -227,11 +229,24 @@ describe('native synthetic UI automation contract', () => {
     expect(ride).toContain('takeScreenshot: "synthetic-completed-ride-review"');
     expect(restart).toContain('stopApp');
     expect(restart).toContain('launchApp');
-    // The real cold-relaunch iOS hierarchy names this native tab
-    // "Week, tab, 2 of 6", not a separate exact "Week" text node.
-    expect(restart).toContain('text: "Week, tab, .*"');
+    // Native accessibility labels vary with iOS versions; the test ID does not.
+    expect(restart).toContain('id: "sidequest-qa-week-tab"');
+    expect(restart).not.toContain('text: "Week, tab, .*"');
     expect(restart).toContain('retryTapIfNoChange: true');
     expect(restart).not.toContain('- tapOn: "Week"');
+  });
+
+
+  it('uses deterministic Today/Week/Train tab IDs across native navigation', () => {
+    const tabs = source('apps/mobile/src/app/(tabs)/_layout.tsx');
+    for (const id of ['sidequest-qa-today-tab','sidequest-qa-week-tab','sidequest-qa-train-tab']) {
+      expect(tabs).toContain("tabBarButtonTestID: '" + id + "'");
+    }
+    for (const flow of ['synthetic-completed-ride-steps.yaml','synthetic-ride-restart-steps.yaml']) {
+      const script = source('e2e/maestro/' + flow);
+      expect(script).toContain('id: "sidequest-qa-week-tab"');
+      expect(script).not.toContain('- tapOn: "Week"');
+    }
   });
 
   it('records native screenshots and uploads failure evidence', () => {
