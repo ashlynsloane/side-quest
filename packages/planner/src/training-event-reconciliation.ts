@@ -49,6 +49,7 @@ export function planLedgerReconciliation(
     events.push({
       id, kind: 'completed', occurredAt: entry.completedAt,
       trainingDate: date, sourceId: entry.ledgerId, activity: entry.activity,
+      note: 'Duration estimated from the saved workout and completion fraction; not measured active time.',
     });
   }
   return events;
