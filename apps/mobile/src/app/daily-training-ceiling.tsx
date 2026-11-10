@@ -1,4 +1,5 @@
-import type { DailyTrainingCeiling, RecoveryStatus, TrainingEvent, TrainingRegion } from '@circuit/planner';
+import { summarizeTrainingUrges, type DailyTrainingCeiling, type RecoveryStatus,
+  type TrainingEvent, type TrainingRegion } from '@circuit/planner';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -61,6 +62,7 @@ export default function DailyTrainingCeilingScreen() {
     return () => { mounted = false; };
   }, [user?.id, date]);
 
+  const urgeSummary = summarizeTrainingUrges(events);
   const plannedMinutes = ceiling?.planned.reduce((sum, item) => sum + (item.minutes ?? 0), 0) ?? 0;
   const performedMinutes = events.filter((event) =>
     (event.kind === 'completed' || event.kind === 'unplanned') && event.activity?.activity === 'strength'
@@ -95,6 +97,20 @@ export default function DailyTrainingCeilingScreen() {
             </Text>)}
           {ceiling.pauseTraining ? <Text style={styles.body}>Training is currently paused by your active check-in. Update that restriction separately.</Text> : null}
         </View>
+        {urgeSummary.recordedUrges > 0 ? <View style={styles.card}>
+          <Text style={styles.cardTitle}>Noticing the urge to do more</Text>
+          <Text style={styles.body}>
+            {urgeSummary.recordedUrges} post-workout training {urgeSummary.recordedUrges === 1 ? 'urge' : 'urges'} recorded today.
+            These are observations, not completed training or evidence that you need a larger workout.
+          </Text>
+          {urgeSummary.mostFrequentReason ? <Text style={styles.body}>
+            Most frequent reason: {({
+              energy: 'I still had energy',
+              faster_progress: 'I wanted to improve faster',
+              restless: 'I felt restless',
+            } as const)[urgeSummary.mostFrequentReason]}
+          </Text> : null}
+        </View> : null}
         {REGIONS.map((region) => <View style={styles.card} key={region.id}>
           <Text style={styles.cardTitle}>{region.name}</Text>
           <Text style={styles.body}>{region.detail}</Text>
