@@ -32,7 +32,7 @@ athlete's active workout lease** while the lease is valid.
 - Local-only profiles still operate locally: they do **not** have a shared
   server identity and are **not** protected against another phone.
 
-**New synchronized ledger (still disabled and undeployed):** a second
+**New synchronized ledger (still disabled and undeployed):** the second
 migration adds immutable completed exposures, explicit server-timestamped
 regional recovery, an immutable daily prescription and conservative
 server-reserved session doses. Cloud starts and renewals use v2 RPCs to
@@ -44,9 +44,12 @@ calculation.** See [authoritative ledger specification](AUTHORITATIVE_TRAINING_L
 
 1. Configure a dedicated **staging** Supabase project with authentication
    and the app's public publishable key, never a service-role key in Expo.
-2. Apply `supabase/migrations/20261110150000_training_workout_leases.sql`
-   using an authorized migration mechanism. Inspect permissions and staging
-   schema before applying to production.
+2. Apply all three migrations in ascending order:
+   `20261110150000_training_workout_leases.sql`,
+   `20261110190000_authoritative_training_ledger.sql`,
+   `20261110210000_reviewed_training_corrections.sql`.
+   The staging dry-run helper refuses ambiguous/production-equal project IDs.
+   Inspect ALL pending CLI migrations and staging schema before applying.
 3. Run the CI PostgreSQL migration/security tests and run a staging test with
    two **real authenticated** devices using the same account.
 4. Verify lock contention, app foreground/background, loss of connectivity,
@@ -80,8 +83,10 @@ release gate. Even if it passes, it will not verify cross-device cloud behavior.
 
 ## Updated synchronized-ledger rollout
 
-The former follow-on architecture has been implemented in a **second staged
-migration**, `20261110190000_authoritative_training_ledger.sql`.
+The synchronized architecture uses the **second staged migration**,
+`20261110190000_authoritative_training_ledger.sql`, and the **third reviewed
+correction / recovery supersession migration**,
+`20261110210000_reviewed_training_corrections.sql`.
 Cloud workouts now synchronize recorded actuals before the v2 start RPC;
 the server checks immutable daily planned dose, completed exposures,
 session reservations and latest regional recovery in one transaction.
@@ -90,10 +95,17 @@ PostgreSQL CI tests the migration and genuine concurrent acquisition;
 this has not been deployed to live Supabase.
 
 **Still not solved:** complete offline/legacy activity ingestion, reviewed
-amendments to the initial plan, local correction/retraction propagation,
+amendments to the initial plan, user-facing local correction/retraction workflow,
 atomic account-switch behavior on physical devices, and prospective clinical
 validation. Device-local and external-source exercise history remains
 self-reported. See the [ledger rollout guide](AUTHORITATIVE_TRAINING_LEDGER.md).
+
+**Current staging gate:** the third migration also restricts cloud lease
+requests to the full prescribed region set, prevents reservation corrections
+when a completion exists, and tombstones unresolved older recovery events
+when an explicitly worse/red-flag observation supersedes them. Mobile
+saves restrictive symptoms locally on cloud failure, but cannot transmit
+them to an offline second device.
 
 The selected 90-second TTL, 30-second renewal and recovery thresholds remain
 product policies, not clinical physiological safety thresholds.
