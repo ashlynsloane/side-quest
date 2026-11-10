@@ -119,3 +119,103 @@ export async function releaseCloudWorkoutLease(
   // false means this lease was already lost or expired; it cannot delete
   // another device's lock, and is safe to consider released locally.
 }
+
+
+export interface CloudLeaseMonitorOptions {
+  initialLease: CloudWorkoutLease;
+  renew(lease: CloudWorkoutLease): Promise<CloudWorkoutLease>;
+  persist(lease: CloudWorkoutLease): Promise<void>;
+  onVerified(lease: CloudWorkoutLease): void;
+  onLost(reason: string): void;
+  subscribeForeground(check: () => void): () => void;
+  intervalMs?: number;
+  now?: () => number;
+}
+
+/**
+ * Runs an immediate server renewal before allowing workout playback, then
+ * checks every 30 seconds and on foreground. Local timestamps never extend
+ * an expiring server lease. Network failures and lost tokens pause playback.
+ * It must be restarted with a fresh session after a lost lease.
+ */
+export function createCloudWorkoutLeaseMonitor(options: CloudLeaseMonitorOptions) {
+  let current = options.initialLease;
+  let active = false;
+  let lost = false;
+  let pending = false;
+  let checking = false;
+  let generation = 0;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let unsubscribe: (() => void) | undefined;
+  const now = options.now ?? Date.now;
+  const intervalMs = options.intervalMs ?? 30_000;
+  if (!Number.isFinite(intervalMs) || intervalMs < 1000 || intervalMs >= 90_000) {
+    throw new Error('Cloud lease monitoring interval must be between 1 and 90 seconds.');
+  }
+
+  const lose = (reason: string) => {
+    if (!active || lost) return;
+    lost = true;
+    options.onLost(reason);
+  };
+
+  const check = async (): Promise<void> => {
+    if (!active || lost) return;
+    if (!validCloudWorkoutLease(current) || Date.parse(current.expiresAt) <= now()) {
+      lose('Cloud workout coordination expired. Stop training and review the session.');
+      return;
+    }
+    if (checking) {
+      pending = true;
+      return;
+    }
+    checking = true;
+    const token = generation;
+    try {
+      const next = await options.renew(current);
+      if (!active || lost || token !== generation) return;
+      if (!validCloudWorkoutLease(next) || next.leaseId !== current.leaseId ||
+          next.deviceId !== current.deviceId || Date.parse(next.expiresAt) <= now()) {
+        throw new Error('The cloud workout lease is invalid or was replaced.');
+      }
+      await options.persist(next);
+      if (!active || lost || token !== generation) return;
+      current = next;
+      options.onVerified(next);
+    } catch (cause) {
+      if (active && !lost && token === generation) {
+        lose(cause instanceof Error ? cause.message : 'Cloud workout lease verification failed.');
+      }
+    } finally {
+      checking = false;
+      if (pending && active && !lost && token === generation) {
+        pending = false;
+        void check();
+      }
+    }
+  };
+
+  return {
+    getLease: () => current,
+    isLost: () => lost,
+    check,
+    start(): () => void {
+      if (active) throw new Error('Cloud workout monitor is already running.');
+      if (!validCloudWorkoutLease(current)) {
+        throw new Error('Cloud workout monitor requires a valid server-issued lease.');
+      }
+      active = true;
+      generation += 1;
+      void check();
+      interval = setInterval(() => { void check(); }, intervalMs);
+      unsubscribe = options.subscribeForeground(() => { void check(); });
+      return () => {
+        active = false;
+        generation += 1;
+        pending = false;
+        if (interval) clearInterval(interval);
+        unsubscribe?.();
+      };
+    },
+  };
+}
