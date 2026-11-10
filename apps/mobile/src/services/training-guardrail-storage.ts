@@ -48,7 +48,27 @@ export async function recordObservedRecovery(
   if (options.syncCloud) {
     // Keep the upload journal until the same explicit observation has been
     // stored locally. A retry must not fabricate a new server observation time.
-    const eventId = await publishRemoteRecovery(userId, date, updates);
+    let eventId: string;
+    try {
+      eventId = await publishRemoteRecovery(userId, date, updates);
+    } catch (error) {
+      // A failed cloud upload must not clear anything. However an athlete's
+      // worsening symptoms are still a local STOP signal even when offline,
+      // or when an older pending "stable" event cannot be reconciled.
+      const restrictive = Object.fromEntries(
+        (['general', 'achilles', 'upper_back'] as TrainingRegion[])
+          .filter((region) => updates[region] === 'worse' || updates[region] === 'red_flag')
+          .map((region) => [region, updates[region]]),
+      ) as Partial<Record<TrainingRegion, RecoveryStatus>>;
+      if (Object.keys(restrictive).length) {
+        try {
+          await saveObservedTrainingRecovery(userId, date, restrictive);
+        } catch {
+          throw new Error('Cloud recovery upload and local restrictive safety save both failed. Stop training.');
+        }
+      }
+      throw error; // Keep the cloud failure visible; another device may remain unaware.
+    }
     await saveObservedTrainingRecovery(userId, date, updates);
     acknowledgeRemoteRecovery(userId, date, eventId);
     return;
