@@ -87,8 +87,8 @@ export default function DailyTrainingCeilingScreen() {
       {loading ? <ActivityIndicator /> : ceiling ? <>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Today's strength budget</Text>
-          <Text style={styles.body}>{plannedMinutes} min prescribed · {performedMinutes} min recorded as completed</Text>
-          <Text style={styles.body}>Remaining: {Math.max(0, plannedMinutes - performedMinutes)} min. This is a ceiling, not an invitation to add work.</Text>
+          <Text style={styles.body}>{plannedMinutes} min prescribed · approximately {performedMinutes} min counted from completed workouts</Text>
+          <Text style={styles.body}>Budget remaining: up to {Math.max(0, plannedMinutes - performedMinutes)} min (estimated). This is a ceiling, not a recommendation to add work.</Text>
           {ceiling.planned.map((item, index) =>
             <Text style={styles.body} key={item.sessionId ?? index}>
               {item.activity} · {item.minutes ?? 0} minutes {item.sessionId ? '(planned session)' : ''}
