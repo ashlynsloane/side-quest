@@ -19,7 +19,7 @@ const state = vi.hoisted(() => {
 });
 vi.mock('expo-sqlite/localStorage/install', () => ({}));
 vi.mock('expo-sqlite', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
+  const { DatabaseSync } = await import('node:' + 'sqlite');
   const database = new DatabaseSync(':memory:');
   state.database = database;
   const adapter = {
