@@ -115,6 +115,7 @@ begin
     or (v_snap->'exposures'->0->>'minutes')::numeric <> 10 then
     raise exception 'Approved amendments were not applied to effective exposure read';
   end if;
+  v_saved := (v_snap->'exposures'->0->>'completedAt')::timestamptz;
   if not exists(select 1 from jsonb_array_elements(
     public.read_training_remote_corrections(100)) as item(value)
     where item.value->>'requestId'='request-reject'
@@ -123,24 +124,18 @@ begin
   end if;
   perform public.publish_training_remote_exposure(
     'correction-bike','bike-id',null,'bike',10,array['general']::text[],
-    (select completed_at from public.training_remote_exposures
-     where athlete_id='00000000-0000-4000-8000-000000000004'
-       and event_id='correction-bike'),v_day);
+    v_saved,v_day);
   begin
     perform public.publish_training_remote_exposure(
       'correction-bike','bike-id',null,'bike',11,array['general']::text[],
-      (select completed_at from public.training_remote_exposures
-       where athlete_id='00000000-0000-4000-8000-000000000004'
-         and event_id='correction-bike'),v_day);
+      v_saved,v_day);
     raise exception 'Unapproved local re-edit passed ledger sync';
   exception when unique_violation then null;
   end;
   -- A stale device replaying the original minute value must not undo review.
   perform public.publish_training_remote_exposure(
     'correction-bike','bike-id',null,'bike',25,array['general']::text[],
-    (select completed_at from public.training_remote_exposures
-     where athlete_id='00000000-0000-4000-8000-000000000004'
-       and event_id='correction-bike'),v_day);
+    v_saved,v_day);
   perform public.publish_training_remote_recovery(
     'post-correction-review',v_day,'{"general":"stable"}'::jsonb);
   select * into v_start from public.acquire_training_workout_lease_v2(
