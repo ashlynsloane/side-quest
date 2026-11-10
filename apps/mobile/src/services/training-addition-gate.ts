@@ -25,7 +25,7 @@ export function assessTrainingAddition(request: TrainingAdditionRequest): Traini
   recordTrainingEvent(request.userId, {
     id: request.requestId,
     occurredAt: request.occurredAt,
-    kind: 'override',
+    kind: 'assessment',
     note: JSON.stringify({
       category: 'addition_assessment',
       decision: result.decision,
