@@ -69,3 +69,46 @@ pnpm --dir packages/planner exec vitest run test/automated-athlete-acceptance.te
 pnpm --dir packages/planner test
 pnpm --dir apps/mobile exec expo export --platform ios --output-dir /tmp/sq-acceptance-ios
 ```
+
+## November 10 — local-first athlete-switch fencing (issue #19)
+
+The first-week setup previously generated a plan asynchronously and called
+`getTrainingBlockById`, `savePerformanceGoal`, `saveTrainingBlock`,
+and `refreshLatestWholeAthletePlan` through the module-scoped active SQLite
+handle. Switching athlete profiles while the asynchronous work was running
+could silently direct A's work to B's database.
+
+The QA branch now:
+
+- Serializes `activateUserDatabase` against
+  `withVerifiedAthleteDatabase(athleteId, work)`. A verified athlete's
+  multi-step first-week writes use the same active SQLite handle until the
+  last calendar refresh completes, or fail before writing when B is already
+  active. Failed activation/write releases the queue.
+- Protects the **evidence collection phase** as well: default equipment
+  seeding is a write, and recent exercise/exposure reads can otherwise be
+  sourced from the wrong athlete during generation. These are scoped before
+  pure block generation begins.
+- Checks the current athlete/attempt after generator awaits, before writes,
+  and before setting finished UI state. Late A generation cannot update B's
+  first-week screen. A user-facing retry intentionally reuses the durable
+  first-week timestamp and seeded block identity instead of inventing a
+  new plan on each attempt.
+- Exercises disk-backed SQLite with paused generation (A then B), switching
+  during goal/block/calendar writes, failed writes followed by B's successful
+  activation, and default equipment isolation. These are real SQL assertions,
+  not mocks of the application's database service.
+- Adds stable React Navigation tab button test IDs for Today/Week/Train.
+  The native ride and cold-restart Maestro flows use the `sidequest-qa-week-tab`
+  ID rather than iOS-version-dependent accessible label strings.
+
+**Limits:** this does not replace the native simulator gate for mid-generation
+profile switching, and it does not provide global cancellation of every legacy
+background task in Side Quest. The new lock is deliberately narrow to first-week
+source reads and persistence; other unsynchronized mutation paths need separate
+audits before production promotion.
+
+Native automated acceptance still requires actual passing Maestro JUnit
+evidence for profile → first week → completed ride → restart, plus a dedicated
+mid-onboarding A→B switch scenario. Do not claim those results from static tests
+or a green planner/SQLite workflow.
