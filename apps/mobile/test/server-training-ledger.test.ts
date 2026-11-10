@@ -14,7 +14,8 @@ vi.mock('../src/services/database', () => db);
 import {
   acknowledgeRemoteRecovery, acquireSynchronizedWorkoutLease, publishRemoteDailyPlan,
   publishRemoteExposure, publishRemoteRecovery, readRemoteTrainingSnapshot,
-  synchronizeRecordedTrainingExposure,
+  synchronizeRecordedTrainingExposure, requestRemoteTrainingCorrection,
+  readRemoteTrainingCorrections,
 } from '../src/services/server-training-ledger';
 import type { WorkoutLeaseRpc } from '../src/services/cloud-workout-coordination';
 
@@ -276,6 +277,66 @@ describe('synchronized authoritative ledger mobile protocol', () => {
       achilles: 'worse',
     }, backend);
     expect(nextId).not.toBe(recoveredId);
+  });
+
+  it('submits a correction REQUEST only, without calling any approval or overwriting an exposure', async () => {
+    const client = rpc();
+    const request = {
+      requestId: 'correction:workout:actual-1:1',
+      targetType: 'exposure' as const, targetId: 'workout:actual-1',
+      trainingDate: date, action: 'replace_minutes' as const,
+      correctedMinutes: 12, reasonCode: 'duration_error' as const,
+    };
+    await requestRemoteTrainingCorrection('athlete-1', request, client);
+    await requestRemoteTrainingCorrection('athlete-1', request, client);
+    expect(client.rpc).toHaveBeenCalledTimes(2);
+    expect(client.rpc).toHaveBeenLastCalledWith(
+      'request_training_remote_correction', {
+        p_request_id: request.requestId,
+        p_target_type: 'exposure',
+        p_target_id: 'workout:actual-1',
+        p_training_date: date,
+        p_action: 'replace_minutes',
+        p_corrected_minutes: 12,
+        p_reason_code: 'duration_error',
+      },
+    );
+    expect(client.rpc).not.toHaveBeenCalledWith(
+      'review_training_remote_correction', expect.anything(),
+    );
+  });
+
+  it('denies malformed correction requests before sending an RPC', async () => {
+    const client = rpc();
+    await expect(requestRemoteTrainingCorrection('athlete-1', {
+      requestId: 'bad-reservation', targetType: 'reservation', targetId: 'planned-A',
+      trainingDate: date, action: 'replace_minutes', correctedMinutes: 5,
+      reasonCode: 'never_started',
+    }, client)).rejects.toThrow('Invalid reviewed correction');
+    expect(client.rpc).not.toHaveBeenCalled();
+    await expect(requestRemoteTrainingCorrection('athlete-1', {
+      requestId: 'retract-1', targetType: 'exposure', targetId: 'workout:x',
+      trainingDate: date, action: 'retract', correctedMinutes: null,
+      reasonCode: 'duplicate',
+    }, rpc({ request_training_remote_correction: false })))
+      .rejects.toThrow('not confirmed');
+  });
+
+  it('reads server-reviewed correction decisions and rejects a malformed audit', async () => {
+    const row = {
+      requestId: 'correction:1', targetType: 'exposure', targetId: 'workout:1',
+      trainingDate: date, action: 'replace_minutes', correctedMinutes: 12,
+      reasonCode: 'duration_error', requestedAt: now, outcome: 'approved',
+      reviewReference: 'CASE-REVIEW-001', decidedAt: now,
+    };
+    const approved = rpc({ read_training_remote_corrections: [row] });
+    expect(await readRemoteTrainingCorrections('athlete-1', approved)).toEqual([row]);
+    expect(approved.rpc).toHaveBeenCalledWith(
+      'read_training_remote_corrections', { p_limit: 100 },
+    );
+    await expect(readRemoteTrainingCorrections('athlete-1',
+      rpc({ read_training_remote_corrections: true })))
+      .rejects.toThrow('unreadable');
   });
 
 });
