@@ -190,6 +190,46 @@ describe('mobile workout authorization — service integration', () => {
     expect(result.result.reasons.join(' ')).toContain('overlaps');
   });
 
+  it('requires post-ride Achilles recovery before accepting even a documented exception', async () => {
+    const w = workout(['gastrocnemius']);
+    scheduled(w);
+    const budget = ready(w);
+    budget.recoveryObservedAt = {
+      ...budget.recoveryObservedAt,
+      achilles: '2026-11-08T12:00:00.000Z',
+    };
+    ceilings.set(key(athlete, date), budget);
+    db.listEnduranceActivitiesForGuardrails.mockResolvedValue([{
+      id: 'ride', discipline: 'bike',
+      startAt: '2026-11-08T20:00:00.000Z', movingTimeSeconds: 900,
+    }]);
+    const denied = await assessWorkoutStart({
+      userId: athlete, workout: w, sessionId: 'session-1',
+      overrideReason: 'I want another session after my ride yesterday',
+    });
+    expect(denied.authorized).toBe(false);
+    expect(denied.result.overrideAllowed).toBe(false);
+    expect(denied.result.reasons.join(' ')).toContain('after the most recent');
+    expect(events.get(key(athlete, date))?.some((event) => event.kind === 'override')).toBe(false);
+  });
+
+  it('retains documented discretion after a verified later regional check', async () => {
+    const w = workout(['gastrocnemius']);
+    scheduled(w);
+    ceilings.set(key(athlete, date), ready(w));
+    db.listEnduranceActivitiesForGuardrails.mockResolvedValue([{
+      id: 'ride', discipline: 'bike',
+      startAt: '2026-11-08T20:00:00.000Z', movingTimeSeconds: 900,
+    }]);
+    const reviewed = await assessWorkoutStart({
+      userId: athlete, workout: w, sessionId: 'session-1',
+      overrideReason: 'I reviewed the post-ride Achilles response and am requesting an exception',
+    });
+    expect(reviewed.authorized).toBe(true);
+    expect(reviewed.result.decision).toBe('defer');
+    expect(events.get(key(athlete, date))?.some((event) => event.kind === 'override')).toBe(true);
+  });
+
   it('does not create or authorize a workout when the history read fails', async () => {
     scheduled();
     db.listWorkoutLedgerEntriesForGuardrails.mockRejectedValue(new Error('database unavailable'));
