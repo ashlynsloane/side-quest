@@ -13,8 +13,8 @@ export PATH="$tmp:$PATH"
 export SQ_TEST_CALLS="$tmp/calls"
 export STAGING_PROJECT_REF='aaaaaaaaaaaaaaaaaaaa'
 export PRODUCTION_PROJECT_REF='bbbbbbbbbbbbbbbbbbbb'
-export SUPABASE_ACCESS_TOKEN='fake-test-token'
-export SUPABASE_DB_PASSWORD='fake-test-password'
+export SUPABASE_ACCESS_TOKEN=x
+export SUPABASE_DB_PASSWORD=x
 : > "$SQ_TEST_CALLS"
 
 # Repeated production reference is refused without touching the CLI.
