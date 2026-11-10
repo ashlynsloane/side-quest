@@ -6,6 +6,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { localTrainingDate } from '@/services/training-addition-gate';
+import { cloudWorkoutLeasesEnabled } from '@/services/cloud-workout-coordination';
+import { readRemoteTrainingSnapshot, type RemoteTrainingSnapshot } from '@/services/server-training-ledger';
 import { loadDailyCeiling, loadTrainingEvents, recordObservedRecovery } from '@/services/training-guardrail-storage';
 import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
@@ -40,6 +42,9 @@ export default function DailyTrainingCeilingScreen() {
     buttonText: { textAlign: 'center', color: tokens.canvas, fontWeight: '800' },
   }), [tokens]);
   const [ceiling, setCeiling] = useState<DailyTrainingCeiling | null>(null);
+  const [remote, setRemote] = useState<RemoteTrainingSnapshot | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const synchronized = user?.mode === 'cloud' && cloudWorkoutLeasesEnabled();
   const [events, setEvents] = useState<TrainingEvent[]>([]);
   const [readiness, setReadiness] = useState<Partial<Record<TrainingRegion, RecoveryStatus>>>({});
   const [recheckedRegions, setRecheckedRegions] = useState<TrainingRegion[]>([]);
@@ -62,11 +67,32 @@ export default function DailyTrainingCeilingScreen() {
     return () => { mounted = false; };
   }, [user?.id, date]);
 
+  useEffect(() => {
+    if (!synchronized || !user?.id) {
+      setRemote(null);
+      setRemoteError(null);
+      return;
+    }
+    let live = true;
+    setRemote(null);
+    setRemoteError(null);
+    void readRemoteTrainingSnapshot(date).then((snapshot) => {
+      if (live) setRemote(snapshot);
+    }).catch((error) => {
+      if (live) setRemoteError(error instanceof Error ? error.message : String(error));
+    });
+    return () => { live = false; };
+  }, [synchronized, date, user?.id]);
+
   const urgeSummary = summarizeTrainingUrges(events);
   const plannedMinutes = ceiling?.planned.reduce((sum, item) => sum + (item.minutes ?? 0), 0) ?? 0;
-  const performedMinutes = events.filter((event) =>
+  const locallyPerformedMinutes = events.filter((event) =>
     (event.kind === 'completed' || event.kind === 'unplanned') && event.activity?.activity === 'strength'
   ).reduce((sum, event) => sum + (event.activity?.minutes ?? 0), 0);
+  const remotelyPerformedMinutes = remote?.exposures.filter((event) =>
+    event.trainingDate === date && event.activity === 'strength'
+  ).reduce((sum, event) => sum + event.minutes, 0);
+  const performedMinutes = synchronized ? remotelyPerformedMinutes : locallyPerformedMinutes;
 
   async function save() {
     if (!ceiling || !user?.id || saving || recheckedRegions.length === 0) return;
@@ -75,7 +101,9 @@ export default function DailyTrainingCeilingScreen() {
       const observed = Object.fromEntries(
         recheckedRegions.map((region) => [region, readiness[region]]),
       ) as Partial<Record<TrainingRegion, RecoveryStatus>>;
-      await recordObservedRecovery(user.id, date, observed);
+      await recordObservedRecovery(user.id, date, observed, {
+        syncCloud: synchronized,
+      });
       router.back();
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
@@ -89,8 +117,22 @@ export default function DailyTrainingCeilingScreen() {
       {loading ? <ActivityIndicator /> : ceiling ? <>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Today's strength budget</Text>
-          <Text style={styles.body}>{plannedMinutes} min prescribed · approximately {performedMinutes} min counted from completed workouts</Text>
-          <Text style={styles.body}>Budget remaining: up to {Math.max(0, plannedMinutes - performedMinutes)} min (estimated). This is a ceiling, not a recommendation to add work.</Text>
+          {synchronized ? <>
+            <Text style={styles.body}>Synchronized activity across devices: {remote
+              ? `${remotelyPerformedMinutes ?? 0} min reported today · ${remote.exposures.length} exposures in the last 48 hours`
+              : 'Awaiting verified server history'}</Text>
+            <Text style={styles.body}>{remote && remote.plan
+              ? `Server remaining allowance: up to ${Math.max(0, remote.plan.reduce((total, session) => total + session.minutes, 0) - (remotelyPerformedMinutes ?? 0))} min (subject to recovery and session limits)`
+              : 'No verified synchronized prescription: new cloud workouts are not authorized.'}</Text>
+            {remote?.recovery.map((item) =>
+              <Text key={item.region} style={styles.body}>
+                Cloud {item.region.replaceAll('_',' ')}: {item.status} · reviewed {new Date(item.observedAt).toLocaleString()}
+              </Text>)}
+            {remoteError ? <Text style={styles.body}>Cloud history unavailable: {remoteError}. Do not interpret this device's local budget as shared clearance.</Text> : null}
+          </> : <>
+            <Text style={styles.body}>{plannedMinutes} min prescribed · approximately {performedMinutes} min counted from completed workouts</Text>
+            <Text style={styles.body}>Budget remaining: up to {Math.max(0, plannedMinutes - (performedMinutes ?? 0))} min (estimated). This is a ceiling, not a recommendation to add work.</Text>
+          </>}
           {ceiling.planned.map((item, index) =>
             <Text style={styles.body} key={item.sessionId ?? index}>
               {item.activity} · {item.minutes ?? 0} minutes {item.sessionId ? '(planned session)' : ''}
