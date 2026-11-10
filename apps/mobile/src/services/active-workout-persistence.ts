@@ -79,7 +79,15 @@ export interface LiveWorkoutSessionSnapshot {
   planLink?: ActiveWorkoutPlanLink;
 }
 
-const LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
+// v1 was unscoped and could expose one athlete's paused session to another
+// athlete who signs in on the same device. Never auto-restore that key.
+const LEGACY_LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
+const LIVE_SESSION_KEY_PREFIX = 'sidequest.live-workout.session.v2.';
+
+function scopedSessionKey(athleteId: string): string {
+  if (!athleteId.trim()) throw new Error('An athlete ID is required for live workout storage');
+  return `${LIVE_SESSION_KEY_PREFIX}${encodeURIComponent(athleteId)}`;
+}
 
 type StorageLike = {
   getItem(key: string): string | null;
@@ -136,18 +144,32 @@ export function createInitialLiveWorkoutSession(
   };
 }
 
-export async function saveLiveWorkoutSession(snapshot: LiveWorkoutSessionSnapshot): Promise<void> {
-  getLocalStorage()?.setItem(LIVE_SESSION_KEY, JSON.stringify(snapshot));
+function requireLocalStorage(): StorageLike {
+  const store = getLocalStorage();
+  if (!store) throw new Error('Local workout checkpoint storage is unavailable');
+  return store;
 }
 
-export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapshot | null> {
-  const storage = getLocalStorage();
-  const serialized = storage?.getItem(LIVE_SESSION_KEY);
+export async function saveLiveWorkoutSession(
+  snapshot: LiveWorkoutSessionSnapshot,
+  athleteId: string,
+): Promise<void> {
+  const storage = requireLocalStorage();
+  const key = scopedSessionKey(athleteId);
+  storage.setItem(key, JSON.stringify(snapshot));
+}
+
+export async function loadLiveWorkoutSession(
+  athleteId: string,
+): Promise<LiveWorkoutSessionSnapshot | null> {
+  const storage = requireLocalStorage();
+  const key = scopedSessionKey(athleteId);
+  const serialized = storage.getItem(key);
   if (!serialized) return null;
   try {
     const parsed: unknown = JSON.parse(serialized);
     if (!isLiveWorkoutSession(parsed)) {
-      storage?.removeItem(LIVE_SESSION_KEY);
+      storage.removeItem(key);
       return null;
     }
     return {
@@ -157,11 +179,15 @@ export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapsh
       planLink: isActiveWorkoutPlanLink(parsed.planLink) ? parsed.planLink : undefined,
     };
   } catch {
-    storage?.removeItem(LIVE_SESSION_KEY);
+    storage.removeItem(key);
     return null;
   }
 }
 
-export async function clearLiveWorkoutSession(): Promise<void> {
-  getLocalStorage()?.removeItem(LIVE_SESSION_KEY);
+export async function clearLiveWorkoutSession(athleteId: string): Promise<void> {
+  const storage = requireLocalStorage();
+  storage.removeItem(scopedSessionKey(athleteId));
+  // One-way cleanup: do not read or migrate unscoped legacy sessions because
+  // ownership cannot be verified on a shared device.
+  storage.removeItem(LEGACY_LIVE_SESSION_KEY);
 }
