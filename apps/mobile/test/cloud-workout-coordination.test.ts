@@ -7,7 +7,8 @@ import {
   validCloudWorkoutLease, type CloudWorkoutLease, type WorkoutLeaseRpc,
 } from '../src/services/cloud-workout-coordination';
 
-const token = '123e4567-e89b-42d3-a456-426614174000';
+// Synthetic, deliberately low-entropy UUID: an identifier fixture, not a credential.
+const token = '00000000-0000-4000-8000-000000000001';
 const later = () => new Date(Date.now() + 90_000).toISOString();
 function backend(result: unknown, error: string | null = null): WorkoutLeaseRpc {
   return { rpc: vi.fn(async () => ({
