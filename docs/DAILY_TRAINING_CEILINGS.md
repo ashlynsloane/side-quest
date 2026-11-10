@@ -14,7 +14,7 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 6. A current `unable_to_train` check-in is a non-overridable pause, including if no daily budget exists.
 7. Completed solo and shared workouts are logged as completed exposures only **after** the existing training-history write succeeds. Saving failures do not silently mark a session completed.
 8. Before any new start, previously saved workouts are reconciled against the guardrail ledger; missing events are reconstructed with idempotent IDs.
-9. Imported endurance activity and completed strength workouts in a rolling 48-hour window are inspected for possible Achilles or upper-back loading overlap. Overlap triggers a conservative reassessment; no direct minute-for-minute equivalence between sports is assumed.
+9. Imported endurance activity and completed strength workouts in a rolling 48-hour window are inspected for possible Achilles or upper-back loading overlap. A check-in performed before an overlapping exposure does not qualify as post-exposure recovery evidence and cannot unlock a documented exception. Overlap triggers a conservative reassessment; no direct minute-for-minute equivalence between sports is assumed.
 10. After completion, recovery must be explicitly rechecked before its result can justify another exposure; the last check-in cannot predate the workout. A paused live workout cannot resume training across a calendar-day change or beyond an eight-hour authorization window; previously recorded work may be saved as partial. Calendar edits can narrow but not silently expand a budget.
 11. Edited and deleted workout records are reconciled through append-only retractions and revised completion events, preserving an auditable history.
 12. Post-workout urges can be recorded separately from completed activity, and the daily UI summarizes them without treating motivation as load.
@@ -51,6 +51,20 @@ Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `
 Bonus workouts after a recorded exposure must go through a revised prescription, including when the original daily plan is missing. Recorded activity is never inferred from an athlete's motivation or an unsaved recommendation.
 
 Keep this PR in draft until the above release blockers are addressed or consciously scoped.
+
+## CI and data-integrity verification
+
+The feature runs planner safety/regression tests, all-workspace TypeScript
+checks, real mobile authorization-service integration tests, athlete-scoped
+checkpoint restoration tests, and **real SQLite SQL/rollback tests**. Current
+feature contracts, all workspace tests, exercise/media validations, and
+runtime navigation checks also run as a separate job. See the integration
+test details in [the release QA matrix](TRAINING_GUARDRAILS_RELEASE_QA.md).
+
+Previously ambiguous exercise catalog identities were resolved by retaining
+the canonical barbell Romanian deadlift, barbell bench press, and cable chop
+definitions and removing redundant gym-expansion copies. Duplicate metadata
+could otherwise make the tissue-loading inference non-deterministic.
 
 ## Manual QA
 
