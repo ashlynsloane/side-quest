@@ -14,11 +14,11 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 6. A current `unable_to_train` check-in is a non-overridable pause, including if no daily budget exists.
 7. Completed solo and shared workouts are logged as completed exposures only **after** the existing training-history write succeeds. Saving failures do not silently mark a session completed.
 8. Before any new start, previously saved workouts are reconciled against the guardrail ledger; missing events are reconstructed with idempotent IDs.
-9. Imported same-day endurance training is inspected for possible Achilles or upper-back loading overlap. Overlap triggers a conservative reassessment; no direct minute-for-minute equivalence between sports is assumed.
-10. After completion, recovery must be explicitly rechecked before its result can justify another exposure; the last check-in cannot predate the workout. Calendar edits can narrow but not silently expand a budget.
+9. Imported endurance activity and completed strength workouts in a rolling 48-hour window are inspected for possible Achilles or upper-back loading overlap. Overlap triggers a conservative reassessment; no direct minute-for-minute equivalence between sports is assumed.
+10. After completion, recovery must be explicitly rechecked before its result can justify another exposure; the last check-in cannot predate the workout. A paused live workout cannot resume training across a calendar-day change or beyond an eight-hour authorization window; previously recorded work may be saved as partial. Calendar edits can narrow but not silently expand a budget.
 11. Edited and deleted workout records are reconciled through append-only retractions and revised completion events, preserving an auditable history.
 12. Post-workout urges can be recorded separately from completed activity, and the daily UI summarizes them without treating motivation as load.
-13. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Event IDs are idempotent.
+13. SQLite tables `daily_training_ceilings` and `training_guardrail_events` are scoped to the athlete and included in local data export/deletion. Live workout checkpoints now have athlete-scoped storage keys and reject malformed snapshots; legacy unscoped sessions are deliberately not auto-restored to avoid cross-account leakage. Event IDs are idempotent.
 
 ## Decision policy
 
@@ -40,13 +40,13 @@ Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `
 
 ## Release blockers / remaining risks
 
-- **External endurance activities:** imported run/bike/swim/HIIT sessions now trigger same-day tissue-overlap cautions, but are not converted to equivalent strength minutes or modeled with validated cumulative injury load. Walking without an imported session and missing data remain invisible. Cross-sport cumulative tissue exposure needs a dedicated model.
+- **External endurance activities:** imported run/bike/swim/HIIT sessions and saved strength sessions now trigger rolling 48-hour tissue-overlap cautions, but are not converted to equivalent strength minutes or modeled with validated cumulative injury load. Walking without an imported session and missing data remain invisible. Cross-sport cumulative tissue exposure needs a dedicated model.
 - **Cross-device synchronization** of guardrail ceilings/events is not implemented; the SQLite ledger is local. Do not advertise synchronized limits.
 - **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately. The start gate now reconciles saved workouts into missing events, but interruption during the active session, deleted-workout corrections, and legacy entries are now covered by planner unit tests; on-device database and offline recovery scenarios still require integration testing.
 - **Recovery evidence:** the timestamped regional check-in is self-reported and not clinician clearance. A stable symptom response does not guarantee a safe increase.
 - **Override workflow:** discretionary exceptions require a recorded reason, while mandatory recovery and prescribed loading constraints block workout starts. Exercise additions outside the app, imported activities, and every possible collaboration entry point need further audit. Consent prompts do not physically prevent athletes exercising.
 - **Human device QA:** verify preview, recovery modal, interruption/relaunch, early exit, repeated starts, logged exceptions, shared-room behavior and offline database failures on supported platforms.
-- **Reliability:** load event histories bounded by date; add integration tests for database migrations and cross-session / cross-device races.
+- **Reliability:** local persisted sessions are now athlete-scoped and expire after eight hours or a date change, but device QA must validate migrations, local-day rollover, interrupted writes and cross-session / cross-device races. The eight-hour expiry is a conservative product policy, not a clinical exercise threshold.
 
 Keep this PR in draft until the above release blockers are addressed or consciously scoped.
 
