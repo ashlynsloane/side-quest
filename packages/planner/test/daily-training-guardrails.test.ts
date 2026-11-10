@@ -47,4 +47,52 @@ describe('daily training ceiling', () => {
       { activity: 'strength', minutes: 35, regions: ['general', 'achilles'], scheduled: true }).decision).toBe('defer');
   });
 
+  it('subtracts already completed strength from the day budget', () => {
+    const history = [{
+      id: 'completed-1', kind: 'completed' as const, occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', minutes: 20, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 20, regions: ['general'], scheduled: true }, history).decision).toBe('modify');
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 15, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
+  });
+  it('does not count prescription or assessment entries as completed load', () => {
+    const history = [{
+      id: 'planned-1', kind: 'prescribed' as const, occurredAt: '2026-11-09T15:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', minutes: 35, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 35, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
+  });
+  it('does not carry yesterday’s completed load into today', () => {
+    const history = [{
+      id: 'yesterday', kind: 'completed' as const, occurredAt: '2026-11-08T21:00:00Z',
+      trainingDate: '2026-11-08',
+      activity: { activity: 'strength', minutes: 35, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 35, regions: ['general'], scheduled: true }, history).decision).toBe('allow');
+  });
+  it('rejects replaying an already exhausted prescription', () => {
+    const history = [{
+      id: 'completed-1', kind: 'completed' as const, occurredAt: '2026-11-09T16:00:00Z',
+      trainingDate: '2026-11-09',
+      activity: { activity: 'strength', minutes: 35, regions: ['general' as const] },
+    }];
+    expect(evaluateTrainingAddition(baseline,
+      { activity: 'strength', minutes: 1, regions: ['general'], scheduled: true }, history).decision).toBe('defer');
+  });
+  it('requires the exact planned session identity when present', () => {
+    const identified = { ...baseline, planned: [
+      { activity: 'strength', sessionId: 'session-a', minutes: 35, regions: ['general' as const] },
+    ] };
+    expect(evaluateTrainingAddition(identified,
+      { activity: 'strength', sessionId: 'session-b', minutes: 20, regions: ['general'], scheduled: true }).decision).toBe('defer');
+    expect(evaluateTrainingAddition(identified,
+      { activity: 'strength', sessionId: 'session-a', minutes: 20, regions: ['general'], scheduled: true }).decision).toBe('allow');
+  });
+
 });
