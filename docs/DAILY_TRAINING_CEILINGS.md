@@ -9,7 +9,7 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 1. A planned session comes from the saved training block, not a caller-provided scheduled flag.
 2. `assessWorkoutStart` builds or loads a dated ceiling and evaluates the workout against current readiness, planned session identity, affected regions, and recorded load.
 3. The shared `WorkoutProvider.beginWorkout` gateway refuses to create a live workout session until the assessment authorizes it. Quick-workout and favorites entry points route through guarded preview.
-4. Non-emergency `defer` and `modify` decisions can be overridden by an explicit athlete-written reason; `stop` decisions cannot. Evaluations and overrides are written separately.
+4. Only discretionary additions can use a documented written exception. Worsening symptoms, missing or stale recovery evidence, mismatched loading regions, and exceeded prescribed ceilings require reassessment or re-planning; `stop` decisions cannot be overridden. Evaluations and permitted exceptions are recorded separately.
 5. The athlete can report **overall, Achilles, and upper-back** recovery separately. A global normal check-in does not imply those tissue-specific recoveries are stable.
 6. A current `unable_to_train` check-in is a non-overridable pause, including if no daily budget exists.
 7. Completed solo and shared workouts are logged as completed exposures only **after** the existing training-history write succeeds. Saving failures do not silently mark a session completed.
@@ -25,11 +25,11 @@ Side Quest must reward adherence to an appropriate prescription rather than extr
 | Input state | Decision |
 | --- | --- |
 | Invalid activity or red flag; training paused | stop |
-| Worsened / missing affected-region recovery, or a stale pre-workout check-in | defer |
+| Worsened / missing affected-region recovery, or a stale pre-workout check-in | defer; fresh assessment required |
 | Unplanned activity under strict ceiling | defer |
 | Session ID absent or different from saved plan | defer |
-| Completed dose already exhausts budget | defer |
-| Proposed dose exceeds remaining budget | modify |
+| Completed dose already exhausts budget | defer; no text-only exception |
+| Proposed dose exceeds remaining budget | modify; reduce or re-plan before starting |
 | Planned, unconsumed, within budget, stable regions | allow |
 
 This is decision support, not automated medical clearance. Regions are conservatively inferred from workout targets **and individual exercises' muscle, joint and movement-pattern metadata**. This is not a validated injury-load or tissue stress model.
@@ -44,7 +44,7 @@ Run `pnpm install --frozen-lockfile`, `pnpm --dir packages/planner typecheck`, `
 - **Cross-device synchronization** of guardrail ceilings/events is not implemented; the SQLite ledger is local. Do not advertise synchronized limits.
 - **Atomicity and reconciliation:** workout history and guardrail event writes currently occur separately. The start gate now reconciles saved workouts into missing events, but interruption during the active session, deleted-workout corrections, and legacy entries are now covered by planner unit tests; on-device database and offline recovery scenarios still require integration testing.
 - **Recovery evidence:** the timestamped regional check-in is self-reported and not clinician clearance. A stable symptom response does not guarantee a safe increase.
-- **Override workflow:** exercise additions outside the app, imported activities, and every possible collaboration entry point need further audit. Consent prompts do not physically prevent athletes exercising.
+- **Override workflow:** discretionary exceptions require a recorded reason, while mandatory recovery and prescribed loading constraints block workout starts. Exercise additions outside the app, imported activities, and every possible collaboration entry point need further audit. Consent prompts do not physically prevent athletes exercising.
 - **Human device QA:** verify preview, recovery modal, interruption/relaunch, early exit, repeated starts, logged exceptions, shared-room behavior and offline database failures on supported platforms.
 - **Reliability:** load event histories bounded by date; add integration tests for database migrations and cross-session / cross-device races.
 
