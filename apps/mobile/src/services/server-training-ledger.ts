@@ -258,27 +258,95 @@ export async function synchronizeRecordedTrainingExposure(
  * Only call this from a NEW explicit user review, not a delayed import of an
  * old "stable" observation that could falsely clear a newer loading event.
  */
+type PendingRecovery = {
+  eventId: string;
+  values: Partial<Record<TrainingRegion, RecoveryStatus>>;
+};
+
+function pendingRecoveryKey(userId: string, date: string): string {
+  return `sidequest.pending-cloud-recovery.v1:${encodeURIComponent(userId)}:${date}`;
+}
+
+function recoveryStorage(): {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+} {
+  const storage = (globalThis as typeof globalThis & { localStorage?: Storage }).localStorage;
+  if (!storage) throw new Error('Durable recovery sync storage is unavailable.');
+  return storage;
+}
+
+/** A failed network acknowledgement must retry the SAME recovery event ID,
+ * preserving the server's original observation timestamp.
+ */
 export async function publishRemoteRecovery(
   userId: string, date: string,
   observations: Partial<Record<TrainingRegion, RecoveryStatus>>,
   rpc?: Rpc,
-): Promise<void> {
+): Promise<string> {
   await assertAuthenticatedAthlete(userId, rpc);
   if (!validDay(date)) throw new Error('Invalid remote recovery date.');
   const regions: TrainingRegion[] = ['general','achilles','upper_back'];
   const values = Object.fromEntries(regions.filter((region) => observations[region] !== undefined)
-    .map((region) => [region, observations[region]]));
+    .map((region) => [region, observations[region]])) as PendingRecovery['values'];
   if (!Object.keys(values).length
       || Object.values(values).some((value) =>
         !['stable','uncertain','worse','red_flag'].includes(String(value)))) {
     throw new Error('An explicit regional recovery report is required.');
   }
-  const id = `recovery:${date}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,10)}`;
+  const storage = recoveryStorage();
+  const key = pendingRecoveryKey(userId, date);
+  let pending: PendingRecovery;
+  const previous = storage.getItem(key);
+  if (previous) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(previous); } catch {
+      throw new Error('Pending recovery upload is unreadable; review before retrying.');
+    }
+    const candidate = parsed as PendingRecovery | null;
+    if (!candidate || typeof candidate.eventId !== 'string'
+        || !candidate.eventId.startsWith(`recovery:${date}:`)
+        || !candidate.values || typeof candidate.values !== 'object') {
+      throw new Error('Pending recovery upload is invalid; review before retrying.');
+    }
+    if (JSON.stringify(candidate.values) !== JSON.stringify(values)) {
+      throw new Error('Complete the pending recovery synchronization before changing symptoms.');
+    }
+    pending = candidate;
+  } else {
+    pending = {
+      eventId: `recovery:${date}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
+      values,
+    };
+    // Write-ahead journal: a crash after server acceptance must not generate
+    // a fresh "stable" timestamp for an older observation on retry.
+    storage.setItem(key, JSON.stringify(pending));
+  }
   const result = await call(backend(rpc), 'publish_training_remote_recovery', {
-    p_event_id: id, p_training_date: date, p_observations: values,
+    p_event_id: pending.eventId, p_training_date: date, p_observations: values,
   });
   if (result !== true) throw new Error('Cloud regional recovery was not confirmed.');
   await assertAuthenticatedAthlete(userId, rpc);
+  return pending.eventId;
+}
+
+/** Acknowledge only after the matching local observation is also durable. */
+export function acknowledgeRemoteRecovery(
+  userId: string, date: string, eventId: string,
+): void {
+  const storage = recoveryStorage();
+  const key = pendingRecoveryKey(userId, date);
+  const raw = storage.getItem(key);
+  if (!raw) throw new Error('Recovery sync acknowledgement has no pending event.');
+  let pending: PendingRecovery;
+  try { pending = JSON.parse(raw) as PendingRecovery; } catch {
+    throw new Error('Recovery sync acknowledgement is unreadable.');
+  }
+  if (pending.eventId !== eventId) {
+    throw new Error('Recovery sync acknowledgement does not match the pending event.');
+  }
+  storage.removeItem(key);
 }
 
 export async function readRemoteTrainingSnapshot(
