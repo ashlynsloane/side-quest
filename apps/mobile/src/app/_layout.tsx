@@ -5,7 +5,7 @@ import { useEffect, type ReactNode } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthProvider, useAuth } from '@/state/auth-context';
 import { ThemeProvider, useTheme } from '@/state/theme-context';
-import { WorkoutProvider } from '@/state/workout-context';
+import { WorkoutProvider, useWorkoutContext } from '@/state/workout-context';
 import { OnboardingProvider, useOnboarding } from '@/state/onboarding-context';
 import { refreshTrainingIntegrations } from '@/services/integration-runtime';
 import { V23BrandHeader } from '@/components/v23-ui';
@@ -62,6 +62,7 @@ function AuthGate() {
   const { user, loading, cloudEnabled } = useAuth();
   const { palette } = useTheme();
   const { loading: onboardingLoading, needsOnboarding, state: onboardingState } = useOnboarding();
+  const { activeWorkout, workoutSessionReady } = useWorkoutContext();
   const router = useRouter();
   const segments = useSegments() as string[];
   useEffect(() => {
@@ -76,9 +77,15 @@ function AuthGate() {
           && onboardingState.privacyModelAcknowledged,
       ),
       route: segments[0],
+      workoutSessionReady,
+      hasActiveWorkout: Boolean(activeWorkout),
     });
     if (redirect) router.replace(redirect as Href);
-  }, [user, loading, onboardingLoading, needsOnboarding, segments, router]);
+  }, [user, loading, onboardingLoading, needsOnboarding,
+    onboardingState.firstWeekSetupStartedAt,
+    onboardingState.strengthModelAcknowledged,
+    onboardingState.privacyModelAcknowledged,
+    workoutSessionReady, activeWorkout, segments, router]);
   useEffect(() => {
     if (loading || !user) return;
     const refresh = () => { void refreshTrainingIntegrations({ cloudEnabled: cloudEnabled && user.mode === 'cloud', userId: user.id }); };
