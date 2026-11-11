@@ -17,7 +17,7 @@ function diagnose(root: string) {
   const run = spawnSync(process.execPath, [script, root], { encoding: 'utf8' });
   const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
     allPassed: boolean;
-    stages: Array<{ stage: string; status: string; diagnosis: string | null }>;
+    stages: Array<{ stage: string; status: string; diagnosis: string | null; failure: string | null }>;
   };
   return { run, report };
 }
