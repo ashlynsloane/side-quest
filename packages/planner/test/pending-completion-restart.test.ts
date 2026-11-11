@@ -86,7 +86,8 @@ describe('durable pending partial-workout completion contract', () => {
       { ...workout, id: 'second-workout' },
       '2026-10-20T11:00:00.000Z',
     );
-    await saveLiveWorkoutSession(b);
+    await expect(saveLiveWorkoutSession(b))
+      .rejects.toThrow(/Conflicting pending workout completion/);
     expect((await loadLiveWorkoutSession())?.workout.id).toBe(workout.id);
     expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
     await expect(saveLiveWorkoutSession({
