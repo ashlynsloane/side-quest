@@ -21,12 +21,12 @@ experience must demonstrate these behaviors, not just unit tests.
 
 | Gate | Status | Verified evidence / required proof |
 | --- | --- | --- |
-| Planner and app typechecks, complete deterministic regression suite, real disk-backed SQLite and iOS JS bundle | **PASS (source)** | SHA `41bcfa45`, [CI 42961448016](https://github.com/ashlynsloane/side-quest/actions/runs/42961448016): 668/668 tests, 110 files, all typechecks and export green |
+| Planner and app typechecks, complete deterministic regression suite, real disk-backed SQLite and iOS JS bundle | **PASS (source)** | SHA `6cf98981`, [CI 43062385131](https://github.com/ashlynsloane/side-quest/actions/runs/43062385131): 669/669 tests, 110 files, all typechecks and export green |
 | Build and launch isolated Release iOS simulator app | **PASS (native)** | [Native build 42959140988](https://github.com/ashlynsloane/side-quest/actions/runs/42959140988); verified app artifact `sidequest-synthetic-ios-app`; synthetic identity only |
 | iOS create profile and first-week onboarding | **PASS (native)** | Native JUnit stages `profile`, `onboarding` passed in run 42959140988 |
 | iOS log completed 75-minute bike | **PASS (native)** | `ride` native JUnit passed in run 42959140988 |
 | Cold restart keeps that actual 75-minute bike in Training History | **PASS (native)** | [UI-only run 43057598937](https://github.com/ashlynsloane/side-quest/actions/runs/43057598937) executed and passed the real cold-restart/history/detail check against a verified source-matched Release app |
-| Real A → B → A account-history isolation | **FAILED: NAVIGATION PRECONDITION (native)** | [UI-only run 43057598937](https://github.com/ashlynsloane/side-quest/actions/runs/43057598937): first 4 stages PASS; isolation expected nonexistent “Go back” on Today. Actual screenshot shows Profile tab visible. QA now uses tab ID, rerun pending. No A→B→A data claim yet |
+| Real A → B → A account-history isolation | **FAILED: NAVIGATION PRECONDITION (native); RETEST RUNNING** | [UI-only run 43057598937](https://github.com/ashlynsloane/side-quest/actions/runs/43057598937): first 4 stages PASS; isolation expected nonexistent “Go back” on Today. Native screenshot shows Profile tab available. QA now uses stable Profile tab ID; [retest 43062375569](https://github.com/ashlynsloane/side-quest/actions/runs/43062375569) running at snapshot. No A→B→A data claim yet |
 | Interrupted strength workout, process restart, resume and partial-completion history | **BLOCKED/UNVERIFIED (native)** | Sixth staged Maestro journey. Source-level and SQLite tests exist; no successful native end-to-end evidence yet |
 | Profile switch *during* first-week write/generation | **UNVERIFIED (native)** | Source/SQLite fence tests only; distinct in-flight native switch test required |
 | Crash *during* pending completion / SQLite commit | **UNVERIFIED (native)** | Fail-closed immutable journal and idempotency tests exist; force-terminate at the actual injection point required |
@@ -60,5 +60,4 @@ The screenshot confirms all tabs including Profile were available. The
 isolation and strength scripts now use destination tab IDs rather than
 assuming router.back() history. **This correction is pending native rerun.**
 
-Next: inspect the run's stage evidence and either advance the gate or fix
-the first real failure. Keep the table synchronized with verified outputs.
+Next: inspect [native run 43062375569](https://github.com/ashlynsloane/side-quest/actions/runs/43062375569) stage evidence after completion. Do not claim A→B→A or strength completion until the respective executed JUnit results PASS.
