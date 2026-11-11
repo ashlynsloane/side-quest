@@ -22,7 +22,7 @@ function syntheticEntry(override: Partial<WorkoutLedgerEntry> = {}): WorkoutLedg
       totalWorkSeconds: 2400,
       stations: [],
       requiredEquipment: [],
-    } as WorkoutLedgerEntry['workout'],
+    } as unknown as NonNullable<WorkoutLedgerEntry['workout']>,
     exercises: [],
     stationRounds: {},
     relationToPlan: 'unrelated',
