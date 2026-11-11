@@ -196,37 +196,34 @@ export async function saveLiveWorkoutSession(
   if (!key) throw new Error('Cannot save an unowned live workout.');
   const oldValue = storage.getItem(key);
   if (oldValue) {
+    let previous: unknown;
     try {
-      const previous: unknown = JSON.parse(oldValue);
-      if (isLiveWorkoutSession(previous) && previous.pendingCompletion) {
-        // The journal is owned by a completion that has not been acknowledged
-        // as fully committed. Even another workout cannot overwrite it.
-        const sameSession = previous.workout.id === snapshot.workout.id
-          && previous.startedAt === snapshot.startedAt;
-        if (!snapshot.pendingCompletion) {
-          // Ignore late timer/background snapshots for the same session,
-          // but reject new-workout replacement explicitly. It must not
-          // falsely appear to have saved when the old journal remains.
-          if (!sameSession) {
-            throw new Error('Conflicting pending workout completion; save the original dose before replacement.');
-          }
-          return;
+      previous = JSON.parse(oldValue);
+    } catch {
+      // Never silently overwrite a malformed historical recovery record.
+      throw new Error('Existing workout checkpoint is unreadable. Its data was preserved.');
+    }
+    if (!isLiveWorkoutSession(previous)) {
+      throw new Error('Existing workout checkpoint is unverified. Its data was preserved.');
+    }
+    if (previous.pendingCompletion) {
+      // A pending dose owns this per-athlete slot until its canonical ledger
+      // write succeeds. A late timer write cannot turn 29% back into 100%.
+      const sameSession = previous.workout.id === snapshot.workout.id
+        && previous.startedAt === snapshot.startedAt;
+      if (!snapshot.pendingCompletion) {
+        if (!sameSession) {
+          throw new Error('Conflicting pending workout completion; save the original dose before replacement.');
         }
-        if (!sameSession
-          || previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
-          || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
-          throw new Error('Conflicting pending workout completion; original dose retained.');
-        }
-        // The complete original set log and all recovery fields are immutable
-        // while the canonical completion is pending. Retrying an identical
-        // journal is a no-op rather than a destructive second write.
         return;
       }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Conflicting pending workout completion')) {
-        throw error;
+      if (!sameSession
+        || previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
+        || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
+        throw new Error('Conflicting pending workout completion; original dose retained.');
       }
-      // An invalid previous checkpoint is not evidence of a valid pending dose.
+      // Idempotent retry of the exact same immutable journal.
+      return;
     }
   }
   storage.setItem(key, JSON.stringify(snapshot));
