@@ -21,7 +21,7 @@ experience must demonstrate these behaviors, not just unit tests.
 
 | Gate | Status | Verified evidence / required proof |
 | --- | --- | --- |
-| Planner and app typechecks, complete deterministic regression suite, real disk-backed SQLite and iOS JS bundle | **PASS (source)** | SHA `cf08c7cb`, [CI 43094606055](https://github.com/ashlynsloane/side-quest/actions/runs/43094606055): 672/672 tests, 111 files, all typechecks and export green |
+| Planner and app typechecks, complete deterministic regression suite, real disk-backed SQLite and iOS JS bundle | **PASS (source)** | SHA `17366e38`, [CI 43108986534](https://github.com/ashlynsloane/side-quest/actions/runs/43108986534): 675/675 tests, 111 files, all typechecks and export green |
 | Build and launch isolated Release iOS simulator app | **PASS (native)** | [Native build 42959140988](https://github.com/ashlynsloane/side-quest/actions/runs/42959140988); verified app artifact `sidequest-synthetic-ios-app`; synthetic identity only |
 | iOS create profile and first-week onboarding | **PASS (native)** | Native JUnit stages `profile`, `onboarding` passed in run 42959140988 |
 | iOS log completed 75-minute bike | **PASS (native)** | `ride` native JUnit passed in run 42959140988 |
@@ -145,3 +145,10 @@ stages. **A focused PASS never qualifies the full milestone release gate.**
 Artifact downloads are retried up to 4 times on transient GitHub failures;
 matching native source fingerprint is still mandatory. Executed native
 results pending.
+
+### Focused native verification — CI evidence, November 11
+
+- The focused two-job [simulator run 43108702041](https://github.com/ashlynsloane/side-quest/actions/runs/43108702041) launched a **strength** job and an **isolation** job in separate simulator environments. Both had reached simulator/app setup; final native JUnit status was **pending** at this snapshot. This proves orchestration started, not that either journey passed.
+- The focused QA source initially failed one outdated assertion about the legacy `99=blocked` text. The contract now requires the new explicit `99=not run/blocked` status. No iOS binary sources changed.
+- Exact-head [CI 43108986534](https://github.com/ashlynsloane/side-quest/actions/runs/43108986534), SHA `17366e38`, **SUCCESS**: 675/675 regression tests across 111 files, including the newly added scoped native-evidence policy tests, typechecks, mobile SQLite acceptance, and iOS JavaScript export.
+- Full six-stage integration remains a required separate gate and has **not** been qualified by focused-test source code or queued jobs.
