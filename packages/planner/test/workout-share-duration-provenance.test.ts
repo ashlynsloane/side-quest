@@ -68,6 +68,46 @@ describe('historical workout duration provenance', () => {
     expect(summary.durationBasis).toBe('planned_equivalent');
   });
 
+  it('does not share unlogged prescriptions as observed trained muscles or exercises', () => {
+    const exercises = [{
+      id: 'prescribed-squat',
+      exerciseId: 'squat',
+      name: 'Prescribed squat',
+      sets: [],
+      bodyRegions: [{ region: 'quadriceps', role: 'primary', load: 0.9 }],
+      movementPatterns: ['squat'],
+    }] as unknown as WorkoutLedgerEntry['exercises'];
+    const summary = buildLedgerWorkoutSummary(syntheticEntry({ exercises }));
+    expect(summary.topRegions).toEqual([]);
+    expect(summary.categories).toEqual([]);
+    expect(summary.exercises).toEqual([]);
+    const share = workoutShareMessage(summary, {
+      ...DEFAULT_WORKOUT_SHARE_OPTIONS,
+      includeExerciseList: true,
+    });
+    expect(share).not.toContain('Prescribed squat');
+    expect(share).not.toContain('Areas trained');
+  });
+
+  it('shares an exercise only after an actual completed set was logged', () => {
+    const exercises = [{
+      id: 'logged-squat',
+      exerciseId: 'squat',
+      name: 'Logged squat',
+      sets: [{ id: 'set-1', reps: 10, completed: true }],
+      bodyRegions: [{ region: 'quadriceps', role: 'primary', load: 0.9 }],
+      movementPatterns: ['squat'],
+    }] as unknown as WorkoutLedgerEntry['exercises'];
+    const summary = buildLedgerWorkoutSummary(syntheticEntry({ exercises }));
+    expect(summary.topRegions).toContain('quadriceps');
+    expect(summary.exercises.map((item) => item.name)).toEqual(['Logged squat']);
+    const share = workoutShareMessage(summary, {
+      ...DEFAULT_WORKOUT_SHARE_OPTIONS,
+      includeExerciseList: true,
+    });
+    expect(share).toContain('Logged squat');
+  });
+
   it('supports legacy explicitly measured summaries without an estimate label', () => {
     const summary = buildLedgerWorkoutSummary(syntheticEntry());
     summary.durationMinutes = 23;
