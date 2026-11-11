@@ -135,6 +135,8 @@ describe('native synthetic UI automation contract', () => {
     const workflow = source('.github/workflows/native-ios-ui-only.yml');
     const fingerprintScript = source('scripts/qa/native-source-fingerprint.mjs');
     expect(workflow).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).not.toMatch(/^  push:/m);
     expect(workflow).toContain('refusing to test an old binary');
     expect(workflow).toContain('QA_BUNDLE_ID: com.sidequest.synthetic.qa');
     expect(workflow).toContain('actions: read');
