@@ -260,6 +260,17 @@ describe('native synthetic UI automation contract', () => {
     expect(ledger).toContain('completionFraction < 1 ? [] : [{');
   });
 
+  it('navigates cross-athlete native journeys through stable tabs, not back-stack assumptions', () => {
+    const isolation = source('e2e/maestro/synthetic-athlete-isolation-steps.yaml');
+    const strength = source('e2e/maestro/synthetic-strength-restart-steps.yaml');
+    expect(isolation).not.toContain('- tapOn: "Go back"\n- tapOn:\n    id: "sidequest-qa-profile-tab"');
+    const first = isolation.indexOf('- tapOn:');
+    expect(isolation.slice(first, first + 75)).toContain('sidequest-qa-profile-tab');
+    expect(strength).toContain('id: "sidequest-qa-train-tab"');
+    expect(strength.split('---')[1]?.split('id: "sidequest-qa-train-tab"')[0])
+      .not.toContain('tapOn: "Go back"');
+  });
+
   it('provides an actual Today/Train workout resume affordance after force-quit', () => {
     const today = source('apps/mobile/src/app/(tabs)/index.tsx');
     const train = source('apps/mobile/src/app/(tabs)/train.tsx');

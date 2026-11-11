@@ -123,3 +123,15 @@ partial completion. It does **not** inject a crash between writing an
 immutable pending-completion journal and committing SQLite; that distinct
 release gate remains OPEN. All six native stages must pass together before
 claiming native acceptance.
+
+## Native isolation precondition, November 11 (run 43057598937)
+
+Actual source-matched Release iOS results: profile PASS, onboarding PASS,
+75-minute bike PASS, cold restart and persisted history PASS. Isolation
+FAILED at its first command because its hardcoded `Go back` did not exist;
+the preceding stage had finished on Today (confirmed in iOS screenshot and
+accessibility hierarchy). **No A/B history switch was tested.** Both the
+isolation and strength stage now start by tapping stable destination tab IDs,
+independent of any accidental router-stack state. This change requires a
+new native UI-only execution. Do not classify the previous isolation as a
+profile-storage defect.

@@ -5,8 +5,8 @@
 appId: com.sidequest.synthetic.qa
 ---
 - launchApp
-# Previous stage ended on A's Training history.
-- tapOn: "Go back"
+# Do not depend on the native back stack after the account-switch stage.
+# Every iOS journey uses the stable destination tab as its precondition.
 - extendedWaitUntil:
     visible:
       id: "sidequest-qa-train-tab"
