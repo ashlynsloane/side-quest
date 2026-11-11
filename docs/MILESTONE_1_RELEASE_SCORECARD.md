@@ -73,3 +73,21 @@ first, then selects the native Profile tab. At stage exit, it now returns
 from A's Activity detail through History to the tab shell before strength
 acceptance. This is **partial B-isolation evidence**, not yet a complete
 A→B→A PASS. A's restored history and strength recovery remain unverified.
+
+## Third native acceptance attempt — rerun 43076034600
+
+Native evidence from completed [run 43062375569](https://github.com/ashlynsloane/side-quest/actions/runs/43062375569):
+profile, onboarding, 75-minute ride and cold restart each **PASS**. On the
+fifth journey, athlete B was created and onboarded, and B's History showed
+**zero records**. The native screenshot at the failure confirms the app was
+still on B's full-screen History route, which hides the bottom tabs.
+The test incorrectly asked for `sidequest-qa-profile-tab` without leaving
+History. This is a **navigation-only failure**, not evidence of data leakage.
+
+Commit `2fcd8913` adds the actual `Go back` transition before switching
+B→A and exits A's History to the tab shell before strength testing.
+The source-matched six-stage [native UI-only rerun 43076034600](https://github.com/ashlynsloane/side-quest/actions/runs/43076034600)
+was **QUEUED at this snapshot**, not a native pass. Exact-head
+[automated acceptance 43076047266](https://github.com/ashlynsloane/side-quest/actions/runs/43076047266)
+completed **SUCCESS**, preserving 110 passing regression test files and
+planner/mobile typecheck and iOS JS export.
