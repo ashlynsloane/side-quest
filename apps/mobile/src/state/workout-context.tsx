@@ -12,6 +12,7 @@ import {
 
 import { useAuth } from '@/state/auth-context';
 import {
+  assertCanStartLiveWorkout,
   clearLiveWorkoutSession,
   createInitialLiveWorkoutSession,
   loadLiveWorkoutSession,
@@ -141,6 +142,9 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
     beginWorkout(workout) {
+      // Synchronous fail-closed check runs before any in-memory context
+      // replacement. An unfinished prior completion must remain recoverable.
+      assertCanStartLiveWorkout(user?.id ?? null);
       const planLink = buildPlanLink(plannedPreviewSource);
       const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
       setActiveWorkout(workout);
