@@ -232,6 +232,70 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await recovered.loadLiveWorkoutSession()).toBeNull();
   });
 
+  it('keeps A pending partial dose and B live workout separate across athlete switches and cold reload', async () => {
+    const mobileCheckpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    await service.saveTrainingBlock(weeklyBlock());
+    const sessionA = mobileCheckpoint.createInitialLiveWorkoutSession(workout, startedAt, {
+      sessionId: 'synthetic-planned-session', sessionDate: '2026-10-20',
+      sessionTitle: 'Athlete A planned session', modifiedFromPlan: false,
+    });
+    await mobileCheckpoint.saveLiveWorkoutSession({
+      ...sessionA, phase: 'rest', running: false,
+      pendingCompletion: { completionFraction: 0.29, completedAt },
+    }, 'synthetic-athlete-one');
+
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect(await mobileCheckpoint.loadLiveWorkoutSession()).toBeNull();
+    const bWorkout = { ...workout, id: 'synthetic-strength-b', name: 'Athlete B session' };
+    const bStart = '2026-10-22T10:00:00.000Z';
+    const sessionB = mobileCheckpoint.createInitialLiveWorkoutSession(bWorkout, bStart);
+    await mobileCheckpoint.saveLiveWorkoutSession({
+      ...sessionB, phase: 'rest', running: false, remainingSeconds: 22,
+    }, 'synthetic-athlete-two');
+    expect((await mobileCheckpoint.loadLiveWorkoutSession())?.workout.id).toBe(bWorkout.id);
+    expect((await mobileCheckpoint.loadLiveWorkoutSession())?.pendingCompletion).toBeUndefined();
+    expect(await ledger()).toHaveLength(0);
+
+    // Simulate actual app-process module reinitialization, retaining device
+    // localStorage and the on-disk SQLite files for both athletes.
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-two');
+    const recovered = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const bRestored = await recovered.loadLiveWorkoutSession();
+    expect(bRestored?.workout.id).toBe(bWorkout.id);
+    expect(bRestored?.remainingSeconds).toBe(22);
+
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const aRestored = await recovered.loadLiveWorkoutSession();
+    expect(aRestored?.workout.id).toBe(workout.id);
+    expect(aRestored?.startedAt).toBe(startedAt);
+    expect(aRestored?.planLink?.sessionId).toBe('synthetic-planned-session');
+    expect(aRestored?.pendingCompletion).toEqual({
+      completionFraction: 0.29, completedAt,
+    });
+    expect(await ledger()).toHaveLength(0);
+    await save(aRestored!.pendingCompletion!.completionFraction);
+    await save(1); // A second attempt must not turn the original 29% into 100%.
+    expect((await ledger()).map((entry) => entry.completionFraction)).toEqual([0.29]);
+    await recovered.clearLiveWorkoutSession('synthetic-athlete-one');
+    expect(await recovered.loadLiveWorkoutSession()).toBeNull();
+
+    // B retains only B's original live work/rest checkpoint, even after A
+    // finished. A sign-out removes only the active-owner pointer, not B data.
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect((await recovered.loadLiveWorkoutSession())?.workout.id).toBe(bWorkout.id);
+    expect(await ledger()).toHaveLength(0);
+    globalThis.localStorage.removeItem('sidequest.active-workout.profile-id');
+    expect(await recovered.loadLiveWorkoutSession()).toBeNull();
+    expect(await recovered.loadLiveWorkoutSession(null)).toBeNull();
+    await expect(recovered.saveLiveWorkoutSession(sessionB, null))
+      .rejects.toThrow('Cannot save an unowned live workout');
+    expect((await recovered.loadLiveWorkoutSession('synthetic-athlete-two'))?.workout.id)
+      .toBe(bWorkout.id);
+  });
+
   it('resumes first-run after goal succeeded but training block failed on real SQLite', async () => {
     const onboarding = await import('../../../apps/mobile/src/services/onboarding');
     const userId = 'synthetic-athlete-one';
