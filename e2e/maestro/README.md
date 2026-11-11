@@ -58,3 +58,29 @@ The shared runner now exports `MAESTRO_DRIVER_STARTUP_TIMEOUT=360000` (milliseco
 Run through `.github/workflows/native-ios-simulator-smoke.yml`. Inspect GitHub Actions artifacts, including the `maestro-evidence/` directory, for any failure. The planner/SQLite suite is a separate gate; both must pass before promoting PR #12.
 
 Maestro CLI documentation: https://docs.maestro.dev/maestro-cli
+
+## November 10 — native restart failure analyzed from artifacts
+
+The [isolated iOS run 42921655590](https://github.com/ashlynsloane/side-quest/actions/runs/42921655590)
+**passed** profile entry, complete first-week onboarding, and recording a
+75-minute bike activity. It **failed** at the History navigation assertion
+after cold relaunch.
+
+The archived `restart/...` screenshot, UI hierarchy, and `commands.json`
+show that Maestro found "Inspect full training history" at
+`[38,828][224,861]` but the fixed bottom tabs occupied y=807–864.
+The test pressed behind the tab bar, stayed in Week, and timed out waiting
+for "Training history". **That test did not reach the persisted records; it
+does not establish whether the ride survived the relaunch.**
+
+The revised Week screen elevates the History action and exposes
+`sidequest-qa-open-training-history`. The revised Maestro restart stage
+uses `centerElement: true`, records a pre-tap screenshot, taps by ID,
+requires the new History route and then checks the completed bike and
+original 75-minute dose. The diagnostic tool now flags the old occlusion
+using captured accessibility bounds, without claiming data loss.
+
+**Not yet native-verified:** the correction requires a new four-stage
+simulator run on the matching app source/flow. Planner and SQLite CI green
+is a separate gate. Tests must be reported as PASS/FAIL/BLOCKED at their
+actual tested SHAs.
