@@ -24,6 +24,8 @@ export type CompletedWorkoutSummary = {
   name: string;
   completedAt: string;
   durationMinutes: number;
+  /** Measured time must never be inferred from wall-clock start/end timestamps. */
+  durationBasis?: 'measured' | 'planned_equivalent' | 'unknown';
   stationCount: number;
   totalRounds: number;
   equipment: string[];
@@ -77,6 +79,9 @@ export function buildCompletedWorkoutSummary(input: {
     name: workout.name,
     completedAt: input.completedAt ?? new Date().toISOString(),
     durationMinutes: Math.max(1, Math.round(input.durationMinutes)),
+    // Active session time is a credited planned-work equivalent, not an
+    // independently measured stopwatch duration (pauses are excluded).
+    durationBasis: 'planned_equivalent',
     stationCount: workout.stations.length,
     totalRounds: Object.values(stationRounds).reduce((sum, value) => sum + value, 0),
     equipment: workout.requiredEquipment.filter((item) => item !== 'bodyweight').map(equipmentLabel),
@@ -101,11 +106,23 @@ export function buildLedgerWorkoutSummary(entry: WorkoutLedgerEntry): CompletedW
   const maxLoad = Math.max(1, ...Object.values(regionLoads).filter((value): value is number => typeof value === 'number'));
   for (const region of Object.keys(regionLoads) as BodyRegion[]) regionLoads[region] = Math.min(1, (regionLoads[region] ?? 0) / maxLoad);
   const topRegions = (Object.entries(regionLoads) as Array<[BodyRegion, number]>).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([region])=>region);
-  const durationMinutes = Math.max(1, Math.round((new Date(entry.completedAt).getTime() - new Date(entry.startedAt).getTime()) / 60_000));
+  // Ledger timestamps describe when the workout was started and saved, not
+  // how long the athlete exercised. A paused session may span many hours.
+  // When the original plan is available, show *estimated planned work* scaled
+  // by the immutable completion fraction. Otherwise duration is unknown.
+  const plannedWorkSeconds = entry.workout?.totalWorkSeconds ?? 0;
+  const fraction = entry.completionFraction;
+  const hasEstimatedDose = Number.isFinite(plannedWorkSeconds) && plannedWorkSeconds > 0
+    && Number.isFinite(fraction) && fraction > 0;
+  const durationMinutes = hasEstimatedDose
+    ? Math.max(1, Math.round(plannedWorkSeconds * Math.min(1, fraction) / 60)) : 0;
+  const durationBasis: CompletedWorkoutSummary['durationBasis'] = hasEstimatedDose
+    ? 'planned_equivalent' : 'unknown';
   return {
     name: entry.name,
     completedAt: entry.completedAt,
     durationMinutes,
+    durationBasis,
     stationCount: entry.workout?.stations.length ?? 0,
     totalRounds: Object.values(entry.stationRounds).reduce((sum, value) => sum + value, 0),
     equipment: [...new Set(entry.exercises.map((item) => item.equipmentId).filter(Boolean).map((item) => equipmentLabel(String(item))))],
@@ -129,7 +146,7 @@ export async function shareCompletedWorkout(summary: CompletedWorkoutSummary, op
 
 export function workoutShareMessage(summary: CompletedWorkoutSummary, options: WorkoutShareOptions): string {
   const lines = [summary.name];
-  if (options.includeDuration) lines.push(`${summary.durationMinutes} min · ${summary.stationCount} stations${summary.totalRounds ? ` · ${summary.totalRounds} rounds` : ''}`);
+  if (options.includeDuration) lines.push(shareDurationLabel(summary));
   if (options.includeTrainedAreas && summary.topRegions.length) lines.push(`Areas trained: ${summary.topRegions.map(regionLabel).join(', ')}`);
   if (options.includeCategories && summary.categories.length) lines.push(summary.categories.join(' · '));
   if (options.includeExerciseList && summary.exercises.length) {
@@ -137,6 +154,15 @@ export function workoutShareMessage(summary: CompletedWorkoutSummary, options: W
   }
   lines.push('', 'Side Quest');
   return lines.join('\n');
+}
+
+function shareDurationLabel(summary: CompletedWorkoutSummary): string {
+  const suffix = ` · ${summary.stationCount} stations${summary.totalRounds ? ` · ${summary.totalRounds} rounds` : ''}`;
+  if (summary.durationBasis === 'unknown') return `Duration not recorded${suffix}`;
+  if (summary.durationBasis === 'planned_equivalent') {
+    return `~${summary.durationMinutes} min planned work equivalent${suffix}`;
+  }
+  return `${summary.durationMinutes} min${suffix}`;
 }
 
 function exerciseLine(exercise: CompletedWorkoutSummary['exercises'][number], options: WorkoutShareOptions): string {
@@ -165,7 +191,7 @@ function workoutShareSvg(summary: CompletedWorkoutSummary, options: WorkoutShare
   <rect x="36" y="36" width="1008" height="1008" rx="44" fill="#FFFFFF" stroke="#D4DDD7" stroke-width="3"/>
   <text x="72" y="112" font-size="28" font-family="Arial" font-weight="700" fill="${accent}" letter-spacing="4">SIDE QUEST</text>
   <text x="72" y="190" font-size="52" font-family="Arial" font-weight="800" fill="${navy}">${escapeXml(summary.name.slice(0, 31))}</text>
-  ${options.includeDuration ? `<text x="72" y="248" font-size="30" font-family="Arial" fill="${muted}">${summary.durationMinutes} min · ${summary.stationCount} stations${summary.totalRounds ? ` · ${summary.totalRounds} rounds` : ''}</text>` : ''}
+  ${options.includeDuration ? `<text x="72" y="248" font-size="30" font-family="Arial" fill="${muted}">${escapeXml(shareDurationLabel(summary).slice(0, 66))}</text>` : ''}
   <rect x="72" y="300" width="480" height="410" rx="34" fill="#EAF1EC"/>
   ${bodySilhouetteSvg(188, 338, false, summary.regionLoads, accent)}
   ${bodySilhouetteSvg(368, 338, true, summary.regionLoads, accent)}
