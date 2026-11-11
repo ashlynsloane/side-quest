@@ -276,6 +276,7 @@ describe('native synthetic UI automation contract', () => {
     expect(flow).toContain('launchApp');
     expect(flow).toContain('id: "sidequest-qa-resume-active-workout"');
     expect(flow).toContain('Save partial');
+    expect(flow).toContain('element: "Finish station"');
     expect(flow).toContain('tapOn: "Finish station"');
     expect(flow).toContain('visible: "Recover and record"');
     expect(flow).toContain('assertVisible: ".*[1-9][0-9]?% completed"');

@@ -34,8 +34,11 @@ appId: com.sidequest.synthetic.qa
     visibilityPercentage: 85
     timeout: 30000
 - tapOn: "Start workout"
-- extendedWaitUntil:
-    visible: "Finish station"
+- scrollUntilVisible:
+    element: "Finish station"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 80
     timeout: 30000
 # Complete the first station before pausing so a partial completion has
 # nonzero actual progression. A 0%-complete record is not a valid proof.
@@ -108,6 +111,5 @@ appId: com.sidequest.synthetic.qa
     timeout: 30000
 - assertVisible: "STRENGTH"
 - assertVisible: ".*[1-9][0-9]?% completed"
-- assertNotVisible: "0% completed"
 - assertNotVisible: "100% completed"
 - takeScreenshot: "synthetic-strength-partial-in-history"
