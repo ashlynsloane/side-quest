@@ -51,7 +51,7 @@ export default function ProfileTab() {
       {__DEV__ ? <V23Row title="Developer tools" detail="Product scenarios, visual QA, and diagnostics" onPress={() => router.push('/developer-tools' as Href)} last /> : null}
     </V23GroupedList>
 
-    <Pressable onPress={() => void signOut()} style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}><Text style={styles.signOutText}>Sign out</Text></Pressable>
+    <Pressable testID="sidequest-qa-sign-out" accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => void signOut()} style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}><Text style={styles.signOutText}>Sign out</Text></Pressable>
   </V23Screen>;
 }
 
