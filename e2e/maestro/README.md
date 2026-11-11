@@ -112,8 +112,9 @@ Do not equate the new scripted test with those unrun checks.
 The new sixth stage, `synthetic-strength-restart-steps.yaml`, starts a real
 synthetic quick workout, uses **Leave** to persist its live work/rest state,
 terminates and relaunches the iOS app, and requires the **Resume workout**
-entry point on Today. It reopens the saved session, ends early, saves the
-original partial fraction, and checks that Training History contains a
+entry point on Today. The test finishes the first station before pausing,
+so it can verify a nonzero partial dose. It reopens the saved rest/log phase,
+ends early, saves the original partial fraction, and checks that Training History contains a
 strength record without 100% completion credit. The same resume card is
 present on Train.
 
