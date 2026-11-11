@@ -100,7 +100,7 @@ describe('native synthetic UI automation contract', () => {
 
   it('uses one staged native runner and refuses a non-synthetic app identity', () => {
     const runner = source('scripts/qa/run-native-maestro.sh');
-    for (const flow of ['profile', 'onboarding', 'ride', 'restart']) {
+    for (const flow of ['profile', 'onboarding', 'ride', 'restart', 'isolation']) {
       expect(runner).toMatch(new RegExp('run_flow ' + flow + ' e2e/maestro/'));
     }
     expect(runner).toContain('QA_BUNDLE_ID');
@@ -211,6 +211,24 @@ describe('native synthetic UI automation contract', () => {
     expect(screen).toContain('testID="sidequest-qa-retry-first-week"');
     expect(db).toContain('export async function withVerifiedAthleteDatabase<T>');
     expect(db).toContain('runWithDatabaseActivationLock');
+  });
+
+  it('exercises A-to-B-to-A native history isolation without deleting the original athlete data', () => {
+    const isolation = source('e2e/maestro/synthetic-athlete-isolation-steps.yaml');
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    const diagnostic = source('scripts/qa/diagnose-native-evidence.mjs');
+    expect(isolation).toContain('synthetic-other-athlete@example.invalid');
+    expect(isolation).toContain('synthetic-athlete@example.invalid');
+    expect(isolation).toContain('runFlow: synthetic-onboarding-steps.yaml');
+    expect(isolation).toContain('assertVisible: "No training records yet"');
+    expect(isolation).toContain('assertNotVisible: "Completed bike"');
+    expect(isolation).toContain('assertVisible: "Completed bike"');
+    expect(isolation).toContain('assertVisible: "75 min.*"');
+    expect(isolation).toContain('synthetic-a-ride-preserved-across-account-switch');
+    expect(isolation.match(/centerElement: true/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(runner).toContain('run_flow isolation e2e/maestro/synthetic-athlete-isolation-steps.yaml');
+    expect(runner).toContain('"isolation=$isolation"');
+    expect(diagnostic).toContain("'restart', 'isolation'");
   });
 
   it('keeps the History link tappable and native restart navigation occlusion-safe', () => {
