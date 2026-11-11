@@ -47,7 +47,10 @@ export default function TrainTab() {
 
     <V23SectionHeader>Choose a workout</V23SectionHeader>
     <View style={styles.quickGrid}>
-      <Pressable onPress={() => router.push('/generate' as Href)} style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}><V23Icon name="clock" color={tokens.accent} size={22} /><Text style={styles.quickTitle}>Quick workout</Text><Text style={styles.quickBody}>Set time and equipment</Text></Pressable>
+      <Pressable testID="sidequest-qa-quick-workout" accessibilityRole="button"
+        accessibilityLabel="Quick workout, set time and equipment"
+        onPress={() => router.push('/generate' as Href)}
+        style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}><V23Icon name="clock" color={tokens.accent} size={22} /><Text style={styles.quickTitle}>Quick workout</Text><Text style={styles.quickBody}>Set time and equipment</Text></Pressable>
       <Pressable onPress={() => router.push('/favorites' as Href)} style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}><V23Icon name="heart" color={tokens.accent} size={22} /><Text style={styles.quickTitle}>Favorites</Text><Text style={styles.quickBody}>{lastWorkout ? 'Repeat a trusted session' : 'Your saved workouts'}</Text></Pressable>
     </View>
 
