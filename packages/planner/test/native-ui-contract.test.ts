@@ -213,6 +213,26 @@ describe('native synthetic UI automation contract', () => {
     expect(db).toContain('runWithDatabaseActivationLock');
   });
 
+  it('keeps the History link tappable and native restart navigation occlusion-safe', () => {
+    const week = source('apps/mobile/src/app/(tabs)/plan.tsx');
+    const historyId = 'sidequest-qa-open-training-history';
+    const link = week.indexOf('testID="' + historyId + '"');
+    const review = week.indexOf('Review recorded training and the week');
+    const otherActions = week.indexOf('Preview training-plan changes');
+    expect(link).toBeGreaterThan(0);
+    expect(link).toBeLessThan(review);
+    expect(link).toBeLessThan(otherActions);
+    expect(week).toContain("router.push('/training-history' as Href)");
+
+    const restart = source('e2e/maestro/synthetic-ride-restart-steps.yaml');
+    expect(restart).toContain('id: "' + historyId + '"');
+    expect(restart).toContain('centerElement: true');
+    expect(restart).toContain('takeScreenshot: "synthetic-history-link-before-tap"');
+    expect(restart).toContain('- assertNotVisible: "Training evidence this week"');
+    expect(restart).toContain('assertVisible: "75 min.*"');
+    expect(restart).not.toContain('- tapOn: "Inspect full training history"');
+  });
+
   it('runs exactly one synthetic athlete from onboarding through restart', () => {
     const wrapperPairs: Array<[string, string, string]> = [
       ['synthetic-onboarding-first-week.yaml', 'synthetic-profile-entry.yaml', 'synthetic-onboarding-steps.yaml'],
