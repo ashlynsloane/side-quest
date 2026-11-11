@@ -108,7 +108,7 @@ function visibleStageLabels(stage) {
 }
 
 function boundingBox(value) {
-  const match = /^\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]$/.exec(String(value ?? ''));
+  const match = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(String(value ?? ''));
   if (!match) return null;
   return { left: Number(match[1]), top: Number(match[2]),
     right: Number(match[3]), bottom: Number(match[4]) };
