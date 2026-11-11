@@ -180,6 +180,25 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.allPassed).toBe(false);
   });
 
+  it('fails closed on skipped, empty or inconsistent native JUnit evidence', () => {
+    for (const broken of [
+      '<testsuites><testsuite tests="1" failures="0" errors="0" skipped="1"><testcase name="x"><skipped/></testcase></testsuite></testsuites>',
+      '<testsuites><testsuite tests="1" failures="0" errors="0"><testcase name="x"><skipped/></testcase></testsuite></testsuites>',
+      '<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0"></testsuite></testsuites>',
+      '<testsuites><testsuite tests="2" failures="0" errors="0" skipped="0"><testcase name="x"/></testsuite></testsuites>',
+    ]) {
+      const root = fixture();
+      for (const stage of ['profile', 'onboarding', 'ride', 'restart']) {
+        writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+      }
+      writeFileSync(join(root, 'isolation-junit.xml'), broken);
+      const { report } = diagnose(root);
+      expect(report.allPassed).toBe(false);
+      expect(report.stages[4]?.status).toBe('INVALID_REPORT');
+      expect(report.stages[4]?.failure).toMatch(/no passing evidence/i);
+    }
+  });
+
   it('never counts a missing or truncated JUnit report as passing', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-junit.xml'), '<testsuite name="incomplete" tests="1">');
