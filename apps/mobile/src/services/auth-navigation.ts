@@ -13,6 +13,10 @@ export type AuthNavigationState = {
   needsOnboarding: boolean;
   firstWeekPrerequisitesComplete: boolean;
   route: string | undefined;
+  /** The signed-in athlete's workout checkpoint has finished hydration. */
+  workoutSessionReady?: boolean;
+  /** Only the currently authenticated athlete may resume this workout. */
+  hasActiveWorkout?: boolean;
 };
 const SETUP_ROUTES = new Set([
   'onboarding',
@@ -38,5 +42,10 @@ export function authRedirectFor(state: AuthNavigationState): AuthDestination | n
     }
     return state.route && SETUP_ROUTES.has(state.route) ? null : '/onboarding';
   }
+  // Signing back into a previously used athlete must never strand them on
+  // an old stack route after the profile-scoped workout provider remounts.
+  // Wait for hydration so a legitimate persisted workout is not displaced.
+  if (state.route === 'active-workout' && state.workoutSessionReady === true
+      && state.hasActiveWorkout === false) return '/(tabs)';
   return state.route === 'sign-in' ? '/(tabs)' : null;
 }
