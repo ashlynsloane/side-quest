@@ -49,6 +49,24 @@ describe('first-run navigation guard', () => {
     expect(authRedirectFor({ ...state, route: '(tabs)', onboardingLoading: true })).toBeNull();
   });
 
+  it('returns to the training tabs when an athlete switch leaves an orphaned active-workout route', () => {
+    const resumed = { ...state, needsOnboarding: false, route: 'active-workout' };
+    // Do not navigate away before the incoming athlete's checkpoint has loaded.
+    expect(authRedirectFor({ ...resumed, workoutSessionReady: false, hasActiveWorkout: false }))
+      .toBeNull();
+    // A valid, athlete-scoped checkpoint is a legitimate route destination.
+    expect(authRedirectFor({ ...resumed, workoutSessionReady: true, hasActiveWorkout: true }))
+      .toBeNull();
+    // The old athlete's screen cannot trap the new athlete in an empty workout.
+    expect(authRedirectFor({ ...resumed, workoutSessionReady: true, hasActiveWorkout: false }))
+      .toBe('/(tabs)');
+    // Onboarding always takes precedence over a stale workout route.
+    expect(authRedirectFor({ ...resumed, needsOnboarding: true, workoutSessionReady: true,
+      hasActiveWorkout: false })).toBe('/onboarding');
+    expect(authRedirectFor({ ...resumed, authenticated: false, workoutSessionReady: true,
+      hasActiveWorkout: false })).toBe('/sign-in');
+  });
+
   it('allows the completed athlete into the training app', () => {
     expect(authRedirectFor({ ...state, needsOnboarding: false, route: 'onboarding-first-week' })).toBeNull();
     expect(authRedirectFor({ ...state, needsOnboarding: false, route: '(tabs)' })).toBeNull();
