@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createManualEnduranceActivity } from '../src/manual-endurance';
@@ -409,6 +409,34 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(service.getActiveDatabaseName()).toBe(protectedName);
     // The database remains intact for a manual owner-provenance migration.
     expect((await ledger())).toHaveLength(1);
+  });
+
+  it('does not modify even one byte of a populated unowned historical SQLite file when refusing adoption', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const athlete = 'legacy_no_owner';
+    const candidate = join(state.directory, 'circuit-generator-legacy_no_owner.db');
+    const original = new DatabaseSync(candidate);
+    original.exec(`
+      CREATE TABLE historical_training (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO historical_training VALUES ('old-record', 'unknown-owner-preserve-me');
+    `);
+    original.close();
+    const bytesBefore = readFileSync(candidate);
+    const activeBefore = service.getActiveDatabaseName();
+
+    await expect(service.activateUserDatabase(athlete))
+      .rejects.toThrow(/no verifiable owner/);
+    expect(service.getActiveDatabaseName()).toBe(activeBefore);
+    expect(readFileSync(candidate).equals(bytesBefore)).toBe(true);
+
+    const untouched = new DatabaseSync(candidate);
+    expect(untouched.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sidequest_athlete_database_owner'",
+    ).get()).toBeUndefined();
+    expect(untouched.prepare(
+      "SELECT value FROM historical_training WHERE id = 'old-record'",
+    ).get()).toEqual({ value: 'unknown-owner-preserve-me' });
+    untouched.close();
   });
 
   it('keeps the previous active profile selected when new owner verification fails', async () => {
