@@ -1,15 +1,12 @@
 name: Experimental training guardrail validation
 
 on:
+  # Historic experimental-guardrail branch only. The canonical PR #12
+  # already runs the complete planner suite in automated-athlete-acceptance.
+  # Avoid a second redundant planner job on every review commit.
   push:
     branches:
       - feat/experimental-training-ramp-guardrails
-  pull_request:
-    branches:
-      - sq2-experience-rebuild
-    paths:
-      - 'packages/planner/**'
-      - '.github/workflows/experimental-training-guardrails.yml'
   workflow_dispatch:
 
 jobs:

@@ -1,12 +1,16 @@
 name: Automated athlete acceptance
 on:
-  push:
-    branches:
-      - test/automated-athlete-acceptance-v1
+  # A PR synchronize event is the single authoritative change trigger.
+  # Push + pull_request previously produced duplicate cancelled runs for
+  # every commit, burying the actual release-gate result.
   pull_request:
+    branches:
+      - sq2-experience-rebuild
     paths:
       - 'packages/planner/**'
       - 'apps/mobile/**'
+      - 'scripts/qa/**'
+      - 'e2e/maestro/**'
       - '.github/workflows/automated-athlete-acceptance.yml'
   workflow_dispatch:
 

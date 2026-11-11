@@ -98,6 +98,18 @@ describe('native synthetic UI automation contract', () => {
       .toContain("if (profileId === null) return null;");
   });
 
+  it('uses one authoritative PR acceptance workflow without duplicate planner jobs', () => {
+    const qa = source('.github/workflows/automated-athlete-acceptance.yml');
+    const guardrail = source('.github/workflows/experimental-training-guardrails.yml');
+    expect(qa).toContain('pull_request:');
+    expect(qa).toContain('- sq2-experience-rebuild');
+    expect(qa).toContain("'scripts/qa/**'");
+    expect(qa).toContain("'e2e/maestro/**'");
+    expect(qa).not.toMatch(/^  push:/m);
+    expect(guardrail).not.toMatch(/^  pull_request:/m);
+    expect(guardrail).toContain('workflow_dispatch:');
+  });
+
   it('uses one staged native runner and refuses a non-synthetic app identity', () => {
     const runner = source('scripts/qa/run-native-maestro.sh');
     for (const flow of ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength']) {
