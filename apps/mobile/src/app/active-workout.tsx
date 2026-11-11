@@ -55,6 +55,7 @@ import {
 } from '@/services/active-workout-persistence';
 import { publishWorkoutActivity } from '@/services/social';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
+import { completedWorkoutSeconds } from '@/services/workout-progress';
 import {
   getWorkoutCuePreferences,
   saveWorkoutCuePreferences,
@@ -111,6 +112,8 @@ export default function ActiveWorkoutScreen() {
   const completionFractionRef = useRef(1);
   const [completionSaveStatus, setCompletionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [completionSaveError, setCompletionSaveError] = useState<string | null>(null);
+  const [pauseSaveBusy, setPauseSaveBusy] = useState(false);
+  const [pauseSaveError, setPauseSaveError] = useState<string | null>(null);
   const cueKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -182,7 +185,11 @@ export default function ActiveWorkoutScreen() {
     }
     if (phase === 'work') completed += (station?.durationSeconds ?? 0) - remainingSeconds;
     if (phase === 'rest') completed += station?.durationSeconds ?? 0;
-    if (phase === 'complete') completed = totalPlannedSeconds;
+    // After early termination, the completion fraction is the original
+    // immutable dose, not the full planned duration.
+    if (phase === 'complete') {
+      completed = completedWorkoutSeconds(totalPlannedSeconds, completionFractionRef.current);
+    }
     return Math.max(0, Math.min(totalPlannedSeconds, completed));
   }, [phase, remainingSeconds, station, stationIndex, totalPlannedSeconds, workout]);
 
@@ -433,27 +440,39 @@ export default function ActiveWorkoutScreen() {
 
   function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
 
-  function pauseAndLeave() {
-    // Do not replace a pending-completion journal with an ordinary rest state.
-    if (phase === 'complete') return;
+  async function pauseAndLeave() {
+    if (phase === 'complete' || pauseSaveBusy) return;
     setRunning(false);
-    void saveLiveWorkoutSession({
-      schemaVersion: 1,
-      savedAt: new Date().toISOString(),
-      workout: activeWorkout,
-      startedAt: startedAt.current,
-      stationIndex,
-      phase,
-      remainingSeconds,
-      running: false,
-      stationRounds,
-      exerciseLoads,
-      exerciseSets,
-      restEntries,
-      restRounds,
-      restLoadUnit,
-      planLink: activePlanLink ?? undefined,
-    }, user?.id ?? null).then(() => router.replace('/' as Href));
+    setPauseSaveBusy(true);
+    setPauseSaveError(null);
+    try {
+      // Do not leave until a durable, profile-scoped checkpoint is stored.
+      // A storage failure must retain the active screen for an explicit retry.
+      await saveLiveWorkoutSession({
+        schemaVersion: 1,
+        savedAt: new Date().toISOString(),
+        workout: activeWorkout,
+        startedAt: startedAt.current,
+        stationIndex,
+        phase,
+        remainingSeconds,
+        running: false,
+        stationRounds,
+        exerciseLoads,
+        exerciseSets,
+        restEntries,
+        restRounds,
+        restLoadUnit,
+        planLink: activePlanLink ?? undefined,
+      }, user?.id ?? null);
+      router.replace('/' as Href);
+    } catch (error) {
+      setPauseSaveError(error instanceof Error
+        ? `Could not save your workout: ${error.message}. Retry Leave before closing the app.`
+        : 'Could not save your workout. Retry Leave before closing the app.');
+    } finally {
+      setPauseSaveBusy(false);
+    }
   }
 
   function endEarly() {
@@ -507,7 +526,7 @@ export default function ActiveWorkoutScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <KeyboardSafeScreen contentContainerStyle={styles.completeContainer}>
-          <Text style={styles.eyebrow}>WORKOUT COMPLETE</Text>
+          <Text style={styles.eyebrow}>{completionFractionRef.current < 1 ? 'PARTIAL WORKOUT' : 'WORKOUT COMPLETE'}</Text>
           <Text style={styles.completeTitle}>{activeWorkout.name}</Text>
           <Text style={styles.helper}>{completionSaveStatus === 'saved'
             ? (activePlanLink ? `${activePlanLink.sessionTitle} was saved and marked complete in your plan.` : 'Saved to training history.')
@@ -520,7 +539,10 @@ export default function ActiveWorkoutScreen() {
             style={styles.outlineButton}>
             <Text style={styles.outlineButtonText}>Retry saving workout</Text>
           </Pressable> : null}
-          <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.max(1, Math.round(elapsedSeconds / 60))} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
+          <Text style={styles.helper}>{completionFractionRef.current < 1
+            ? `${Math.min(99, Math.round(completionFractionRef.current * 100))}% of the planned duration completed. Paused time is not counted.`
+            : 'Full planned duration completed.'}</Text>
+          <View style={styles.summaryRow}><SummaryMetric label="Time" value={`${Math.round(elapsedSeconds / 60)} min`} styles={styles} /><SummaryMetric label="Stations" value={String(activeWorkout.stations.length)} styles={styles} /><SummaryMetric label="Rounds" value={String(Object.values(stationRounds).reduce((sum, value) => sum + value, 0))} styles={styles} /></View>
 
           <CompletedWorkoutBodyMap regionLoads={completedSummary.regionLoads} />
           <Pressable onPress={() => setShareOpen(true)} style={styles.shareButton}><V23Icon name="more" color={tokens.accent} size={18} /><View style={{ flex: 1 }}><Text style={styles.cardTitle}>Share workout summary</Text><Text style={styles.helper}>Choose exactly what appears. Pain, restrictions, and notes stay private.</Text></View><Text style={styles.shareChevron}>›</Text></Pressable>
@@ -568,10 +590,14 @@ export default function ActiveWorkoutScreen() {
           <Text style={styles.topTitle}>{phase === 'rest' ? 'Recover and record' : currentStation.purpose}</Text>
         </View>
         <Pressable accessibilityLabel="Workout cue settings" onPress={() => setCueSettingsOpen(true)} style={styles.iconHeaderButton}><V23Icon name="settings" color={tokens.text} size={20} /></Pressable>
-        <Pressable onPress={pauseAndLeave} style={styles.pausePill}><Text style={styles.pauseButtonText}>Leave</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Leave" disabled={pauseSaveBusy}
+          onPress={() => void pauseAndLeave()} style={[styles.pausePill, pauseSaveBusy && { opacity: 0.5 }]}>
+          <Text style={styles.pauseButtonText}>{pauseSaveBusy ? 'Saving…' : 'Leave'}</Text>
+        </Pressable>
         <Pressable onPress={endEarly} style={styles.endPill}><Text style={styles.endButtonText}>End</Text></Pressable>
       </View>
       {activePlanLink ? <View style={styles.planBanner}><V23Icon name="plan" color={tokens.accent} size={17} /><Text style={styles.planBannerText}>Planned {formatPlanDate(activePlanLink.sessionDate)} · {activePlanLink.sessionTitle}{activePlanLink.modifiedFromPlan ? ' · Customized' : ''}</Text></View> : null}
+      {pauseSaveError ? <View style={styles.resumeBanner}><Text style={styles.resumeBannerText}>{pauseSaveError}</Text></View> : null}
       {resumeNotice ? <Pressable onPress={() => setResumeNotice(null)} style={styles.resumeBanner}><V23Icon name="play" color={tokens.accent} size={17} /><Text style={styles.resumeBannerText}>{resumeNotice}</Text></Pressable> : null}
 
       <KeyboardSafeScreen contentContainerStyle={styles.content}>

@@ -152,6 +152,42 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await sessionStatus()).toBe('completed');
   });
 
+  it('never invents completed exercise sets for an unlogged partial workout', async () => {
+    const exerciseWorkout = {
+      ...workout, id: 'synthetic-partial-with-exercise',
+      stations: [{
+        id: 'synthetic-station-1', durationSeconds: 900,
+        exercises: [{
+          exerciseId: 'synthetic-squat', target: 10, unit: 'reps',
+          equipmentOptionId: 'bodyweight',
+          exerciseSnapshot: {
+            name: 'Synthetic bodyweight squat', bodyRegions: [],
+            movementPatterns: ['squat'], equipmentOptions: [],
+          },
+        }],
+      }],
+    } as unknown as Parameters<MobileDb['saveCompletedWorkout']>[0]['workout'];
+    await service.saveCompletedWorkout({
+      workout: exerciseWorkout,
+      startedAt, completedAt,
+      completionFraction: 0.25, stationRounds: {},
+      idempotencyKey: 'unlogged-partial',
+    });
+    const partial = (await ledger()).find((entry) => entry.id === 'unlogged-partial');
+    expect(partial?.completionFraction).toBe(0.25);
+    expect(partial?.exercises).toHaveLength(1);
+    expect(partial?.exercises[0]?.sets).toEqual([]);
+
+    await service.saveCompletedWorkout({
+      workout: exerciseWorkout,
+      startedAt, completedAt,
+      completionFraction: 1, stationRounds: {},
+      idempotencyKey: 'full-no-set-logging',
+    });
+    const full = (await ledger()).find((entry) => entry.id === 'full-no-set-logging');
+    expect(full?.exercises[0]?.sets).toHaveLength(1);
+  });
+
   it('repeating the same completion is idempotent and preserves partial dose', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     await save(0.4);

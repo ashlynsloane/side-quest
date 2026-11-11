@@ -245,6 +245,18 @@ describe('native synthetic UI automation contract', () => {
     expect(diagnostic).toContain("'restart', 'isolation', 'strength'");
   });
 
+  it('does not report full planned work after partial completion and requires a durable Leave save', () => {
+    const screen = source('apps/mobile/src/app/active-workout.tsx');
+    const ledger = source('apps/mobile/src/services/database.ts');
+    expect(screen).toContain("completedWorkoutSeconds(totalPlannedSeconds, completionFractionRef.current)");
+    expect(screen).toContain('PARTIAL WORKOUT');
+    expect(screen).toContain('Paused time is not counted.');
+    expect(screen).toContain('await saveLiveWorkoutSession({');
+    expect(screen).toContain("setPauseSaveError(error instanceof Error");
+    expect(screen).toContain('disabled={pauseSaveBusy}');
+    expect(ledger).toContain('completionFraction < 1 ? [] : [{');
+  });
+
   it('provides an actual Today/Train workout resume affordance after force-quit', () => {
     const today = source('apps/mobile/src/app/(tabs)/index.tsx');
     const train = source('apps/mobile/src/app/(tabs)/train.tsx');

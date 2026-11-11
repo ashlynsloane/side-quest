@@ -752,9 +752,12 @@ export async function saveCompletedWorkout({
         const equipmentId = option?.items.find((entry) => entry.equipmentId !== 'bodyweight')?.equipmentId
           ?? option?.items[0]?.equipmentId;
         const fallbackLoad = exerciseLoads[item.exerciseId];
+        // Never fabricate a completed set for every exercise when an athlete
+        // saved only part of a workout without recording sets. The session's
+        // partial fraction is real, but which movements they did is unknown.
         const sets = exerciseSets[item.exerciseId]?.length
           ? exerciseSets[item.exerciseId]
-          : [{
+          : completionFraction < 1 ? [] : [{
               id: `${workoutInstanceId}_${item.exerciseId}_set_1`,
               reps: item.unit === 'seconds' ? undefined : item.target,
               seconds: item.unit === 'seconds' ? item.target : undefined,

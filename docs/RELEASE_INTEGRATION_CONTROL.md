@@ -194,3 +194,19 @@ completion without claiming full credit. This is **scripted but not native
 verified** until all six stage JUnit reports and screenshots pass. A crash
 between journal and canonical ledger persistence requires a separate
 injection test and remains an explicit release blocker.
+
+## Partial-workout reporting integrity and Leave checkpoint failure handling
+
+The active completion screen no longer substitutes the full planned time for
+an early-ended workout. A shared pure helper derives active credited seconds
+from the original immutable completion fraction and planned duration, so a
+25% completion of a 40-minute plan is displayed as 10 minutes, not 40.
+The athlete sees **PARTIAL WORKOUT** and an explicit fraction. This is a
+planned-duration-equivalent, not an independent stopwatch-based measurement.
+
+The Leave action now waits for the local checkpoint write and stays on the
+active workout with a visible retry message if that write fails. Incomplete
+workouts with no per-exercise set logs no longer create synthetic completed
+sets for *every* exercise. Historical records are unchanged; this is a
+forward-only recording correction, not a migration. The exact real-device
+reliability of both changes requires native verification before release.
