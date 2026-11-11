@@ -21,7 +21,7 @@ experience must demonstrate these behaviors, not just unit tests.
 
 | Gate | Status | Verified evidence / required proof |
 | --- | --- | --- |
-| Planner and app typechecks, complete deterministic regression suite, real disk-backed SQLite and iOS JS bundle | **PASS (source)** | SHA `6cf98981`, [CI 43062385131](https://github.com/ashlynsloane/side-quest/actions/runs/43062385131): 669/669 tests, 110 files, all typechecks and export green |
+| Planner and app typechecks, complete deterministic regression suite, real disk-backed SQLite and iOS JS bundle | **PASS (source)** | SHA `cf08c7cb`, [CI 43094606055](https://github.com/ashlynsloane/side-quest/actions/runs/43094606055): 672/672 tests, 111 files, all typechecks and export green |
 | Build and launch isolated Release iOS simulator app | **PASS (native)** | [Native build 42959140988](https://github.com/ashlynsloane/side-quest/actions/runs/42959140988); verified app artifact `sidequest-synthetic-ios-app`; synthetic identity only |
 | iOS create profile and first-week onboarding | **PASS (native)** | Native JUnit stages `profile`, `onboarding` passed in run 42959140988 |
 | iOS log completed 75-minute bike | **PASS (native)** | `ride` native JUnit passed in run 42959140988 |
@@ -109,3 +109,13 @@ command record proves no UI interaction occurred. Original failed logs and
 JUnit are retained; any actual tap, assertion, ambiguous command trace or
 second transport failure ends in FAIL. Added a deterministic helper test.
 This needs fresh native execution; no gate status is upgraded by code alone.
+
+### Exact-head acceptance verification after transport retry
+
+[Run 43094606055](https://github.com/ashlynsloane/side-quest/actions/runs/43094606055),
+commit `cf08c7cb`: **SUCCESS**. Full planner regression 672/672 tests
+in 111 files; synthetic journey tests 23/23 and real mobile SQLite tests
+29/29; planner/mobile typechecks and iOS JS export passed. Native iOS
+UI-only [run 43094446036](https://github.com/ashlynsloane/side-quest/actions/runs/43094446036)
+remained **QUEUED at this snapshot**. No A→B→A or strength native PASS
+can be inferred from this code-level CI.
