@@ -53,7 +53,7 @@ describe('native UI failure evidence diagnosis', () => {
         { attributes: { 'resource-id': 'sidequest-qa-enter-beta', enabled: 'false' } },
       ],
     }));
-    const { report } = diagnose(root);
+    const { run, report } = diagnose(root);
     expect(report.allPassed).toBe(false);
     expect(run.status).toBe(1);
     expect(report.stages[0]?.status).toBe('FAILED');
