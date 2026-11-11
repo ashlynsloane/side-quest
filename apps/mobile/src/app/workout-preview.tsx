@@ -111,10 +111,24 @@ export default function WorkoutPreviewScreen() {
       && (activePlanLink?.sessionId ?? null) === (previewPlannedSession?.id ?? null),
   );
 
-  function start() {
-    if (!activeWorkout) {
+  function beginAndNavigate() {
+    try {
+      // A stored partial-completion journal or unreadable checkpoint must
+      // not be overwritten by starting this preview.
       beginWorkout(workout);
       router.push('/active-workout' as Href);
+    } catch (error) {
+      Alert.alert(
+        'Previous workout needs attention',
+        error instanceof Error ? error.message : 'Could not safely start this workout.',
+        [{ text: 'OK' }],
+      );
+    }
+  }
+
+  function start() {
+    if (!activeWorkout) {
+      beginAndNavigate();
       return;
     }
     if (activeMatchesPreview) {
@@ -127,7 +141,7 @@ export default function WorkoutPreviewScreen() {
       [
         { text: 'Keep current workout', style: 'cancel' },
         { text: 'Resume current', onPress: () => router.push('/active-workout' as Href) },
-        { text: 'Replace and start', style: 'destructive', onPress: () => { beginWorkout(workout); router.push('/active-workout' as Href); } },
+        { text: 'Replace and start', style: 'destructive', onPress: beginAndNavigate },
       ],
     );
   }
