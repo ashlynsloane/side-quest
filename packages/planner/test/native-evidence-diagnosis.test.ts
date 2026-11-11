@@ -26,21 +26,21 @@ afterEach(() => {
 });
 
 describe('native UI failure evidence diagnosis', () => {
-  it('reports passing only when all four native stages have nonempty passing evidence', () => {
+  it('reports passing only when all five native stages have nonempty passing evidence', () => {
     const root = fixture();
-    for (const stage of ['profile', 'onboarding', 'ride', 'restart']) {
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart', 'isolation']) {
       writeFileSync(join(root, stage + '-junit.xml'), junit(1));
     }
     const { run, report } = diagnose(root);
     expect(run.status, run.stderr).toBe(0);
     expect(report.allPassed).toBe(true);
-    expect(report.stages.map(x => x.status)).toEqual(Array(4).fill('PASSED'));
+    expect(report.stages.map(x => x.status)).toEqual(Array(5).fill('PASSED'));
   });
 
   it('detects email mistakenly entered into Name without publishing input values', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-junit.xml'), junit(1, true));
-    for (const stage of ['onboarding', 'ride', 'restart']) {
+    for (const stage of ['onboarding', 'ride', 'restart', 'isolation']) {
       writeFileSync(join(root, stage + '-console.log'), 'BLOCKED: prerequisite failed');
     }
     const folder = join(root, 'profile', 'screen-hierarchy');
@@ -57,7 +57,7 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.allPassed).toBe(false);
     expect(report.stages[0]?.status).toBe('FAILED');
     expect(report.stages[0]?.diagnosis).toMatch(/keyboard-focus leak/);
-    expect(report.stages.slice(1).map(x => x.status)).toEqual(Array(3).fill('BLOCKED'));
+    expect(report.stages.slice(1).map(x => x.status)).toEqual(Array(4).fill('BLOCKED'));
     expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
       .not.toContain('synthetic-secret@example.invalid');
   });
@@ -167,6 +167,17 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.allPassed).toBe(false);
     expect(report.stages[0]?.status).toBe('DRIVER_STARTUP_TIMEOUT');
     expect(report.stages[1]?.status).toBe('BLOCKED');
+  });
+
+  it('keeps isolation mandatory even when original four journeys pass', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart']) {
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    }
+    const { report } = diagnose(root);
+    expect(report.stages.map((stage) => stage.status))
+      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN']);
+    expect(report.allPassed).toBe(false);
   });
 
   it('never counts a missing or truncated JUnit report as passing', () => {
