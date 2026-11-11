@@ -151,7 +151,7 @@ describe('durable pending partial-workout completion contract', () => {
     expect(screen).toContain('completionFractionRef.current = snapshot.pendingCompletion.completionFraction');
     expect(screen).toContain("setPhase(snapshot.pendingCompletion ? 'complete' : snapshot.phase)");
     expect(screen).toContain('pendingCompletion: { completedAt: timestamp, completionFraction }');
-    expect(screen).toContain("if (phase === 'complete') return;");
+    expect(screen).toContain("if (phase === 'complete' || pauseSaveBusy) return;");
   });
 });
 
