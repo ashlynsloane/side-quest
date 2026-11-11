@@ -11,16 +11,18 @@ appId: com.sidequest.synthetic.qa
     visible:
       id: "sidequest-qa-week-tab"
     timeout: 30000
-# Until a stable QA profile tab ID exists, use the exact iOS composite
-# accessibility label (the short "You" selector is not reliable).
-- tapOn: "You, tab, 5 of 6"
+- tapOn:
+    id: "sidequest-qa-profile-tab"
 - scrollUntilVisible:
-    element: "Sign out"
+    element:
+      id: "sidequest-qa-sign-out"
     direction: DOWN
     centerElement: true
     visibilityPercentage: 85
     timeout: 30000
-- tapOn: "Sign out"
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Create your beta profile"
     timeout: 30000
@@ -64,14 +66,18 @@ appId: com.sidequest.synthetic.qa
 # Switch back to A. The local profile key is derived deterministically
 # from normalized email; this must restore, not duplicate, the original file.
 - tapOn: "Go back"
-- tapOn: "You, tab, 5 of 6"
+- tapOn:
+    id: "sidequest-qa-profile-tab"
 - scrollUntilVisible:
-    element: "Sign out"
+    element:
+      id: "sidequest-qa-sign-out"
     direction: DOWN
     centerElement: true
     visibilityPercentage: 85
     timeout: 30000
-- tapOn: "Sign out"
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Create your beta profile"
     timeout: 30000
