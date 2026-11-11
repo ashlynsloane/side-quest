@@ -374,5 +374,9 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('run_flow restart e2e/maestro/synthetic-ride-restart-steps.yaml');
     expect(runner).not.toContain('run_flow ride e2e/maestro/synthetic-completed-ride.yaml');
     expect(runner).toContain('exit 1');
+    expect(runner).toContain('diagnostics=$?');
+    expect(runner).toContain('"$diagnostics" -ne 0');
+    expect(source('scripts/qa/diagnose-native-evidence.mjs'))
+      .toContain('if (!report.allPassed) process.exitCode = 1;');
   });
 });

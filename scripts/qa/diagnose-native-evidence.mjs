@@ -241,3 +241,7 @@ const lines = [
 ].join('\n');
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines);
 else process.stdout.write(lines);
+// The native gate must be executable, not just a descriptive report.
+// Even a zero-exit Maestro process cannot qualify an incomplete/skipped
+// or corrupt JUnit file as passing evidence.
+if (!report.allPassed) process.exitCode = 1;

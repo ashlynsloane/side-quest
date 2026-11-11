@@ -83,7 +83,8 @@ summary="Profile: $profile; onboarding: $onboarding; ride: $ride; restart: $rest
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
-node scripts/qa/diagnose-native-evidence.mjs maestro-evidence || true
+node scripts/qa/diagnose-native-evidence.mjs maestro-evidence
+diagnostics=$?
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     echo "## Native iOS athlete acceptance"
@@ -91,7 +92,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "A passing native build or launch alone is not a passing athlete journey."
   } >> "$GITHUB_STEP_SUMMARY"
 fi
-if [[ "$profile" -ne 0 || "$onboarding" -ne 0 || "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 || "$strength" -ne 0 ]]; then
+if [[ "$profile" -ne 0 || "$onboarding" -ne 0 || "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 || "$strength" -ne 0 || "$diagnostics" -ne 0 ]]; then
   exit 1
 fi
 exit 0

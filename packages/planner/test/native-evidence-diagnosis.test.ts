@@ -55,6 +55,7 @@ describe('native UI failure evidence diagnosis', () => {
     }));
     const { report } = diagnose(root);
     expect(report.allPassed).toBe(false);
+    expect(run.status).toBe(1);
     expect(report.stages[0]?.status).toBe('FAILED');
     expect(report.stages[0]?.diagnosis).toMatch(/keyboard-focus leak/);
     expect(report.stages.slice(1).map(x => x.status)).toEqual(Array(5).fill('BLOCKED'));
@@ -202,7 +203,8 @@ describe('native UI failure evidence diagnosis', () => {
         writeFileSync(join(root, stage + '-junit.xml'), junit(1));
       }
       writeFileSync(join(root, 'isolation-junit.xml'), broken);
-      const { report } = diagnose(root);
+      const { run, report } = diagnose(root);
+      expect(run.status).toBe(1);
       expect(report.allPassed).toBe(false);
       expect(report.stages[4]?.status).toBe('INVALID_REPORT');
       expect(report.stages[4]?.failure).toMatch(/no passing evidence/i);
