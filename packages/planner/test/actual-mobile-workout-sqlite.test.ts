@@ -232,6 +232,54 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await recovered.loadLiveWorkoutSession()).toBeNull();
   });
 
+  it('does not overwrite an unresolved completion with a new workout or corrupt stored checkpoint', async () => {
+    const checkpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const sessionA = checkpoint.createInitialLiveWorkoutSession(workout, startedAt);
+    const pending = {
+      ...sessionA, phase: 'rest' as const, running: false,
+      pendingCompletion: { completionFraction: 0.31, completedAt },
+    };
+    await checkpoint.saveLiveWorkoutSession(pending, 'synthetic-athlete-one');
+    const storedBefore = globalThis.localStorage.getItem(
+      'sidequest.live-workout.session.v1:synthetic-athlete-one',
+    );
+    expect(() => checkpoint.assertCanStartLiveWorkout('synthetic-athlete-one'))
+      .toThrow(/Finish saving the previous workout/);
+
+    const otherWorkout = { ...workout, id: 'other-workout' };
+    const replacement = checkpoint.createInitialLiveWorkoutSession(
+      otherWorkout, '2026-10-21T11:00:00.000Z',
+    );
+    await expect(checkpoint.saveLiveWorkoutSession(replacement, 'synthetic-athlete-one'))
+      .rejects.toThrow(/Conflicting pending workout completion/);
+    expect(globalThis.localStorage.getItem(
+      'sidequest.live-workout.session.v1:synthetic-athlete-one',
+    )).toBe(storedBefore);
+    // Background writes for the original session may arrive after its
+    // journal is committed; they are ignored rather than wiping the dose.
+    await checkpoint.saveLiveWorkoutSession(sessionA, 'synthetic-athlete-one');
+    expect((await checkpoint.loadLiveWorkoutSession('synthetic-athlete-one'))
+      ?.pendingCompletion?.completionFraction).toBe(0.31);
+
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect(() => checkpoint.assertCanStartLiveWorkout('synthetic-athlete-two'))
+      .not.toThrow();
+    await checkpoint.saveLiveWorkoutSession(replacement, 'synthetic-athlete-two');
+    expect((await checkpoint.loadLiveWorkoutSession('synthetic-athlete-two'))
+      ?.workout.id).toBe('other-workout');
+
+    await service.activateUserDatabase('synthetic-athlete-one');
+    await checkpoint.clearLiveWorkoutSession('synthetic-athlete-one');
+    expect(() => checkpoint.assertCanStartLiveWorkout('synthetic-athlete-one'))
+      .not.toThrow();
+    const corruptKey = 'sidequest.live-workout.session.v1:synthetic-athlete-one';
+    globalThis.localStorage.setItem(corruptKey, '{unparseable-checkpoint');
+    expect(() => checkpoint.assertCanStartLiveWorkout('synthetic-athlete-one'))
+      .toThrow(/data was preserved/);
+    expect(globalThis.localStorage.getItem(corruptKey))
+      .toBe('{unparseable-checkpoint');
+  });
+
   it('keeps A pending partial dose and B live workout separate across athlete switches and cold reload', async () => {
     const mobileCheckpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
     await service.saveTrainingBlock(weeklyBlock());
