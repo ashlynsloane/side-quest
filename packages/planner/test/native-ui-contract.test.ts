@@ -289,7 +289,7 @@ describe('native synthetic UI automation contract', () => {
       expect(source('e2e/maestro/' + stage)).not.toMatch(/^- runFlow:/m);
     }
     const runner = source('scripts/qa/run-native-maestro.sh');
-    expect(runner).toContain('one persistent synthetic athlete');
+    expect(runner).toContain('staged synthetic account and workout lifecycle');
     const onboarding = source('e2e/maestro/synthetic-onboarding-steps.yaml');
     expect(onboarding).toContain('- launchApp');
     expect(onboarding).toContain('retryTapIfNoChange: true');
