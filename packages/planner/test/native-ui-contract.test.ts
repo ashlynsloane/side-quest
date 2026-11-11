@@ -294,8 +294,10 @@ describe('native synthetic UI automation contract', () => {
     }
     expect(card).toContain('testID="sidequest-qa-resume-active-workout"');
     expect(ui).toContain('testID={testID}');
-    expect(flow).toContain('tapOn: ".*Quick workout.*"');
+    expect(flow).toContain('id: "sidequest-qa-quick-workout"');
     expect(flow).not.toContain('- tapOn: "Quick workout"');
+    expect(source('apps/mobile/src/app/(tabs)/train.tsx'))
+      .toContain('testID="sidequest-qa-quick-workout"');
     expect(flow).toContain('stopApp');
     expect(flow).toContain('launchApp');
     expect(flow).toContain('id: "sidequest-qa-resume-active-workout"');
