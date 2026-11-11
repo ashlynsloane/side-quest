@@ -91,3 +91,21 @@ was **QUEUED at this snapshot**, not a native pass. Exact-head
 [automated acceptance 43076047266](https://github.com/ashlynsloane/side-quest/actions/runs/43076047266)
 completed **SUCCESS**, preserving 110 passing regression test files and
 planner/mobile typecheck and iOS JS export.
+
+## Intermittent native transport failure — run 43076034600
+
+The third native UI-only run did **not** reach the A→B→A gate. Profile
+creation PASSED; the onboarding stage failed at its `launchApp`
+command with `DeviceUnreachableException` during XCTest `setPermissions`
+(transport refused `127.0.0.1`). The archived Maestro command trace shows
+only define variables, app configuration and a RUNNING launchApp; **no
+onboarding UI interaction or app assertion executed**. Ride, restart,
+isolation and strength remained BLOCKED. This is test-driver infrastructure
+failure, not demonstrated application regression.
+
+One narrowly guarded infrastructure retry is now allowed *per stage* only
+when both the JUnit contains a known XCTest transport error and the native
+command record proves no UI interaction occurred. Original failed logs and
+JUnit are retained; any actual tap, assertion, ambiguous command trace or
+second transport failure ends in FAIL. Added a deterministic helper test.
+This needs fresh native execution; no gate status is upgraded by code alone.

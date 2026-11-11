@@ -22,6 +22,19 @@ run_flow() {
     --test-output-dir="maestro-evidence/${label}" \
     "$file" > "maestro-evidence/${label}-console.log" 2>&1
   local result=$?
+  if [[ "$result" -ne 0 ]] && node scripts/qa/native-driver-retry.mjs \
+      "maestro-evidence/${label}-junit.xml" "maestro-evidence/${label}"; then
+    # Only pre-interaction XCTest failures qualify. Preserve the original
+    # failure for forensics; the retry must produce its own fresh JUnit.
+    mv "maestro-evidence/${label}-junit.xml" "maestro-evidence/${label}-driver-attempt1-junit.xml"
+    mv "maestro-evidence/${label}-console.log" "maestro-evidence/${label}-driver-attempt1-console.log"
+    echo "INFRASTRUCTURE RETRY: pre-interaction XCTest driver transport failed; retrying ${label} once."
+    maestro --udid="$MAESTRO_UDID" test \
+      --format junit --output "maestro-evidence/${label}-junit.xml" \
+      --test-output-dir="maestro-evidence/${label}-retry" \
+      "$file" > "maestro-evidence/${label}-console.log" 2>&1
+    result=$?
+  fi
   tail -n 90 "maestro-evidence/${label}-console.log"
   return "$result"
 }

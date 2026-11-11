@@ -145,3 +145,14 @@ explicitly leaving History using its accessible `Go back` control, then
 selecting Profile. The A-history → Train handoff is similarly explicit.
 No change to the app binary; a source-fingerprint-matched UI-only retest is
 required before qualifying the complete A→B→A or strength journey.
+
+## XCTest pre-interaction transport retry policy
+
+Run 43076034600 failed due to `DeviceUnreachableException` during
+`setPermissions` while the first `launchApp` of the onboarding stage was
+RUNNING. No onboarding interaction occurred. The native runner now permits
+**one** retry of a stage only if its JUnit confirms the XCTest transport
+failure **and** its archived `commands.json` contains only setup/config/
+incomplete launch commands. The first JUnit and console log remain archived
+for investigation. Any completed UI interaction, assertion failure, absent
+command evidence or second failure remains a hard native FAIL.
