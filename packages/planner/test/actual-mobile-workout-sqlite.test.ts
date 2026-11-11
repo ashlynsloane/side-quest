@@ -278,6 +278,10 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
       .toThrow(/data was preserved/);
     expect(globalThis.localStorage.getItem(corruptKey))
       .toBe('{unparseable-checkpoint');
+    await expect(checkpoint.saveLiveWorkoutSession(replacement, 'synthetic-athlete-one'))
+      .rejects.toThrow(/Existing workout checkpoint is unreadable/);
+    expect(globalThis.localStorage.getItem(corruptKey))
+      .toBe('{unparseable-checkpoint');
   });
 
   it('keeps A pending partial dose and B live workout separate across athlete switches and cold reload', async () => {
