@@ -160,6 +160,33 @@ export function createInitialLiveWorkoutSession(
   };
 }
 
+/**
+ * A pending completion is a durable, immutable write-ahead journal. Do not
+ * replace it with a new workout merely because the UI has been navigated to
+ * a different preview. Only a successful canonical ledger save and explicit
+ * checkpoint clear may unblock starting a new session.
+ */
+export function assertCanStartLiveWorkout(profileId?: string | null): void {
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) throw new Error('Cannot start an unowned workout.');
+  const raw = storage.getItem(key);
+  if (!raw) return;
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(raw);
+  } catch {
+    throw new Error('The previous workout checkpoint could not be read. Its data was preserved.');
+  }
+  if (!isLiveWorkoutSession(candidate)) {
+    throw new Error('The previous workout checkpoint could not be verified. Its data was preserved.');
+  }
+  if (candidate.pendingCompletion) {
+    throw new Error('Finish saving the previous workout before starting a new one. The original completion dose is preserved.');
+  }
+}
+
 export async function saveLiveWorkoutSession(
   snapshot: LiveWorkoutSessionSnapshot, profileId?: string | null,
 ): Promise<void> {
@@ -177,8 +204,12 @@ export async function saveLiveWorkoutSession(
         const sameSession = previous.workout.id === snapshot.workout.id
           && previous.startedAt === snapshot.startedAt;
         if (!snapshot.pendingCompletion) {
-          // A late timer / background checkpoint must never erase the
-          // original completion journal before the canonical ledger commits.
+          // Ignore late timer/background snapshots for the same session,
+          // but reject new-workout replacement explicitly. It must not
+          // falsely appear to have saved when the old journal remains.
+          if (!sameSession) {
+            throw new Error('Conflicting pending workout completion; save the original dose before replacement.');
+          }
           return;
         }
         if (!sameSession
