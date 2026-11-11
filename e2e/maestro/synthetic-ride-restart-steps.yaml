@@ -12,14 +12,25 @@ appId: com.sidequest.synthetic.qa
 - tapOn:
     id: "sidequest-qa-week-tab"
     retryTapIfNoChange: true
+# The earlier native failure was an occluded touch: Maestro considered
+# the History link visible at y=828, behind the 76-point Week tab bar.
+# centerElement moves it into the actual tappable scroll viewport.
 - scrollUntilVisible:
-    element: "Inspect full training history"
+    element:
+      id: "sidequest-qa-open-training-history"
     direction: DOWN
-    timeout: 25000
-- tapOn: "Inspect full training history"
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- takeScreenshot: "synthetic-history-link-before-tap"
+- tapOn:
+    id: "sidequest-qa-open-training-history"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Training history"
     timeout: 30000
+# A tap on the overlying Week tab must not qualify as a pass.
+- assertNotVisible: "Training evidence this week"
 - assertVisible: "Completed bike"
 - assertVisible: "75 min.*"
 - takeScreenshot: "synthetic-ride-recovered-after-relaunch"
