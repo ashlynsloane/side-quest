@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 
 const root = process.argv[2] ?? 'maestro-evidence';
-const stages = ['profile', 'onboarding', 'ride', 'restart'];
+const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation'];
 const escaped = (s) => s.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) =>
   ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" })[entity]);
 function recurse(path) {
@@ -226,7 +226,7 @@ const lines = [
     '| ' + stage.stage + ' | ' + stage.status + ' | ' +
       (stage.diagnosis ?? stage.failure ?? '').replaceAll('|', ' ').replaceAll('\n', ' ').slice(0, 180) + ' |'),
   '',
-  '**All four native journeys verified: ' + (report.allPassed ? 'YES' : 'NO') + '**',
+  '**All five staged native journeys verified: ' + (report.allPassed ? 'YES' : 'NO') + '**',
   '',
 ].join('\n');
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines);
