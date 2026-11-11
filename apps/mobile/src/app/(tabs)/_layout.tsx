@@ -22,7 +22,7 @@ export default function TabLayout() {
     <Tabs.Screen name="plan" options={{ title: 'Week', tabBarButtonTestID: 'sidequest-qa-week-tab', tabBarIcon: ({ focused }) => <TabIcon kind="plan" focused={focused} /> }} />
     <Tabs.Screen name="train" options={{ title: 'Train', tabBarButtonTestID: 'sidequest-qa-train-tab', tabBarIcon: ({ focused }) => <TabIcon kind="train" focused={focused} /> }} />
     <Tabs.Screen name="coach" options={{ title: 'Coach', tabBarIcon: ({ focused }) => <TabIcon kind="insights" focused={focused} /> }} />
-    <Tabs.Screen name="profile" options={{ title: 'You', tabBarIcon: ({ focused }) => <TabIcon kind="profile" focused={focused} /> }} />
+    <Tabs.Screen name="profile" options={{ title: 'You', tabBarButtonTestID: 'sidequest-qa-profile-tab', tabBarIcon: ({ focused }) => <TabIcon kind="profile" focused={focused} /> }} />
     <Tabs.Screen name="library" options={{ href: null }} />
   </Tabs>;
 }
