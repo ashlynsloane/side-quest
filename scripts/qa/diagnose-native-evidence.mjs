@@ -190,9 +190,19 @@ for (const stage of stages) {
     const total = Number(suite ? attr(suite, 'tests') : NaN);
     const failures = Number(suite ? attr(suite, 'failures') ?? 0 : NaN);
     const errors = Number(suite ? attr(suite, 'errors') ?? 0 : NaN);
-    if (!Number.isFinite(total) || total < 1 || /<\/testsuite>/.test(xml) === false) {
+    const skipped = Number(suite ? attr(suite, 'skipped') ?? 0 : NaN);
+    const cases = (xml.match(/<testcase(?:\s|>)/g) ?? []).length;
+    // Never count a missing/empty/aborted or skipped Maestro scenario as
+    // real native evidence. Passing JUnit requires an executed test case;
+    // a zero-failure suite with no assertion executed is not acceptance.
+    if (!Number.isInteger(total) || total < 1
+      || !Number.isInteger(cases) || cases !== total
+      || !Number.isInteger(skipped) || skipped > 0
+      || /<skipped(?:\s|>|\/)/.test(xml)
+      || /<\/testsuite>/.test(xml) === false) {
       status = 'INVALID_REPORT';
-    } else if (failures > 0 || errors > 0 || /<failure(?:\s|>)/.test(xml)) {
+      failure = 'Native JUnit missing, skipped or inconsistent test execution; no passing evidence.';
+    } else if (failures > 0 || errors > 0 || /<failure(?:\s|>|\/)/.test(xml) || /<error(?:\s|>|\/)/.test(xml)) {
       status = 'FAILED';
       const match = xml.match(/<failure(?:\s[^>]*)?>([\s\S]*?)<\/failure>/);
       failure = match ? escaped(match[1]).trim().slice(0, 300) : 'Native assertion failed';
