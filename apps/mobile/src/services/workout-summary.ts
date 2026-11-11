@@ -96,7 +96,10 @@ export function buildLedgerWorkoutSummary(entry: WorkoutLedgerEntry): CompletedW
   const regionLoads: Partial<Record<BodyRegion, number>> = {};
   const categories = new Set<string>();
   for (const exercise of entry.exercises) {
-    const setCount = Math.max(1, exercise.sets.filter((set) => set.completed).length);
+    // Partial sessions can include the entire prescription with zero logged
+    // sets. Do not turn planned exercises into observed muscle exposure.
+    const setCount = exercise.sets.filter((set) => set.completed).length;
+    if (setCount === 0) continue;
     for (const region of exercise.bodyRegions) {
       const roleFactor = region.role === 'primary' ? 1 : region.role === 'secondary' ? 0.62 : 0.34;
       regionLoads[region.region] = (regionLoads[region.region] ?? 0) + Math.max(0.25, region.load) * roleFactor * setCount;
@@ -127,7 +130,8 @@ export function buildLedgerWorkoutSummary(entry: WorkoutLedgerEntry): CompletedW
     totalRounds: Object.values(entry.stationRounds).reduce((sum, value) => sum + value, 0),
     equipment: [...new Set(entry.exercises.map((item) => item.equipmentId).filter(Boolean).map((item) => equipmentLabel(String(item))))],
     categories: [...categories].slice(0,4),
-    exercises: entry.exercises.map((item) => ({ name: item.name, sets: item.sets })),
+    exercises: entry.exercises.filter((item) => item.sets.some((set) => set.completed))
+      .map((item) => ({ name: item.name, sets: item.sets.filter((set) => set.completed) })),
     regionLoads,
     topRegions,
   };
