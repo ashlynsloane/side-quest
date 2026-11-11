@@ -135,3 +135,13 @@ isolation and strength stage now start by tapping stable destination tab IDs,
 independent of any accidental router-stack state. This change requires a
 new native UI-only execution. Do not classify the previous isolation as a
 profile-storage defect.
+
+## Second A/B native run 43062375569
+
+Native stages profile, onboarding, ride, cold restart passed. B's account
+was created and its empty history confirmed natively, but switching back to
+A was BLOCKED because a nested History route hid the bottom tabs. Fixed by
+explicitly leaving History using its accessible `Go back` control, then
+selecting Profile. The A-history → Train handoff is similarly explicit.
+No change to the app binary; a source-fingerprint-matched UI-only retest is
+required before qualifying the complete A→B→A or strength journey.

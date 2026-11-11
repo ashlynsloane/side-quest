@@ -263,7 +263,15 @@ describe('native synthetic UI automation contract', () => {
   it('navigates cross-athlete native journeys through stable tabs, not back-stack assumptions', () => {
     const isolation = source('e2e/maestro/synthetic-athlete-isolation-steps.yaml');
     const strength = source('e2e/maestro/synthetic-strength-restart-steps.yaml');
-    expect(isolation).not.toContain('- tapOn: "Go back"\n- tapOn:\n    id: "sidequest-qa-profile-tab"');
+    expect(isolation).toContain('visible: "Go back"');
+    expect(isolation).toContain('id: "sidequest-qa-profile-tab"');
+    expect(isolation).toContain('id: "sidequest-qa-train-tab"');
+    const bEmpty = isolation.indexOf('assertVisible: "No training records yet"');
+    const leaveBHistory = isolation.indexOf('- tapOn: "Go back"', bEmpty);
+    const backToProfile = isolation.indexOf('id: "sidequest-qa-profile-tab"', leaveBHistory);
+    expect(bEmpty).toBeGreaterThan(0);
+    expect(leaveBHistory).toBeGreaterThan(bEmpty);
+    expect(backToProfile).toBeGreaterThan(leaveBHistory);
     const first = isolation.indexOf('- tapOn:');
     expect(isolation.slice(first, first + 75)).toContain('sidequest-qa-profile-tab');
     expect(strength).toContain('id: "sidequest-qa-train-tab"');

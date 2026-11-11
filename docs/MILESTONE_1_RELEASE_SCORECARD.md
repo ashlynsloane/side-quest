@@ -26,7 +26,7 @@ experience must demonstrate these behaviors, not just unit tests.
 | iOS create profile and first-week onboarding | **PASS (native)** | Native JUnit stages `profile`, `onboarding` passed in run 42959140988 |
 | iOS log completed 75-minute bike | **PASS (native)** | `ride` native JUnit passed in run 42959140988 |
 | Cold restart keeps that actual 75-minute bike in Training History | **PASS (native)** | [UI-only run 43057598937](https://github.com/ashlynsloane/side-quest/actions/runs/43057598937) executed and passed the real cold-restart/history/detail check against a verified source-matched Release app |
-| Real A → B → A account-history isolation | **FAILED: NAVIGATION PRECONDITION (native); RETEST RUNNING** | [UI-only run 43057598937](https://github.com/ashlynsloane/side-quest/actions/runs/43057598937): first 4 stages PASS; isolation expected nonexistent “Go back” on Today. Native screenshot shows Profile tab available. QA now uses stable Profile tab ID; [retest 43062375569](https://github.com/ashlynsloane/side-quest/actions/runs/43062375569) running at snapshot. No A→B→A data claim yet |
+| Real A → B → A account-history isolation | **PARTIAL NATIVE EVIDENCE; FAIL AT B→A NAVIGATION** | [UI-only run 43062375569](https://github.com/ashlynsloane/side-quest/actions/runs/43062375569): B profile onboarding completed; B's History had 0 records and “No training records yet”. QA then sought a tab from the full-screen History subpage, which hides tabs. Corrected to Go back then select Profile; A's original ride awaits native confirmation. |
 | Interrupted strength workout, process restart, resume and partial-completion history | **BLOCKED/UNVERIFIED (native)** | Sixth staged Maestro journey. Source-level and SQLite tests exist; no successful native end-to-end evidence yet |
 | Profile switch *during* first-week write/generation | **UNVERIFIED (native)** | Source/SQLite fence tests only; distinct in-flight native switch test required |
 | Crash *during* pending completion / SQLite commit | **UNVERIFIED (native)** | Fail-closed immutable journal and idempotency tests exist; force-terminate at the actual injection point required |
@@ -61,3 +61,15 @@ isolation and strength scripts now use destination tab IDs rather than
 assuming router.back() history. **This correction is pending native rerun.**
 
 Next: inspect [native run 43062375569](https://github.com/ashlynsloane/side-quest/actions/runs/43062375569) stage evidence after completion. Do not claim A→B→A or strength completion until the respective executed JUnit results PASS.
+
+## Second native isolation attempt — run 43062375569
+
+Four leading native journeys passed. Stage 5 created and onboarded synthetic
+athlete B and showed B's empty Training History (zero records, screenshot
+and accessibility evidence). The stage then failed solely at navigation:
+it attempted to select the Profile tab while inside full-screen History,
+where the tab bar is hidden. The fix uses the visible `Go back` control
+first, then selects the native Profile tab. At stage exit, it now returns
+from A's Activity detail through History to the tab shell before strength
+acceptance. This is **partial B-isolation evidence**, not yet a complete
+A→B→A PASS. A's restored history and strength recovery remain unverified.
