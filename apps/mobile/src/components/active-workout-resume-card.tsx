@@ -35,7 +35,7 @@ export function ActiveWorkoutResumeCard({
         {planLink?.modifiedFromPlan ? <V23Chip tone="warm">Customized</V23Chip> : null}
       </View>
       <Text style={[styles.body, { color: tokens.textMuted }]}>Your timer, station, and logged sets are saved. Resume when you are ready.</Text>
-      <V23PrimaryButton onPress={onResume} icon="play">Resume workout</V23PrimaryButton>
+      <V23PrimaryButton testID="sidequest-qa-resume-active-workout" onPress={onResume} icon="play">Resume workout</V23PrimaryButton>
     </V23Card>
   );
 }

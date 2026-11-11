@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { V23Card, V23Chip, V23GroupedList, V23Icon, V23PrimaryButton, V23Row, V23ScenicBanner, V23Screen, V23SectionHeader } from '@/components/v23-ui';
+import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
 import { getLatestTrainingBlock, listWorkoutLedgerEntries, type WorkoutLedgerEntry } from '@/services/database';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
@@ -15,7 +16,7 @@ export default function TrainTab() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { openPlannedWorkoutPreview } = useWorkoutContext();
+  const { openPlannedWorkoutPreview, activeWorkout, activePlanLink, workoutSessionReady } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [lastWorkout, setLastWorkout] = useState<WorkoutLedgerEntry | null>(null);
 
@@ -32,6 +33,11 @@ export default function TrainTab() {
 
   return <V23Screen>
     <View style={styles.intro}><Text style={styles.pageTitle}>Train</Text><Text style={styles.pageBody}>Strength that fits the rest of your training.</Text></View>
+
+    {workoutSessionReady && activeWorkout ? (
+      <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink}
+        onResume={() => router.push('/active-workout' as Href)} />
+    ) : null}
 
     <V23Card elevated style={styles.heroCard}>
       <View style={styles.heroTop}><View style={styles.heroCopy}><Text style={styles.kicker}>Recommended today</Text><Text style={styles.title}>{next?.title ?? 'Full-body strength'}</Text><Text style={styles.meta}>{next ? `${Math.round(next.workout.totalWorkSeconds / 60)} min · ${capitalize(next.intendedLoad)}` : '45–60 min · Moderate'}</Text></View><View style={styles.heroIcon}><V23Icon name="train" color={tokens.accent} size={28} /></View></View>

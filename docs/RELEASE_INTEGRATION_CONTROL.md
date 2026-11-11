@@ -47,11 +47,12 @@ integration tests and a review of conflict semantics.
    non-destructively. No user data are migrated by CI.
 6. A **single CI run on the candidate SHA** passes planner regression, actual
    mobile SQLite tests, planner/mobile typechecks and iOS JavaScript export.
-7. Native Release simulator **all five stages** pass and upload JUnit/
+7. Native Release simulator **all six stages** pass and upload JUnit/
    accessibility/screenshot evidence for profile → first week → completed
-   ride → restart → A→B→A history isolation. Mid-generation native
-   switching and interrupted partial-completion recovery remain additional
-   required checks. A native build or script existing is not passing proof.
+   ride → restart → A→B→A history isolation → strength pause/relaunch/
+   partial-save. Mid-generation native switching and a forced termination
+   *during* pending partial-completion commit remain additional required
+   checks. A native build or script existing is not passing proof.
 
 **Evidence snapshot:** On 2026-11-10, the core CI run for
 `5d3967739ce9e86f63e026907cbbe3ea38dfdf3f` passed:
@@ -177,3 +178,19 @@ History after cold relaunch, this gate remains unverified.
   documented historical-owner migration/backup for legitimately old data,
   a native force-quit with an in-flight completion save, and physical-device
   verification. Do not mark those gates passed based on source or CI alone.
+
+## Restored workout discoverability and end-to-end native strength coverage
+
+The app already persisted work/rest state in a profile-scoped local checkpoint,
+but Home and Train did not expose a way to return to it after a cold process
+relaunch. Both screens now conditionally show the existing reusable
+`ActiveWorkoutResumeCard` whenever the active workout provider has restored
+an authenticated athlete's session. Its stable native QA selector is
+`sidequest-qa-resume-active-workout`.
+
+A sixth mandatory synthetic iOS journey leaves an active quick workout,
+relaunches the process, reopens the checkpoint from Today and saves a partial
+completion without claiming full credit. This is **scripted but not native
+verified** until all six stage JUnit reports and screenshots pass. A crash
+between journal and canonical ledger persistence requires a separate
+injection test and remains an explicit release blocker.

@@ -1,0 +1,109 @@
+# Synthetic athlete A has returned from the A/B isolation stage.
+# Exercise a real strength workout, persist and cold-restore an in-progress
+# session, then save a partial dose without awarding 100% credit.
+# This does NOT simulate a crash during the SQL completion transaction.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp
+# Previous stage ended on A's Training history.
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-train-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-train-tab"
+- tapOn: "Quick workout"
+- extendedWaitUntil:
+    visible: "Build a strength-cardio circuit"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Generate Workout"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- tapOn: "Generate Workout"
+- extendedWaitUntil:
+    visible: "WORKOUT PREVIEW"
+    timeout: 60000
+- scrollUntilVisible:
+    element: "Start workout"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn: "Start workout"
+- extendedWaitUntil:
+    visible: "Leave"
+    timeout: 30000
+# The app's own Leave action journals the timer/workout and routes to Today.
+# This establishes a deterministic checkpoint before the process is stopped.
+- tapOn: "Leave"
+- extendedWaitUntil:
+    visible: "WORKOUT IN PROGRESS"
+    timeout: 30000
+- takeScreenshot: "synthetic-strength-paused-checkpoint"
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-today-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-today-tab"
+- extendedWaitUntil:
+    visible: "WORKOUT IN PROGRESS"
+    timeout: 30000
+- assertVisible:
+    id: "sidequest-qa-resume-active-workout"
+- takeScreenshot: "synthetic-strength-resume-after-relaunch"
+- tapOn:
+    id: "sidequest-qa-resume-active-workout"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Resume timer"
+    timeout: 30000
+# End the recovered session early; its fraction must not become 100%.
+- scrollUntilVisible:
+    element: "End workout"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- tapOn: "End workout"
+- tapOn: "Save partial"
+- extendedWaitUntil:
+    visible: "Saved to training history.*"
+    timeout: 30000
+- takeScreenshot: "synthetic-strength-partial-saved"
+- scrollUntilVisible:
+    element: "Return to Today"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- tapOn: "Return to Today"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-week-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-open-training-history"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-open-training-history"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000
+- assertVisible: "STRENGTH"
+- assertVisible: ".*% completed"
+- assertNotVisible: "100% completed"
+- takeScreenshot: "synthetic-strength-partial-in-history"

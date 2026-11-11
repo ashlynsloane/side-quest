@@ -106,3 +106,19 @@ release green when only the original four stages pass.
 force-quit while a partial completion is pending, and manual validation
 against the supported beta device and historical ownership migration.
 Do not equate the new scripted test with those unrun checks.
+
+## November 11 — native strength pause, cold-restart, and partial-completion flow
+
+The new sixth stage, `synthetic-strength-restart-steps.yaml`, starts a real
+synthetic quick workout, uses **Leave** to persist its live work/rest state,
+terminates and relaunches the iOS app, and requires the **Resume workout**
+entry point on Today. It reopens the saved session, ends early, saves the
+original partial fraction, and checks that Training History contains a
+strength record without 100% completion credit. The same resume card is
+present on Train.
+
+This verifies a paused workout surviving a native cold restart and a normal
+partial completion. It does **not** inject a crash between writing an
+immutable pending-completion journal and committing SQLite; that distinct
+release gate remains OPEN. All six native stages must pass together before
+claiming native acceptance.

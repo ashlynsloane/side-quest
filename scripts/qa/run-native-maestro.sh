@@ -26,7 +26,7 @@ run_flow() {
   return "$result"
 }
 
-# The five stages use one persistent synthetic athlete instead of clearing
+# The six stages use a staged synthetic account and workout lifecycle instead of clearing
 # the app four times through nested standalone wrappers. Each stage keeps its
 # own JUnit and screenshot evidence, and is gated on its predecessor.
 # Every downstream test is blocked (code 99) if prerequisites failed.
@@ -35,6 +35,7 @@ onboarding=99
 ride=99
 restart=99
 isolation=99
+strength=99
 run_flow profile e2e/maestro/synthetic-profile-entry.yaml
 profile=$?
 if [[ "$profile" -eq 0 ]]; then
@@ -61,6 +62,12 @@ if [[ "$restart" -eq 0 ]]; then
 else
   echo "BLOCKED: account isolation requires passing cold-restart history" | tee maestro-evidence/isolation-console.log
 fi
+if [[ "$isolation" -eq 0 ]]; then
+  run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml
+  strength=$?
+else
+  echo "BLOCKED: strength pause/restart requires passing A/B isolation" | tee maestro-evidence/strength-console.log
+fi
 xcrun simctl io "$MAESTRO_UDID" screenshot maestro-evidence/final-simulator-screen.png || true
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
@@ -69,9 +76,10 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "ride=$ride"
     echo "restart=$restart"
     echo "isolation=$isolation"
+    echo "strength=$strength"
   } >> "$GITHUB_OUTPUT"
 fi
-summary="Profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation (0=pass, 99=blocked)"
+summary="Profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength (0=pass, 99=blocked)"
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
@@ -83,7 +91,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "A passing native build or launch alone is not a passing athlete journey."
   } >> "$GITHUB_STEP_SUMMARY"
 fi
-if [[ "$profile" -ne 0 || "$onboarding" -ne 0 || "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 ]]; then
+if [[ "$profile" -ne 0 || "$onboarding" -ne 0 || "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 || "$strength" -ne 0 ]]; then
   exit 1
 fi
 exit 0

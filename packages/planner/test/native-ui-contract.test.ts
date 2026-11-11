@@ -100,7 +100,7 @@ describe('native synthetic UI automation contract', () => {
 
   it('uses one staged native runner and refuses a non-synthetic app identity', () => {
     const runner = source('scripts/qa/run-native-maestro.sh');
-    for (const flow of ['profile', 'onboarding', 'ride', 'restart', 'isolation']) {
+    for (const flow of ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength']) {
       expect(runner).toMatch(new RegExp('run_flow ' + flow + ' e2e/maestro/'));
     }
     expect(runner).toContain('QA_BUNDLE_ID');
@@ -185,6 +185,8 @@ describe('native synthetic UI automation contract', () => {
       'synthetic-onboarding-steps.yaml',
       'synthetic-completed-ride-steps.yaml',
       'synthetic-ride-restart-steps.yaml',
+      'synthetic-athlete-isolation-steps.yaml',
+      'synthetic-strength-restart-steps.yaml',
     ];
     for (const name of flowNames) {
       const path = 'e2e/maestro/' + name;
@@ -228,7 +230,30 @@ describe('native synthetic UI automation contract', () => {
     expect(isolation.match(/centerElement: true/g)?.length).toBeGreaterThanOrEqual(4);
     expect(runner).toContain('run_flow isolation e2e/maestro/synthetic-athlete-isolation-steps.yaml');
     expect(runner).toContain('"isolation=$isolation"');
-    expect(diagnostic).toContain("'restart', 'isolation'");
+    expect(diagnostic).toContain("'restart', 'isolation', 'strength'");
+  });
+
+  it('provides an actual Today/Train workout resume affordance after force-quit', () => {
+    const today = source('apps/mobile/src/app/(tabs)/index.tsx');
+    const train = source('apps/mobile/src/app/(tabs)/train.tsx');
+    const card = source('apps/mobile/src/components/active-workout-resume-card.tsx');
+    const ui = source('apps/mobile/src/components/v23-ui.tsx');
+    const flow = source('e2e/maestro/synthetic-strength-restart-steps.yaml');
+    const runner = source('scripts/qa/run-native-maestro.sh');
+
+    for (const page of [today, train]) {
+      expect(page).toContain('<ActiveWorkoutResumeCard');
+      expect(page).toContain('workoutSessionReady && activeWorkout');
+      expect(page).toContain("router.push('/active-workout' as Href)");
+    }
+    expect(card).toContain('testID="sidequest-qa-resume-active-workout"');
+    expect(ui).toContain('testID={testID}');
+    expect(flow).toContain('stopApp');
+    expect(flow).toContain('launchApp');
+    expect(flow).toContain('id: "sidequest-qa-resume-active-workout"');
+    expect(flow).toContain('Save partial');
+    expect(flow).toContain('assertNotVisible: "100% completed"');
+    expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
   });
 
   it('keeps the History link tappable and native restart navigation occlusion-safe', () => {
