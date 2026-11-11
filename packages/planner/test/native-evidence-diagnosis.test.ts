@@ -134,6 +134,29 @@ describe('native UI failure evidence diagnosis', () => {
       .not.toContain('synthetic-secret');
   });
 
+  it('recognizes the native History link hidden behind bottom tabs after restart', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'restart-junit.xml'), junit(1, true).replace(
+      'Assertion failed',
+      'Assertion is false: "Training history" is visible',
+    ));
+    const folder = join(root, 'restart', 'screen-hierarchy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'step-009-assertCondition-Training_history.json'), JSON.stringify({
+      children: [
+        { attributes: { accessibilityText: 'Inspect full training history',
+          bounds: '[38,828][224,861]' } },
+        { attributes: { 'resource-id': 'sidequest-qa-week-tab',
+          accessibilityText: 'Week, tab, 2 of 6', bounds: '[80,807][160,864]' } },
+      ],
+    }));
+    const { report } = diagnose(root);
+    expect(report.stages[3]?.status).toBe('FAILED');
+    expect(report.stages[3]?.diagnosis).toMatch(/under the bottom navigation bar/);
+    expect(report.stages[3]?.diagnosis).toMatch(/persistence after restart is unverified/);
+    expect(report.allPassed).toBe(false);
+  });
+
   it('reports XCTest startup failure as infrastructure, never an app assertion failure', () => {
     const root = fixture();
     writeFileSync(join(root, 'profile-console.log'),
