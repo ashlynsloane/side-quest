@@ -7,6 +7,7 @@ This directory contains Maestro journeys for the **isolated synthetic iOS app**,
 - `synthetic-onboarding-first-week.yaml`: fresh synthetic local account, fast-start questionnaire, saved first-week preview and Week screen.
 - `synthetic-completed-ride.yaml`: onboard a fresh synthetic athlete, record a 75-minute bike activity with deliberately **unknown** distance, inspect actual activity review.
 - `synthetic-ride-restart.yaml`: record the synthetic ride, terminate and relaunch the native app, then verify the record remains in history.
+- `synthetic-athlete-isolation-steps.yaml`: after restart, switch A → B → A on the same simulator; verify B sees no A ride and A retains its original 75-minute ride. This fifth stage is a native release gate, not a substitute for a mid-generation switch test.
 
 ## November 3 acceptance checkpoint
 
@@ -84,3 +85,24 @@ using captured accessibility bounds, without claiming data loss.
 simulator run on the matching app source/flow. Planner and SQLite CI green
 is a separate gate. Tests must be reported as PASS/FAIL/BLOCKED at their
 actual tested SHAs.
+
+## November 10/11 — fifth athlete-isolation stage
+
+After confirming the original synthetic athlete's completed ride survives a
+cold relaunch, the staged runner now signs out and creates a **different
+synthetic local athlete**, completes that new athlete's onboarding, and verifies
+that athlete B has no completed training records. It then signs back into A
+and verifies the original saved ride is still 75 minutes.
+
+This end-to-end account-isolation check goes beyond mocked SQLite switches:
+it exercises native sign-in, database activation, screen routing, timeline
+queries, account switching, and persistence on one iOS simulator.
+
+**Release criterion:** five non-empty passing JUnit reports, including the new
+`isolation` stage. The native summarizer explicitly refuses to mark the
+release green when only the original four stages pass.
+
+**Still outstanding:** a native mid-generation profile switch, native
+force-quit while a partial completion is pending, and manual validation
+against the supported beta device and historical ownership migration.
+Do not equate the new scripted test with those unrun checks.
