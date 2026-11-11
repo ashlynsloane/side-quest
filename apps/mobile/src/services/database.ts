@@ -107,20 +107,23 @@ async function verifyAthleteDatabaseOwner(
   userId: string,
   permitLegacyAdoption: boolean,
 ): Promise<void> {
-  await database.execAsync(`
-    CREATE TABLE IF NOT EXISTS sidequest_athlete_database_owner (
-      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-      user_id TEXT NOT NULL
-    );
-  `);
-  const existing = await database.getFirstAsync<{ user_id: string }>(
-    `SELECT user_id FROM ${DB_OWNER_TABLE} WHERE singleton = 1`,
+  // A rejected legacy adoption must be READ-ONLY. Creating the owner
+  // table before checking existing user tables modified unowned SQLite bytes
+  // even though access was refused. Inspect sqlite_master first.
+  const ownerTable = await database.getFirstAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    DB_OWNER_TABLE,
   );
-  if (existing) {
-    if (existing.user_id !== userId) {
-      throw new Error('Athlete database ownership mismatch. No training records were opened.');
+  if (ownerTable) {
+    const existing = await database.getFirstAsync<{ user_id: string }>(
+      `SELECT user_id FROM ${DB_OWNER_TABLE} WHERE singleton = 1`,
+    );
+    if (existing) {
+      if (existing.user_id !== userId) {
+        throw new Error('Athlete database ownership mismatch. No training records were opened.');
+      }
+      return;
     }
-    return;
   }
   const tables = await database.getAllAsync<{ name: string }>(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN (?, 'sqlite_sequence')",
@@ -131,7 +134,16 @@ async function verifyAthleteDatabaseOwner(
       'Existing athlete database has no verifiable owner. Data was preserved; migration requires review.',
     );
   }
-  // The single owner row is written before exposing any athlete records.
+  if (!ownerTable) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS sidequest_athlete_database_owner (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        user_id TEXT NOT NULL
+      );
+    `);
+  }
+  // Only new/unambiguous owner claims may mutate the file. The owner marker
+  // is committed before initializeDatabase or any athlete table is exposed.
   await database.runAsync(
     `INSERT INTO ${DB_OWNER_TABLE} (singleton, user_id) VALUES (1, ?)`,
     userId,
