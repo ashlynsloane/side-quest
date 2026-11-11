@@ -113,3 +113,37 @@ Do not enable cloud feature flags as a by-product of code consolidation.
 - PR #1 divergent branch requires a separate code audit, not an automatic merge.
 - PR #20 cloud staging, reviewer/correction workflows and real two-device QA
   are deliberately out of scope for the local-first release.
+
+## Native restart incident: verified cause and targeted correction
+
+The [November 10 isolated iOS run](https://github.com/ashlynsloane/side-quest/actions/runs/42921655590)
+passed **profile**, **onboarding**, and **completed ride**, but failed the
+**restart** stage before entering Training History.
+
+Downloaded the full archived native JUnit, Maestro command sequence, failure
+screenshot, and accessibility hierarchy. The failure hierarchy showed:
+
+- The "Inspect full training history" element was at
+  `[38,828][224,861]`.
+- The Week tab occupied `[80,807][160,864]`; the other bottom tabs also
+  occupied this fixed bottom row. The test's History target therefore lay
+  beneath the tab bar. Maestro regarded it as visible and reported a
+  successful `tapOn`, but the screen never navigated away from Week.
+- The assertion `"Training history" is visible` failed because the History
+  route was not entered. **No assertion was made about the saved bike after
+  restart**, and missing data is not an established cause.
+
+Code changes in the single PR #12 release candidate:
+
+1. Promote Training History to the first action in Week's training-evidence
+   card; provide stable `sidequest-qa-open-training-history` test ID.
+2. Use Maestro `scrollUntilVisible` with `centerElement: true` to keep the
+   link away from fixed tabs, record a pre-tap screenshot, tap the stable ID,
+   and demand the History route plus the original 75-minute ride.
+3. Add source-contract regression tests for the accessible navigation and
+   diagnostic unit tests which identify a History target occluded by tab-bar
+   bounds. Native QA must not classify this failure as data loss.
+
+**Verification classification:** code-level acceptance runs are separate
+from native simulator results. Until a new four-stage native run confirms
+History after cold relaunch, this gate remains unverified.
