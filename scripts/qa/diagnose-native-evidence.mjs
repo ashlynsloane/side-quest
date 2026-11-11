@@ -106,9 +106,62 @@ function visibleStageLabels(stage) {
   }
   return [];
 }
+
+function boundingBox(value) {
+  const match = /^\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]$/.exec(String(value ?? ''));
+  if (!match) return null;
+  return { left: Number(match[1]), top: Number(match[2]),
+    right: Number(match[3]), bottom: Number(match[4]) };
+}
+
+/**
+ * The native November 10 restart failure happened before History navigation.
+ * Maestro matched the link by accessibility label at y=828, directly behind
+ * the bottom Week tab at y=807–864. The tap was intercepted; it was NOT
+ * evidence that an endurance record had disappeared from SQLite.
+ */
+function restartHistoryOcclusionDiagnostic(failure) {
+  if (!/Training history.*visible/i.test(String(failure ?? ''))) return null;
+  const files = recurse(join(root, 'restart')).filter((p) =>
+    p.includes('screen-hierarchy') && p.endsWith('.json')).sort().reverse();
+  for (const path of files) {
+    try {
+      const nodes = [];
+      function visit(node) {
+        if (!node || typeof node !== 'object') return;
+        const attrs = node.attributes ?? {};
+        if (attrs.accessibilityText || attrs['resource-id']) nodes.push({
+          label: String(attrs.accessibilityText ?? ''),
+          id: String(attrs['resource-id'] ?? ''),
+          box: boundingBox(attrs.bounds),
+        });
+        for (const child of node.children ?? []) visit(child);
+      }
+      visit(JSON.parse(readFileSync(path, 'utf8')));
+      const history = nodes.find((node) =>
+        node.label === 'Inspect full training history' && node.box);
+      const tabs = nodes.filter((node) =>
+        /^sidequest-qa-(today|week|train)-tab$/.test(node.id) && node.box);
+      if (!history || !tabs.length) continue;
+      const tabTop = Math.min(...tabs.map((node) => node.box.top));
+      const tabBottom = Math.max(...tabs.map((node) => node.box.bottom));
+      if (history.box.top >= tabTop && history.box.top < tabBottom) {
+        return 'History link was under the bottom navigation bar; the tap stayed on Week. Actual record persistence after restart is unverified.';
+      }
+    } catch {
+      // Artifact parsing must never turn a failed scenario into a pass.
+    }
+  }
+  return null;
+}
+
 function nativeStageDiagnostic(stage, failure) {
   if (stage !== 'ride' && stage !== 'restart') return null;
   const labels = visibleStageLabels(stage);
+  if (stage === 'restart') {
+    const occluded = restartHistoryOcclusionDiagnostic(failure);
+    if (occluded) return occluded;
+  }
   // A cold restart can correctly restore Today while Maestro fails to match
   // the short "Week" selector. The native tab label includes position/role.
   if (stage === 'restart' && /Text matching regex: Week/.test(String(failure ?? ''))
