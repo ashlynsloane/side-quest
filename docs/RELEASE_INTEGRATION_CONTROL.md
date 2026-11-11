@@ -47,10 +47,11 @@ integration tests and a review of conflict semantics.
    non-destructively. No user data are migrated by CI.
 6. A **single CI run on the candidate SHA** passes planner regression, actual
    mobile SQLite tests, planner/mobile typechecks and iOS JavaScript export.
-7. Native Release simulator **all stages** pass and upload evidence for
-   profile → first week → completed ride → restart. Add a native A→B
-   switching case and interrupted workout recovery. A native build or
-   script existing is not evidence that its steps passed.
+7. Native Release simulator **all five stages** pass and upload JUnit/
+   accessibility/screenshot evidence for profile → first week → completed
+   ride → restart → A→B→A history isolation. Mid-generation native
+   switching and interrupted partial-completion recovery remain additional
+   required checks. A native build or script existing is not passing proof.
 
 **Evidence snapshot:** On 2026-11-10, the core CI run for
 `5d3967739ce9e86f63e026907cbbe3ea38dfdf3f` passed:
@@ -106,8 +107,10 @@ Do not enable cloud feature flags as a by-product of code consolidation.
 - Native UI restart journey fails before confirming Training History; inspect
   screenshot/accessibility hierarchy to distinguish selector/navigation failure
   from actual missing activity.
-- Native profile switch during first-week generation and genuine crash/relaunch
-  with a pending partial completion remain acceptance gates.
+- Native A→B→A history isolation is now a mandatory fifth stage, but it
+  remains unverified until an actual matching native simulator run passes.
+  A switch *during* first-week generation and genuine crash/relaunch with
+  a pending partial completion remain separate acceptance gates.
 - SQLite historical ownership ambiguity (issue #15), outstanding issues
   #13/#14/#19 native verification, and full signed-device release validation.
 - PR #1 divergent branch requires a separate code audit, not an automatic merge.
@@ -147,3 +150,30 @@ Code changes in the single PR #12 release candidate:
 **Verification classification:** code-level acceptance runs are separate
 from native simulator results. Until a new four-stage native run confirms
 History after cold relaunch, this gate remains unverified.
+
+## Current local-first hardening additions (November 11)
+
+- **Native cross-athlete isolation:** New fifth staged Maestro flow uses real
+  local profile sign-out/sign-in and expects B's training history to be empty
+  while A's original 75-minute bike survives switching back. All five JUnit
+  results are required; source files and scripts alone are not native evidence.
+  Stable accessible profile-tab and sign-out IDs avoid iOS composite-label
+  selector brittleness.
+- **Pending partial completion protection:** A new workout preview cannot
+  replace a previously journaled, unsaved partial dose. The provider checks
+  localStorage *before* replacing in-memory workout state; the preview
+  surfaces a recovery instruction. Direct session persistence rejects
+  conflicting replacements, while stale writes for the same session remain
+  no-ops. Malformed checkpoints are retained and cannot be overwritten
+  automatically. SQLite/adapter tests cover 29–31% partial completion,
+  sign-out and cold restart across A/B profiles.
+- **Legacy SQLite no-write denial:** The owner check now performs a
+  read-only `sqlite_master` inspection before creating its ownership table.
+  When an old populated file lacks independently verifiable ownership,
+  activation refuses to adopt the file without modifying its bytes.
+  A new disk-backed test compares the entire original SQLite file
+  byte-for-byte after rejection.
+- **Remaining:** Actual native iOS release acceptance for these changes,
+  documented historical-owner migration/backup for legitimately old data,
+  a native force-quit with an in-flight completion save, and physical-device
+  verification. Do not mark those gates passed based on source or CI alone.
