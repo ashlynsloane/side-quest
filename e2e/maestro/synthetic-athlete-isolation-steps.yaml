@@ -61,7 +61,7 @@ appId: com.sidequest.synthetic.qa
     visible: "Training history"
     timeout: 30000
 - assertVisible: "No training records yet"
-- assertNotVisible: "Completed bike"
+- assertNotVisible: "Review Completed bike activity"
 - takeScreenshot: "synthetic-b-no-athlete-a-history"
 # Switch back to A. The local profile key is derived deterministically
 # from normalized email; this must restore, not duplicate, the original file.
@@ -109,6 +109,13 @@ appId: com.sidequest.synthetic.qa
 - extendedWaitUntil:
     visible: "Training history"
     timeout: 30000
-- assertVisible: "Completed bike"
-- assertVisible: "75 min.*"
+- assertVisible: "Review Completed bike activity"
+- tapOn: "Review Completed bike activity"
+- extendedWaitUntil:
+    visible: "75 minutes.*"
+    timeout: 30000
 - takeScreenshot: "synthetic-a-ride-preserved-across-account-switch"
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000

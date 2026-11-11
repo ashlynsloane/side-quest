@@ -31,6 +31,14 @@ appId: com.sidequest.synthetic.qa
     timeout: 30000
 # A tap on the overlying Week tab must not qualify as a pass.
 - assertNotVisible: "Training evidence this week"
-- assertVisible: "Completed bike"
-- assertVisible: "75 min.*"
+# The iOS parent Pressable exposes the record as one accessibility element.
+- assertVisible: "Review Completed bike activity"
+- tapOn: "Review Completed bike activity"
+- extendedWaitUntil:
+    visible: "75 minutes.*"
+    timeout: 30000
 - takeScreenshot: "synthetic-ride-recovered-after-relaunch"
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000

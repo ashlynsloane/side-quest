@@ -1,8 +1,15 @@
 name: Native iOS UI-only acceptance (reuse verified binary)
 on:
-  # Run only after a source-matched full native Release app artifact exists.
-  # Automatic YAML-push jobs used to fail before the first binary was built,
-  # generating misleading red checks with zero Maestro assertions.
+  # A verified Release simulator binary now exists. Automatically rerun
+  # the cheaper UI journeys on QA-only changes, using strict source SHA.
+  push:
+    branches: [test/automated-athlete-acceptance-v1]
+    paths:
+      - 'e2e/maestro/*.yaml'
+      - 'e2e/maestro/**/*.yaml'
+      - 'scripts/qa/run-native-maestro.sh'
+      - 'scripts/qa/diagnose-native-evidence.mjs'
+      - '.github/workflows/native-ios-ui-only.yml'
   workflow_dispatch:
     inputs:
       native_build_run_id:

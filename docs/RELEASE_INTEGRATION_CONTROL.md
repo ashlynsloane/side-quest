@@ -210,3 +210,19 @@ workouts with no per-exercise set logs no longer create synthetic completed
 sets for *every* exercise. Historical records are unchanged; this is a
 forward-only recording correction, not a migration. The exact real-device
 reliability of both changes requires native verification before release.
+
+## Native restart incident: November 11, 2026
+
+The completed Release simulator build run 42959140988 passed synthetic
+profile creation, onboarding and recording the 75-minute bike. On cold restart,
+the screenshot and native accessibility hierarchy displayed **one persisted
+Completed bike record with 75 min**. The failure was the QA assertion for
+an inaccessible *child* title; the iOS Pressable exports the composite label
+`Review Completed bike activity` instead. The actual data was present.
+The corrected test now asserts that parent, opens activity detail, checks
+`75 minutes`, and returns to history for the next journey. This must still
+pass its own native run before the milestone is marked complete.
+
+The reusable source-matched simulator binary artifact now exists. UI-only
+acceptance is re-enabled for QA flow changes, with strict app fingerprint
+matching to avoid accepting tests on an outdated native binary.

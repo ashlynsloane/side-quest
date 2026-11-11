@@ -136,7 +136,8 @@ describe('native synthetic UI automation contract', () => {
     const fingerprintScript = source('scripts/qa/native-source-fingerprint.mjs');
     expect(workflow).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
     expect(workflow).toContain('workflow_dispatch:');
-    expect(workflow).not.toMatch(/^  push:/m);
+    expect(workflow).toContain('push:');
+    expect(workflow).toContain("'e2e/maestro/*.yaml'");
     expect(workflow).toContain('refusing to test an old binary');
     expect(workflow).toContain('QA_BUNDLE_ID: com.sidequest.synthetic.qa');
     expect(workflow).toContain('actions: read');
@@ -237,9 +238,9 @@ describe('native synthetic UI automation contract', () => {
     expect(isolation).toContain('synthetic-athlete@example.invalid');
     expect(isolation).toContain('runFlow: synthetic-onboarding-steps.yaml');
     expect(isolation).toContain('assertVisible: "No training records yet"');
-    expect(isolation).toContain('assertNotVisible: "Completed bike"');
-    expect(isolation).toContain('assertVisible: "Completed bike"');
-    expect(isolation).toContain('assertVisible: "75 min.*"');
+    expect(isolation).toContain('assertNotVisible: "Review Completed bike activity"');
+    expect(isolation).toContain('assertVisible: "Review Completed bike activity"');
+    expect(isolation).toContain('visible: "75 minutes.*"');
     expect(isolation).toContain('synthetic-a-ride-preserved-across-account-switch');
     expect(isolation.match(/centerElement: true/g)?.length).toBeGreaterThanOrEqual(4);
     expect(runner).toContain('run_flow isolation e2e/maestro/synthetic-athlete-isolation-steps.yaml');
@@ -302,8 +303,10 @@ describe('native synthetic UI automation contract', () => {
     expect(restart).toContain('id: "' + historyId + '"');
     expect(restart).toContain('centerElement: true');
     expect(restart).toContain('takeScreenshot: "synthetic-history-link-before-tap"');
+    expect(restart).toContain('- tapOn: "Review Completed bike activity"');
     expect(restart).toContain('- assertNotVisible: "Training evidence this week"');
-    expect(restart).toContain('assertVisible: "75 min.*"');
+    expect(restart).toContain('assertVisible: "Review Completed bike activity"');
+    expect(restart).toContain('visible: "75 minutes.*"');
     expect(restart).not.toContain('- tapOn: "Inspect full training history"');
   });
 
@@ -333,7 +336,8 @@ describe('native synthetic UI automation contract', () => {
     const restart = source('e2e/maestro/synthetic-ride-restart-steps.yaml');
     // Native inspection showed the labels include trailing intensity context.
     expect(ride).toContain('assertVisible: "75 minutes.*"');
-    expect(restart).toContain('assertVisible: "75 min.*"');
+    expect(restart).toContain('assertVisible: "Review Completed bike activity"');
+    expect(restart).toContain('visible: "75 minutes.*"');
     expect(ride).toContain('takeScreenshot: "synthetic-completed-ride-review"');
     expect(restart).toContain('stopApp');
     expect(restart).toContain('launchApp');
