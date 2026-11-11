@@ -119,7 +119,7 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('com.sidequest.synthetic.qa');
     expect(runner).toContain('MAESTRO_DRIVER_STARTUP_TIMEOUT');
     expect(runner).toContain('360000');
-    expect(runner).toContain('99=blocked');
+    expect(runner).toContain('99=not run/blocked');
     const script = new URL('../../../scripts/qa/run-native-maestro.sh', import.meta.url);
     const check = spawnSync('bash', ['-n', script.pathname], { encoding: 'utf8' });
     expect(check.status, check.stderr).toBe(0);
