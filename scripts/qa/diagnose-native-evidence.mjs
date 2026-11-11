@@ -3,6 +3,15 @@ import { join } from 'node:path';
 
 const root = process.argv[2] ?? 'maestro-evidence';
 const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength'];
+const scopes = Object.freeze({
+  full: stages,
+  isolation: stages.filter((stage) => stage !== 'strength'),
+  strength: ['profile', 'onboarding', 'strength'],
+});
+const scope = process.env.NATIVE_QA_SCOPE ?? 'full';
+// An invalid or empty scope must never turn failed tests into success.
+if (!Object.hasOwn(scopes, scope)) throw new Error('Invalid native acceptance scope.');
+const required = new Set(scopes[scope]);
 const escaped = (s) => s.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) =>
   ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" })[entity]);
 function recurse(path) {
@@ -177,7 +186,7 @@ function nativeStageDiagnostic(stage, failure) {
     ? 'Saved bike and 75-minute dose are visible; exact-text assertion ignored the composite native accessibility label.'
     : null;
 }
-const report = { schemaVersion: 1, stages: [], allPassed: true };
+const report = { schemaVersion: 1, scope, requiredStages: [...required], stages: [], allPassed: true };
 for (const stage of stages) {
   const junitPath = join(root, stage + '-junit.xml');
   const consolePath = join(root, stage + '-console.log');
@@ -218,7 +227,11 @@ for (const stage of stages) {
   } else if (log.trim()) {
     status = 'NO_REPORT';
   }
-  if (status !== 'PASSED') report.allPassed = false;
+  if (!required.has(stage)) {
+    // This journey was intentionally excluded, never a passing assertion.
+    status = 'NOT_REQUIRED';
+    failure = null;
+  } else if (status !== 'PASSED') report.allPassed = false;
   const diagnosis = status !== 'FAILED' ? null
     : stage === 'profile' ? profileDiagnostic()
       : stage === 'onboarding' ? onboardingDiagnostic()
@@ -236,7 +249,7 @@ const lines = [
     '| ' + stage.stage + ' | ' + stage.status + ' | ' +
       (stage.diagnosis ?? stage.failure ?? '').replaceAll('|', ' ').replaceAll('\n', ' ').slice(0, 180) + ' |'),
   '',
-  '**All six staged native journeys verified: ' + (report.allPassed ? 'YES' : 'NO') + '**',
+  '**All required ' + scope + ' native stages verified: ' + (report.allPassed ? 'YES' : 'NO') + '**',
   '',
 ].join('\n');
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines);

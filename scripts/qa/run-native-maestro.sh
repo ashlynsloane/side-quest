@@ -39,6 +39,16 @@ run_flow() {
   return "$result"
 }
 
+# One installed synthetic binary supports three independent acceptance scopes:
+# full = six consecutive stages, isolation = five, strength = profile ->
+# onboarding -> strength. Each scope uses a CLEAN simulator in its own job.
+scope="${NATIVE_QA_SCOPE:-full}"
+case "$scope" in
+  full|isolation|strength) ;;
+  *) echo "Unsupported NATIVE_QA_SCOPE: $scope" >&2; exit 2 ;;
+esac
+export NATIVE_QA_SCOPE="$scope"
+
 # The six stages use a staged synthetic account and workout lifecycle instead of clearing
 # the app four times through nested standalone wrappers. Each stage keeps its
 # own JUnit and screenshot evidence, and is gated on its predecessor.
@@ -57,29 +67,42 @@ if [[ "$profile" -eq 0 ]]; then
 else
   echo "BLOCKED: onboarding requires passing profile creation" | tee maestro-evidence/onboarding-console.log
 fi
-if [[ "$onboarding" -eq 0 ]]; then
-  run_flow ride e2e/maestro/synthetic-completed-ride-steps.yaml
-  ride=$?
+if [[ "$scope" == "strength" ]]; then
+  # This is the primary architectural improvement: strength acceptance
+  # no longer depends on recorded endurance or switching two profiles.
+  if [[ "$onboarding" -eq 0 ]]; then
+    run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml
+    strength=$?
+  else
+    echo "BLOCKED: strength requires passing synthetic onboarding" | tee maestro-evidence/strength-console.log
+  fi
 else
-  echo "BLOCKED: recorded ride requires passing onboarding" | tee maestro-evidence/ride-console.log
-fi
-if [[ "$ride" -eq 0 ]]; then
-  run_flow restart e2e/maestro/synthetic-ride-restart-steps.yaml
-  restart=$?
-else
-  echo "BLOCKED: restart requires passing completed ride" | tee maestro-evidence/restart-console.log
-fi
-if [[ "$restart" -eq 0 ]]; then
-  run_flow isolation e2e/maestro/synthetic-athlete-isolation-steps.yaml
-  isolation=$?
-else
-  echo "BLOCKED: account isolation requires passing cold-restart history" | tee maestro-evidence/isolation-console.log
-fi
-if [[ "$isolation" -eq 0 ]]; then
-  run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml
-  strength=$?
-else
-  echo "BLOCKED: strength pause/restart requires passing A/B isolation" | tee maestro-evidence/strength-console.log
+  if [[ "$onboarding" -eq 0 ]]; then
+    run_flow ride e2e/maestro/synthetic-completed-ride-steps.yaml
+    ride=$?
+  else
+    echo "BLOCKED: recorded ride requires passing onboarding" | tee maestro-evidence/ride-console.log
+  fi
+  if [[ "$ride" -eq 0 ]]; then
+    run_flow restart e2e/maestro/synthetic-ride-restart-steps.yaml
+    restart=$?
+  else
+    echo "BLOCKED: restart requires passing completed ride" | tee maestro-evidence/restart-console.log
+  fi
+  if [[ "$restart" -eq 0 ]]; then
+    run_flow isolation e2e/maestro/synthetic-athlete-isolation-steps.yaml
+    isolation=$?
+  else
+    echo "BLOCKED: account isolation requires passing cold-restart history" | tee maestro-evidence/isolation-console.log
+  fi
+  if [[ "$scope" == "full" ]]; then
+    if [[ "$isolation" -eq 0 ]]; then
+      run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml
+      strength=$?
+    else
+      echo "BLOCKED: strength pause/restart requires passing A/B isolation" | tee maestro-evidence/strength-console.log
+    fi
+  fi
 fi
 xcrun simctl io "$MAESTRO_UDID" screenshot maestro-evidence/final-simulator-screen.png || true
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -92,7 +115,7 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "strength=$strength"
   } >> "$GITHUB_OUTPUT"
 fi
-summary="Profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength (0=pass, 99=blocked)"
+summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength (0=pass, 99=not run/blocked)"
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
@@ -100,12 +123,13 @@ node scripts/qa/diagnose-native-evidence.mjs maestro-evidence
 diagnostics=$?
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
-    echo "## Native iOS athlete acceptance"
+    echo "## Native iOS athlete acceptance ($scope)"
     echo "$summary"
     echo "A passing native build or launch alone is not a passing athlete journey."
   } >> "$GITHUB_STEP_SUMMARY"
 fi
-if [[ "$profile" -ne 0 || "$onboarding" -ne 0 || "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 || "$strength" -ne 0 || "$diagnostics" -ne 0 ]]; then
-  exit 1
-fi
+if [[ "$diagnostics" -ne 0 || "$profile" -ne 0 || "$onboarding" -ne 0 ]]; then exit 1; fi
+if [[ "$scope" == "strength" && "$strength" -ne 0 ]]; then exit 1; fi
+if [[ "$scope" != "strength" && ( "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 ) ]]; then exit 1; fi
+if [[ "$scope" == "full" && "$strength" -ne 0 ]]; then exit 1; fi
 exit 0

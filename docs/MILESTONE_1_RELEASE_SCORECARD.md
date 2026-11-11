@@ -119,3 +119,29 @@ in 111 files; synthetic journey tests 23/23 and real mobile SQLite tests
 UI-only [run 43094446036](https://github.com/ashlynsloane/side-quest/actions/runs/43094446036)
 remained **QUEUED at this snapshot**. No A→B→A or strength native PASS
 can be inferred from this code-level CI.
+
+## Focused native acceptance (2026-11-11)
+
+The prior [native run 43094446036](https://github.com/ashlynsloane/side-quest/actions/runs/43094446036)
+**FAILED before simulator boot**: GitHub returned HTTP 502 downloading the
+verified Release binary artifact. This is an external artifact-service
+failure, **not** a failed app assertion. [Automated acceptance 43095049768](https://github.com/ashlynsloane/side-quest/actions/runs/43095049768)
+ran all planner/typecheck/mobile/JS validations, but final artifact upload
+failed with an upstream HTML response; preserve the previous source CI
+pass rather than misclassifying product logic.
+
+Independent source-matched simulator suites now exist via `NATIVE_QA_SCOPE`:
+- `strength`: fresh synthetic profile → onboarding → interrupted/restarted
+  strength session → partial completion, **without any ride/A→B dependency**
+- `isolation`: fresh synthetic profile → onboarding → saved 75-minute ride
+  → cold restart → A→B→A profile isolation, **without the strength stage**
+- `full`: original mandatory six-stage integration journey
+
+Automatic QA-only branch pushes schedule separate `strength` and
+`isolation` simulator jobs, each in a clean environment. Manual dispatch
+still supports `full`. The stage evidence JSON records a strict scope,
+required stages, and `NOT_REQUIRED` instead of falsely passing omitted
+stages. **A focused PASS never qualifies the full milestone release gate.**
+Artifact downloads are retried up to 4 times on transient GitHub failures;
+matching native source fingerprint is still mandatory. Executed native
+results pending.

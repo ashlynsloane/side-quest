@@ -156,3 +156,18 @@ failure **and** its archived `commands.json` contains only setup/config/
 incomplete launch commands. The first JUnit and console log remain archived
 for investigation. Any completed UI interaction, assertion failure, absent
 command evidence or second failure remains a hard native FAIL.
+
+## Parallel focused native acceptance
+
+`NATIVE_QA_SCOPE=strength` runs a clean synthetic profile, first-week setup
+and genuine strength resume/partial-save acceptance independently of
+endurance and A/B navigation. `NATIVE_QA_SCOPE=isolation` runs profile,
+onboarding, ride, cold restart and A/B restoration independently of
+strength. `NATIVE_QA_SCOPE=full` remains the six-stage release gate.
+
+Each runner writes an explicit scope and required stage list; omitted stages
+are `NOT_REQUIRED` (not PASS). The focused workflow uses separate clean
+iPhone simulators via a parallel job matrix and refuses an old binary when
+the app-source SHA fingerprint differs. Artifact downloads can retry after
+transient GitHub 502s; XCTest UI failures are still strict. Full passing
+native integration is mandatory before release.

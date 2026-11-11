@@ -26,6 +26,56 @@ afterEach(() => {
 });
 
 describe('native UI failure evidence diagnosis', () => {
+  it('permits independently executed strength without claiming omitted stages passed', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'strength'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const run = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'strength' },
+    });
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; scope: string;
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(run.status).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.scope).toBe('strength');
+    expect(report.stages.filter((x) => x.status === 'NOT_REQUIRED').map((x) => x.stage))
+      .toEqual(['ride', 'restart', 'isolation']);
+    const full = diagnose(root);
+    expect(full.run.status).toBe(1);
+    expect(full.report.allPassed).toBe(false);
+  });
+
+  it('requires A/B isolation but not strength for focused isolation acceptance', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart', 'isolation'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const r = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'isolation' },
+    });
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; stages: Array<{ status: string }>;
+    };
+    expect(r.status).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.stages[5]?.status).toBe('NOT_REQUIRED');
+    expect(diagnose(root).run.status).toBe(1);
+  });
+
+  it('rejects unknown scopes and never treats missing required JUnit as a pass', () => {
+    const root = fixture();
+    const unknown = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'none' },
+    });
+    expect(unknown.status).not.toBe(0);
+    for (const stage of ['profile', 'onboarding'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const incomplete = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'strength' },
+    });
+    expect(incomplete.status).toBe(1);
+  });
   it('reports passing only when all six native stages have nonempty passing evidence', () => {
     const root = fixture();
     for (const stage of ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength']) {

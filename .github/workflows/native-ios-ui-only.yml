@@ -12,6 +12,15 @@ on:
       - '.github/workflows/native-ios-ui-only.yml'
   workflow_dispatch:
     inputs:
+      journey:
+        description: 'Independent native acceptance journey'
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - isolation
+          - strength
       native_build_run_id:
         description: 'Native build run ID containing sidequest-synthetic-ios-app (optional)'
         required: false
@@ -27,11 +36,17 @@ concurrency:
 
 jobs:
   synthetic-ui:
+    name: Native ${{ matrix.journey }} acceptance
+    strategy:
+      fail-fast: false
+      matrix:
+        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || '["isolation","strength"]') }}
     runs-on: macos-latest
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       QA_BUNDLE_ID: com.sidequest.synthetic.qa
+      NATIVE_QA_SCOPE: ${{ matrix.journey }}
       MAESTRO_CLI_NO_ANALYTICS: '1'
       MAESTRO_DRIVER_STARTUP_TIMEOUT: '360000'
     steps:
@@ -53,8 +68,19 @@ jobs:
             exit 2
           fi
           echo "native_build_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name sidequest-synthetic-ios-app --dir native-binary
+          # GitHub's artifacts endpoint occasionally returns transient 502s.
+          # Retry only the download. Never bypass the source fingerprint check.
+          DOWNLOADED=0
+          for ATTEMPT in 1 2 3 4; do
+            if gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+                --name sidequest-synthetic-ios-app --dir native-binary; then
+              DOWNLOADED=1
+              break
+            fi
+            echo "Artifact download failed on attempt $ATTEMPT; retrying transient API error" >&2
+            sleep "$(( ATTEMPT * 6 ))"
+          done
+          test "$DOWNLOADED" -eq 1
           test -s native-binary/native-source.sha256
           test -s native-binary/simulator-app.tar.gz
           node scripts/qa/native-source-fingerprint.mjs > current-native-source.sha256
@@ -107,7 +133,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: synthetic-ui-reused-binary-evidence
+          name: synthetic-ui-reused-binary-evidence-${{ matrix.journey }}
           if-no-files-found: warn
           path: |
             native-reused-app-first-launch.png

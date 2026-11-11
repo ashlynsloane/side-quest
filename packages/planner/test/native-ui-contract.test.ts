@@ -398,6 +398,14 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).not.toContain('run_flow ride e2e/maestro/synthetic-completed-ride.yaml');
     expect(runner).toContain('exit 1');
     expect(runner).toContain('diagnostics=$?');
+    expect(runner).toContain('NATIVE_QA_SCOPE');
+    expect(runner).toContain('if [[ "$scope" == "strength" ]]');
+    expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
+    const focused = source('.github/workflows/native-ios-ui-only.yml');
+    expect(focused).toContain('["isolation","strength"]');
+    expect(focused).toContain('NATIVE_QA_SCOPE:');
+    expect(focused).toContain('for ATTEMPT in 1 2 3 4');
+    expect(focused).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
     expect(runner).toContain('scripts/qa/native-driver-retry.mjs');
     expect(runner).toContain('driver-attempt1-junit.xml');
     expect(runner).toContain('driver-attempt1-console.log');
