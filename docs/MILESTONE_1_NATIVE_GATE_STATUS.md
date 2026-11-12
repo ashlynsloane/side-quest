@@ -11,24 +11,21 @@ cloud-feature enablement, or beta distribution is authorized by passing CI.
 
 | Gate | Verified evidence | Status |
 | --- | --- | --- |
-| Planner/mobile typecheck, actual mobile SQLite, full regression, iOS JS export | [CI #43147658452](https://github.com/ashlynsloane/side-quest/actions/runs/43147658452), `12208837` | **PASS — 710/710 tests, 116 files** |
-| Integrated six-stage native Release athlete journey | [Native #43141133431](https://github.com/ashlynsloane/side-quest/actions/runs/43141133431), source `fc2a05c6`. Six stage-specific Maestro JUnit results all pass | **PASS**; later synthetic generation-race source requires a newer binary |
-| Separate A→B→A→B in-progress strength checkpoint isolation | [Native #43138494416](https://github.com/ashlynsloane/side-quest/actions/runs/43138494416), `live-isolation` JUnit (1 test, 0 failures), `allPassed=true`, archived screenshots | **PASS** on its compiled source; reverify with new build |
-| Synthetic owner-mismatch startup and retry on actual simulator | `owner-recovery` scope checks visible denial, failed retry, unchanged training-block count, embedded owner marker, and `PRAGMA quick_check` | **NOT YET NATIVE-VERIFIED**; older UI-only run refused an incompatible binary before app launch |
-| Synthetic A→B switch while A's generated first week is waiting to persist | `generation-isolation` scope; synthetic A holds after calculation; barrier releases only after verified B activation, then actual A/B SQLite goals/blocks and integrity are checked | **NOT YET NATIVE-VERIFIED**; source test and contract complete |
+| Planner/mobile typecheck, actual mobile SQLite, full regression, iOS JS export | [CI #43152434170](https://github.com/ashlynsloane/side-quest/actions/runs/43152434170), `3f6dcdca` | **PASS — 710/710 tests, 116 files** |
+| Integrated six-stage native Release athlete journey | [Native #43147554597](https://github.com/ashlynsloane/side-quest/actions/runs/43147554597), updated synthetic Release source. Six stage-specific Maestro JUnit results all pass | **PASS — all six integrated stages on updated native binary** |
+| Separate A→B→A→B in-progress strength checkpoint isolation | [Native #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701), `live-isolation` independently successful with archived evidence | **PASS on updated native binary** |
+| Synthetic owner-mismatch startup and retry on actual simulator | [Native #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701), `owner-recovery` JUnit + unchanged training-block count, owner mismatch, `PRAGMA quick_check` | **PASS — actual native UI plus SQLite postconditions** |
+| Synthetic A→B switch while A's generated first week is waiting to persist | [Native #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701), `generation-isolation` JUnit + distinct A/B goals and actual owner-tagged SQLite postconditions | **PASS — actual native UI plus SQLite postconditions** |
 | iOS process termination during pending workout completion + recovery | Node disk-backed SQLite OS `SIGKILL` / transaction rollback test, unchanged 43% pending journal and no 100% replay | **DISK-BACKED TEST PASS; TRUE NATIVE KILL STILL NOT RUN** |
 | Historical legacy database provenance and migration with rollback | Read-only legacy owner audit; consistent synthetic SQLite online/WAL backup rehearsal with original hashes unchanged | **AUDIT/BACKUP PASS; HUMAN-VERIFIED PROVENANCE AND DEVICE MIGRATION NOT RUN** |
 | Signed physical iPhone acceptance / rollback | [P01–P15 physical-device protocol](MILESTONE_1_PHYSICAL_DEVICE_ACCEPTANCE.md) | **NOT RUN** |
 
-The most recent source-matched native build for the new generation-race
-instrumentation is [run #43147554597](https://github.com/ashlynsloane/side-quest/actions/runs/43147554597).
-Its result must be read from actual JUnit and screenshots, not inferred from
-source CI. Native UI-only execution is permitted only when the full native
+The synthetic native app was compiled and exercised in [run #43147554597](https://github.com/ashlynsloane/side-quest/actions/runs/43147554597), with all six integrated stages PASSED. Independent [run #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701) executed five focused jobs on that matching binary: **owner-recovery, generation-isolation, live-isolation and completed-history isolation PASSED**; the focused strength job **FAILED during QA profile-entry** because iOS entered the email into the name field, leaving email blank and Enter Beta disabled. It did **not** reach workout execution. This is separate from the six-stage native strength PASS. The synthetic sign-in test has been changed to assert name/email focus and enabled Enter Beta; a new focused native run remains necessary to verify the harness fix. Native UI-only execution is permitted only when the full native
 source fingerprint exactly matches the archived synthetic Release binary.
 
 ## What the native evidence actually proves
 
-The six integrated stages on #43141133431 executed, in sequence:
+The six integrated stages on #43147554597 executed, in sequence:
 
 1. Create a synthetic local athlete account.
 2. Generate the first seven-day multisport plan.
@@ -41,8 +38,7 @@ The six integrated stages on #43141133431 executed, in sequence:
 The independent seven-stage privacy coverage on #43138494416 tests a
 *different* property: A and B own separate in-progress strength checkpoints,
 both survive a cold restart, and neither account sees the other's live session.
-The latest independent result was one `live-isolation` JUnit case with zero
-failures plus prerequisite profile/onboarding passes. Do not call this the
+The latest independent `live-isolation` job in #43152426701 succeeded on the updated native binary, with prerequisite profile/onboarding passes. Do not call this the
 original six-stage gate.
 
 ### New native ownership-denial gate
@@ -76,8 +72,10 @@ for an arbitrary timeout.
 `generation-isolation` then completes onboarding B and cold-relaunches,
 followed by an independent read-only audit of the two actual SQLite files.
 The A file must have no persisted first-week goal or training block; the B
-file must contain its own goal and training block; both embedded owners and
-`PRAGMA quick_check` must be correct. Missing JUnit, skipped steps,
+file must contain exactly one distinct Ironman 70.3 goal/block, with zero
+contamination from A's General strength goal and block; both embedded owners and
+`PRAGMA quick_check` must be correct. This independent gate **PASSED** in
+#43152426701. Missing JUnit, skipped steps,
 unsupported scope, missing owner, or failing database postconditions are all
 FAIL/NOT VERIFIED, never PASS.
 
@@ -113,8 +111,8 @@ journey.
 | Blocker | Tracking |
 | --- | --- |
 | Real native iOS SIGKILL while canonical completion is pending, then restart/repair with original dose and no duplicate | [Issue #13](https://github.com/ashlynsloane/side-quest/issues/13) |
-| Run/inspect native `generation-isolation` JUnit plus actual A/B SQL postcondition | [Issue #19](https://github.com/ashlynsloane/side-quest/issues/19) |
-| Run/inspect native `owner-recovery` JUnit plus original-row/owner/SQLite postcondition | [Issue #15](https://github.com/ashlynsloane/side-quest/issues/15) |
+| `generation-isolation` native JUnit and A/B SQLite postcondition PASSED; keep release integration tracked until approval | [Issue #19](https://github.com/ashlynsloane/side-quest/issues/19) |
+| `owner-recovery` native JUnit and original-row/owner/SQLite postcondition PASSED; real historical owner provenance still separate | [Issue #15](https://github.com/ashlynsloane/side-quest/issues/15) |
 | Document original owner provenance for any ambiguous historical real database, consistent restorable backup, deliberate migration and rollback | [Issue #15](https://github.com/ashlynsloane/side-quest/issues/15) |
 | Execute P01–P15 on a signed physical iPhone and approve release/rollback plan | [Physical-device protocol](MILESTONE_1_PHYSICAL_DEVICE_ACCEPTANCE.md) |
 | Keep [cloud guardrails PR #20](https://github.com/ashlynsloane/side-quest/pull/20) separate, staged and feature OFF | Out of Milestone 1 |
