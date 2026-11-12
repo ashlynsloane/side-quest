@@ -46,7 +46,7 @@ if [[ "$1" == before ]]; then
   # or any process whose full UIKitApplication bundle ID differs from QA.
   PIDS=$(xcrun simctl spawn "$MAESTRO_UDID" launchctl list |
     awk -v app="$QA_BUNDLE_ID" '$3 ~ /^UIKitApplication:/ {
-      label=$3; sub(/^UIKitApplication:/,"",label); sub(/\\[.*/,"",label);
+      label=$3; sub(/^UIKitApplication:/,"",label); sub(/\[.*/,"",label);
       if (label==app && $1 ~ /^[0-9]+$/) print $1
     }')
   if [[ ! "$PIDS" =~ ^[0-9]+$ ]]; then
