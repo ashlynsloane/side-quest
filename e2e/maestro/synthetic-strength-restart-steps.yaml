@@ -30,13 +30,16 @@ appId: com.sidequest.synthetic.qa
 - extendedWaitUntil:
     visible: "WORKOUT PREVIEW"
     timeout: 60000
+# Native run 43114582364 screenshot and hierarchy confirm the visible button
+# is labeled "Start workout, play" by the icon-bearing native Pressable.
+# Match the actual accessible control rather than an invisible exact label.
 - scrollUntilVisible:
-    element: "Start workout"
+    element: "Start workout, play"
     direction: DOWN
     centerElement: true
     visibilityPercentage: 85
     timeout: 30000
-- tapOn: "Start workout"
+- tapOn: "Start workout, play"
 - scrollUntilVisible:
     element: "Finish station"
     direction: DOWN
