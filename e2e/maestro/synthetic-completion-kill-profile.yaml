@@ -1,0 +1,37 @@
+# Separate synthetic athlete for actual iOS SIGKILL of pending strength
+# completion. Must never share profile or database with other native QA lanes.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-athlete-name"
+    timeout: 45000
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- assertVisible:
+    id: "sidequest-qa-athlete-name"
+    focused: true
+- inputText: "Synthetic Crash Athlete A"
+- tapOn: "Create your beta profile"
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- assertVisible:
+    id: "sidequest-qa-athlete-email"
+    focused: true
+- inputText: "synthetic-save-interrupt-a@example.invalid"
+- tapOn: "Create your beta profile"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-enter-beta"
+      enabled: true
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "synthetic-completion-kill-profile-created"
