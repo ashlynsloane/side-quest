@@ -41,7 +41,7 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.allPassed).toBe(true);
     expect(report.scope).toBe('strength');
     expect(report.stages.filter((x) => x.status === 'NOT_REQUIRED').map((x) => x.stage))
-      .toEqual(['ride', 'restart', 'isolation', 'live-isolation', 'owner-recovery']);
+      .toEqual(['ride', 'restart', 'isolation', 'live-isolation', 'owner-recovery', 'generation-isolation']);
     const full = diagnose(root);
     expect(full.run.status).toBe(1);
     expect(full.report.allPassed).toBe(false);
@@ -118,6 +118,37 @@ describe('native UI failure evidence diagnosis', () => {
     expect(runOwnerGate().status).toBe(1);
   });
 
+  it('requires native mid-generation A→B switch plus two real SQLite owner postconditions', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'generation-isolation'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const runRace = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'generation-isolation' },
+    });
+    const passed = runRace();
+    expect(passed.status, passed.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(['profile', 'generation-isolation']);
+    expect(report.stages.filter((entry) => entry.status === 'PASSED').map((entry) => entry.stage))
+      .toEqual(['profile', 'generation-isolation']);
+    expect(diagnose(root).report.allPassed).toBe(false);
+
+    writeFileSync(join(root, 'generation-isolation-console.log'),
+      'POSTCONDITION FAILED: stale first-week A result appeared in B');
+    expect(runRace().status).toBe(1);
+    const blocked = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(blocked.stages.find((entry) => entry.stage === 'generation-isolation')?.status)
+      .toBe('FAILED');
+    rmSync(join(root, 'generation-isolation-junit.xml'));
+    expect(runRace().status).toBe(1);
+  });
+
   it('rejects unknown scopes and never treats missing required JUnit as a pass', () => {
     const root = fixture();
     const unknown = spawnSync(process.execPath, [script, root], {
@@ -139,7 +170,7 @@ describe('native UI failure evidence diagnosis', () => {
     const { run, report } = diagnose(root);
     expect(run.status, run.stderr).toBe(0);
     expect(report.allPassed).toBe(true);
-    expect(report.stages.map(x => x.status)).toEqual([...Array(6).fill('PASSED'), 'NOT_REQUIRED', 'NOT_REQUIRED']);
+    expect(report.stages.map(x => x.status)).toEqual([...Array(6).fill('PASSED'), 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED']);
   });
 
   it('detects email mistakenly entered into Name without publishing input values', () => {
@@ -164,7 +195,7 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.stages[0]?.status).toBe('FAILED');
     expect(report.stages[0]?.diagnosis).toMatch(/keyboard-focus leak/);
     expect(report.stages.slice(1).map(x => x.status))
-      .toEqual([...Array(5).fill('BLOCKED'), 'NOT_REQUIRED', 'NOT_REQUIRED']);
+      .toEqual([...Array(5).fill('BLOCKED'), 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED']);
     expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
       .not.toContain('synthetic-secret@example.invalid');
   });
@@ -283,7 +314,7 @@ describe('native UI failure evidence diagnosis', () => {
     }
     const { report } = diagnose(root);
     expect(report.stages.map((stage) => stage.status))
-      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN', 'NOT_REQUIRED', 'NOT_REQUIRED']);
+      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED']);
     expect(report.allPassed).toBe(false);
   });
 
@@ -326,5 +357,6 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.stages.slice(1, 6).every(x => x.status === 'NOT_RUN')).toBe(true);
     expect(report.stages[6]?.status).toBe('NOT_REQUIRED');
     expect(report.stages[7]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[8]?.status).toBe('NOT_REQUIRED');
   });
 });
