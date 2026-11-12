@@ -8,7 +8,7 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43137083239](https://github.com/ashlynsloane/side-quest/actions/runs/43137083239), SHA `f68daf90` | **PASS — automated tests, typechecks and iOS JS export** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43137896412](https://github.com/ashlynsloane/side-quest/actions/runs/43137896412), SHA `5f8437b1` | **PASS — 695/695 tests across 114 files, typechecks and iOS JS export** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
@@ -38,6 +38,21 @@ Reuse of an existing Release binary is permitted only if `scripts/qa/native-sour
 - Live strength completion is inside a verified-athlete database activation lock. New disk-backed race tests prove A completes to A even when B activation is queued, and stale A writes after B activation fail closed.
 - A deliberate mid-transaction SQL failure plus cold module/database reload preserves the original 41% pending completion and forbids a 100% replay.
 - A **real OS `SIGKILL`** of a separate Node SQLite writer while its database transaction is open rolls back the uncommitted row; a cold restart of the mobile database service recovers the original **43% pending dose**, retries once and refuses to promote it to 100%. This validates filesystem/SQLite crash behavior, **NOT** forced termination inside the native iOS save callback.
+
+### Consistent synthetic legacy SQLite backup rehearsal
+
+The new `scripts/qa/backup-synthetic-legacy-sqlite.mjs` requires explicit
+`SIDEQUEST_QA_SYNTHETIC_BACKUP=1` and synthetic input/output fixture names,
+refuses missing or existing destination files, and uses Node SQLite's online
+backup API rather than copying the `.db` file without its committed WAL.
+It verifies `PRAGMA quick_check` and publishes the validated snapshot
+using an atomic no-overwrite hard link, then removes its temporary copy.
+`packages/planner/test/synthetic-legacy-backup.test.ts` passed in
+[CI #43137896412](https://github.com/ashlynsloane/side-quest/actions/runs/43137896412):
+the snapshot includes a committed row that remained in WAL, preserves the
+source database and WAL hashes, and rejects missing authorization, bad
+filenames and overwrites. This is a **synthetic backup protocol rehearsal**,
+not a migrated or owner-recovered iPhone file.
 
 ### Seventh independent native privacy gate
 
