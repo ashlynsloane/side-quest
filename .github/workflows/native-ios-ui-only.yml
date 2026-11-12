@@ -25,6 +25,7 @@ on:
           - owner-recovery
           - generation-isolation
           - completion-kill
+          - completion-in-transaction-kill
       native_build_run_id:
         description: 'Native build run ID containing sidequest-synthetic-ios-app (optional)'
         required: false
@@ -44,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || '["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill"]') }}
+        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || '["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill","completion-in-transaction-kill"]') }}
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -60,7 +61,7 @@ jobs:
           node-version: '22'
       - name: Reject malformed native QA and crash-injection scripts before simulator startup
         run: |
-          bash -n scripts/qa/run-native-maestro.sh scripts/qa/kill-synthetic-pending-completion.sh scripts/qa/inject-synthetic-owner-mismatch.sh scripts/qa/verify-synthetic-generation-race.sh
+          bash -n scripts/qa/run-native-maestro.sh scripts/qa/kill-synthetic-pending-completion.sh scripts/qa/kill-synthetic-uncommitted-completion.sh scripts/qa/inject-synthetic-owner-mismatch.sh scripts/qa/verify-synthetic-generation-race.sh
           node --check scripts/qa/diagnose-native-evidence.mjs
           if [[ "${NATIVE_QA_SCOPE}" == 'completion-kill' ]]; then
             test -s e2e/maestro/synthetic-completion-kill-profile.yaml
