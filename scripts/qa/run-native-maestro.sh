@@ -42,11 +42,12 @@ run_flow() {
 # One installed synthetic binary supports three independent acceptance scopes:
 # full = six consecutive stages, isolation = five, strength = profile ->
 # onboarding -> strength, live-isolation = profile -> onboarding ->
-# A/B/A/B independent live workout checkpoints and cold resume. Each
+# A/B/A/B independent live workout checkpoints; owner-recovery = profile ->
+# onboarding -> synthetic in-file owner mismatch -> fail-closed startup UI. Each
 # scope uses a CLEAN simulator in its own job.
 scope="${NATIVE_QA_SCOPE:-full}"
 case "$scope" in
-  full|isolation|strength|live-isolation) ;;
+  full|isolation|strength|live-isolation|owner-recovery) ;;
   *) echo "Unsupported NATIVE_QA_SCOPE: $scope" >&2; exit 2 ;;
 esac
 export NATIVE_QA_SCOPE="$scope"
@@ -62,6 +63,7 @@ restart=99
 isolation=99
 strength=99
 live_isolation=99
+owner_recovery=99
 run_flow profile e2e/maestro/synthetic-profile-entry.yaml
 profile=$?
 if [[ "$profile" -eq 0 ]]; then
@@ -85,6 +87,20 @@ elif [[ "$scope" == "live-isolation" ]]; then
     live_isolation=$?
   else
     echo "BLOCKED: live checkpoint isolation requires passing synthetic onboarding" | tee maestro-evidence/live-isolation-console.log
+  fi
+elif [[ "$scope" == "owner-recovery" ]]; then
+  if [[ "$onboarding" -eq 0 ]]; then
+    # Injection is refused unless the selected installed bundle is the
+    # isolated synthetic QA application. Never mutate a real device.
+    if NATIVE_QA_OWNER_RECOVERY=1 bash scripts/qa/inject-synthetic-owner-mismatch.sh; then
+      run_flow owner-recovery e2e/maestro/synthetic-owner-recovery-steps.yaml
+      owner_recovery=$?
+    else
+      owner_recovery=1
+      echo "BLOCKED: synthetic SQLite owner mismatch could not be prepared safely" | tee maestro-evidence/owner-recovery-console.log
+    fi
+  else
+    echo "BLOCKED: owner recovery requires passing synthetic onboarding" | tee maestro-evidence/owner-recovery-console.log
   fi
 else
   if [[ "$onboarding" -eq 0 ]]; then
@@ -124,9 +140,10 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "isolation=$isolation"
     echo "strength=$strength"
     echo "live_isolation=$live_isolation"
+    echo "owner_recovery=$owner_recovery"
   } >> "$GITHUB_OUTPUT"
 fi
-summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation (0=pass, 99=not run/blocked)"
+summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation; owner-recovery: $owner_recovery (0=pass, 99=not run/blocked)"
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
@@ -142,6 +159,7 @@ fi
 if [[ "$diagnostics" -ne 0 || "$profile" -ne 0 || "$onboarding" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "strength" && "$strength" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "live-isolation" && "$live_isolation" -ne 0 ]]; then exit 1; fi
+if [[ "$scope" == "owner-recovery" && "$owner_recovery" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "full" || "$scope" == "isolation" ]]; then
   if [[ "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 ]]; then exit 1; fi
 fi
