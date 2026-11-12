@@ -316,7 +316,7 @@ describe('native synthetic UI automation contract', () => {
     expect(flow).toContain('assertNotVisible: "Open .* strength workout, 100 percent completed"');
     expect(source('apps/mobile/src/app/training-history.tsx'))
       .toContain('percent completed');
-    expect(flow).toContain('assertNotVisible: "100% completed"');
+    expect(flow).not.toContain('assertNotVisible: "100% completed"');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
   });
 
