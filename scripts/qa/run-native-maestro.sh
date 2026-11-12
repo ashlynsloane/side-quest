@@ -47,7 +47,7 @@ run_flow() {
 # scope uses a CLEAN simulator in its own job.
 scope="${NATIVE_QA_SCOPE:-full}"
 case "$scope" in
-  full|isolation|strength|live-isolation|owner-recovery) ;;
+  full|isolation|strength|live-isolation|owner-recovery|generation-isolation) ;;
   *) echo "Unsupported NATIVE_QA_SCOPE: $scope" >&2; exit 2 ;;
 esac
 export NATIVE_QA_SCOPE="$scope"
@@ -64,15 +64,41 @@ isolation=99
 strength=99
 live_isolation=99
 owner_recovery=99
-run_flow profile e2e/maestro/synthetic-profile-entry.yaml
-profile=$?
-if [[ "$profile" -eq 0 ]]; then
-  run_flow onboarding e2e/maestro/synthetic-onboarding-steps.yaml
-  onboarding=$?
+generation_isolation=99
+if [[ "$scope" == "generation-isolation" ]]; then
+  run_flow profile e2e/maestro/synthetic-race-profile-entry.yaml
 else
-  echo "BLOCKED: onboarding requires passing profile creation" | tee maestro-evidence/onboarding-console.log
+  run_flow profile e2e/maestro/synthetic-profile-entry.yaml
 fi
-if [[ "$scope" == "strength" ]]; then
+profile=$?
+if [[ "$scope" != "generation-isolation" ]]; then
+  if [[ "$profile" -eq 0 ]]; then
+    run_flow onboarding e2e/maestro/synthetic-onboarding-steps.yaml
+    onboarding=$?
+  else
+    echo "BLOCKED: onboarding requires passing profile creation" | tee maestro-evidence/onboarding-console.log
+  fi
+fi
+if [[ "$scope" == "generation-isolation" ]]; then
+  if [[ "$profile" -eq 0 ]]; then
+    run_flow generation-isolation e2e/maestro/synthetic-first-week-generation-switch.yaml
+    generation_isolation=$?
+    if [[ "$generation_isolation" -eq 0 ]]; then
+      # Wait until A's bounded pre-save hold definitely expires, with B
+      # remaining active. Then inspect BOTH real synthetic SQLite files.
+      sleep 80
+      if ! NATIVE_QA_GENERATION_RACE=1 bash scripts/qa/verify-synthetic-generation-race.sh \
+          >> maestro-evidence/generation-isolation-console.log 2>&1; then
+        generation_isolation=1
+        echo "POSTCONDITION FAILED: athlete A's stale generated plan or database ownership leaked" \
+          | tee -a maestro-evidence/generation-isolation-console.log
+      fi
+    fi
+  else
+    echo "BLOCKED: generation switch needs a synthetic A profile" \
+      | tee maestro-evidence/generation-isolation-console.log
+  fi
+elif [[ "$scope" == "strength" ]]; then
   # This is the primary architectural improvement: strength acceptance
   # no longer depends on recorded endurance or switching two profiles.
   if [[ "$onboarding" -eq 0 ]]; then
@@ -149,9 +175,10 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "strength=$strength"
     echo "live_isolation=$live_isolation"
     echo "owner_recovery=$owner_recovery"
+    echo "generation_isolation=$generation_isolation"
   } >> "$GITHUB_OUTPUT"
 fi
-summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation; owner-recovery: $owner_recovery (0=pass, 99=not run/blocked)"
+summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation; owner-recovery: $owner_recovery; generation-isolation: $generation_isolation (0=pass, 99=not run/blocked)"
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
@@ -164,7 +191,9 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "A passing native build or launch alone is not a passing athlete journey."
   } >> "$GITHUB_STEP_SUMMARY"
 fi
-if [[ "$diagnostics" -ne 0 || "$profile" -ne 0 || "$onboarding" -ne 0 ]]; then exit 1; fi
+if [[ "$diagnostics" -ne 0 || "$profile" -ne 0 ]]; then exit 1; fi
+if [[ "$scope" != "generation-isolation" && "$onboarding" -ne 0 ]]; then exit 1; fi
+if [[ "$scope" == "generation-isolation" && "$generation_isolation" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "strength" && "$strength" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "live-isolation" && "$live_isolation" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "owner-recovery" && "$owner_recovery" -ne 0 ]]; then exit 1; fi
