@@ -250,6 +250,34 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await sessionStatus()).toBe('completed');
   });
 
+  it('fences in-flight canonical completion from athlete B database activation', async () => {
+    await service.saveTrainingBlock(weeklyBlock());
+    let entered!: () => void;
+    let release!: () => void;
+    const inside = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+
+    const aSave = service.withVerifiedAthleteDatabase('synthetic-athlete-one', async () => {
+      entered();
+      await held; // A owns the activation lock while the write is delayed.
+      await save(0.42);
+    });
+    await inside;
+    const switchToB = service.activateUserDatabase('synthetic-athlete-two');
+    release();
+    await Promise.all([aSave, switchToB]);
+    // The entire multi-step canonical write stayed in A's SQLite database.
+    expect(await ledger()).toHaveLength(0);
+    await expect(service.withVerifiedAthleteDatabase('synthetic-athlete-one', () => save(1)))
+      .rejects.toThrow(/Athlete profile changed/);
+    expect(await ledger()).toHaveLength(0);
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect((await ledger()).map((entry) => entry.completionFraction)).toEqual([0.42]);
+    expect(await sessionStatus()).toBe('completed');
+    await service.activateUserDatabase('synthetic-athlete-two');
+    expect(await ledger()).toHaveLength(0);
+  });
+
   it('rolls back both ledger and completed-workout row after an injected SQL failure', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     state.failNextContaining = 'INSERT OR REPLACE INTO workout_ledger';
