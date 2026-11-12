@@ -95,6 +95,14 @@ elif [[ "$scope" == "owner-recovery" ]]; then
     if NATIVE_QA_OWNER_RECOVERY=1 bash scripts/qa/inject-synthetic-owner-mismatch.sh; then
       run_flow owner-recovery e2e/maestro/synthetic-owner-recovery-steps.yaml
       owner_recovery=$?
+      if [[ "$owner_recovery" -eq 0 ]]; then
+        if ! NATIVE_QA_OWNER_RECOVERY=1 bash scripts/qa/inject-synthetic-owner-mismatch.sh verify \
+            >> maestro-evidence/owner-recovery-console.log 2>&1; then
+          owner_recovery=1
+          echo "POSTCONDITION FAILED: synthetic owner recovery data integrity check" \
+            | tee -a maestro-evidence/owner-recovery-console.log
+        fi
+      fi
     else
       owner_recovery=1
       echo "BLOCKED: synthetic SQLite owner mismatch could not be prepared safely" | tee maestro-evidence/owner-recovery-console.log
