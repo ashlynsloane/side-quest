@@ -2,7 +2,7 @@
 // legacy SQLite fixture. Not an app migration and never intended for an
 // athlete's personal database or an installed iPhone container.
 import { backup, DatabaseSync } from 'node:sqlite';
-import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, linkSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -45,9 +45,10 @@ async function main() {
     } finally {
       cloned.close();
     }
-    // Publish a validated snapshot atomically. The original remains intact.
-    if (existsSync(output)) throw new Error('Backup destination appeared during copy.');
-    renameSync(temp, output);
+    // Atomic no-overwrite publish: hard-link creation fails with EEXIST
+    // even if another process creates the destination between checks. A
+    // normal POSIX rename could silently replace someone's existing file.
+    linkSync(temp, output);
     process.stdout.write(JSON.stringify({
       mode: 'synthetic_only_online_sqlite_backup',
       integrityOk: true,
