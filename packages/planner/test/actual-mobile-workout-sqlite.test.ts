@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createManualEnduranceActivity } from '../src/manual-endurance';
@@ -276,6 +277,97 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await sessionStatus()).toBe('completed');
     await service.activateUserDatabase('synthetic-athlete-two');
     expect(await ledger()).toHaveLength(0);
+  });
+
+  it('survives a real SIGKILL while SQLite has an uncommitted completion write', async () => {
+    // This terminates a separate Node process during a real SQLite
+    // transaction on the same on-disk file used by the mobile service.
+    // It validates SQLite crash rollback + app retry, but it is NOT
+    // native iOS process termination within the actual Expo callback.
+    const live = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    await service.saveTrainingBlock(weeklyBlock());
+    const originalFraction = 0.43;
+    await live.saveLiveWorkoutSession({
+      ...live.createInitialLiveWorkoutSession(workout, startedAt, {
+        sessionId: 'synthetic-planned-session', sessionDate: '2026-10-20',
+        sessionTitle: 'Planned strength', modifiedFromPlan: false,
+      }),
+      phase: 'rest', running: false,
+      pendingCompletion: { completionFraction: originalFraction, completedAt },
+    }, 'synthetic-athlete-one');
+
+    const childScript = [
+      "import { DatabaseSync } from 'node:sqlite';",
+      'const db = new DatabaseSync(process.argv[1]);',
+      "db.exec('BEGIN IMMEDIATE');",
+      "db.prepare('INSERT INTO completed_workouts (id, workout_json, started_at, completed_at, completion_fraction, station_rounds_json) VALUES (?, ?, ?, ?, ?, ?)').run(process.argv[2], process.argv[3], process.argv[4], process.argv[5], Number(process.argv[6]), '{}');",
+      "process.stdout.write('UNCOMMITTED_WRITE_REACHED\\n');",
+      'process.stdin.resume();',
+    ].join('\n');
+    const dbPath = join(scratch, 'circuit-generator.db');
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childScript,
+      dbPath, stableId, JSON.stringify(workout), startedAt, completedAt,
+      String(originalFraction)], { stdio: ['pipe', 'pipe', 'pipe'] });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let output = '';
+        let finished = false;
+        const timeout = setTimeout(() => {
+          if (!finished) { finished = true; reject(new Error('SQLite SIGKILL fixture did not reach transaction hold')); }
+        }, 15000);
+        child.once('error', (error) => {
+          if (!finished) { finished = true; clearTimeout(timeout); reject(error); }
+        });
+        child.once('exit', (code, signal) => {
+          if (!finished) {
+            finished = true; clearTimeout(timeout);
+            reject(new Error('SQLite fixture exited before hold: ' + code + '/' + signal));
+          }
+        });
+        child.stdout.on('data', (chunk: Buffer) => {
+          output += chunk.toString();
+          if (!finished && output.includes('UNCOMMITTED_WRITE_REACHED')) {
+            finished = true; clearTimeout(timeout); resolve();
+          }
+        });
+      });
+      const killed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolve) => child.once('exit', (code, signal) => resolve({ code, signal })),
+      );
+      child.kill('SIGKILL');
+      expect((await killed).signal).toBe('SIGKILL');
+
+      // The uncommitted row cannot become a claimed completed workout.
+      const { DatabaseSync } = await import('node:sqlite');
+      const probe = new DatabaseSync(dbPath);
+      try {
+        expect(probe.prepare('SELECT id FROM completed_workouts WHERE id = ?')
+          .get(stableId)).toBeUndefined();
+      } finally {
+        probe.close();
+      }
+      expect(await ledger()).toHaveLength(0);
+      expect((await live.loadLiveWorkoutSession('synthetic-athlete-one'))
+        ?.pendingCompletion?.completionFraction).toBe(originalFraction);
+
+      // A cold app-module restart must keep the original partial fraction.
+      for (const handle of state.handles.splice(0)) handle.close();
+      vi.resetModules();
+      service = await import('../../../apps/mobile/src/services/database');
+      await service.activateUserDatabase('synthetic-athlete-one');
+      const restored = await import('../../../apps/mobile/src/services/active-workout-persistence');
+      expect((await restored.loadLiveWorkoutSession('synthetic-athlete-one'))
+        ?.pendingCompletion).toEqual({ completionFraction: originalFraction, completedAt });
+      await save(originalFraction);
+      await save(1); // duplicate replay cannot promote an original partial dose.
+      expect((await ledger()).map((entry) => entry.completionFraction))
+        .toEqual([originalFraction]);
+      expect(await sessionStatus()).toBe('completed');
+      await restored.clearLiveWorkoutSession('synthetic-athlete-one');
+      expect(await restored.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    }
   });
 
   it('rolls back both ledger and completed-workout row after an injected SQL failure', async () => {
