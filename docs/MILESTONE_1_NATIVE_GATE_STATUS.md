@@ -8,7 +8,7 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43132850671](https://github.com/ashlynsloane/side-quest/actions/runs/43132850671), SHA `724ea398` | **PASS — 689/689 tests, 112 files** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43133967083](https://github.com/ashlynsloane/side-quest/actions/runs/43133967083), SHA `8a97a921` | **PASS — 692/692 tests, 113 files** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
@@ -42,6 +42,10 @@ Reuse of an existing Release binary is permitted only if `scripts/qa/native-sour
 ### Seventh independent native privacy gate
 
 The six-stage integrated gate still tests completed ride/history isolation. A separate `live-isolation` scope now checks athlete A's **paused in-progress workout**, A→B absent-from-B state, B's own paused workout, A's original restored station, and B's original restored station after A→B→A→B switches and a cold relaunch. The `live-isolation` result is recorded separately and cannot make the core six-stage JUnit pass if anything there fails. The isolated test is **scripted and in flight**, not yet verified.
+
+### Read-only legacy owner audit (diagnostic, not migration)
+
+`scripts/qa/audit-legacy-owner.mjs` opens a given synthetic SQLite file read-only, checks SQLite integrity and embedded owner metadata, and reports only owner-verification status and WAL sidecar presence—not athlete IDs or training rows. `packages/planner/test/legacy-owner-audit.test.ts` verifies matched, mismatched, unmarked and missing databases, including unchanged file hashes. A populated database without independently verified ownership remains **DENIED**. Real iPhone startup error recovery and a consistent legacy backup/migration workflow are still required.
 
 ## Still required before Milestone 1 can be signed off
 
