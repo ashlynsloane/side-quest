@@ -2101,13 +2101,18 @@ async function migrateCompletedWorkoutsIntoLedger(): Promise<void> {
             exerciseId: item.exerciseId,
             name: item.exerciseSnapshot.name,
             equipmentId,
-            sets: [{
+            // Old completed_workouts rows have no per-exercise set logs.
+            // Partial completion states which fraction of the overall session
+            // was completed, NOT which individual exercises were performed.
+            // Preserve the prescribed exercise catalog without inventing a
+            // completed set for every movement in a partial legacy session.
+            sets: Number.isFinite(row.completion_fraction) && row.completion_fraction >= 1 ? [{
               id: `${row.id}_${item.exerciseId}_set_1`,
               reps: item.unit === 'seconds' ? undefined : item.target,
               seconds: item.unit === 'seconds' ? item.target : undefined,
               loadBasis: inferLoadBasis(equipmentId),
               completed: true,
-            }],
+            }] : [],
             bodyRegions: item.exerciseSnapshot.bodyRegions,
             movementPatterns: item.exerciseSnapshot.movementPatterns,
             matchConfidence: 'exact',
