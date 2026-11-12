@@ -42,6 +42,7 @@ import {
   saveFavoriteWorkout,
   saveWorkoutFeedback,
   saveWorkoutReflection,
+  withVerifiedAthleteDatabase,
   type LoadBasis,
   type LoggedSet,
 } from '@/services/database';
@@ -325,6 +326,8 @@ export default function ActiveWorkoutScreen() {
     const completedLoads = override?.exerciseLoads ?? exerciseLoads;
     const completedSets = override?.exerciseSets ?? exerciseSets;
     try {
+      const athleteId = user?.id;
+      if (!athleteId) throw new Error('An authenticated athlete is required to save a workout.');
       // Journal the *original* completed dose and timestamp before the SQL
       // transaction. A force quit following a failed save must not silently
       // convert a partial completion into a full one on the next launch.
@@ -345,20 +348,26 @@ export default function ActiveWorkoutScreen() {
         restLoadUnit,
         planLink: activePlanLink ?? undefined,
         pendingCompletion: { completedAt: timestamp, completionFraction },
-      }, user?.id ?? null);
-      await saveCompletedWorkout({
-      workout: activeWorkout,
-      startedAt: startedAt.current,
-      completedAt: timestamp,
-      completionFraction,
-      stationRounds: completedRounds,
-      exerciseLoads: completedLoads,
-      exerciseSets: completedSets,
-      plannedSessionId: activePlanLink?.sessionId,
-      relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
-      // Persisted in the active checkpoint: a restart retry must use the
-      // same canonical workout identity, not a fresh completion timestamp.
-      idempotencyKey: `${activeWorkout.id}_${startedAt.current}`,
+      }, athleteId);
+      // The SQLite service owns one mutable active database handle. Hold the
+      // verified athlete's activation lock across the entire canonical save,
+      // its derived-memory rebuild, and planned-session repair. If another
+      // athlete already activated, reject without writing to that file. If B
+      // switches while A is saving, B's activation waits until A commits.
+      await withVerifiedAthleteDatabase(athleteId, async () => {
+        await saveCompletedWorkout({
+          workout: activeWorkout,
+          startedAt: startedAt.current,
+          completedAt: timestamp,
+          completionFraction,
+          stationRounds: completedRounds,
+          exerciseLoads: completedLoads,
+          exerciseSets: completedSets,
+          plannedSessionId: activePlanLink?.sessionId,
+          relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
+          // Persisted in the checkpoint: retry the same canonical identity.
+          idempotencyKey: `${activeWorkout.id}_${startedAt.current}`,
+        });
       });
       // Show "Saved" only after the local workout ledger and plan update
       // have succeeded. Recovery/retry uses the same completion timestamp.
