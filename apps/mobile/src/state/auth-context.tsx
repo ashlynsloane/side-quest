@@ -66,7 +66,7 @@ export function AuthProvider({children}:{children:ReactNode}){
    const {data:sub}=supabase.auth.onAuthStateChange((_event:AuthChangeEvent,session:Session|null)=>{
      if(!active)return;
      const localSaved=readSaved();
-     const next=session?.user?fromCloud(session.user,localSaved):localSaved?.mode==='local'?localSaved:null;
+     const next=_event==='SIGNED_OUT'?null:session?.user?fromCloud(session.user,localSaved):localSaved?.mode==='local'?localSaved:null;
      void restore(next);
    });
    return()=>{active=false;latestGeneration++;sub.subscription.unsubscribe();};
