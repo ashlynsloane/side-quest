@@ -208,6 +208,49 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await sessionStatus()).toBe('completed');
   });
 
+  it('cold-restarts safely after an injected mid-transaction partial-save failure', async () => {
+    // This is a disk-backed SQL failure and full JS module restart, NOT a
+    // simulator process termination at an exact native commit instruction.
+    const persistence = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    await service.saveTrainingBlock(weeklyBlock());
+    const originalFraction = 0.41;
+    const initial = persistence.createInitialLiveWorkoutSession(workout, startedAt, {
+      sessionId: 'synthetic-planned-session', sessionDate: '2026-10-20',
+      sessionTitle: 'Planned strength', modifiedFromPlan: false,
+    });
+    await persistence.saveLiveWorkoutSession({
+      ...initial, phase: 'rest', running: false,
+      pendingCompletion: { completionFraction: originalFraction, completedAt },
+    }, 'synthetic-athlete-one');
+
+    // The completed-workout row was inserted, then the ledger insert failed.
+    // The SQLite transaction must roll back ALL canonical rows before restart.
+    state.failNextContaining = 'INSERT OR REPLACE INTO workout_ledger';
+    await expect(save(originalFraction)).rejects.toThrow(/synthetic SQLite write interruption/);
+    expect(await ledger()).toHaveLength(0);
+    expect(await sessionStatus()).toBe('planned');
+    for (const handle of state.handles.splice(0)) handle.close();
+
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const reloaded = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const pending = await reloaded.loadLiveWorkoutSession('synthetic-athlete-one');
+    expect(pending?.pendingCompletion).toEqual({
+      completionFraction: originalFraction, completedAt,
+    });
+    expect(pending?.startedAt).toBe(startedAt);
+    expect(await ledger()).toHaveLength(0);
+
+    await save(pending!.pendingCompletion!.completionFraction);
+    await save(1); // stale retry cannot silently promote 41% to 100%
+    expect((await ledger()).map((entry) => entry.completionFraction))
+      .toEqual([originalFraction]);
+    expect(await sessionStatus()).toBe('completed');
+    await reloaded.clearLiveWorkoutSession('synthetic-athlete-one');
+    expect(await reloaded.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+  });
+
   it('repairs plan status after a post-commit failure without duplicate workout', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     state.failNextContaining = 'INSERT INTO training_blocks';
