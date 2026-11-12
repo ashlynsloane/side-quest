@@ -27,13 +27,22 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).not.toContain('EXPO_PUBLIC_SUPABASE_');
   });
 
-  it('enters Email before Name to avoid the iOS keyboard occluding lower controls', () => {
-    const profile = source('e2e/maestro/synthetic-profile-entry.yaml');
-    const emailIndex = profile.indexOf('id: "sidequest-qa-athlete-email"');
-    const nameIndex = profile.indexOf('id: "sidequest-qa-athlete-name"');
-    expect(emailIndex).toBeGreaterThan(0);
-    expect(nameIndex).toBeGreaterThan(emailIndex);
-    expect(profile).not.toMatch(/^- hideKeyboard/m);
+  it('verifies actual input focus and enabled beta entry before profile creation', () => {
+    for (const path of [
+      'e2e/maestro/synthetic-profile-entry.yaml',
+      'e2e/maestro/synthetic-race-profile-entry.yaml',
+    ]) {
+      const profile = source(path);
+      const nameIndex = profile.indexOf('id: "sidequest-qa-athlete-name"', profile.indexOf('- waitForAnimationToEnd'));
+      const emailIndex = profile.indexOf('id: "sidequest-qa-athlete-email"', nameIndex);
+      expect(nameIndex).toBeGreaterThan(0);
+      expect(emailIndex).toBeGreaterThan(nameIndex);
+      expect(profile).toContain('id: "sidequest-qa-athlete-name"\n    focused: true');
+      expect(profile).toContain('id: "sidequest-qa-athlete-email"\n    focused: true');
+      expect(profile).toContain('id: "sidequest-qa-enter-beta"\n      enabled: true');
+      expect(profile).toContain('tapOn: "Create your beta profile"');
+      expect(profile).not.toMatch(/^- hideKeyboard/m);
+    }
     // The numeric activity keyboard must also avoid the unreliable dismiss API.
     expect(source('e2e/maestro/synthetic-completed-ride-steps.yaml'))
       .not.toMatch(/^- hideKeyboard/m);
