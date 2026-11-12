@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   activateStartupProfile,
   startupDatabaseRecoveryMessage,
@@ -46,6 +47,27 @@ describe('fail-closed local startup after SQLite owner verification', () => {
     const second = await activateStartupProfile(candidate, activate);
     expect(second).toEqual({ profile: candidate, recoveryError: null });
     expect(attempts).toBe(2);
+  });
+
+  it('wires the root recovery screen to owner-verified retry without clearing saved profile', () => {
+    const auth = readFileSync(new URL(
+      '../../../apps/mobile/src/state/auth-context.tsx', import.meta.url,
+    ), 'utf8');
+    const root = readFileSync(new URL(
+      '../../../apps/mobile/src/app/_layout.tsx', import.meta.url,
+    ), 'utf8');
+    expect(auth).toContain('const result=await activateStartupProfile(candidate,activateUserDatabase)');
+    expect(auth).toContain('failedStartupCandidate.current=candidate;');
+    expect(auth).toContain('setStartupRecoveryError(result.recoveryError);');
+    expect(auth).toContain('setLoading(false);');
+    const failurePath = auth.split('if(result.recoveryError){')[1]?.split('}else{')[0];
+    expect(failurePath).not.toContain('persist(null)');
+    expect(failurePath).not.toContain('store.removeItem(KEY)');
+    expect(auth).toContain("const next=_event==='SIGNED_OUT'?null");
+    expect(root).toContain('if (startupRecoveryError) {');
+    expect(root).toContain('Your local training history needs recovery.');
+    expect(root).toContain('retry={() => void retryStartup()}');
+    expect(root).toContain('if (startupRecoveryError) return;');
   });
 
   it('does not emit internal owner IDs or SQL details from a failed activation', () => {
