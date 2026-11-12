@@ -1,0 +1,28 @@
+# Must run AFTER host confirms a real exact-bundle OS SIGKILL. No
+# clearState/uninstall: the pending fraction and timestamp must cold-recover.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Retry saving workout"
+    timeout: 45000
+- assertVisible: "PARTIAL WORKOUT"
+- assertVisible: "Completion was interrupted.*"
+- takeScreenshot: "native-synthetic-interrupted-workout-restored"
+- tapOn: "Retry saving workout"
+- extendedWaitUntil:
+    visible: "Saved to training history.*"
+    timeout: 45000
+- assertVisible: ".*% of the planned duration completed.*"
+- takeScreenshot: "native-synthetic-original-partial-saved-on-retry"
+- scrollUntilVisible:
+    element: "Return to Today"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- tapOn: "Return to Today"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
