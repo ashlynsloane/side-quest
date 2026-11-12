@@ -41,10 +41,12 @@ run_flow() {
 
 # One installed synthetic binary supports three independent acceptance scopes:
 # full = six consecutive stages, isolation = five, strength = profile ->
-# onboarding -> strength. Each scope uses a CLEAN simulator in its own job.
+# onboarding -> strength, live-isolation = profile -> onboarding ->
+# A/B/A/B independent live workout checkpoints and cold resume. Each
+# scope uses a CLEAN simulator in its own job.
 scope="${NATIVE_QA_SCOPE:-full}"
 case "$scope" in
-  full|isolation|strength) ;;
+  full|isolation|strength|live-isolation) ;;
   *) echo "Unsupported NATIVE_QA_SCOPE: $scope" >&2; exit 2 ;;
 esac
 export NATIVE_QA_SCOPE="$scope"
@@ -59,6 +61,7 @@ ride=99
 restart=99
 isolation=99
 strength=99
+live_isolation=99
 run_flow profile e2e/maestro/synthetic-profile-entry.yaml
 profile=$?
 if [[ "$profile" -eq 0 ]]; then
@@ -75,6 +78,13 @@ if [[ "$scope" == "strength" ]]; then
     strength=$?
   else
     echo "BLOCKED: strength requires passing synthetic onboarding" | tee maestro-evidence/strength-console.log
+  fi
+elif [[ "$scope" == "live-isolation" ]]; then
+  if [[ "$onboarding" -eq 0 ]]; then
+    run_flow live-isolation e2e/maestro/synthetic-live-checkpoint-isolation-steps.yaml
+    live_isolation=$?
+  else
+    echo "BLOCKED: live checkpoint isolation requires passing synthetic onboarding" | tee maestro-evidence/live-isolation-console.log
   fi
 else
   if [[ "$onboarding" -eq 0 ]]; then
@@ -113,9 +123,10 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "restart=$restart"
     echo "isolation=$isolation"
     echo "strength=$strength"
+    echo "live_isolation=$live_isolation"
   } >> "$GITHUB_OUTPUT"
 fi
-summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength (0=pass, 99=not run/blocked)"
+summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation (0=pass, 99=not run/blocked)"
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
@@ -130,6 +141,9 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 if [[ "$diagnostics" -ne 0 || "$profile" -ne 0 || "$onboarding" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "strength" && "$strength" -ne 0 ]]; then exit 1; fi
-if [[ "$scope" != "strength" && ( "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 ) ]]; then exit 1; fi
+if [[ "$scope" == "live-isolation" && "$live_isolation" -ne 0 ]]; then exit 1; fi
+if [[ "$scope" == "full" || "$scope" == "isolation" ]]; then
+  if [[ "$ride" -ne 0 || "$restart" -ne 0 || "$isolation" -ne 0 ]]; then exit 1; fi
+fi
 if [[ "$scope" == "full" && "$strength" -ne 0 ]]; then exit 1; fi
 exit 0
