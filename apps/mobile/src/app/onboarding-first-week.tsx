@@ -1,6 +1,7 @@
 import type { BodyRegion, EnduranceDiscipline, EnduranceSchedule, EquipmentId, PerformanceGoal, PerformanceGoalType, TrainingBlockPlan, Weekday } from '@circuit/domain';
 import { addLocalCalendarDays, buildFirstWeekTrainingSummary, generateTrainingBlock, nextLocalMonday, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import Constants from 'expo-constants';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen, Surface } from '@/components/v12-ui';
@@ -13,6 +14,7 @@ import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-run
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
 import { firstWeekAttemptSeed } from '@/services/first-week-provenance';
+import { isSyntheticNativeGenerationRace, holdSyntheticFirstWeekBeforePersistence } from '@/services/native-qa-generation-race';
 
 type Params = { goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; background?: string; runStatus?: string; injury?: string; strength?: string };
 type BuildState = 'building' | 'ready' | 'error';
@@ -24,7 +26,11 @@ export default function OnboardingFirstWeekScreen() {
   const router = useRouter();
   const { exercises } = useExerciseCatalog();
   const { complete, state: onboardingState } = useOnboarding();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
+  // The interruption control is unreachable in any normal beta bundle.
+  const syntheticGenerationRace = isSyntheticNativeGenerationRace(
+    Constants.expoConfig?.ios?.bundleIdentifier, user,
+  );
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [state, setState] = useState<BuildState>('building');
@@ -34,6 +40,7 @@ export default function OnboardingFirstWeekScreen() {
   const [enduranceWarning, setEnduranceWarning] = useState<string | null>(null);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [resultAttemptKey, setResultAttemptKey] = useState<string | null>(null);
+  const [syntheticGenerationReady, setSyntheticGenerationReady] = useState(false);
   const currentAttempt = useRef(0);
   const started = useRef<string | null>(null);
   const activeAthleteId = useRef<string | null>(user?.id ?? null);
@@ -50,6 +57,7 @@ export default function OnboardingFirstWeekScreen() {
     if (!athleteId || started.current === attemptKey || exercises.length === 0) return;
     started.current = attemptKey;
     setBlock(null);
+    setSyntheticGenerationReady(false);
     setError(null);
     setEnduranceWarning(null);
     setEnduranceEvents([]);
@@ -73,6 +81,15 @@ export default function OnboardingFirstWeekScreen() {
     const seed = firstWeekAttemptSeed(params, weekStartDate);
     void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }, athleteId)
       .then(async (result) => {
+        // QA-only deterministic post-generation / pre-SQL commit race. This
+        // fixture is available only in the isolated synthetic iOS bundle and
+        // after a fully calculated draft is awaiting its owner-locked save.
+        // If A signs out and B activates while we hold, stillCurrent MUST
+        // reject A's result rather than writing it to B's SQLite handle.
+        if (syntheticGenerationRace) {
+          if (stillCurrent()) setSyntheticGenerationReady(true);
+          await holdSyntheticFirstWeekBeforePersistence(true);
+        }
         // Both identity checks matter: user changes during generation AND
         // while waiting for the SQLite activation/write queue must fail closed.
         if (!stillCurrent()) return;
@@ -110,12 +127,21 @@ export default function OnboardingFirstWeekScreen() {
         setResultAttemptKey(attemptKey);
         setState('error');
       });
-  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, retryAttempt, user?.id]);
+  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, retryAttempt, syntheticGenerationRace, user?.id]);
 
   // A profile switch invalidates the displayed A plan immediately, before
   // React effects run or asynchronous SQLite activation finishes for B.
   const expectedAttemptKey = `${user?.id ?? 'signed-out'}:${retryAttempt}`;
-  if (state === 'building' || resultAttemptKey !== expectedAttemptKey) return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
+  if (state === 'building' || resultAttemptKey !== expectedAttemptKey) return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface>
+    {syntheticGenerationRace && syntheticGenerationReady ? <Pressable
+      testID="sidequest-qa-switch-during-first-week-generation"
+      accessibilityRole="button"
+      accessibilityLabel="Synthetic QA switch athlete during first-week generation"
+      onPress={() => void signOut()}
+      style={styles.secondary}>
+      <Text style={styles.secondaryText}>Synthetic QA: switch athlete before saving</Text>
+    </Pressable> : null}
+  </AppScreen>;
 
   if (state === 'error' || !block) return <AppScreen eyebrow="FIRST DRAFT" title="The week needs one more review." subtitle={error ?? 'The draft could not be generated.'}><Surface style={styles.errorCard}><Text style={styles.errorTitle}>{block
       ? 'The strength plan was saved, but setup could not finish.'
