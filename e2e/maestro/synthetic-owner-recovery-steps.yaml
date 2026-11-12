@@ -1,0 +1,23 @@
+# Independent native release gate: a corrupted/mismatched embedded owner
+# must NOT turn into automatic sign-in, an infinite spinner, or file adoption.
+# Previous shell gate first verifies the isolated QA bundle and deliberately
+# changes ONLY its synthetic SQLite owner row.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Your local training history needs recovery."
+    timeout: 60000
+- assertVisible: "Try again"
+- assertNotVisible:
+    id: "sidequest-qa-week-tab"
+- takeScreenshot: "synthetic-owner-mismatch-recovery-visible"
+# Retry must fail closed again without assigning the database to A.
+- tapOn: "Try again"
+- extendedWaitUntil:
+    visible: "Your local training history needs recovery."
+    timeout: 30000
+- assertVisible: "Try again"
+- assertNotVisible:
+    id: "sidequest-qa-week-tab"
+- takeScreenshot: "synthetic-owner-mismatch-retry-preserved"
