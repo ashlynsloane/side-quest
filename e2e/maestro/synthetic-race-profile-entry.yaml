@@ -1,0 +1,23 @@
+# A synthetic-only local account that intentionally holds the first-week
+# generator immediately BEFORE its owner-locked SQLite persistence step.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-athlete-email"
+    timeout: 45000
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-first-week-race-a@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Race Athlete A"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "generation-race-athlete-a-new-profile"
