@@ -114,7 +114,15 @@ appId: com.sidequest.synthetic.qa
 - extendedWaitUntil:
     visible: "Training history"
     timeout: 30000
-- assertVisible: "STRENGTH"
-- assertVisible: ".*[1-9][0-9]?% completed"
-- assertNotVisible: "100% completed"
+# iOS exposes the entire workout row as one accessible Pressable; its
+# separate visible "27% completed" Text child is not an accessible node.
+# Assert the saved *canonical fraction* through the row's accessible label,
+# not the hidden child. This must be above zero and below one hundred.
+- assertVisible: "Open .* strength workout, [1-9][0-9]? percent completed"
+- assertNotVisible: "Open .* strength workout, 100 percent completed"
 - takeScreenshot: "synthetic-strength-partial-in-history"
+# Opening the row proves the durable SQLite ledger detail is retrievable.
+- tapOn: "Open .* strength workout, [1-9][0-9]? percent completed"
+- extendedWaitUntil:
+    visible: "EDIT WORKOUT"
+    timeout: 30000
