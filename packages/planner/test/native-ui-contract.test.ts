@@ -300,6 +300,32 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).toContain('          - owner-recovery');
   });
 
+  it('stages a real synthetic A-to-B switch during held onboarding generation with SQL postconditions', () => {
+    const flow = source('e2e/maestro/synthetic-first-week-generation-switch.yaml');
+    const a = source('e2e/maestro/synthetic-race-profile-entry.yaml');
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    const validator = source('scripts/qa/verify-synthetic-generation-race.sh');
+    const diag = source('scripts/qa/diagnose-native-evidence.mjs');
+    const workflow = source('.github/workflows/native-ios-ui-only.yml');
+    expect(a).toContain('synthetic-first-week-race-a@example.invalid');
+    expect(flow).toContain('sidequest-qa-switch-during-first-week-generation');
+    expect(flow).toContain('synthetic-first-week-race-b@example.invalid');
+    expect(flow).toContain('generation-a-held-before-owner-locked-save');
+    expect(flow).toContain('stopApp');
+    expect(flow).toContain('launchApp');
+    expect(runner).toContain('run_flow generation-isolation e2e/maestro/synthetic-first-week-generation-switch.yaml');
+    expect(runner).toContain('sleep 80');
+    expect(runner).toContain('verify-synthetic-generation-race.sh');
+    expect(diag).toContain("'generation-isolation': ['profile', 'generation-isolation']");
+    expect(diag).toContain('POSTCONDITION FAILED');
+    expect(workflow).toContain('          - generation-isolation');
+    expect(validator).toContain('com.sidequest.synthetic.qa');
+    expect(validator).toContain('NATIVE_QA_GENERATION_RACE');
+    expect(validator).toContain('sidequest_athlete_database_owner');
+    expect(validator).toContain('PRAGMA quick_check');
+    expect(validator).toContain("A_BLOCKS\\" != '0'"); // A must not have saved a plan.
+  });
+
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
     const screen = source('apps/mobile/src/app/active-workout.tsx');
     const ledger = source('apps/mobile/src/services/database.ts');
@@ -470,7 +496,7 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('if [[ "$scope" == "strength" ]]');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
     const focused = source('.github/workflows/native-ios-ui-only.yml');
-    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery"]');
+    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery","generation-isolation"]');
     expect(focused).toContain('NATIVE_QA_SCOPE:');
     expect(focused).toContain('for ATTEMPT in 1 2 3 4');
     expect(focused).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
