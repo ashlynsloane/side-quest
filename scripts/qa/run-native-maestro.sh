@@ -84,9 +84,10 @@ if [[ "$scope" == "generation-isolation" ]]; then
     run_flow generation-isolation e2e/maestro/synthetic-first-week-generation-switch.yaml
     generation_isolation=$?
     if [[ "$generation_isolation" -eq 0 ]]; then
-      # Wait until A's bounded pre-save hold definitely expires, with B
-      # remaining active. Then inspect BOTH real synthetic SQLite files.
-      sleep 80
+      # The QA barrier already resumed A after B's actual owner-verified
+      # activation, not a guessed timer. Allow pending microtasks/SQL to settle
+      # before inspecting both canonical SQLite files.
+      sleep 3
       if ! NATIVE_QA_GENERATION_RACE=1 bash scripts/qa/verify-synthetic-generation-race.sh \
           >> maestro-evidence/generation-isolation-console.log 2>&1; then
         generation_isolation=1
