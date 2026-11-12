@@ -23,6 +23,7 @@ on:
           - strength
           - live-isolation
           - owner-recovery
+          - generation-isolation
       native_build_run_id:
         description: 'Native build run ID containing sidequest-synthetic-ios-app (optional)'
         required: false
@@ -42,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || '["isolation","strength","live-isolation","owner-recovery"]') }}
+        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || '["isolation","strength","live-isolation","owner-recovery","generation-isolation"]') }}
     runs-on: macos-latest
     timeout-minutes: 60
     env:
