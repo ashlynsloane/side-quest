@@ -41,7 +41,7 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.allPassed).toBe(true);
     expect(report.scope).toBe('strength');
     expect(report.stages.filter((x) => x.status === 'NOT_REQUIRED').map((x) => x.stage))
-      .toEqual(['ride', 'restart', 'isolation', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after']);
+      .toEqual(['ride', 'restart', 'isolation', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after', 'completion-in-transaction-before', 'completion-in-transaction-after']);
     const full = diagnose(root);
     expect(full.run.status).toBe(1);
     expect(full.report.allPassed).toBe(false);
@@ -178,6 +178,38 @@ describe('native UI failure evidence diagnosis', () => {
     expect(runGate().status).toBe(1);
   });
 
+  it('requires separate real iOS uncommitted-transaction kill stages and rejects SQL rollback failures', () => {
+    const root = fixture();
+    const required = ['profile', 'onboarding',
+      'completion-in-transaction-before', 'completion-in-transaction-after'];
+    for (const stage of required)
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const runGate = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env,
+        NATIVE_QA_SCOPE: 'completion-in-transaction-kill' },
+    });
+    const passed = runGate();
+    expect(passed.status, passed.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(required);
+    expect(report.stages.filter((entry) => entry.status === 'PASSED').map((entry) => entry.stage))
+      .toEqual(required);
+
+    writeFileSync(join(root, 'completion-in-transaction-before-console.log'),
+      'POSTCONDITION FAILED: uncommitted SQLite rows survived SIGKILL');
+    expect(runGate().status).toBe(1);
+    writeFileSync(join(root, 'completion-in-transaction-before-console.log'), '');
+    writeFileSync(join(root, 'completion-in-transaction-after-console.log'),
+      'POSTCONDITION FAILED: replay created two workout rows');
+    expect(runGate().status).toBe(1);
+    rmSync(join(root, 'completion-in-transaction-after-junit.xml'));
+    expect(runGate().status).toBe(1);
+  });
+
   it('rejects unknown scopes and never treats missing required JUnit as a pass', () => {
     const root = fixture();
     const unknown = spawnSync(process.execPath, [script, root], {
@@ -199,7 +231,7 @@ describe('native UI failure evidence diagnosis', () => {
     const { run, report } = diagnose(root);
     expect(run.status, run.stderr).toBe(0);
     expect(report.allPassed).toBe(true);
-    expect(report.stages.map(x => x.status)).toEqual([...Array(6).fill('PASSED'), 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED']);
+    expect(report.stages.map(x => x.status)).toEqual([...Array(6).fill('PASSED'), ...Array(7).fill('NOT_REQUIRED')]);
   });
 
   it('detects email mistakenly entered into Name without publishing input values', () => {
@@ -224,7 +256,7 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.stages[0]?.status).toBe('FAILED');
     expect(report.stages[0]?.diagnosis).toMatch(/keyboard-focus leak/);
     expect(report.stages.slice(1).map(x => x.status))
-      .toEqual([...Array(5).fill('BLOCKED'), 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED']);
+      .toEqual([...Array(5).fill('BLOCKED'), ...Array(7).fill('NOT_REQUIRED')]);
     expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
       .not.toContain('synthetic-secret@example.invalid');
   });
@@ -343,7 +375,7 @@ describe('native UI failure evidence diagnosis', () => {
     }
     const { report } = diagnose(root);
     expect(report.stages.map((stage) => stage.status))
-      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED', 'NOT_REQUIRED']);
+      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN', ...Array(7).fill('NOT_REQUIRED')]);
     expect(report.allPassed).toBe(false);
   });
 
@@ -389,5 +421,7 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.stages[8]?.status).toBe('NOT_REQUIRED');
     expect(report.stages[9]?.status).toBe('NOT_REQUIRED');
     expect(report.stages[10]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[11]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[12]?.status).toBe('NOT_REQUIRED');
   });
 });
