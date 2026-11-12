@@ -24,11 +24,17 @@ appId: com.sidequest.synthetic.qa
 - extendedWaitUntil:
     visible: "WORKOUT PREVIEW"
     timeout: 60000
+# Scroll to the stable section heading, not the icon-bearing button.
+# Native 43132842718 had the Start button plainly visible but Maestro's
+# scrollUntilVisible(button, 85%) still failed at the end of the scroll view.
 - scrollUntilVisible:
-    element: "Start workout, play"
+    element: "Ready when you are"
     direction: DOWN
     centerElement: true
-    visibilityPercentage: 85
+    visibilityPercentage: 75
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Start workout, play"
     timeout: 30000
 - tapOn: "Start workout, play"
 - scrollUntilVisible:
