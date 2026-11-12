@@ -1,6 +1,6 @@
 # Milestone 1 — native interrupted-strength completion acceptance (#13)
 
-**Disposition: window A is implemented and pending actual simulator proof; window B remains not implemented.** The existing Node SQLite `SIGKILL` test
+**Disposition: both synthetic interruption windows are implemented, but neither has yet produced a passing native SIGKILL/JUnit/SQLite acceptance report.** The existing Node SQLite `SIGKILL` test
 proves the transaction's disk rollback and the 43% journal retry in the
 Node/Expo adapter. A synthetic native simulator build, XCTest/Maestro journey,
 and *real app process termination during pending canonical completion* are
@@ -8,8 +8,7 @@ still needed. None of the tests below authorize touching a real beta install.
 
 ## Synthetic native implementation now on draft PR #12 (unverified)
 
-The first of the two interruption gates is now implemented and integrated
-into the independent `completion-kill` Maestro scope:
+Both interruption windows are implemented as **separate** simulator acceptance scopes: `completion-kill` (A) and `completion-in-transaction-kill` (B). Neither is a native PASS until its own actual SIGKILL and SQL evidence is confirmed. Window A:
 
 - `apps/mobile/src/services/native-qa-completion-kill.ts` enforces **both**
   the exact synthetic simulator bundle identifier and a dedicated local
@@ -40,11 +39,39 @@ into the independent `completion-kill` Maestro scope:
   beta-bundle exclusion and correct journal→hold→SQL ordering; JUnit
   diagnostic tests fail on missing, skipped or invalid native evidence.
 
-**No native completion-kill PASS may be claimed until the source-matched
-Release simulator and its SQL evidence have completed.** Window B (true kill
-*inside* the uncommitted SQLite transaction) is still separate, as are
-historical human-owner provenance, physical-device testing and rollback
-authorization.
+### Window B: real SIGKILL *inside* an uncommitted SQLite transaction
+
+- The in-transaction test uses a **different** fixture:
+  `synthetic-save-interrupt-b@example.invalid`, again only in the
+  isolated `com.sidequest.synthetic.qa` bundle. The ordinary beta bundle
+  can never activate either crash window.
+- `saveCompletedWorkout` accepts an explicitly caller-supplied
+  `syntheticOnlyHoldAfterUncommittedInsert` callback. The only caller
+  supplies it after both synthetic guards pass. The callback executes
+  **after** the first real `completed_workouts` INSERT **inside**
+  `db.withTransactionAsync` and **before** the transaction resolves.
+- `active-workout.tsx` exposes an independent native accessibility marker
+  only at that point. The durable original fraction/timestamp journal
+  remains the same checkpoint used for window A. A restored checkpoint
+  bypasses the interruption callback so retry is possible.
+- `completion-in-transaction-kill` runs separate synthetic B profile,
+  onboarding, workout and Maestro JUnits. The host helper
+  `kill-synthetic-uncommitted-completion.sh` verifies the exact UIKit app
+  PID and sends **real `kill -9`**. It deliberately avoids opening SQLite
+  while the native write transaction holds a lock.
+- **After** process death, the helper verifies the embedded B owner,
+  `PRAGMA quick_check = ok`, and **zero** surviving canonical rows.
+  That is the required rollback evidence. Cold relaunch/retry must then
+  produce **exactly one** matching, sub-100%-complete ledger/workout pair
+  with identical stable ID/timestamps and no fabricated completed sets.
+- Source and JUnit contract tests require both the before/after stages
+  and fail if a SQL postcondition is rejected or missing.
+
+**No native PASS may be claimed for either interruption window until
+its exact source-matched iOS Release simulator, actual process kill,
+separate JUnit stages, and SQLite postconditions have completed.**
+Real historical-owner provenance, physical iPhone acceptance and rollback
+authorization are also still separate release blockers.
 
 ## Accepted design
 
