@@ -6,6 +6,9 @@ import {
   SYNTHETIC_COMPLETION_KILL_TIMEOUT_MS,
   isSyntheticPreSqlCompletionKill,
   holdSyntheticPreSqlCompletion,
+  SYNTHETIC_IN_TRANSACTION_KILL_EMAIL,
+  isSyntheticInTransactionCompletionKill,
+  holdSyntheticInTransactionCompletion,
 } from '../../../apps/mobile/src/services/native-qa-completion-kill';
 
 describe('native partial completion SIGKILL synthetic-only seam', () => {
@@ -38,6 +41,57 @@ describe('native partial completion SIGKILL synthetic-only seam', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('blocks a real in-transaction SQL crash only for a DIFFERENT synthetic B fixture', () => {
+    const inTx = { email: SYNTHETIC_IN_TRANSACTION_KILL_EMAIL, mode: 'local' as const };
+    expect(isSyntheticInTransactionCompletionKill(SYNTHETIC_COMPLETION_KILL_BUNDLE, inTx))
+      .toBe(true);
+    expect(isSyntheticInTransactionCompletionKill(SYNTHETIC_COMPLETION_KILL_BUNDLE, fixture))
+      .toBe(false);
+    expect(isSyntheticPreSqlCompletionKill(SYNTHETIC_COMPLETION_KILL_BUNDLE, inTx))
+      .toBe(false);
+    expect(isSyntheticInTransactionCompletionKill('com.sidequest.app', inTx)).toBe(false);
+    expect(isSyntheticInTransactionCompletionKill(undefined, inTx)).toBe(false);
+    expect(isSyntheticInTransactionCompletionKill(SYNTHETIC_COMPLETION_KILL_BUNDLE, {
+      ...inTx, mode: 'cloud',
+    })).toBe(false);
+  });
+
+  it('holds a genuine uncommitted INSERT and never stalls a beta workout', async () => {
+    vi.useFakeTimers();
+    try {
+      await holdSyntheticInTransactionCompletion(false);
+      const pending = holdSyntheticInTransactionCompletion(true, 100);
+      const failure = expect(pending).rejects.toThrow(/uncommitted-SQL kill window expired/);
+      await vi.advanceTimersByTimeAsync(100);
+      await failure;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('positions native B crash after real SQL INSERT but before commit, with cold-retry bypass', () => {
+    const db = readFileSync(new URL(
+      '../../../apps/mobile/src/services/database.ts', import.meta.url,
+    ), 'utf8');
+    const screen = readFileSync(new URL(
+      '../../../apps/mobile/src/app/active-workout.tsx', import.meta.url,
+    ), 'utf8');
+    const save = db.slice(db.indexOf('export async function saveCompletedWorkout('));
+    const begin = save.indexOf('await db.withTransactionAsync(async () => {');
+    const insert = save.indexOf('INSERT OR REPLACE INTO completed_workouts', begin);
+    const hold = save.indexOf('await syntheticOnlyHoldAfterUncommittedInsert()', insert);
+    const ledger = save.indexOf('INSERT OR REPLACE INTO workout_ledger', hold);
+    expect(begin).toBeGreaterThan(0);
+    expect(insert).toBeGreaterThan(begin);
+    expect(hold).toBeGreaterThan(insert);
+    expect(ledger).toBeGreaterThan(hold);
+    expect(save).toContain('syntheticOnlyHoldAfterUncommittedInsert?: () => Promise<void>');
+    expect(screen).toContain('isSyntheticInTransactionCompletionKill(');
+    expect(screen).toContain('!restoredPendingCompletion.current');
+    expect(screen).toContain('await holdSyntheticInTransactionCompletion(true)');
+    expect(screen).toContain('sidequest-qa-completion-sql-uncommitted-before-commit');
   });
 
   it('journals the unchanged partial fraction before exposing a real process-kill marker', () => {
