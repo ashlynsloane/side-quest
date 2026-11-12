@@ -89,24 +89,24 @@ appId: com.sidequest.synthetic.qa
 - tapOn: "Create your beta profile"
 - tapOn:
     id: "sidequest-qa-enter-beta"
-- extendedWaitUntil:
-    visible:
-      id: "sidequest-qa-today-tab"
-    timeout: 30000
-- tapOn:
-    id: "sidequest-qa-today-tab"
-- assertVisible: "WORKOUT IN PROGRESS"
-- tapOn:
-    id: "sidequest-qa-resume-active-workout"
-    retryTapIfNoChange: true
+# Native evidence 43132842718: when A's last route was active-workout and
+# A's checkpoint exists, auth navigation correctly restores directly into
+# the paused "Recover and record" screen rather than the tab shell.
+# This is an allowed recovery route, NOT a missing Today tab.
 - extendedWaitUntil:
     visible: "Recover and record"
     timeout: 30000
+- assertVisible: "STATION 1 COMPLETE"
+- assertVisible: "Paused"
 - takeScreenshot: "athlete-a-restored-station-instead-of-b"
+# Leave must durably keep A's checkpoint; the Today card then verifies the
+# checkpoint is still discoverable through normal navigation.
 - tapOn: "Leave"
 - extendedWaitUntil:
     visible: "WORKOUT IN PROGRESS"
     timeout: 30000
+- assertVisible:
+    id: "sidequest-qa-resume-active-workout"
 
 # B: switch again; B's separate checkpoint must also still exist.
 - tapOn:
@@ -133,17 +133,18 @@ appId: com.sidequest.synthetic.qa
 - tapOn: "Create your beta profile"
 - tapOn:
     id: "sidequest-qa-enter-beta"
-- extendedWaitUntil:
-    visible:
-      id: "sidequest-qa-today-tab"
-    timeout: 30000
-- tapOn:
-    id: "sidequest-qa-today-tab"
-- assertVisible: "WORKOUT IN PROGRESS"
-- tapOn:
-    id: "sidequest-qa-resume-active-workout"
-    retryTapIfNoChange: true
+# B also returns to its own last active-workout route with B's separate
+# persisted checkpoint, never A's. Check both UI state and discoverability.
 - extendedWaitUntil:
     visible: "Recover and record"
     timeout: 30000
+- assertVisible: "STATION 1 COMPLETE"
+- assertVisible: "Paused"
 - takeScreenshot: "athlete-b-original-station-restored"
+- tapOn: "Leave"
+- extendedWaitUntil:
+    visible: "WORKOUT IN PROGRESS"
+    timeout: 30000
+- assertVisible:
+    id: "sidequest-qa-resume-active-workout"
+- takeScreenshot: "athlete-b-checkpoint-still-on-today"
