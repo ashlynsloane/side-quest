@@ -202,6 +202,8 @@ describe('native synthetic UI automation contract', () => {
       'synthetic-ride-restart-steps.yaml',
       'synthetic-athlete-isolation-steps.yaml',
       'synthetic-strength-restart-steps.yaml',
+      'synthetic-strength-pause-checkpoint.yaml',
+      'synthetic-live-checkpoint-isolation-steps.yaml',
     ];
     for (const name of flowNames) {
       const path = 'e2e/maestro/' + name;
@@ -246,6 +248,27 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('run_flow isolation e2e/maestro/synthetic-athlete-isolation-steps.yaml');
     expect(runner).toContain('"isolation=$isolation"');
     expect(diagnostic).toContain("'restart', 'isolation', 'strength'");
+  });
+
+  it('scripts A/B/A/B live workout checkpoint isolation without conflating completed ride history', () => {
+    const flow = source('e2e/maestro/synthetic-live-checkpoint-isolation-steps.yaml');
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    const diag = source('scripts/qa/diagnose-native-evidence.mjs');
+    const workflow = source('.github/workflows/native-ios-ui-only.yml');
+    expect(flow).toContain('runFlow: synthetic-strength-pause-checkpoint.yaml');
+    expect(flow).toContain('synthetic-live-athlete-b@example.invalid');
+    expect(flow).toContain('synthetic-athlete@example.invalid');
+    expect(flow).toContain('assertNotVisible: "WORKOUT IN PROGRESS"');
+    expect(flow).toContain('id: "sidequest-qa-resume-active-workout"');
+    expect(flow).toContain('athlete-a-restored-station-instead-of-b');
+    expect(flow).toContain('athlete-b-original-station-restored');
+    expect(flow).toContain('stopApp');
+    expect(flow).toContain('launchApp');
+    expect(runner).toContain('run_flow live-isolation e2e/maestro/synthetic-live-checkpoint-isolation-steps.yaml');
+    expect(runner).toContain('"live_isolation=$live_isolation"');
+    expect(runner).toContain('if [[ "$scope" == "live-isolation" && "$live_isolation" -ne 0 ]]');
+    expect(diag).toContain("'live-isolation': ['profile', 'onboarding', 'live-isolation']");
+    expect(workflow).toContain('          - live-isolation');
   });
 
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
