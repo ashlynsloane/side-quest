@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   SYNTHETIC_RACE_BUNDLE,
   SYNTHETIC_RACE_EMAIL,
-  SYNTHETIC_RACE_HOLD_MS,
+  SYNTHETIC_RACE_B_ID,
+  SYNTHETIC_RACE_MAX_WAIT_MS,
+  readSyntheticLocalProfileId,
   isSyntheticNativeGenerationRace,
   holdSyntheticFirstWeekBeforePersistence,
 } from '../../../apps/mobile/src/services/native-qa-generation-race';
@@ -28,23 +30,68 @@ describe('synthetic native mid-generation athlete-switch gate', () => {
     expect(isSyntheticNativeGenerationRace(SYNTHETIC_RACE_BUNDLE, {
       ...a, email: ' SYNTHETIC-FIRST-WEEK-RACE-A@EXAMPLE.INVALID ',
     })).toBe(true);
-    expect(SYNTHETIC_RACE_HOLD_MS).toBeGreaterThanOrEqual(60_000);
+    expect(SYNTHETIC_RACE_MAX_WAIT_MS).toBeGreaterThanOrEqual(120_000);
   });
 
-  it('holds before persistence only when QA gating is enabled', async () => {
+  it('releases pending A only after B has completed a real synthetic auth-store switch', async () => {
     vi.useFakeTimers();
     try {
-      await holdSyntheticFirstWeekBeforePersistence(false);
+      let currentProfile = 'local_synthetic-first-week-race-a@example.invalid';
+      const readOwner = vi.fn(() => currentProfile);
+      await holdSyntheticFirstWeekBeforePersistence(false, readOwner);
+      expect(readOwner).not.toHaveBeenCalled();
+
       let completed = false;
-      const pending = holdSyntheticFirstWeekBeforePersistence(true, 500)
-        .then(() => { completed = true; });
-      await vi.advanceTimersByTimeAsync(499);
+      const pending = holdSyntheticFirstWeekBeforePersistence(
+        true, readOwner, { pollIntervalMs: 50, timeoutMs: 2_000 },
+      ).then(() => { completed = true; });
+      await vi.advanceTimersByTimeAsync(250);
       expect(completed).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
+      currentProfile = SYNTHETIC_RACE_B_ID;
+      await vi.advanceTimersByTimeAsync(50);
       await pending;
       expect(completed).toBe(true);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('fails closed after a bounded wait if synthetic B never authenticates', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = holdSyntheticFirstWeekBeforePersistence(
+        true, () => null, { pollIntervalMs: 100, timeoutMs: 500 },
+      );
+      const denial = expect(pending).rejects.toThrow(/did not activate/);
+      await vi.advanceTimersByTimeAsync(500);
+      await denial;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads only an explicitly local stored profile and never emits the record', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const values = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: (key: string) => values.get(key) ?? null },
+    });
+    try {
+      expect(readSyntheticLocalProfileId()).toBeNull();
+      values.set('circuit.v12.beta-profile', '{invalid');
+      expect(readSyntheticLocalProfileId()).toBeNull();
+      values.set('circuit.v12.beta-profile', JSON.stringify({
+        id: SYNTHETIC_RACE_B_ID, mode: 'cloud',
+      }));
+      expect(readSyntheticLocalProfileId()).toBeNull();
+      values.set('circuit.v12.beta-profile', JSON.stringify({
+        id: SYNTHETIC_RACE_B_ID, mode: 'local',
+      }));
+      expect(readSyntheticLocalProfileId()).toBe(SYNTHETIC_RACE_B_ID);
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original);
+      else Reflect.deleteProperty(globalThis, 'localStorage');
     }
   });
 
