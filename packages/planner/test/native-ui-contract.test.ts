@@ -326,6 +326,12 @@ describe('native synthetic UI automation contract', () => {
     expect(validator).toContain('sidequest_athlete_database_owner');
     expect(validator).toContain('PRAGMA quick_check');
     expect(validator).toContain('A_BLOCKS'); // A must not have saved a plan.
+    expect(validator).toContain('goal_general_offseason');
+    expect(validator).toContain('goal_ironman_70_3');
+    expect(validator).toContain('B_A_GOAL_LEAK');
+    expect(validator).toContain('B_STALE_BLOCKS');
+    expect(validator).toContain("B_GOALS");
+    expect(validator).toContain("B_BLOCKS");
   });
 
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
