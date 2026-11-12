@@ -188,6 +188,59 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(full?.exercises[0]?.sets).toHaveLength(1);
   });
 
+  it('migrates legacy partial completions without inventing per-exercise sets', async () => {
+    const exerciseWorkout = {
+      ...workout, id: 'synthetic-legacy-partial',
+      stations: [{
+        id: 'legacy-station-1', durationSeconds: 900,
+        exercises: [{
+          exerciseId: 'legacy-squat', target: 10, unit: 'reps',
+          equipmentOptionId: 'bodyweight',
+          exerciseSnapshot: {
+            name: 'Legacy prescribed squat', bodyRegions: [],
+            movementPatterns: ['squat'], equipmentOptions: [],
+          },
+        }],
+      }],
+    } as unknown as Parameters<MobileDb['saveCompletedWorkout']>[0]['workout'];
+    const legacyId = 'legacy-partial-before-ledger';
+    await service.saveCompletedWorkout({
+      workout: exerciseWorkout,
+      startedAt, completedAt,
+      completionFraction: 0.25, stationRounds: {},
+      idempotencyKey: legacyId,
+    });
+    // Simulate a pre-ledger app version: the original completed_workouts row
+    // survives, but the newer workout_ledger row does not yet exist.
+    const { DatabaseSync } = await import('node:sqlite');
+    const probe = new DatabaseSync(join(scratch, 'circuit-generator.db'));
+    try {
+      probe.prepare('DELETE FROM workout_ledger WHERE id = ?').run(legacyId);
+    } finally {
+      probe.close();
+    }
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const migrated = (await ledger()).find((entry) => entry.id === legacyId);
+    expect(migrated?.completionFraction).toBe(0.25);
+    expect(migrated?.workout?.id).toBe('synthetic-legacy-partial');
+    expect(migrated?.exercises).toHaveLength(1);
+    expect(migrated?.exercises[0]?.name).toBe('Legacy prescribed squat');
+    expect(migrated?.exercises[0]?.sets).toEqual([]);
+
+    // Reopening a database after migration cannot duplicate or upgrade a
+    // partial record to a completed full prescription.
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    expect((await ledger()).filter((entry) => entry.id === legacyId)).toHaveLength(1);
+    expect((await ledger()).find((entry) => entry.id === legacyId)
+      ?.exercises[0]?.sets).toEqual([]);
+  });
+
   it('repeating the same completion is idempotent and preserves partial dose', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     await save(0.4);
