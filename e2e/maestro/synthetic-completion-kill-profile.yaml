@@ -11,18 +11,24 @@ appId: com.sidequest.synthetic.qa
 - waitForAnimationToEnd
 - tapOn:
     id: "sidequest-qa-athlete-name"
-- assertVisible:
-    id: "sidequest-qa-athlete-name"
-    focused: true
 - inputText: "Synthetic Crash Athlete A"
+# iOS 26's accessibility snapshot reports focused=false even while the
+# keyboard is open. Verify the actual field value, not its focused flag.
+- copyTextFrom:
+    id: "sidequest-qa-athlete-name"
+- assertTrue:
+    condition: ${maestro.copiedText === "Synthetic Crash Athlete A"}
+    label: "Synthetic athlete name matches the name input"
 - tapOn: "Create your beta profile"
 - waitForAnimationToEnd
 - tapOn:
     id: "sidequest-qa-athlete-email"
-- assertVisible:
-    id: "sidequest-qa-athlete-email"
-    focused: true
 - inputText: "synthetic-save-interrupt-a@example.invalid"
+- copyTextFrom:
+    id: "sidequest-qa-athlete-email"
+- assertTrue:
+    condition: ${maestro.copiedText === "synthetic-save-interrupt-a@example.invalid"}
+    label: "Synthetic athlete email matches the email input"
 - tapOn: "Create your beta profile"
 - extendedWaitUntil:
     visible:
