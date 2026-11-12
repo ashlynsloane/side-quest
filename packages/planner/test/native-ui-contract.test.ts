@@ -252,6 +252,8 @@ describe('native synthetic UI automation contract', () => {
     const screen = source('apps/mobile/src/app/active-workout.tsx');
     const ledger = source('apps/mobile/src/services/database.ts');
     expect(screen).toContain("completedWorkoutSeconds(totalPlannedSeconds, completionFractionRef.current)");
+    expect(screen).toContain('await withVerifiedAthleteDatabase(athleteId, async () => {');
+    expect(screen).toContain('await saveCompletedWorkout({');
     expect(screen).toContain('PARTIAL WORKOUT');
     expect(screen).toContain('Paused time is not counted.');
     expect(screen).toContain('await saveLiveWorkoutSession({');
