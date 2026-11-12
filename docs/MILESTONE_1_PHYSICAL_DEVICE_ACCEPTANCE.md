@@ -21,7 +21,8 @@
 | P05 | A starts strength, completes first station, taps Leave | Durable checkpoint exists before leaving; timer no longer advances in background | NOT RUN |
 | P06 | Force quit from home and cold relaunch | A's correct station, rounds, rest state and paused timer restore | NOT RUN |
 | P07 | Resume and Save partial | Canonical history shows the original nonzero fraction below 100%; unlogged sets are NOT invented | NOT RUN |
-| P08 | Kill immediately after Save partial during a QA-controlled pending/SQL interruption | Pending fraction/timestamp recover, exactly one canonical record after retry, no full-dose inflation | NOT RUN |
+| P08a | Force-kill the exact isolated QA app after the original partial journal is durable but BEFORE canonical SQL starts | Same original fraction/timestamp recover after restart; exactly one canonical record after retry, no 100% inflation or fabricated sets | NOT RUN |
+| P08b | Force-kill the exact isolated QA app AFTER a real uncommitted completed-workouts INSERT and BEFORE SQLite transaction COMMIT | SQLite rolls back uncommitted workout/ledger rows, journal survives, original partial fraction/timestamp recover and retry creates exactly one canonical record | NOT RUN |
 | P09 | Sign out A and create local B | Neither A's completed records nor A's active strength session appear in B | NOT RUN |
 | P10 | Pause an independent B strength session, switch back A→B | Each athlete's own paused workout and plan link restore; no data overwrite | NOT RUN |
 | P11 | Switch A→B during controlled first-week generation/persistence | Stale A writes and UI results cannot appear in B; A retry targets same plan identity | NOT RUN |
@@ -30,7 +31,7 @@
 | P14 | Full reset/migration rehearsal on COPY of synthetic legacy SQLite with missing owner | Fail closed, preserve original bytes and journaling sidecars, no silent adoption or loss | NOT RUN |
 | P15 | Production-safety and privacy inspection | No QA fault-injection toggles or synthetic test identity used in production builds; no API credentials or real user contents in diagnostic artifacts | NOT RUN |
 
-**Pass rule:** each scenario requires a named build hash, observed result, and signed evidence. `NOT RUN`, `SKIPPED`, a screenshot from the wrong build, or an old standalone test do not qualify. Do not turn these into automated PASS on file existence alone.
+**Pass rule:** each scenario requires a named build hash, observed result, and signed evidence. P08a and P08b are separately mandatory: a graceful app stop, backgrounding or ordinary Leave does not qualify as `SIGKILL`; a screenshot alone does not establish SQL rollback. The exact synthetic database owner must match, with separately archived SQLite integrity and canonical-row counts. Neither scenario can be marked pass until executed on an approved signed isolated QA device. `NOT RUN`, `SKIPPED`, a screenshot from the wrong build, or an old standalone test do not qualify. Do not turn these into automated PASS on file existence alone.
 
 ## High-risk profile recovery protocol
 
