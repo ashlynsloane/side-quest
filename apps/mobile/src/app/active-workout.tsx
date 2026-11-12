@@ -9,6 +9,7 @@ import type {
 import { listExerciseSwapCandidates, swapExerciseInWorkout, type ExerciseSwapCandidate } from '@circuit/generator';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
+import Constants from 'expo-constants';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useRouter, type Href } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
@@ -57,6 +58,7 @@ import {
 import { publishWorkoutActivity } from '@/services/social';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import { completedWorkoutSeconds } from '@/services/workout-progress';
+import { isSyntheticPreSqlCompletionKill, holdSyntheticPreSqlCompletion } from '@/services/native-qa-completion-kill';
 import {
   getWorkoutCuePreferences,
   saveWorkoutCuePreferences,
@@ -109,6 +111,8 @@ export default function ActiveWorkoutScreen() {
   const [shareOpen, setShareOpen] = useState(false);
   const startedAt = useRef(new Date().toISOString());
   const completedAt = useRef<string | null>(null);
+  const restoredPendingCompletion = useRef(false);
+  const [syntheticPreSqlKillReady, setSyntheticPreSqlKillReady] = useState(false);
   const savedCompletion = useRef(false);
   const completionFractionRef = useRef(1);
   const [completionSaveStatus, setCompletionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -144,6 +148,7 @@ export default function ActiveWorkoutScreen() {
         setRestLoadUnit(snapshot.restLoadUnit);
         startedAt.current = snapshot.startedAt;
         if (snapshot.pendingCompletion) {
+          restoredPendingCompletion.current = true;
           completedAt.current = snapshot.pendingCompletion.completedAt;
           completionFractionRef.current = snapshot.pendingCompletion.completionFraction;
           setCompletionSaveStatus('error');
@@ -349,6 +354,17 @@ export default function ActiveWorkoutScreen() {
         planLink: activePlanLink ?? undefined,
         pendingCompletion: { completedAt: timestamp, completionFraction },
       }, athleteId);
+      // This native crash QA seam can run only in the isolated synthetic
+      // Release bundle, with the exact synthetic local fixture identity.
+      // It occurs strictly AFTER durable pendingCompletion journaling and
+      // BEFORE the canonical SQLite transaction begins. A cold-restored
+      // journal skips the hold so the original partial dose can be retried.
+      if (isSyntheticPreSqlCompletionKill(
+        Constants.expoConfig?.ios?.bundleIdentifier, user,
+      ) && !restoredPendingCompletion.current) {
+        setSyntheticPreSqlKillReady(true);
+        await holdSyntheticPreSqlCompletion(true);
+      }
       // The SQLite service owns one mutable active database handle. Hold the
       // verified athlete's activation lock across the entire canonical save,
       // its derived-memory rebuild, and planned-session repair. If another
@@ -542,6 +558,10 @@ export default function ActiveWorkoutScreen() {
             : completionSaveStatus === 'saving' ? 'Saving completed workout locally…'
               : 'Workout finished. Local save needs confirmation before leaving.'}</Text>
           {completionSaveError ? <Text style={styles.helper}>{completionSaveError}</Text> : null}
+          {syntheticPreSqlKillReady ? <Text
+            testID="sidequest-qa-completion-journal-durable-before-sql"
+            accessibilityLabel="Synthetic QA pending completion journal persisted before SQL"
+            style={styles.helper}>Synthetic QA: journal durable, before SQL commit.</Text> : null}
           {completionSaveStatus === 'error' ? <Pressable
             accessibilityRole="button"
             onPress={() => void persistCompletion(completionFractionRef.current)}
