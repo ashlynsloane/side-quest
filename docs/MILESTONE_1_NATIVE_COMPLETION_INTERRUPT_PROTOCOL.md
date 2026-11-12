@@ -1,10 +1,50 @@
 # Milestone 1 — native interrupted-strength completion acceptance (#13)
 
-**Disposition: REQUIRED / NOT RUN.** The existing Node SQLite `SIGKILL` test
+**Disposition: window A is implemented and pending actual simulator proof; window B remains not implemented.** The existing Node SQLite `SIGKILL` test
 proves the transaction's disk rollback and the 43% journal retry in the
 Node/Expo adapter. A synthetic native simulator build, XCTest/Maestro journey,
 and *real app process termination during pending canonical completion* are
 still needed. None of the tests below authorize touching a real beta install.
+
+## Synthetic native implementation now on draft PR #12 (unverified)
+
+The first of the two interruption gates is now implemented and integrated
+into the independent `completion-kill` Maestro scope:
+
+- `apps/mobile/src/services/native-qa-completion-kill.ts` enforces **both**
+  the exact synthetic simulator bundle identifier and a dedicated local
+  `.invalid` account before a post-journal pause can occur. The real beta
+  bundle cannot activate this seam.
+- `apps/mobile/src/app/active-workout.tsx` exposes an accessibility marker
+  only **after** `saveLiveWorkoutSession` successfully persisted the original
+  `{completedAt, completionFraction}` pending journal and strictly **before**
+  `withVerifiedAthleteDatabase` begins the canonical SQLite write. A
+  restored pending journal bypasses the hold to permit a genuine retry.
+- `e2e/maestro/synthetic-completion-kill-before.yaml` reaches this pause
+  after one completed station and early partial save.
+- `scripts/qa/kill-synthetic-pending-completion.sh before` verifies an
+  exact embedded owner, no existing canonical workout/ledger rows, and
+  `PRAGMA quick_check = ok`. It obtains the exact UIKitApplication PID from
+  the isolated simulator's `launchctl list`, then sends **real `kill -9`**.
+  It fails closed if there is not precisely one numeric PID for the exact
+  synthetic bundle. No graceful `simctl terminate` substitutes.
+- `e2e/maestro/synthetic-completion-kill-after.yaml` cold launches without
+  clearing app data; accepts direct restored workout or Today→Resume,
+  requires retry of the interrupted partial, and records screenshots.
+- `kill-synthetic-pending-completion.sh after` requires exactly one
+  `completed_workouts` and one matching `workout_ledger` row, an unchanged
+  partial fraction strictly between zero and one, matching timestamps,
+  zero fabricated completed sets, the proper database owner, and clean SQLite
+  integrity. The JUnit + SQL postconditions must *both* pass.
+- `packages/planner/test/native-completion-kill-gate.test.ts` guards
+  beta-bundle exclusion and correct journal→hold→SQL ordering; JUnit
+  diagnostic tests fail on missing, skipped or invalid native evidence.
+
+**No native completion-kill PASS may be claimed until the source-matched
+Release simulator and its SQL evidence have completed.** Window B (true kill
+*inside* the uncommitted SQLite transaction) is still separate, as are
+historical human-owner provenance, physical-device testing and rollback
+authorization.
 
 ## Accepted design
 
