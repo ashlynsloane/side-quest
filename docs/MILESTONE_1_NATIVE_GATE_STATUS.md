@@ -8,20 +8,23 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43114621647](https://github.com/ashlynsloane/side-quest/actions/runs/43114621647), SHA `1fcf27c7` | **PASS — 683/683 tests, 112 files** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43129771100](https://github.com/ashlynsloane/side-quest/actions/runs/43129771100), SHA `db8fa219` | **PASS — 686/686 tests, 112 files** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
 | Kill/relaunch app and recover the saved ride | Same native JUnit and screenshots | **PASS** |
 | Switch A→B, show B has no A history, switch B→A and recover A's original ride | Same native JUnit and screenshots | **PASS** |
-| Strength workout → finish station → Leave → relaunch → Resume → Save partial → History shows nonzero, below 100% | Same native run | **FAIL BEFORE START** at an exact accessibility selector; entire remainder **UNVERIFIED** |
-| Focused native strength and isolation rerun | [UI-only run #43127249398](https://github.com/ashlynsloane/side-quest/actions/runs/43127249398) | **RUNNING at this checkpoint; inspect JUnit before updating status** |
+| Strength workout → finish station → Leave → relaunch → Resume → Save partial → History record | [Focused strength run #43127249398](https://github.com/ashlynsloane/side-quest/actions/runs/43127249398) | **Native actions succeeded; History screenshot shows 27% completed and 0 recorded sets. FINAL JUnit FAILS** because iOS hides the percentage child inside the accessible parent workout card |
+| Accessibility correction and durable detail-row assertion | App history row now exposes “N percent completed” in its screen-reader label, with corresponding native assertion | **COMMITTED; requires new native proof** |
+| Source-matched full six-stage rerun | [Release iOS run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251), updated native source | **IN PROGRESS at this checkpoint, not PASS** |
 
 ### Specific native-strength failure and repair
 
 Native failure snapshot `step-011-scrollUntilVisible-Start_workout.json/.png` shows the generated workout preview, the enabled **Start workout** button with native `accessibilityText: "Start workout, play"`, and the button within the viewport at approximately y=683–733. This is a *test selector mismatch*; it does not demonstrate an app-navigation, persistence or SQLite fault. The Maestro YAML now matches the observed native accessibility label and has a code-contract regression preventing the exact-text mistake.
 
-The new test-only changes do not alter the app-source fingerprint; reuse of an existing Release binary is permitted only if `scripts/qa/native-source-fingerprint.mjs` verifies an exact match.
+The focused run completed the strength session and the real Training History screen displayed a saved **27% completion**, with no invented completed sets. Its final JUnit assertion could not see the child text because the parent Pressable supplied a shorter accessibility label. The app now exposes the completion percentage in the parent accessible label; the revised test asserts that value and opens the canonical history detail. This app-source change **requires a new matching native build**. Previous binary results do not qualify the revised head.
+
+Reuse of an existing Release binary is permitted only if `scripts/qa/native-source-fingerprint.mjs` verifies an exact match.
 
 ### Completed source-data integrity hardening
 
@@ -30,6 +33,9 @@ The new test-only changes do not alter the app-source fingerprint; reuse of an e
 - Historical share summaries must label planned-dose equivalents as estimates rather than presenting paused wall-clock time as measured exercise.
 - Historical shares cannot claim that prescribed exercises or muscle areas were completed without actual logged sets.
 - SQLite ownership denial for ambiguous historical files is non-destructive. **This is not a user-data migration solution.**
+- Legacy partial `completed_workouts` import retains the original fraction and planned exercise catalog, but no longer invents completed per-exercise sets; real-file migration/restart tests passed.
+- Live strength completion is inside a verified-athlete database activation lock. New disk-backed race tests prove A completes to A even when B activation is queued, and stale A writes after B activation fail closed.
+- A deliberate mid-transaction SQL failure plus cold module/database reload preserves the original 41% pending completion and forbids a 100% replay. This is simulated SQL-failure evidence, NOT a native forced process termination.
 
 ## Still required before Milestone 1 can be signed off
 
