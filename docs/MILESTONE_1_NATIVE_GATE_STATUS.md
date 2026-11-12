@@ -8,7 +8,7 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43133967083](https://github.com/ashlynsloane/side-quest/actions/runs/43133967083), SHA `8a97a921` | **PASS — 692/692 tests, 113 files** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43137083239](https://github.com/ashlynsloane/side-quest/actions/runs/43137083239), SHA `f68daf90` | **PASS — automated tests, typechecks and iOS JS export** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
@@ -16,14 +16,14 @@
 | Switch A→B, show B has no A history, switch B→A and recover A's original ride | Same native JUnit and screenshots | **PASS** |
 | Strength workout → finish station → Leave → relaunch → Resume → Save partial → History record | [Focused strength run #43127249398](https://github.com/ashlynsloane/side-quest/actions/runs/43127249398) | **Native actions succeeded; History screenshot shows 27% completed and 0 recorded sets. FINAL JUnit FAILS** because iOS hides the percentage child inside the accessible parent workout card |
 | Accessibility correction and durable detail-row assertion | App history row now exposes “N percent completed” in its screen-reader label, with corresponding native assertion | **COMMITTED; requires new native proof** |
-| A→B→A→B profile isolation for **active strength sessions** | [Independent native UI-only run #43132842718](https://github.com/ashlynsloane/side-quest/actions/runs/43132842718), `live-isolation` scope | **RUNNING at this checkpoint, no native PASS claimed**; scripted cold-restart plus two independent paused sessions |
-| Source-matched full six-stage rerun | [Release iOS run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251), updated native source | **IN PROGRESS at this checkpoint, not PASS** |
+| A→B→A→B profile isolation for **active strength sessions** | [Independent native UI-only run #43132842718](https://github.com/ashlynsloane/side-quest/actions/runs/43132842718), `live-isolation` scope | **FAIL — after B→A reauthentication, A's original paused session restored directly on the active-workout screen; test incorrectly expected Today tab.** Screenshot verified the correct paused station; test corrected, [rerun #43137076308](https://github.com/ashlynsloane/side-quest/actions/runs/43137076308) not yet confirmed |
+| Source-matched full six-stage rerun | [Release iOS run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251), source SHA `b64b29f7` | **PASS — all six native Maestro stages; profile, onboarding, ride, restart, A→B→A isolation and strength** |
 
 ### Specific native-strength failure and repair
 
 Native failure snapshot `step-011-scrollUntilVisible-Start_workout.json/.png` shows the generated workout preview, the enabled **Start workout** button with native `accessibilityText: "Start workout, play"`, and the button within the viewport at approximately y=683–733. This is a *test selector mismatch*; it does not demonstrate an app-navigation, persistence or SQLite fault. The Maestro YAML now matches the observed native accessibility label and has a code-contract regression preventing the exact-text mistake.
 
-The focused run completed the strength session and the real Training History screen displayed a saved **27% completion**, with no invented completed sets. Its final JUnit assertion could not see the child text because the parent Pressable supplied a shorter accessibility label. The app now exposes the completion percentage in the parent accessible label; the revised test asserts that value and opens the canonical history detail. This app-source change **requires a new matching native build**. Previous binary results do not qualify the revised head.
+The focused run completed the strength session and the real Training History screen displayed a saved **27% completion**, with no invented completed sets. Its final JUnit assertion could not see the child text because the parent Pressable supplied a shorter accessibility label. The app now exposes the completion percentage in the parent accessible label; the revised test asserts that value and opens the canonical history detail. The updated app-source binary **passed all six integrated native stages** in run #43129525251. Subsequent commits through `f68daf90` altered QA scripts, tests and documentation, not the compiled app-source fingerprint. The independent A→B→A→B live-session test is still a separate required privacy gate.
 
 Reuse of an existing Release binary is permitted only if `scripts/qa/native-source-fingerprint.mjs` verifies an exact match.
 
@@ -49,7 +49,7 @@ The six-stage integrated gate still tests completed ride/history isolation. A se
 
 ## Still required before Milestone 1 can be signed off
 
-1. **Exact-match native full six-stage execution:** one six-stage Release simulator run with all six PASS and complete JUnit, hierarchy and screenshot artifacts. Focused `strength` or `isolation` passes alone do not satisfy the integrated six-stage gate.
+1. **Exact-match native full six-stage execution: PASSED on run #43129525251.** Preserve its six JUnit results/screenshots and verify native source fingerprint on any later app-source edits. Focused scopes cannot replace this integrated evidence.
 2. **Native interrupted completion:** a process termination *during* pending journal / canonical SQLite completion and recovery with the original fraction/timestamp and no dose duplication. Merely stopping the app after the Leave checkpoint is not equivalent. Track in [issue #13](https://github.com/ashlynsloane/side-quest/issues/13).
 3. **Native profile switch mid-generation:** switch accounts while A's onboarding evaluation or persistence is pending and prove no A state reaches B. Disk-backed tests already exist; native confirmation remains in [issue #19](https://github.com/ashlynsloane/side-quest/issues/19).
 4. **Legacy SQLite ownership/migration:** conservative byte-preserving backup and original-owner verification for untagged historical files, collision/reset cases and rollback, [issue #15](https://github.com/ashlynsloane/side-quest/issues/15). Current fail-closed denial must not be weakened just to accept old data.
