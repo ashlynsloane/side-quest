@@ -18,11 +18,11 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
   return <ThemeProvider><RootFailure message={message} retry={retry} /></ThemeProvider>;
 }
 
-function RootFailure({ message, retry }: { message: string; retry: () => void }) {
+function RootFailure({ message, retry, title = "The app hit an unexpected state." }: { message: string; retry: () => void; title?: string }) {
   const { tokens } = useTheme();
   return <View style={[rootFailureStyles.root, { backgroundColor: tokens.canvas }]}>
     <Text style={[rootFailureStyles.eyebrow, { color: tokens.accent }]}>SIDE QUEST RECOVERY</Text>
-    <Text style={[rootFailureStyles.title, { color: tokens.text }]}>The app hit an unexpected state.</Text>
+    <Text style={[rootFailureStyles.title, { color: tokens.text }]}>{title}</Text>
     <Text style={[rootFailureStyles.body, { color: tokens.textMuted }]}>{message}</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="Try Side Quest again" onPress={retry} style={[rootFailureStyles.button, { backgroundColor: tokens.accent }]}><Text style={rootFailureStyles.buttonText}>Try again</Text></Pressable>
   </View>;
@@ -59,13 +59,14 @@ function ScopedOnboardingProvider({ children }: { children: ReactNode }) {
 }
 
 function AuthGate() {
-  const { user, loading, cloudEnabled } = useAuth();
+  const { user, loading, cloudEnabled, startupRecoveryError, retryStartup } = useAuth();
   const { palette } = useTheme();
   const { loading: onboardingLoading, needsOnboarding, state: onboardingState } = useOnboarding();
   const { activeWorkout, workoutSessionReady } = useWorkoutContext();
   const router = useRouter();
   const segments = useSegments() as string[];
   useEffect(() => {
+    if (startupRecoveryError) return;
     const redirect = authRedirectFor({
       authenticated: Boolean(user),
       authLoading: loading,
@@ -85,7 +86,7 @@ function AuthGate() {
     onboardingState.firstWeekSetupStartedAt,
     onboardingState.strengthModelAcknowledged,
     onboardingState.privacyModelAcknowledged,
-    workoutSessionReady, activeWorkout, segments, router]);
+    workoutSessionReady, activeWorkout, segments, router, startupRecoveryError]);
   useEffect(() => {
     if (loading || !user) return;
     const refresh = () => { void refreshTrainingIntegrations({ cloudEnabled: cloudEnabled && user.mode === 'cloud', userId: user.id }); };
@@ -94,6 +95,9 @@ function AuthGate() {
     const interval = setInterval(refresh, 15 * 60 * 1000);
     return () => { subscription.remove(); clearInterval(interval); };
   }, [cloudEnabled, loading, user]);
+  if (startupRecoveryError) {
+    return <RootFailure title="Your local training history needs recovery." message={startupRecoveryError} retry={() => void retryStartup()} />;
+  }
   if (loading || onboardingLoading) {
     return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.canvas }}><ActivityIndicator size="large" color={palette.forest} /></View>;
   }
