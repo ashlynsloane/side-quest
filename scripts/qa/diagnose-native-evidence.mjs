@@ -2,15 +2,16 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 
 const root = process.argv[2] ?? 'maestro-evidence';
-const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after'];
+const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after', 'completion-in-transaction-before', 'completion-in-transaction-after'];
 const scopes = Object.freeze({
-  full: stages.filter((stage) => !['live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after'].includes(stage)), 
-  isolation: stages.filter((stage) => !['strength', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after'].includes(stage)), 
+  full: stages.filter((stage) => !['live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after', 'completion-in-transaction-before', 'completion-in-transaction-after'].includes(stage)), 
+  isolation: stages.filter((stage) => !['strength', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after', 'completion-in-transaction-before', 'completion-in-transaction-after'].includes(stage)), 
   strength: ['profile', 'onboarding', 'strength'],
   'live-isolation': ['profile', 'onboarding', 'live-isolation'],
   'owner-recovery': ['profile', 'onboarding', 'owner-recovery'],
   'generation-isolation': ['profile', 'generation-isolation'],
   'completion-kill': ['profile', 'onboarding', 'completion-kill-before', 'completion-kill-after'],
+  'completion-in-transaction-kill': ['profile', 'onboarding', 'completion-in-transaction-before', 'completion-in-transaction-after'],
 });
 const scope = process.env.NATIVE_QA_SCOPE ?? 'full';
 // An invalid or empty scope must never turn failed tests into success.
@@ -244,7 +245,7 @@ for (const stage of stages) {
     status = 'FAILED';
     failure = 'Old athlete generated plan or owner validation failed after A-to-B profile switch.';
   }
-  if (stage.startsWith('completion-kill-') && required.has(stage)
+  if ((stage.startsWith('completion-kill-') || stage.startsWith('completion-in-transaction-')) && required.has(stage)
       && /POSTCONDITION FAILED/.test(log)) {
     status = 'FAILED';
     failure = 'Native SIGKILL was not confirmed, or the original partial completion did not survive SQLite recovery.';
