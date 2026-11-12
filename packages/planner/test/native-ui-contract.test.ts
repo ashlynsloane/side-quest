@@ -329,8 +329,11 @@ describe('native synthetic UI automation contract', () => {
     expect(flow).toContain('launchApp');
     expect(flow).toContain('id: "sidequest-qa-resume-active-workout"');
     expect(flow).toContain('Save partial');
-    expect(flow).toContain('element: "Start workout, play"');
+    expect(flow).toContain('element: "Ready when you are"');
+    expect(flow).toContain('visible: "Start workout, play"');
     expect(flow).toContain('tapOn: "Start workout, play"');
+    expect(source('e2e/maestro/synthetic-strength-pause-checkpoint.yaml'))
+      .toContain('element: "Ready when you are"');
     expect(flow).not.toContain('element: "Start workout"');
     expect(flow).not.toContain('- tapOn: "Start workout"');
     expect(flow).toContain('element: "Finish station"');
