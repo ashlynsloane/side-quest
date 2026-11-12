@@ -58,6 +58,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Reject malformed native QA and crash-injection scripts before simulator startup
+        run: |
+          bash -n scripts/qa/run-native-maestro.sh scripts/qa/kill-synthetic-pending-completion.sh scripts/qa/inject-synthetic-owner-mismatch.sh scripts/qa/verify-synthetic-generation-race.sh
+          node --check scripts/qa/diagnose-native-evidence.mjs
+          if [[ "${NATIVE_QA_SCOPE}" == 'completion-kill' ]]; then
+            test -s e2e/maestro/synthetic-completion-kill-profile.yaml
+            test -s e2e/maestro/synthetic-completion-kill-before.yaml
+            test -s e2e/maestro/synthetic-completion-kill-after.yaml
+          fi
       - name: Identify a compatible native app artifact
         id: source
         run: |
