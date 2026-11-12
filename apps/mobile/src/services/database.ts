@@ -649,6 +649,7 @@ export async function saveCompletedWorkout({
   relationToPlan,
   friendSubstitution,
   idempotencyKey,
+  syntheticOnlyHoldAfterUncommittedInsert,
 }: {
   workout: GeneratedWorkout;
   startedAt: string;
@@ -663,6 +664,8 @@ export async function saveCompletedWorkout({
   relationToPlan?: WorkoutPlanRelation;
   friendSubstitution?: Omit<FriendWorkoutSubstitution, 'completedAt'>;
   idempotencyKey?: string;
+  /** QA-only caller-supplied barrier executed after an uncommitted INSERT. */
+  syntheticOnlyHoldAfterUncommittedInsert?: () => Promise<void>;
 }): Promise<void> {
   await initializeDatabase();
   const workoutInstanceId = idempotencyKey?.trim() || `${workout.id}_${completedAt}`;
@@ -694,6 +697,14 @@ export async function saveCompletedWorkout({
       completionFraction,
       JSON.stringify(stationRounds),
     );
+
+    // Real in-transaction crash rehearsal: the first canonical workout row
+    // exists only as an uncommitted SQLite write. Do not resolve this promise
+    // before OS SIGKILL. The app's exact synthetic bundle/profile gate is
+    // enforced by the sole caller; no normal beta code supplies this callback.
+    if (syntheticOnlyHoldAfterUncommittedInsert) {
+      await syntheticOnlyHoldAfterUncommittedInsert();
+    }
 
     const exposures = calculateWorkoutExposures(workout, completionFraction);
     for (const [region, rawExposure] of exposures) {
