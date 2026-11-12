@@ -18,7 +18,8 @@ describe('native synthetic UI automation contract', () => {
     expect(flow).toContain('appId: com.sidequest.synthetic.qa');
     expect(flow).toContain('- runFlow: synthetic-profile-entry.yaml');
     expect(profileFlow).toContain('clearState: true');
-    expect(profileFlow).toContain('visible:\\n      id: "sidequest-qa-athlete-email"');
+    expect(profileFlow).toContain('id: "sidequest-qa-athlete-email"');
+    expect(profileFlow).toContain('timeout: 45000');
     expect(profileFlow).not.toContain('- assertVisible: "Create your beta profile"');
     expect(workflow).toContain('QA_BUNDLE_ID: com.sidequest.synthetic.qa');
     expect(workflow).toContain('app.expo.ios.bundleIdentifier = process.env.QA_BUNDLE_ID');
