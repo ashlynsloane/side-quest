@@ -8,7 +8,7 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43129771100](https://github.com/ashlynsloane/side-quest/actions/runs/43129771100), SHA `db8fa219` | **PASS — 686/686 tests, 112 files** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43131754561](https://github.com/ashlynsloane/side-quest/actions/runs/43131754561), SHA `dd06f44a` | **PASS — 687/687 tests, 112 files** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
@@ -35,7 +35,8 @@ Reuse of an existing Release binary is permitted only if `scripts/qa/native-sour
 - SQLite ownership denial for ambiguous historical files is non-destructive. **This is not a user-data migration solution.**
 - Legacy partial `completed_workouts` import retains the original fraction and planned exercise catalog, but no longer invents completed per-exercise sets; real-file migration/restart tests passed.
 - Live strength completion is inside a verified-athlete database activation lock. New disk-backed race tests prove A completes to A even when B activation is queued, and stale A writes after B activation fail closed.
-- A deliberate mid-transaction SQL failure plus cold module/database reload preserves the original 41% pending completion and forbids a 100% replay. This is simulated SQL-failure evidence, NOT a native forced process termination.
+- A deliberate mid-transaction SQL failure plus cold module/database reload preserves the original 41% pending completion and forbids a 100% replay.
+- A **real OS `SIGKILL`** of a separate Node SQLite writer while its database transaction is open rolls back the uncommitted row; a cold restart of the mobile database service recovers the original **43% pending dose**, retries once and refuses to promote it to 100%. This validates filesystem/SQLite crash behavior, **NOT** forced termination inside the native iOS save callback.
 
 ## Still required before Milestone 1 can be signed off
 
