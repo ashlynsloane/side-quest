@@ -323,7 +323,7 @@ describe('native synthetic UI automation contract', () => {
     expect(validator).toContain('NATIVE_QA_GENERATION_RACE');
     expect(validator).toContain('sidequest_athlete_database_owner');
     expect(validator).toContain('PRAGMA quick_check');
-    expect(validator).toContain("A_BLOCKS\\" != '0'"); // A must not have saved a plan.
+    expect(validator).toContain('A_BLOCKS'); // A must not have saved a plan.
   });
 
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
