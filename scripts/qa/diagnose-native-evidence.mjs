@@ -2,11 +2,12 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 
 const root = process.argv[2] ?? 'maestro-evidence';
-const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength'];
+const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation'];
 const scopes = Object.freeze({
-  full: stages,
-  isolation: stages.filter((stage) => stage !== 'strength'),
+  full: stages.filter((stage) => stage !== 'live-isolation'),
+  isolation: stages.filter((stage) => stage !== 'strength' && stage !== 'live-isolation'),
   strength: ['profile', 'onboarding', 'strength'],
+  'live-isolation': ['profile', 'onboarding', 'live-isolation'],
 });
 const scope = process.env.NATIVE_QA_SCOPE ?? 'full';
 // An invalid or empty scope must never turn failed tests into success.
