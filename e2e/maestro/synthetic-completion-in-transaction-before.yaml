@@ -1,0 +1,21 @@
+# Native SIGKILL phase 2: the partial workout is journaled then the first
+# canonical SQLite row INSERT executes uncommitted before transaction COMMIT.
+# The host script kills the exact app PID with -9, then verifies rollback 0/0.
+appId: com.sidequest.synthetic.qa
+---
+- runFlow: synthetic-strength-pause-checkpoint.yaml
+- assertVisible: "WORKOUT IN PROGRESS"
+- tapOn:
+    id: "sidequest-qa-resume-active-workout"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Recover and record"
+    timeout: 30000
+- tapOn: "End"
+- tapOn: "Save partial"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-completion-sql-uncommitted-before-commit"
+    timeout: 45000
+- assertVisible: "PARTIAL WORKOUT"
+- takeScreenshot: "native-synthetic-uncommitted-sql-before-sigkill"
