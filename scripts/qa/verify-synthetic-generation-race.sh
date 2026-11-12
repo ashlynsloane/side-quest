@@ -39,17 +39,24 @@ if [[ -z "$A_FILE" || -z "$B_FILE" || "$A_FILE" == "$B_FILE" ]]; then
   echo 'QA generation race failed: distinct embedded SQLite owners not found.' >&2
   exit 1
 fi
+# Synthetic A intentionally selects GENERAL STRENGTH; B defaults to
+# IRONMAN 70.3. Without distinct goal IDs, a stale write from A into B could
+# be overwritten by B's own onboarding, yielding a dangerous false PASS.
 A_BLOCKS=$(sqlite3 "$A_FILE" 'SELECT COUNT(*) FROM training_blocks;')
 B_BLOCKS=$(sqlite3 "$B_FILE" 'SELECT COUNT(*) FROM training_blocks;')
 A_GOALS=$(sqlite3 "$A_FILE" 'SELECT COUNT(*) FROM performance_goals;')
 B_GOALS=$(sqlite3 "$B_FILE" 'SELECT COUNT(*) FROM performance_goals;')
+B_A_GOAL_LEAK=$(sqlite3 "$B_FILE" "SELECT COUNT(*) FROM performance_goals WHERE id='goal_general_offseason';")
+B_EXPECTED_GOAL=$(sqlite3 "$B_FILE" "SELECT COUNT(*) FROM performance_goals WHERE id='goal_ironman_70_3';")
+B_STALE_BLOCKS=$(sqlite3 "$B_FILE" "SELECT COUNT(*) FROM training_blocks WHERE block_json LIKE '%general_offseason%';")
 A_CHECK=$(sqlite3 "$A_FILE" 'PRAGMA quick_check;')
 B_CHECK=$(sqlite3 "$B_FILE" 'PRAGMA quick_check;')
 if [[ "$A_BLOCKS" != '0' || "$A_GOALS" != '0' ||
-      ! "$B_BLOCKS" =~ ^[0-9]+$ || "$B_BLOCKS" -lt 1 ||
-      ! "$B_GOALS" =~ ^[0-9]+$ || "$B_GOALS" -lt 1 ||
+      "$B_BLOCKS" != '1' || "$B_GOALS" != '1' ||
+      "$B_A_GOAL_LEAK" != '0' || "$B_STALE_BLOCKS" != '0' ||
+      "$B_EXPECTED_GOAL" != '1' ||
       "$A_CHECK" != 'ok' || "$B_CHECK" != 'ok' ]]; then
-  echo 'POSTCONDITION FAILED: stale first-week A write reached B or an unexpected plan state remained.' >&2
+  echo 'POSTCONDITION FAILED: A goal/block leaked into B, a plan was overwritten, or SQLite integrity failed.' >&2
   exit 1
 fi
-echo 'Synthetic generation-race PASS: A has no persisted draft; B has its own block and goal; both SQLite owners and integrity verified.'
+echo 'Synthetic generation-race PASS: no A goal/block in either file; B owns exactly one distinct goal/block; SQLite owners/integrity intact.'
