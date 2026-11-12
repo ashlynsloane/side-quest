@@ -2,13 +2,14 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 
 const root = process.argv[2] ?? 'maestro-evidence';
-const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation', 'owner-recovery'];
+const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation', 'owner-recovery', 'generation-isolation'];
 const scopes = Object.freeze({
-  full: stages.filter((stage) => stage !== 'live-isolation' && stage !== 'owner-recovery'),
-  isolation: stages.filter((stage) => !['strength', 'live-isolation', 'owner-recovery'].includes(stage)), 
+  full: stages.filter((stage) => !['live-isolation', 'owner-recovery', 'generation-isolation'].includes(stage)), 
+  isolation: stages.filter((stage) => !['strength', 'live-isolation', 'owner-recovery', 'generation-isolation'].includes(stage)), 
   strength: ['profile', 'onboarding', 'strength'],
   'live-isolation': ['profile', 'onboarding', 'live-isolation'],
   'owner-recovery': ['profile', 'onboarding', 'owner-recovery'],
+  'generation-isolation': ['profile', 'generation-isolation'],
 });
 const scope = process.env.NATIVE_QA_SCOPE ?? 'full';
 // An invalid or empty scope must never turn failed tests into success.
@@ -236,6 +237,11 @@ for (const stage of stages) {
       && /POSTCONDITION FAILED/.test(log)) {
     status = 'FAILED';
     failure = 'Synthetic owner mismatch or existing training records did not survive restart/retry.';
+  }
+  if (stage === 'generation-isolation' && required.has(stage)
+      && /POSTCONDITION FAILED/.test(log)) {
+    status = 'FAILED';
+    failure = 'Old athlete generated plan or owner validation failed after A-to-B profile switch.';
   }
   if (!required.has(stage)) {
     // This journey was intentionally excluded, never a passing assertion.
