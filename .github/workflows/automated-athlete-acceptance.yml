@@ -38,6 +38,10 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify native QA script syntax before simulator costs
+        run: |
+          bash -n scripts/qa/run-native-maestro.sh scripts/qa/inject-synthetic-owner-mismatch.sh
+          node --check scripts/qa/diagnose-native-evidence.mjs
       - name: Typecheck planner
         id: planner_typecheck
         run: pnpm --dir packages/planner typecheck
