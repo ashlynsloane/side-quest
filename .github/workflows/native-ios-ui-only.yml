@@ -21,6 +21,7 @@ on:
           - full
           - isolation
           - strength
+          - live-isolation
       native_build_run_id:
         description: 'Native build run ID containing sidequest-synthetic-ios-app (optional)'
         required: false
