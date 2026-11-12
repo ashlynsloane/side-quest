@@ -314,7 +314,9 @@ describe('native synthetic UI automation contract', () => {
     expect(flow).toContain('stopApp');
     expect(flow).toContain('launchApp');
     expect(runner).toContain('run_flow generation-isolation e2e/maestro/synthetic-first-week-generation-switch.yaml');
-    expect(runner).toContain('sleep 80');
+    expect(runner).toContain('sleep 3');
+    expect(source('apps/mobile/src/services/native-qa-generation-race.ts'))
+      .toContain('readActiveProfileId() === SYNTHETIC_RACE_B_ID');
     expect(runner).toContain('verify-synthetic-generation-race.sh');
     expect(diag).toContain("'generation-isolation': ['profile', 'generation-isolation']");
     expect(diag).toContain('POSTCONDITION FAILED');
