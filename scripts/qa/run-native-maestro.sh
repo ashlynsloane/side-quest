@@ -47,7 +47,7 @@ run_flow() {
 # scope uses a CLEAN simulator in its own job.
 scope="${NATIVE_QA_SCOPE:-full}"
 case "$scope" in
-  full|isolation|strength|live-isolation|owner-recovery|generation-isolation|completion-kill) ;;
+  full|isolation|strength|live-isolation|owner-recovery|generation-isolation|completion-kill|completion-in-transaction-kill) ;;
   *) echo "Unsupported NATIVE_QA_SCOPE: $scope" >&2; exit 2 ;;
 esac
 export NATIVE_QA_SCOPE="$scope"
@@ -67,10 +67,14 @@ owner_recovery=99
 generation_isolation=99
 completion_kill_before=99
 completion_kill_after=99
+in_transaction_before=99
+in_transaction_after=99
 if [[ "$scope" == "generation-isolation" ]]; then
   run_flow profile e2e/maestro/synthetic-race-profile-entry.yaml
 elif [[ "$scope" == "completion-kill" ]]; then
   run_flow profile e2e/maestro/synthetic-completion-kill-profile.yaml
+elif [[ "$scope" == "completion-in-transaction-kill" ]]; then
+  run_flow profile e2e/maestro/synthetic-completion-in-transaction-profile.yaml
 else
   run_flow profile e2e/maestro/synthetic-profile-entry.yaml
 fi
@@ -128,6 +132,32 @@ elif [[ "$scope" == "completion-kill" ]]; then
   else
     echo "BLOCKED: interrupted completion needs passing synthetic onboarding" \
       | tee maestro-evidence/completion-kill-before-console.log
+  fi
+elif [[ "$scope" == "completion-in-transaction-kill" ]]; then
+  if [[ "$onboarding" -eq 0 ]]; then
+    run_flow completion-in-transaction-before e2e/maestro/synthetic-completion-in-transaction-before.yaml
+    in_transaction_before=$?
+    if [[ "$in_transaction_before" -eq 0 ]]; then
+      if NATIVE_QA_COMPLETION_KILL=1 bash scripts/qa/kill-synthetic-uncommitted-completion.sh before; then
+        run_flow completion-in-transaction-after e2e/maestro/synthetic-completion-kill-after.yaml
+        in_transaction_after=$?
+        if [[ "$in_transaction_after" -eq 0 ]]; then
+          if ! NATIVE_QA_COMPLETION_KILL=1 bash scripts/qa/kill-synthetic-uncommitted-completion.sh after \
+              >> maestro-evidence/completion-in-transaction-after-console.log 2>&1; then
+            in_transaction_after=1
+            echo "POSTCONDITION FAILED: in-transaction crash retry lost original SQLite fraction or created duplicate" \
+              | tee -a maestro-evidence/completion-in-transaction-after-console.log
+          fi
+        fi
+      else
+        in_transaction_before=1
+        echo "POSTCONDITION FAILED: real in-transaction app SIGKILL/SQL rollback was not verified" \
+          | tee -a maestro-evidence/completion-in-transaction-before-console.log
+      fi
+    fi
+  else
+    echo "BLOCKED: in-transaction kill needs synthetic onboarding" \
+      | tee maestro-evidence/completion-in-transaction-before-console.log
   fi
 elif [[ "$scope" == "strength" ]]; then
   # This is the primary architectural improvement: strength acceptance
@@ -209,9 +239,11 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "generation_isolation=$generation_isolation"
     echo "completion_kill_before=$completion_kill_before"
     echo "completion_kill_after=$completion_kill_after"
+    echo "completion_in_transaction_before=$in_transaction_before"
+    echo "completion_in_transaction_after=$in_transaction_after"
   } >> "$GITHUB_OUTPUT"
 fi
-summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation; owner-recovery: $owner_recovery; generation-isolation: $generation_isolation; completion-kill-before: $completion_kill_before; completion-kill-after: $completion_kill_after (0=pass, 99=not run/blocked)"
+summary="Scope: $scope; profile: $profile; onboarding: $onboarding; ride: $ride; restart: $restart; isolation: $isolation; strength: $strength; live-isolation: $live_isolation; owner-recovery: $owner_recovery; generation-isolation: $generation_isolation; completion-kill-before: $completion_kill_before; completion-kill-after: $completion_kill_after; in-transaction-before: $in_transaction_before; in-transaction-after: $in_transaction_after (0=pass, 99=not run/blocked)"
 echo "$summary"
 # Parse JUnit reports and accessibility hierarchy into an actionable, privacy-
 # preserving diagnosis. Do not let reporting success override a failed UI test.
@@ -229,6 +261,8 @@ if [[ "$scope" != "generation-isolation" && "$onboarding" -ne 0 ]]; then exit 1;
 if [[ "$scope" == "generation-isolation" && "$generation_isolation" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "completion-kill" &&
       ( "$completion_kill_before" -ne 0 || "$completion_kill_after" -ne 0 ) ]]; then exit 1; fi
+if [[ "$scope" == "completion-in-transaction-kill" &&
+      ( "$in_transaction_before" -ne 0 || "$in_transaction_after" -ne 0 ) ]]; then exit 1; fi
 if [[ "$scope" == "strength" && "$strength" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "live-isolation" && "$live_isolation" -ne 0 ]]; then exit 1; fi
 if [[ "$scope" == "owner-recovery" && "$owner_recovery" -ne 0 ]]; then exit 1; fi
