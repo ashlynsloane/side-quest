@@ -2,12 +2,13 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } 
 import { join } from 'node:path';
 
 const root = process.argv[2] ?? 'maestro-evidence';
-const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation'];
+const stages = ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength', 'live-isolation', 'owner-recovery'];
 const scopes = Object.freeze({
-  full: stages.filter((stage) => stage !== 'live-isolation'),
-  isolation: stages.filter((stage) => stage !== 'strength' && stage !== 'live-isolation'),
+  full: stages.filter((stage) => stage !== 'live-isolation' && stage !== 'owner-recovery'),
+  isolation: stages.filter((stage) => !['strength', 'live-isolation', 'owner-recovery'].includes(stage)), 
   strength: ['profile', 'onboarding', 'strength'],
   'live-isolation': ['profile', 'onboarding', 'live-isolation'],
+  'owner-recovery': ['profile', 'onboarding', 'owner-recovery'],
 });
 const scope = process.env.NATIVE_QA_SCOPE ?? 'full';
 // An invalid or empty scope must never turn failed tests into success.
@@ -227,6 +228,14 @@ for (const stage of stages) {
     status = 'BLOCKED';
   } else if (log.trim()) {
     status = 'NO_REPORT';
+  }
+  // A post-Maestro SQLite integrity failure must override passing UI JUnit.
+  // Otherwise the app could claim successful recovery while silently losing
+  // historical training records or adopting the wrong profile.
+  if (stage === 'owner-recovery' && required.has(stage)
+      && /POSTCONDITION FAILED/.test(log)) {
+    status = 'FAILED';
+    failure = 'Synthetic owner mismatch or existing training records did not survive restart/retry.';
   }
   if (!required.has(stage)) {
     // This journey was intentionally excluded, never a passing assertion.
