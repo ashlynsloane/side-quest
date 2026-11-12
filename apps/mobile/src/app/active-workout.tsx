@@ -58,7 +58,7 @@ import {
 import { publishWorkoutActivity } from '@/services/social';
 import { buildCompletedWorkoutSummary } from '@/services/workout-summary';
 import { completedWorkoutSeconds } from '@/services/workout-progress';
-import { isSyntheticPreSqlCompletionKill, holdSyntheticPreSqlCompletion } from '@/services/native-qa-completion-kill';
+import { isSyntheticPreSqlCompletionKill, holdSyntheticPreSqlCompletion, isSyntheticInTransactionCompletionKill, holdSyntheticInTransactionCompletion } from '@/services/native-qa-completion-kill';
 import {
   getWorkoutCuePreferences,
   saveWorkoutCuePreferences,
@@ -113,6 +113,7 @@ export default function ActiveWorkoutScreen() {
   const completedAt = useRef<string | null>(null);
   const restoredPendingCompletion = useRef(false);
   const [syntheticPreSqlKillReady, setSyntheticPreSqlKillReady] = useState(false);
+  const [syntheticInTransactionKillReady, setSyntheticInTransactionKillReady] = useState(false);
   const savedCompletion = useRef(false);
   const completionFractionRef = useRef(1);
   const [completionSaveStatus, setCompletionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -383,6 +384,18 @@ export default function ActiveWorkoutScreen() {
           relationToPlan: activePlanLink ? 'completed_planned' : 'unrelated',
           // Persisted in the checkpoint: retry the same canonical identity.
           idempotencyKey: `${activeWorkout.id}_${startedAt.current}`,
+          // Separate native-only test: after the FIRST real SQLite INSERT but
+          // BEFORE the transaction commits, block so host can SIGKILL iOS.
+          // No real athlete or normal beta bundle can supply this callback.
+          syntheticOnlyHoldAfterUncommittedInsert:
+            isSyntheticInTransactionCompletionKill(
+              Constants.expoConfig?.ios?.bundleIdentifier, user,
+            ) && !restoredPendingCompletion.current
+              ? async () => {
+                  setSyntheticInTransactionKillReady(true);
+                  await holdSyntheticInTransactionCompletion(true);
+                }
+              : undefined,
         });
       });
       // Show "Saved" only after the local workout ledger and plan update
@@ -562,6 +575,10 @@ export default function ActiveWorkoutScreen() {
             testID="sidequest-qa-completion-journal-durable-before-sql"
             accessibilityLabel="Synthetic QA pending completion journal persisted before SQL"
             style={styles.helper}>Synthetic QA: journal durable, before SQL commit.</Text> : null}
+          {syntheticInTransactionKillReady ? <Text
+            testID="sidequest-qa-completion-sql-uncommitted-before-commit"
+            accessibilityLabel="Synthetic QA SQLite workout INSERT pending uncommitted transaction"
+            style={styles.helper}>Synthetic QA: uncommitted SQLite workout row, before commit.</Text> : null}
           {completionSaveStatus === 'error' ? <Pressable
             accessibilityRole="button"
             onPress={() => void persistCompletion(completionFractionRef.current)}
