@@ -8,22 +8,23 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43137896412](https://github.com/ashlynsloane/side-quest/actions/runs/43137896412), SHA `5f8437b1` | **PASS — 695/695 tests across 114 files, typechecks and iOS JS export** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Verified CI #43141207223](https://github.com/ashlynsloane/side-quest/actions/runs/43141207223), SHA `a0fd5549`, and [QA-gate source CI #43142441473](https://github.com/ashlynsloane/side-quest/actions/runs/43142441473) | **700/700 tests across 115 files PASS at `a0fd5549`; newer native-owner QA scripts require their own exact-head green result** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
 | Kill/relaunch app and recover the saved ride | Same native JUnit and screenshots | **PASS** |
 | Switch A→B, show B has no A history, switch B→A and recover A's original ride | Same native JUnit and screenshots | **PASS** |
-| Strength workout → finish station → Leave → relaunch → Resume → Save partial → History record | [Focused strength run #43127249398](https://github.com/ashlynsloane/side-quest/actions/runs/43127249398) | **Native actions succeeded; History screenshot shows 27% completed and 0 recorded sets. FINAL JUnit FAILS** because iOS hides the percentage child inside the accessible parent workout card |
-| Accessibility correction and durable detail-row assertion | App history row now exposes “N percent completed” in its screen-reader label, with corresponding native assertion | **COMMITTED; requires new native proof** |
-| A→B→A→B profile isolation for **active strength sessions** | [Independent native UI-only run #43132842718](https://github.com/ashlynsloane/side-quest/actions/runs/43132842718), `live-isolation` scope | **FAIL — after B→A reauthentication, A's original paused session restored directly on the active-workout screen; test incorrectly expected Today tab.** Screenshot verified the correct paused station; test corrected, [rerun #43137076308](https://github.com/ashlynsloane/side-quest/actions/runs/43137076308) not yet confirmed |
-| Source-matched full six-stage rerun | [Release iOS run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251), source SHA `b64b29f7` | **PASS — all six native Maestro stages; profile, onboarding, ride, restart, A→B→A isolation and strength** |
+| Strength workout → finish station → Leave → cold relaunch → Resume → Save partial → History detail | [Full Release run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251) | **PASS; historical prior focused selector failures superseded by the complete six-stage native evidence** |
+| Accessibility completion label and canonical detail-row assertion | [Full Release run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251) | **PASS on compiled app source before subsequent auth-recovery additions; new auth source must be rebuilt** |
+| A→B→A→B privacy isolation for **two paused strength workouts** | [Independent native UI-only run #43138494416](https://github.com/ashlynsloane/side-quest/actions/runs/43138494416), `live-isolation` scope and artifact `13909607956` | **PASS — JUnit 1 test, 0 failures; 3 required stages PASS; A and B's separate sessions restored with screenshots** |
+| Source-matched full six-stage native Release | [Release iOS run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251), original binary source SHA `b64b29f7` | **PASS — all six native Maestro stages; subsequent auth startup recovery changes require a rebuilt binary before exact-head signoff** |
+| Synthetic owner-mismatch startup/retry + preserved SQLite data | `owner-recovery` native scope, SQL-backed count and PRAGMA quick_check after UI retry | **IMPLEMENTED / NOT YET NATIVE-VERIFIED.** A previous UI-only attempt refused an outdated binary; source-matched rerun pending |
 
 ### Specific native-strength failure and repair
 
 Native failure snapshot `step-011-scrollUntilVisible-Start_workout.json/.png` shows the generated workout preview, the enabled **Start workout** button with native `accessibilityText: "Start workout, play"`, and the button within the viewport at approximately y=683–733. This is a *test selector mismatch*; it does not demonstrate an app-navigation, persistence or SQLite fault. The Maestro YAML now matches the observed native accessibility label and has a code-contract regression preventing the exact-text mistake.
 
-The focused run completed the strength session and the real Training History screen displayed a saved **27% completion**, with no invented completed sets. Its final JUnit assertion could not see the child text because the parent Pressable supplied a shorter accessibility label. The app now exposes the completion percentage in the parent accessible label; the revised test asserts that value and opens the canonical history detail. The updated app-source binary **passed all six integrated native stages** in run #43129525251. Subsequent commits through `f68daf90` altered QA scripts, tests and documentation, not the compiled app-source fingerprint. The independent A→B→A→B live-session test is still a separate required privacy gate.
+The focused run completed the strength session and the real Training History screen displayed a saved **27% completion**, with no invented completed sets. Its final JUnit assertion could not see the child text because the parent Pressable supplied a shorter accessibility label. The app now exposes the completion percentage in the parent accessible label; the revised test asserts that value and opens the canonical history detail. The updated app-source binary **passed all six integrated native stages** in run #43129525251. Subsequent commits through `f68daf90` altered QA scripts, tests and documentation, not the compiled app-source fingerprint. The independent A→B→A→B live-session test subsequently **PASSED** in #43138494416. A later change to the auth startup recovery UI requires fresh exact-binary native acceptance.
 
 Reuse of an existing Release binary is permitted only if `scripts/qa/native-source-fingerprint.mjs` verifies an exact match.
 
@@ -56,11 +57,11 @@ not a migrated or owner-recovered iPhone file.
 
 ### Seventh independent native privacy gate
 
-The six-stage integrated gate still tests completed ride/history isolation. A separate `live-isolation` scope now checks athlete A's **paused in-progress workout**, A→B absent-from-B state, B's own paused workout, A's original restored station, and B's original restored station after A→B→A→B switches and a cold relaunch. The `live-isolation` result is recorded separately and cannot make the core six-stage JUnit pass if anything there fails. The isolated test is **scripted and in flight**, not yet verified.
+The six-stage integrated gate still tests completed ride/history isolation. A separate `live-isolation` scope now checks athlete A's **paused in-progress workout**, A→B absent-from-B state, B's own paused workout, A's original restored station, and B's original restored station after A→B→A→B switches and a cold relaunch. The `live-isolation` result is recorded separately and cannot make the core six-stage JUnit pass if anything there fails. The isolated live-workout privacy test **PASSED**: run #43138494416, archived `live-isolation-junit.xml` (1 test, 0 failures), `native-ui-summary.json` (`allPassed: true`), and screenshots from both original paused workout recovery paths.
 
 ### Read-only legacy owner audit (diagnostic, not migration)
 
-`scripts/qa/audit-legacy-owner.mjs` opens a given synthetic SQLite file read-only, checks SQLite integrity and embedded owner metadata, and reports only owner-verification status and WAL sidecar presence—not athlete IDs or training rows. `packages/planner/test/legacy-owner-audit.test.ts` verifies matched, mismatched, unmarked and missing databases, including unchanged file hashes. A populated database without independently verified ownership remains **DENIED**. Real iPhone startup error recovery and a consistent legacy backup/migration workflow are still required.
+`scripts/qa/audit-legacy-owner.mjs` opens a given synthetic SQLite file read-only, checks SQLite integrity and embedded owner metadata, and reports only owner-verification status and WAL sidecar presence—not athlete IDs or training rows. `packages/planner/test/legacy-owner-audit.test.ts` verifies matched, mismatched, unmarked and missing databases, including unchanged file hashes. A populated database without independently verified ownership remains **DENIED**. A fail-closed startup recovery view and an explicitly synthetic native owner-mismatch test are now implemented. The native `owner-recovery` gate has **not yet passed**; real iPhone recovery and any owner-verified production migration remain unverified and release-blocking.
 
 ## Still required before Milestone 1 can be signed off
 
@@ -79,7 +80,7 @@ The six-stage integrated gate still tests completed ride/history isolation. A se
 
 - Planner and source QA: `.github/workflows/automated-athlete-acceptance.yml` on the **exact candidate SHA**.
 - Full native Release binary + six-stage Maestro: `.github/workflows/native-ios-simulator-smoke.yml`.
-- Reuse previously compiled binary only with exact source SHA-256 match: `.github/workflows/native-ios-ui-only.yml` with scope `full`, `isolation`, or `strength`. Only scope `full` constitutes the integrated native gate.
+- Reuse previously compiled binary only with exact source SHA-256 match: `.github/workflows/native-ios-ui-only.yml`, including independent `live-isolation` and `owner-recovery` scopes. Only `full` constitutes the integrated six-stage gate. The `owner-recovery` gate additionally verifies unaltered synthetic plan-row counts, mismatched owner marker, and `PRAGMA quick_check` after native retry.
 - Review six individual `maestro-evidence/{stage}-junit.xml` reports and `native-ui-summary.json`; absence/skips are FAIL/NOT_REQUIRED, never PASS.
 - No real-athlete data in committed fixtures, log artifacts or screenshots.
 
