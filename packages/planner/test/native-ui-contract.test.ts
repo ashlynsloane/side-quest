@@ -286,6 +286,10 @@ describe('native synthetic UI automation contract', () => {
     expect(diag).toContain("'owner-recovery': ['profile', 'onboarding', 'owner-recovery']");
     expect(diag).toContain('POSTCONDITION FAILED');
     expect(flow).toContain('Your local training history needs recovery.');
+    expect(flow).toContain('tapOn: "Try Side Quest again"');
+    expect(flow).not.toContain('tapOn: "Try again"');
+    expect(source('apps/mobile/src/app/_layout.tsx'))
+      .toContain('accessibilityLabel="Try Side Quest again"');
     expect(flow).toContain('synthetic-owner-mismatch-retry-preserved');
     expect(flow).toContain('assertNotVisible:');
     expect(injection).toContain('com.sidequest.synthetic.qa');
