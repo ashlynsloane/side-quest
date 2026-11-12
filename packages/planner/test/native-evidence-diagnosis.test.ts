@@ -41,10 +41,32 @@ describe('native UI failure evidence diagnosis', () => {
     expect(report.allPassed).toBe(true);
     expect(report.scope).toBe('strength');
     expect(report.stages.filter((x) => x.status === 'NOT_REQUIRED').map((x) => x.stage))
-      .toEqual(['ride', 'restart', 'isolation']);
+      .toEqual(['ride', 'restart', 'isolation', 'live-isolation']);
     const full = diagnose(root);
     expect(full.run.status).toBe(1);
     expect(full.report.allPassed).toBe(false);
+  });
+
+  it('requires a separate native A/B/A/B live checkpoint journal without weakening six-stage full scope', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'live-isolation'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const exec = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'live-isolation' },
+    });
+    const passed = exec();
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(passed.status, passed.stderr).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(['profile', 'onboarding', 'live-isolation']);
+    expect(report.stages.filter((stage) => stage.status === 'PASSED').map((stage) => stage.stage))
+      .toEqual(['profile', 'onboarding', 'live-isolation']);
+    expect(diagnose(root).report.allPassed).toBe(false);
+    rmSync(join(root, 'live-isolation-junit.xml'));
+    expect(exec().status).toBe(1);
   });
 
   it('requires A/B isolation but not strength for focused isolation acceptance', () => {
@@ -84,7 +106,7 @@ describe('native UI failure evidence diagnosis', () => {
     const { run, report } = diagnose(root);
     expect(run.status, run.stderr).toBe(0);
     expect(report.allPassed).toBe(true);
-    expect(report.stages.map(x => x.status)).toEqual(Array(6).fill('PASSED'));
+    expect(report.stages.map(x => x.status)).toEqual([...Array(6).fill('PASSED'), 'NOT_REQUIRED']);
   });
 
   it('detects email mistakenly entered into Name without publishing input values', () => {
@@ -108,7 +130,8 @@ describe('native UI failure evidence diagnosis', () => {
     expect(run.status).toBe(1);
     expect(report.stages[0]?.status).toBe('FAILED');
     expect(report.stages[0]?.diagnosis).toMatch(/keyboard-focus leak/);
-    expect(report.stages.slice(1).map(x => x.status)).toEqual(Array(5).fill('BLOCKED'));
+    expect(report.stages.slice(1).map(x => x.status))
+      .toEqual([...Array(5).fill('BLOCKED'), 'NOT_REQUIRED']);
     expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
       .not.toContain('synthetic-secret@example.invalid');
   });
@@ -227,7 +250,7 @@ describe('native UI failure evidence diagnosis', () => {
     }
     const { report } = diagnose(root);
     expect(report.stages.map((stage) => stage.status))
-      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN']);
+      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN', 'NOT_REQUIRED']);
     expect(report.allPassed).toBe(false);
   });
 
@@ -267,6 +290,7 @@ describe('native UI failure evidence diagnosis', () => {
     const { report } = diagnose(root);
     expect(report.allPassed).toBe(false);
     expect(report.stages[0]?.status).toBe('INVALID_REPORT');
-    expect(report.stages.slice(1).every(x => x.status === 'NOT_RUN')).toBe(true);
+    expect(report.stages.slice(1, 6).every(x => x.status === 'NOT_RUN')).toBe(true);
+    expect(report.stages[6]?.status).toBe('NOT_REQUIRED');
   });
 });
