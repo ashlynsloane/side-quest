@@ -8,7 +8,7 @@
 
 | Test gate | Actual evidence | Result |
 | --- | --- | --- |
-| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43131754561](https://github.com/ashlynsloane/side-quest/actions/runs/43131754561), SHA `dd06f44a` | **PASS — 687/687 tests, 112 files** |
+| Planner/mobile typecheck, real SQLite acceptance, complete planner suite, iOS JS export | [Exact-source CI #43132850671](https://github.com/ashlynsloane/side-quest/actions/runs/43132850671), SHA `724ea398` | **PASS — 689/689 tests, 112 files** |
 | Synthetic local profile creation | [Native Release run #43114582364](https://github.com/ashlynsloane/side-quest/actions/runs/43114582364), QA binary from `80643966` | **PASS** |
 | Generate and review first seven-day plan | Same native JUnit and screenshots | **PASS** |
 | Save the actual 75-minute ride | Same native JUnit and screenshots | **PASS** |
@@ -16,6 +16,7 @@
 | Switch A→B, show B has no A history, switch B→A and recover A's original ride | Same native JUnit and screenshots | **PASS** |
 | Strength workout → finish station → Leave → relaunch → Resume → Save partial → History record | [Focused strength run #43127249398](https://github.com/ashlynsloane/side-quest/actions/runs/43127249398) | **Native actions succeeded; History screenshot shows 27% completed and 0 recorded sets. FINAL JUnit FAILS** because iOS hides the percentage child inside the accessible parent workout card |
 | Accessibility correction and durable detail-row assertion | App history row now exposes “N percent completed” in its screen-reader label, with corresponding native assertion | **COMMITTED; requires new native proof** |
+| A→B→A→B profile isolation for **active strength sessions** | [Independent native UI-only run #43132842718](https://github.com/ashlynsloane/side-quest/actions/runs/43132842718), `live-isolation` scope | **RUNNING at this checkpoint, no native PASS claimed**; scripted cold-restart plus two independent paused sessions |
 | Source-matched full six-stage rerun | [Release iOS run #43129525251](https://github.com/ashlynsloane/side-quest/actions/runs/43129525251), updated native source | **IN PROGRESS at this checkpoint, not PASS** |
 
 ### Specific native-strength failure and repair
@@ -37,6 +38,10 @@ Reuse of an existing Release binary is permitted only if `scripts/qa/native-sour
 - Live strength completion is inside a verified-athlete database activation lock. New disk-backed race tests prove A completes to A even when B activation is queued, and stale A writes after B activation fail closed.
 - A deliberate mid-transaction SQL failure plus cold module/database reload preserves the original 41% pending completion and forbids a 100% replay.
 - A **real OS `SIGKILL`** of a separate Node SQLite writer while its database transaction is open rolls back the uncommitted row; a cold restart of the mobile database service recovers the original **43% pending dose**, retries once and refuses to promote it to 100%. This validates filesystem/SQLite crash behavior, **NOT** forced termination inside the native iOS save callback.
+
+### Seventh independent native privacy gate
+
+The six-stage integrated gate still tests completed ride/history isolation. A separate `live-isolation` scope now checks athlete A's **paused in-progress workout**, A→B absent-from-B state, B's own paused workout, A's original restored station, and B's original restored station after A→B→A→B switches and a cold relaunch. The `live-isolation` result is recorded separately and cannot make the core six-stage JUnit pass if anything there fails. The isolated test is **scripted and in flight**, not yet verified.
 
 ## Still required before Milestone 1 can be signed off
 
