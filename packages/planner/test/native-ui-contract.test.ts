@@ -35,6 +35,8 @@ describe('native synthetic UI automation contract', () => {
         'Synthetic Race Athlete A', 'synthetic-first-week-race-a@example.invalid'],
       ['e2e/maestro/synthetic-completion-kill-profile.yaml',
         'Synthetic Crash Athlete A', 'synthetic-save-interrupt-a@example.invalid'],
+      ['e2e/maestro/synthetic-completion-in-transaction-profile.yaml',
+        'Synthetic Crash Athlete B', 'synthetic-save-interrupt-b@example.invalid'],
     ]) {
       const profile = source(path);
       const nameIndex = profile.indexOf('id: "sidequest-qa-athlete-name"',
@@ -379,6 +381,31 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).toContain('          - completion-kill');
   });
 
+  it('enforces real process kill inside uncommitted SQLite and original-dose cold retry', () => {
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    const sourceScript = source('scripts/qa/kill-synthetic-uncommitted-completion.sh');
+    const flow = source('e2e/maestro/synthetic-completion-in-transaction-before.yaml');
+    const after = source('e2e/maestro/synthetic-completion-kill-after.yaml');
+    const workflow = source('.github/workflows/native-ios-ui-only.yml');
+    const diag = source('scripts/qa/diagnose-native-evidence.mjs');
+    expect(flow).toContain('sidequest-qa-completion-sql-uncommitted-before-commit');
+    expect(flow).toContain('PARTIAL WORKOUT');
+    expect(after).toContain('Retry saving workout');
+    expect(runner).toContain('run_flow completion-in-transaction-before');
+    expect(runner).toContain('run_flow completion-in-transaction-after');
+    expect(runner).toContain('kill-synthetic-uncommitted-completion.sh before');
+    expect(runner).toContain('kill-synthetic-uncommitted-completion.sh after');
+    expect(sourceScript).toContain('synthetic-save-interrupt-b@example.invalid');
+    expect(sourceScript).toContain('kill -9 "$PID"');
+    expect(sourceScript).toContain('launchctl list');
+    expect(sourceScript).toContain("COUNTS\" == '0|0'");
+    expect(sourceScript).toContain('PRAGMA quick_check;');
+    expect(sourceScript).toContain('COUNT(*) FROM completed_workouts');
+    expect(sourceScript).toContain('COUNT(*) FROM workout_ledger');
+    expect(diag).toContain("'completion-in-transaction-kill': ['profile', 'onboarding', 'completion-in-transaction-before', 'completion-in-transaction-after']");
+    expect(workflow).toContain('          - completion-in-transaction-kill');
+  });
+
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
     const screen = source('apps/mobile/src/app/active-workout.tsx');
     const ledger = source('apps/mobile/src/services/database.ts');
@@ -549,7 +576,7 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('if [[ "$scope" == "strength" ]]');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
     const focused = source('.github/workflows/native-ios-ui-only.yml');
-    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill"]');
+    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill","completion-in-transaction-kill"]');
     expect(focused).toContain('NATIVE_QA_SCOPE:');
     expect(focused).toContain('for ATTEMPT in 1 2 3 4');
     expect(focused).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
