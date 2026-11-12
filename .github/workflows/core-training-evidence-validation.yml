@@ -1,0 +1,47 @@
+name: Core training evidence validation
+
+on:
+  push:
+    branches:
+      - feat/core-training-evidence-review-v1
+      - feat/training-week-baseline-approval-v1
+      - feat/training-source-window-audit-v1
+      - feat/explicit-training-plan-adjustments-v1
+      - test/training-adjustment-persistence-release-gate-v1
+      - feat/core-training-integration-mvp-v1
+      - test/training-adjustment-persistence-release-gate-v1
+  pull_request:
+    branches:
+      - feat/experimental-training-ramp-guardrails
+    paths:
+      - 'packages/planner/**'
+      - 'apps/mobile/src/services/core-training-week-evidence.ts'
+      - 'apps/mobile/src/app/(tabs)/plan.tsx'
+      - '.github/workflows/core-training-evidence-validation.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: training-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-training-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.16.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck planner
+        run: pnpm --dir packages/planner typecheck
+      - name: Typecheck mobile
+        run: pnpm --dir apps/mobile typecheck
+      - name: Planner regression tests
+        run: pnpm --dir packages/planner test
+      - name: Verify iOS JavaScript bundle
+        run: pnpm --dir apps/mobile exec expo export --platform ios --output-dir /tmp/side-quest-qa-ios-export

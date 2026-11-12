@@ -10,7 +10,9 @@ import {
   type ReactNode,
 } from 'react';
 
+import { useAuth } from '@/state/auth-context';
 import {
+  assertCanStartLiveWorkout,
   clearLiveWorkoutSession,
   createInitialLiveWorkoutSession,
   loadLiveWorkoutSession,
@@ -83,6 +85,7 @@ function resolvePlannedSessionForTrainingSpace(session: PlannedStrengthSession):
 }
 
 export function WorkoutProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [previewWorkout, setPreviewWorkoutState] = useState<GeneratedWorkout | null>(null);
   const [previewExplanation, setPreviewExplanation] = useState<WorkoutRecommendationExplanation | null>(null);
   const [plannedPreviewSource, setPlannedPreviewSource] = useState<PlannedPreviewSource | null>(null);
@@ -93,7 +96,8 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let live = true;
-    void loadLiveWorkoutSession().then((snapshot) => {
+    if (!user) { setWorkoutSessionReady(true); return; }
+    void loadLiveWorkoutSession(user.id).then((snapshot) => {
       if (!live) return;
       if (snapshot) {
         setActiveWorkout(snapshot.workout);
@@ -103,7 +107,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setWorkoutSessionReady(true);
     });
     return () => { live = false; };
-  }, []);
+  }, [user?.id]);
 
   const value = useMemo<WorkoutContextValue>(() => ({
     previewWorkout,
@@ -138,12 +142,15 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
     beginWorkout(workout) {
+      // Synchronous fail-closed check runs before any in-memory context
+      // replacement. An unfinished prior completion must remain recoverable.
+      assertCanStartLiveWorkout(user?.id ?? null);
       const planLink = buildPlanLink(plannedPreviewSource);
       const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
       setActiveWorkout(workout);
       setActivePlanLink(planLink);
       setRestoredActiveWorkout(false);
-      void saveLiveWorkoutSession(snapshot);
+      void saveLiveWorkoutSession(snapshot, user?.id ?? null);
     },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
@@ -152,9 +159,9 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setActiveWorkout(null);
       setActivePlanLink(null);
       setRestoredActiveWorkout(false);
-      void clearLiveWorkoutSession();
+      void clearLiveWorkoutSession(user?.id ?? null);
     },
-  }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady]);
+  }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady, user?.id]);
 
   return <WorkoutContext.Provider value={value}>{children}</WorkoutContext.Provider>;
 }

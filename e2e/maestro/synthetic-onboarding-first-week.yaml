@@ -1,0 +1,9 @@
+# Synthetic-only scenario: fresh local profile -> proposed multisport week.
+# This is designed for the isolated simulator bundle identifier, never the beta.
+# Requires EXPO_PUBLIC_BETA_INVITE_CODE and Supabase cloud auth to be unset.
+appId: com.sidequest.synthetic.qa
+---
+# Standalone scenario composes all prerequisites for direct manual execution.
+# CI runs the named stage alone after verifying its preceding stage.
+- runFlow: synthetic-profile-entry.yaml
+- runFlow: synthetic-onboarding-steps.yaml

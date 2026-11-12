@@ -1,0 +1,427 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const script = fileURLToPath(new URL('../../../scripts/qa/diagnose-native-evidence.mjs', import.meta.url));
+const folders: string[] = [];
+const junit = (count: number, fail = false) => `<testsuites><testsuite name="QA" tests="${count}" failures="${Number(fail)}" errors="0" skipped="0"><testcase name="case">${fail ? '<failure>Assertion failed</failure>' : ''}</testcase></testsuite></testsuites>`;
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'native-evidence-'));
+  folders.push(root);
+  return root;
+}
+function diagnose(root: string) {
+  const run = spawnSync(process.execPath, [script, root], { encoding: 'utf8' });
+  const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+    allPassed: boolean;
+    stages: Array<{ stage: string; status: string; diagnosis: string | null; failure: string | null }>;
+  };
+  return { run, report };
+}
+afterEach(() => {
+  for (const root of folders.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe('native UI failure evidence diagnosis', () => {
+  it('permits independently executed strength without claiming omitted stages passed', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'strength'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const run = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'strength' },
+    });
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; scope: string;
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(run.status).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.scope).toBe('strength');
+    expect(report.stages.filter((x) => x.status === 'NOT_REQUIRED').map((x) => x.stage))
+      .toEqual(['ride', 'restart', 'isolation', 'live-isolation', 'owner-recovery', 'generation-isolation', 'completion-kill-before', 'completion-kill-after', 'completion-in-transaction-before', 'completion-in-transaction-after']);
+    const full = diagnose(root);
+    expect(full.run.status).toBe(1);
+    expect(full.report.allPassed).toBe(false);
+  });
+
+  it('requires a separate native A/B/A/B live checkpoint journal without weakening six-stage full scope', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'live-isolation'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const exec = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'live-isolation' },
+    });
+    const passed = exec();
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(passed.status, passed.stderr).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(['profile', 'onboarding', 'live-isolation']);
+    expect(report.stages.filter((stage) => stage.status === 'PASSED').map((stage) => stage.stage))
+      .toEqual(['profile', 'onboarding', 'live-isolation']);
+    expect(diagnose(root).report.allPassed).toBe(false);
+    rmSync(join(root, 'live-isolation-junit.xml'));
+    expect(exec().status).toBe(1);
+  });
+
+  it('requires A/B isolation but not strength for focused isolation acceptance', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart', 'isolation'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const r = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'isolation' },
+    });
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; stages: Array<{ status: string }>;
+    };
+    expect(r.status).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.stages[5]?.status).toBe('NOT_REQUIRED');
+    expect(diagnose(root).run.status).toBe(1);
+  });
+
+  it('requires native owner-denial UI AND the synthetic SQLite integrity postcondition', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'owner-recovery'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const runOwnerGate = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'owner-recovery' },
+    });
+    const passed = runOwnerGate();
+    expect(passed.status, passed.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(['profile', 'onboarding', 'owner-recovery']);
+    expect(report.stages.filter((x) => x.status === 'PASSED').map((x) => x.stage))
+      .toEqual(['profile', 'onboarding', 'owner-recovery']);
+    expect(diagnose(root).report.allPassed).toBe(false);
+
+    // Passing UI screenshots are NOT enough if the owner marker was
+    // automatically claimed or any synthetic plan row disappeared.
+    writeFileSync(join(root, 'owner-recovery-console.log'),
+      'POSTCONDITION FAILED: synthetic owner mismatch or plan rows changed');
+    expect(runOwnerGate().status).toBe(1);
+    const rejected = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(rejected.stages.find((stage) => stage.stage === 'owner-recovery')?.status)
+      .toBe('FAILED');
+    rmSync(join(root, 'owner-recovery-junit.xml'));
+    expect(runOwnerGate().status).toBe(1);
+  });
+
+  it('requires native mid-generation A→B switch plus two real SQLite owner postconditions', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'generation-isolation'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const runRace = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'generation-isolation' },
+    });
+    const passed = runRace();
+    expect(passed.status, passed.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(['profile', 'generation-isolation']);
+    expect(report.stages.filter((entry) => entry.status === 'PASSED').map((entry) => entry.stage))
+      .toEqual(['profile', 'generation-isolation']);
+    expect(diagnose(root).report.allPassed).toBe(false);
+
+    writeFileSync(join(root, 'generation-isolation-console.log'),
+      'POSTCONDITION FAILED: stale first-week A result appeared in B');
+    expect(runRace().status).toBe(1);
+    const blocked = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(blocked.stages.find((entry) => entry.stage === 'generation-isolation')?.status)
+      .toBe('FAILED');
+    rmSync(join(root, 'generation-isolation-junit.xml'));
+    expect(runRace().status).toBe(1);
+  });
+
+  it('requires an actual completion-kill-before and after native JUnit plus clean SQLite inspection', () => {
+    const root = fixture();
+    const required = ['profile', 'onboarding', 'completion-kill-before', 'completion-kill-after'];
+    for (const stage of required)
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const runGate = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'completion-kill' },
+    });
+    const passing = runGate();
+    expect(passing.status, passing.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(required);
+    expect(report.stages.filter((entry) => entry.status === 'PASSED').map((entry) => entry.stage))
+      .toEqual(required);
+    writeFileSync(join(root, 'completion-kill-before-console.log'),
+      'POSTCONDITION FAILED: no OS SIGKILL was confirmed');
+    expect(runGate().status).toBe(1);
+    writeFileSync(join(root, 'completion-kill-before-console.log'), '');
+    writeFileSync(join(root, 'completion-kill-after-console.log'),
+      'POSTCONDITION FAILED: canonical workout rows duplicated');
+    expect(runGate().status).toBe(1);
+    rmSync(join(root, 'completion-kill-after-junit.xml'));
+    expect(runGate().status).toBe(1);
+  });
+
+  it('requires separate real iOS uncommitted-transaction kill stages and rejects SQL rollback failures', () => {
+    const root = fixture();
+    const required = ['profile', 'onboarding',
+      'completion-in-transaction-before', 'completion-in-transaction-after'];
+    for (const stage of required)
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const runGate = () => spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env,
+        NATIVE_QA_SCOPE: 'completion-in-transaction-kill' },
+    });
+    const passed = runGate();
+    expect(passed.status, passed.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'native-ui-summary.json'), 'utf8')) as {
+      allPassed: boolean; requiredStages: string[];
+      stages: Array<{ stage: string; status: string }>;
+    };
+    expect(report.allPassed).toBe(true);
+    expect(report.requiredStages).toEqual(required);
+    expect(report.stages.filter((entry) => entry.status === 'PASSED').map((entry) => entry.stage))
+      .toEqual(required);
+
+    writeFileSync(join(root, 'completion-in-transaction-before-console.log'),
+      'POSTCONDITION FAILED: uncommitted SQLite rows survived SIGKILL');
+    expect(runGate().status).toBe(1);
+    writeFileSync(join(root, 'completion-in-transaction-before-console.log'), '');
+    writeFileSync(join(root, 'completion-in-transaction-after-console.log'),
+      'POSTCONDITION FAILED: replay created two workout rows');
+    expect(runGate().status).toBe(1);
+    rmSync(join(root, 'completion-in-transaction-after-junit.xml'));
+    expect(runGate().status).toBe(1);
+  });
+
+  it('rejects unknown scopes and never treats missing required JUnit as a pass', () => {
+    const root = fixture();
+    const unknown = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'none' },
+    });
+    expect(unknown.status).not.toBe(0);
+    for (const stage of ['profile', 'onboarding'])
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    const incomplete = spawnSync(process.execPath, [script, root], {
+      encoding: 'utf8', env: { ...process.env, NATIVE_QA_SCOPE: 'strength' },
+    });
+    expect(incomplete.status).toBe(1);
+  });
+  it('reports passing only when all six native stages have nonempty passing evidence', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart', 'isolation', 'strength']) {
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    }
+    const { run, report } = diagnose(root);
+    expect(run.status, run.stderr).toBe(0);
+    expect(report.allPassed).toBe(true);
+    expect(report.stages.map(x => x.status)).toEqual([...Array(6).fill('PASSED'), ...Array(7).fill('NOT_REQUIRED')]);
+  });
+
+  it('detects email mistakenly entered into Name without publishing input values', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'profile-junit.xml'), junit(1, true));
+    for (const stage of ['onboarding', 'ride', 'restart', 'isolation', 'strength']) {
+      writeFileSync(join(root, stage + '-console.log'), 'BLOCKED: prerequisite failed');
+    }
+    const folder = join(root, 'profile', 'screen-hierarchy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+      children: [
+        { attributes: { 'resource-id': 'sidequest-qa-athlete-name',
+          value: 'Synthetic QA Athlete synthetic-secret@example.invalid' } },
+        { attributes: { 'resource-id': 'sidequest-qa-athlete-email', enabled: 'true' } },
+        { attributes: { 'resource-id': 'sidequest-qa-enter-beta', enabled: 'false' } },
+      ],
+    }));
+    const { run, report } = diagnose(root);
+    expect(report.allPassed).toBe(false);
+    expect(run.status).toBe(1);
+    expect(report.stages[0]?.status).toBe('FAILED');
+    expect(report.stages[0]?.diagnosis).toMatch(/keyboard-focus leak/);
+    expect(report.stages.slice(1).map(x => x.status))
+      .toEqual([...Array(5).fill('BLOCKED'), ...Array(7).fill('NOT_REQUIRED')]);
+    expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
+      .not.toContain('synthetic-secret@example.invalid');
+  });
+
+  it('distinguishes a tapped-but-stuck final onboarding screen from generation errors', () => {
+    for (const [label, diagnosis] of [
+      ['Ready to build.', 'route did not advance'],
+      ['Making the first draft.', 'did not reach a completed'],
+      ['The week needs one more review.', 'generation error state'],
+      ['First-week navigation error: synthetic message', 'route threw a navigation exception'],
+    ]) {
+      const root = fixture();
+      writeFileSync(join(root, 'profile-junit.xml'), junit(1));
+      writeFileSync(join(root, 'onboarding-junit.xml'), junit(1, true));
+      const folder = join(root, 'onboarding', 'screen-hierarchy');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+        children: [
+          { attributes: { accessibilityText: label } },
+          { attributes: { 'resource-id': 'sidequest-qa-onboarding-next', enabled: 'true' } },
+        ],
+      }));
+      const { report } = diagnose(root);
+      expect(report.stages[1]?.status).toBe('FAILED');
+      expect(report.stages[1]?.diagnosis).toContain(diagnosis);
+      expect(report.allPassed).toBe(false);
+    }
+  });
+
+  it('identifies a composite native duration label after a successfully saved ride', () => {
+    for (const [stage, durationLabel] of [
+      ['ride', '75 minutes · Intensity unavailable'],
+      ['restart', '75 min · intensity unavailable'],
+    ]) {
+      const root = fixture();
+      const expected = stage === 'ride' ? '75 minutes' : '75 min';
+      writeFileSync(join(root, stage + '-junit.xml'),
+        junit(1, true).replace('Assertion failed',
+          'Assertion is false: "' + expected + '" is visible'));
+      const folder = join(root, stage, 'screen-hierarchy');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+        children: [
+          { attributes: { accessibilityText: 'Completed bike' } },
+          { attributes: { accessibilityText: durationLabel } },
+        ],
+      }));
+      const { report } = diagnose(root);
+      const result = report.stages.find(x => x.stage === stage);
+      expect(result?.status).toBe('FAILED');
+      expect(result?.diagnosis).toContain('composite native accessibility label');
+      expect(report.allPassed).toBe(false);
+    }
+  });
+
+  it('identifies the restored Today screen and composite Week tab after cold restart', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'restart-junit.xml'),
+      junit(1, true).replace('Assertion failed',
+        'Element not found: Text matching regex: Week'));
+    const folder = join(root, 'restart', 'screen-hierarchy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'step-last.json'), JSON.stringify({
+      children: [
+        { attributes: { accessibilityText: 'TODAY' } },
+        { attributes: { accessibilityText: 'Week, tab, 2 of 6' } },
+      ],
+    }));
+    const { report } = diagnose(root);
+    expect(report.allPassed).toBe(false);
+    expect(report.stages[3]?.status).toBe('FAILED');
+    expect(report.stages[3]?.diagnosis).toMatch(/Cold restart restored the Today screen/);
+    expect(readFileSync(join(root, 'native-ui-summary.json'), 'utf8'))
+      .not.toContain('synthetic-secret');
+  });
+
+  it('recognizes the native History link hidden behind bottom tabs after restart', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'restart-junit.xml'), junit(1, true).replace(
+      'Assertion failed',
+      'Assertion is false: "Training history" is visible',
+    ));
+    const folder = join(root, 'restart', 'screen-hierarchy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'step-009-assertCondition-Training_history.json'), JSON.stringify({
+      children: [
+        { attributes: { accessibilityText: 'Inspect full training history',
+          bounds: '[38,828][224,861]' } },
+        { attributes: { 'resource-id': 'sidequest-qa-week-tab',
+          accessibilityText: 'Week, tab, 2 of 6', bounds: '[80,807][160,864]' } },
+      ],
+    }));
+    const { report } = diagnose(root);
+    expect(report.stages[3]?.status).toBe('FAILED');
+    expect(report.stages[3]?.diagnosis).toMatch(/under the bottom navigation bar/);
+    expect(report.stages[3]?.diagnosis).toMatch(/persistence after restart is unverified/);
+    expect(report.allPassed).toBe(false);
+  });
+
+  it('reports XCTest startup failure as infrastructure, never an app assertion failure', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'profile-console.log'),
+      'iOS driver not ready in time, consider increasing timeout by configuring MAESTRO_DRIVER_STARTUP_TIMEOUT');
+    writeFileSync(join(root, 'onboarding-console.log'),
+      'BLOCKED: onboarding requires passing profile creation');
+    const { report } = diagnose(root);
+    expect(report.allPassed).toBe(false);
+    expect(report.stages[0]?.status).toBe('DRIVER_STARTUP_TIMEOUT');
+    expect(report.stages[1]?.status).toBe('BLOCKED');
+  });
+
+  it('keeps isolation mandatory even when original four journeys pass', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart']) {
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    }
+    const { report } = diagnose(root);
+    expect(report.stages.map((stage) => stage.status))
+      .toEqual(['PASSED', 'PASSED', 'PASSED', 'PASSED', 'NOT_RUN', 'NOT_RUN', ...Array(7).fill('NOT_REQUIRED')]);
+    expect(report.allPassed).toBe(false);
+  });
+
+  it('requires the strength restart stage even when the first five pass', () => {
+    const root = fixture();
+    for (const stage of ['profile', 'onboarding', 'ride', 'restart', 'isolation']) {
+      writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+    }
+    const { report } = diagnose(root);
+    expect(report.stages[5]?.status).toBe('NOT_RUN');
+    expect(report.allPassed).toBe(false);
+  });
+
+  it('fails closed on skipped, empty or inconsistent native JUnit evidence', () => {
+    for (const broken of [
+      '<testsuites><testsuite tests="1" failures="0" errors="0" skipped="1"><testcase name="x"><skipped/></testcase></testsuite></testsuites>',
+      '<testsuites><testsuite tests="1" failures="0" errors="0"><testcase name="x"><skipped/></testcase></testsuite></testsuites>',
+      '<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0"></testsuite></testsuites>',
+      '<testsuites><testsuite tests="2" failures="0" errors="0" skipped="0"><testcase name="x"/></testsuite></testsuites>',
+    ]) {
+      const root = fixture();
+      for (const stage of ['profile', 'onboarding', 'ride', 'restart']) {
+        writeFileSync(join(root, stage + '-junit.xml'), junit(1));
+      }
+      writeFileSync(join(root, 'isolation-junit.xml'), broken);
+      const { run, report } = diagnose(root);
+      expect(run.status).toBe(1);
+      expect(report.allPassed).toBe(false);
+      expect(report.stages[4]?.status).toBe('INVALID_REPORT');
+      expect(report.stages[4]?.failure).toMatch(/no passing evidence/i);
+    }
+  });
+
+  it('never counts a missing or truncated JUnit report as passing', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'profile-junit.xml'), '<testsuite name="incomplete" tests="1">');
+    const { report } = diagnose(root);
+    expect(report.allPassed).toBe(false);
+    expect(report.stages[0]?.status).toBe('INVALID_REPORT');
+    expect(report.stages.slice(1, 6).every(x => x.status === 'NOT_RUN')).toBe(true);
+    expect(report.stages[6]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[7]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[8]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[9]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[10]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[11]?.status).toBe('NOT_REQUIRED');
+    expect(report.stages[12]?.status).toBe('NOT_REQUIRED');
+  });
+});

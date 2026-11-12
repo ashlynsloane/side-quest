@@ -1,0 +1,54 @@
+# Reusable native checkpoint setup for A/B active-session privacy.
+# Called only after the synthetic athlete has completed onboarding.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-train-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-train-tab"
+- tapOn:
+    id: "sidequest-qa-quick-workout"
+- extendedWaitUntil:
+    visible: "Build a strength-cardio circuit"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Generate Workout"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- tapOn: "Generate Workout"
+- extendedWaitUntil:
+    visible: "WORKOUT PREVIEW"
+    timeout: 60000
+# Scroll to the stable section heading, not the icon-bearing button.
+# Native 43132842718 had the Start button plainly visible but Maestro's
+# scrollUntilVisible(button, 85%) still failed at the end of the scroll view.
+- scrollUntilVisible:
+    element: "Ready when you are"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Start workout, play"
+    timeout: 30000
+- tapOn: "Start workout, play"
+- scrollUntilVisible:
+    element: "Finish station"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 80
+    timeout: 30000
+- tapOn: "Finish station"
+- extendedWaitUntil:
+    visible: "Recover and record"
+    timeout: 30000
+# Must write the athlete-scoped checkpoint to localStorage BEFORE leaving.
+- tapOn: "Leave"
+- extendedWaitUntil:
+    visible: "WORKOUT IN PROGRESS"
+    timeout: 30000

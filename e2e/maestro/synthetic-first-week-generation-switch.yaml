@@ -1,0 +1,127 @@
+# Native issue #19: A's finished generation is held BEFORE persistence,
+# then B becomes the active authenticated profile. The expired async A result
+# must not write a goal, block or calendar into B's real SQLite database.
+# Run on isolated synthetic iOS bundle; synthetic-race-profile-entry is first.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Choose the goal."
+    timeout: 30000
+# Deliberately choose a DIFFERENT A goal from B's default Ironman 70.3.
+# Distinct goal IDs and seeded block IDs make transient A→B contamination
+# distinguishable even if B later writes its own first-week plan.
+- scrollUntilVisible:
+    element: "General strength.*"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 75
+    timeout: 30000
+- tapOn: "General strength.*"
+- takeScreenshot: "generation-a-distinct-general-strength-goal"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Use the time you actually have."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "What is available now?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Anything to protect?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "How do you respond to training?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Ready to build."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Making the first draft."
+    timeout: 20000
+# This ID becomes visible ONLY once A's draft calculation has completed and
+# its synthetic-only delayed persistence window is ACTIVE. The tap is a real
+# in-process account switch, not an app kill or a completed onboarding.
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-switch-during-first-week-generation"
+    timeout: 60000
+- takeScreenshot: "generation-a-held-before-owner-locked-save"
+- tapOn:
+    id: "sidequest-qa-switch-during-first-week-generation"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-athlete-email"
+    timeout: 30000
+# B is a distinct athlete, created while A's first-week promise is pending.
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-first-week-race-b@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Race Athlete B"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "generation-b-first-run-independent"
+- runFlow: synthetic-onboarding-steps.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
+- takeScreenshot: "generation-b-successful-first-week"
+# Cold restart proves the actual B plan is durable after A's delayed task
+# has had a chance to complete. The shell postcondition verifies both DBs.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
+- takeScreenshot: "generation-b-persisted-after-relaunch"

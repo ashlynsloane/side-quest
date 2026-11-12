@@ -1,0 +1,173 @@
+# Native iOS scripted acceptance
+
+This directory contains Maestro journeys for the **isolated synthetic iOS app**, bundle ID `com.sidequest.synthetic.qa`. The CI workflow rewrites `apps/mobile/app.json` only inside an ephemeral macOS runner. It never deploys to an installed beta, uses fictional accounts, and does not access real athlete records.
+
+## Journeys
+
+- `synthetic-onboarding-first-week.yaml`: fresh synthetic local account, fast-start questionnaire, saved first-week preview and Week screen.
+- `synthetic-completed-ride.yaml`: onboard a fresh synthetic athlete, record a 75-minute bike activity with deliberately **unknown** distance, inspect actual activity review.
+- `synthetic-ride-restart.yaml`: record the synthetic ride, terminate and relaunch the native app, then verify the record remains in history.
+- `synthetic-athlete-isolation-steps.yaml`: after restart, switch A → B → A on the same simulator; verify B sees no A ride and A retains its original 75-minute ride. This fifth stage is a native release gate, not a substitute for a mid-generation switch test.
+
+## November 3 acceptance checkpoint
+
+- [Full simulator run 41500092739](https://github.com/ashlynsloane/side-quest/actions/runs/41500092739) verified **profile PASS and entire first-week onboarding PASS**, including generated first-week preview.
+- The completed-ride scenario reached `Completed bike` in Activity Review. Its archived screenshot and accessibility hierarchy both confirmed the actual saved dose displayed as `75 minutes · Intensity unavailable`. The exact-text assertion `75 minutes` failed because Maestro matched the entire accessibility label. That is **not** evidence of lost activity data; cold restart was **BLOCKED**.
+- Native assertions now match composite labels using `75 minutes.*` and `75 min.*`, rather than weakening the record or assuming an unknown distance was zero.
+- The shared runner now stages profile → onboarding → ride → restart with one synthetic athlete, avoiding repeated app resets. Independent Maestro invocations require an explicit `launchApp` and a retryable onboarding tap because the first foreground tap could otherwise be consumed without advancing. This revised staged handoff is still undergoing native verification.
+- Source-matched reusable-binary jobs deliberately refuse a stale archive after app-source edits. Changes to the first-week save/recovery code require a new native Release artifact before these newer journeys can be verified.
+- [Automated QA 41739781463](https://github.com/ashlynsloane/side-quest/actions/runs/41739781463) passed **643 tests in 109 files**. That verifies code-level behavior and disk-backed SQLite recovery, **not** cold-restart acceptance.
+- The initial plan now uses a restart-stable opaque attempt identity and recovers a matching persisted block, repairing weekly rows after partial saves (issue [#18](https://github.com/ashlynsloane/side-quest/issues/18)). Cross-account async write fencing remains a separate open release risk ([#19](https://github.com/ashlynsloane/side-quest/issues/19)).
+
+## Evidence chronology
+
+1. **Native build and launch passed** in [run 41161358738](https://github.com/ashlynsloane/side-quest/actions/runs/41161358738): native Release build, simulator install, launch and initial screenshot.
+2. **First interactive run failed** in [run 41163888023](https://github.com/ashlynsloane/side-quest/actions/runs/41163888023). Simulator screenshot and accessibility hierarchy confirmed the original test typed both the name and email in the **Name** field, leaving the Email field blank and the Enter beta button disabled. Both journeys failed at the same initial first-week assertion. This was a test-input targeting error, not evidence of an app crash.
+3. Corrected the test with explicit Name/Email/Enter-beta accessibility IDs and a keyboard dismissal between fields. Added stable IDs for the onboarding and activity-save actions. A subsequent full native run must be completed before these interactions are called passing.
+4. **Second corrected native run [41211274766](https://github.com/ashlynsloane/side-quest/actions/runs/41211274766) failed** on the isolated profile-entry stage. A fresh screenshot and accessibility hierarchy showed `Name` contained both the fictional name **and the fictional email**, while `Email` remained blank and Enter beta stayed disabled. Maestro's successful `tapOn` action did **not** guarantee focus changed, because the keyboard occluded the lower field.
+5. The profile-entry flow now enters the lower Email field **before** opening the keyboard for Name, then taps the non-interactive form title instead of relying on `hideKeyboard`. The ride flow also avoids `hideKeyboard` for its numeric keypad. See [the latest full native workflow](https://github.com/ashlynsloane/side-quest/actions/workflows/native-ios-simulator-smoke.yml); none of these updated interactions count as passing until their own JUnit evidence confirms success.
+6. The restart journey remains a separate acceptance gate. When a prerequisite fails, its status must be reported as **blocked / not executed**, not passed.
+
+## New verified native evidence
+
+- [Native staged run 41214934281](https://github.com/ashlynsloane/side-quest/actions/runs/41214934281): **synthetic-profile-entry PASSED** on a real iOS simulator. First-week onboarding FAILED at `scrollUntilVisible: element: "Continue"`, even though the screenshot visibly showed the green Continue button and the accessibility hierarchy identified `sidequest-qa-onboarding-next` as enabled. Completed ride and restart were **BLOCKED**.
+- The onboarding flow now scrolls to and taps the stable accessibility ID `sidequest-qa-onboarding-next` with a 50% visibility threshold; it no longer relies on text matching of nested button content.
+- [Full native build 41214934281](https://github.com/ashlynsloane/side-quest/actions/runs/41214934281) published an isolated `sidequest-synthetic-ios-app` artifact with source fingerprint. [UI-only run 41227346948](https://github.com/ashlynsloane/side-quest/actions/runs/41227346948) successfully resolved the source-compatible binary, booted an iPhone simulator and installed the app without Xcode recompilation; interactive outcome must be verified separately.
+- Native compilation now triggers only when app source/config/dependencies change. UI YAML or runner script edits use the source-matched UI-only workflow. A source-hash mismatch **must** fail, not use a stale binary.
+- Regression results: [615/615 tests](https://github.com/ashlynsloane/side-quest/actions/runs/41215203188) passed before the latest selectors; subsequent changes require their own CI result.
+
+## November 2 — verified final-button selector regression
+
+[Full native iOS run 41262127886](https://github.com/ashlynsloane/side-quest/actions/runs/41262127886) **passed synthetic profile entry and progressed through Step 7** but failed at Maestro `tapOn: {text: "Build my first week"}`. The actual saved iOS accessibility hierarchy exposes the pressable as `accessibilityText: "Build my first week, ›"`, with `resource-id: sidequest-qa-onboarding-next` and `enabled: true`. Therefore this particular failure was the **test failing to find the pressable**, not proof that the app's route change failed.
+
+Restored the stable `id: sidequest-qa-onboarding-next` target, recorded a pre-tap screenshot, retained `retryTapIfNoChange: true`, and separated a 15-second navigation check from the later 120-second generation assertion. Run [41485434344](https://github.com/ashlynsloane/side-quest/actions/runs/41485434344) is the native UI-only verification attempt for this exact selector change. Do **not** count plan creation or ride persistence as native-verified until JUnit and screenshots confirm each stage.
+
+## November 2 — XCTest driver cold-start incident
+
+[Native UI-only run 41485434344](https://github.com/ashlynsloane/side-quest/actions/runs/41485434344) installed and launched the source-matched synthetic app but **never executed the profile scenario**. Maestro printed `iOS driver not ready in time` and produced no JUnit XML. The archived `xctest_runner` log shows the iOS UI test runner eventually started its local HTTP server after a long cold start. This is an infrastructure startup timeout, **not evidence that the profile or final-button code failed**.
+
+The shared runner now exports `MAESTRO_DRIVER_STARTUP_TIMEOUT=360000` (milliseconds, six minutes), and the native workflow allows enough time for four sequential test-driver sessions. The diagnostic report explicitly marks no-JUnit driver startup as `DRIVER_STARTUP_TIMEOUT` instead of app failure. The native release gate remains red until a full run passes profile → onboarding → completed ride → relaunch.
+
+## Required evidence to call the native release gate passing
+
+- All three Maestro scenarios execute successfully against a native iPhone simulator with non-empty JUnit reports.
+- Screenshots and the accessibility hierarchy match the expected states, and no error/blank screen is mistaken for successful navigation.
+- A completed ride appears in training history **after cold relaunch**, with actual 75-minute duration and absent/unknown distance rather than an invented mileage.
+- Athlete profile isolation and pending-partial-workout force-quit recovery still require additional native scenarios beyond the first three.
+- Do not infer clinical safety, data-source coverage, or actual hardware correctness from simulator success.
+
+Run through `.github/workflows/native-ios-simulator-smoke.yml`. Inspect GitHub Actions artifacts, including the `maestro-evidence/` directory, for any failure. The planner/SQLite suite is a separate gate; both must pass before promoting PR #12.
+
+Maestro CLI documentation: https://docs.maestro.dev/maestro-cli
+
+## November 10 — native restart failure analyzed from artifacts
+
+The [isolated iOS run 42921655590](https://github.com/ashlynsloane/side-quest/actions/runs/42921655590)
+**passed** profile entry, complete first-week onboarding, and recording a
+75-minute bike activity. It **failed** at the History navigation assertion
+after cold relaunch.
+
+The archived `restart/...` screenshot, UI hierarchy, and `commands.json`
+show that Maestro found "Inspect full training history" at
+`[38,828][224,861]` but the fixed bottom tabs occupied y=807–864.
+The test pressed behind the tab bar, stayed in Week, and timed out waiting
+for "Training history". **That test did not reach the persisted records; it
+does not establish whether the ride survived the relaunch.**
+
+The revised Week screen elevates the History action and exposes
+`sidequest-qa-open-training-history`. The revised Maestro restart stage
+uses `centerElement: true`, records a pre-tap screenshot, taps by ID,
+requires the new History route and then checks the completed bike and
+original 75-minute dose. The diagnostic tool now flags the old occlusion
+using captured accessibility bounds, without claiming data loss.
+
+**Not yet native-verified:** the correction requires a new four-stage
+simulator run on the matching app source/flow. Planner and SQLite CI green
+is a separate gate. Tests must be reported as PASS/FAIL/BLOCKED at their
+actual tested SHAs.
+
+## November 10/11 — fifth athlete-isolation stage
+
+After confirming the original synthetic athlete's completed ride survives a
+cold relaunch, the staged runner now signs out and creates a **different
+synthetic local athlete**, completes that new athlete's onboarding, and verifies
+that athlete B has no completed training records. It then signs back into A
+and verifies the original saved ride is still 75 minutes.
+
+This end-to-end account-isolation check goes beyond mocked SQLite switches:
+it exercises native sign-in, database activation, screen routing, timeline
+queries, account switching, and persistence on one iOS simulator.
+
+**Release criterion:** five non-empty passing JUnit reports, including the new
+`isolation` stage. The native summarizer explicitly refuses to mark the
+release green when only the original four stages pass.
+
+**Still outstanding:** a native mid-generation profile switch, native
+force-quit while a partial completion is pending, and manual validation
+against the supported beta device and historical ownership migration.
+Do not equate the new scripted test with those unrun checks.
+
+## November 11 — native strength pause, cold-restart, and partial-completion flow
+
+The new sixth stage, `synthetic-strength-restart-steps.yaml`, starts a real
+synthetic quick workout, uses **Leave** to persist its live work/rest state,
+terminates and relaunches the iOS app, and requires the **Resume workout**
+entry point on Today. The test finishes the first station before pausing,
+so it can verify a nonzero partial dose. It reopens the saved rest/log phase,
+ends early, saves the original partial fraction, and checks that Training History contains a
+strength record without 100% completion credit. The same resume card is
+present on Train.
+
+This verifies a paused workout surviving a native cold restart and a normal
+partial completion. It does **not** inject a crash between writing an
+immutable pending-completion journal and committing SQLite; that distinct
+release gate remains OPEN. All six native stages must pass together before
+claiming native acceptance.
+
+## Native isolation precondition, November 11 (run 43057598937)
+
+Actual source-matched Release iOS results: profile PASS, onboarding PASS,
+75-minute bike PASS, cold restart and persisted history PASS. Isolation
+FAILED at its first command because its hardcoded `Go back` did not exist;
+the preceding stage had finished on Today (confirmed in iOS screenshot and
+accessibility hierarchy). **No A/B history switch was tested.** Both the
+isolation and strength stage now start by tapping stable destination tab IDs,
+independent of any accidental router-stack state. This change requires a
+new native UI-only execution. Do not classify the previous isolation as a
+profile-storage defect.
+
+## Second A/B native run 43062375569
+
+Native stages profile, onboarding, ride, cold restart passed. B's account
+was created and its empty history confirmed natively, but switching back to
+A was BLOCKED because a nested History route hid the bottom tabs. Fixed by
+explicitly leaving History using its accessible `Go back` control, then
+selecting Profile. The A-history → Train handoff is similarly explicit.
+No change to the app binary; a source-fingerprint-matched UI-only retest is
+required before qualifying the complete A→B→A or strength journey.
+
+## XCTest pre-interaction transport retry policy
+
+Run 43076034600 failed due to `DeviceUnreachableException` during
+`setPermissions` while the first `launchApp` of the onboarding stage was
+RUNNING. No onboarding interaction occurred. The native runner now permits
+**one** retry of a stage only if its JUnit confirms the XCTest transport
+failure **and** its archived `commands.json` contains only setup/config/
+incomplete launch commands. The first JUnit and console log remain archived
+for investigation. Any completed UI interaction, assertion failure, absent
+command evidence or second failure remains a hard native FAIL.
+
+## Parallel focused native acceptance
+
+`NATIVE_QA_SCOPE=strength` runs a clean synthetic profile, first-week setup
+and genuine strength resume/partial-save acceptance independently of
+endurance and A/B navigation. `NATIVE_QA_SCOPE=isolation` runs profile,
+onboarding, ride, cold restart and A/B restoration independently of
+strength. `NATIVE_QA_SCOPE=full` remains the six-stage release gate.
+
+Each runner writes an explicit scope and required stage list; omitted stages
+are `NOT_REQUIRED` (not PASS). The focused workflow uses separate clean
+iPhone simulators via a parallel job matrix and refuses an old binary when
+the app-source SHA fingerprint differs. Artifact downloads can retry after
+transient GitHub 502s; XCTest UI failures are still strict. Full passing
+native integration is mandatory before release.

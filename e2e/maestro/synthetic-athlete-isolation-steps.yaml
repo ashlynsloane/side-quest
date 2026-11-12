@@ -1,0 +1,138 @@
+# Synthetic athlete A already has an original 75-minute completed ride.
+# Switch to B, complete B's onboarding and prove B has no A history;
+# return to A and prove that A's original ride survives the account changes.
+# Tests the real native auth/navigation/SQLite path; no cloud or credentials.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp
+# Native evidence run 43057598937 ended the preceding stage on Today,
+# not History: router.back() traversed to Today. Navigate via the stable
+# tab ID, which is visible in the actual iOS hierarchy.
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-profile-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-profile-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-sign-out"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Create your beta profile"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-other-athlete@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Other Athlete"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "synthetic-b-first-run-isolated"
+# The existing onboarding flow intentionally does NOT clear app state.
+- runFlow: synthetic-onboarding-steps.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-week-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-open-training-history"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-open-training-history"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000
+- assertVisible: "No training records yet"
+- assertNotVisible: "Review Completed bike activity"
+- takeScreenshot: "synthetic-b-no-athlete-a-history"
+# Athlete B's History is a full-screen stack page and hides tab buttons.
+# Native run 43062375569 screenshot confirms B has zero records here.
+# Return to the tab shell before selecting Profile.
+- extendedWaitUntil:
+    visible: "Go back"
+    timeout: 30000
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-profile-tab"
+    timeout: 30000
+# The local profile key is derived deterministically from normalized email;
+# this must restore the original SQLite file rather than duplicate it.
+- tapOn:
+    id: "sidequest-qa-profile-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-sign-out"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Create your beta profile"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-athlete@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic QA Athlete"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-week-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-open-training-history"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-open-training-history"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000
+- assertVisible: "Review Completed bike activity"
+- tapOn: "Review Completed bike activity"
+- extendedWaitUntil:
+    visible: "75 minutes.*"
+    timeout: 30000
+- takeScreenshot: "synthetic-a-ride-preserved-across-account-switch"
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000
+# Hand off to strength from the tab shell, not a nested History route.
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-train-tab"
+    timeout: 30000

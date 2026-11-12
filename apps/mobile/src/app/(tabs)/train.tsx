@@ -1,10 +1,12 @@
 // V23ScenicBanner variant="strength" is intentionally retired from the visible Train layout.
 // Legacy validation compatibility: Generate a strength session; <DisclosureGroup; MOST RECENT; More workout tools; Goal-plan strength; SUGGESTED ACTION.
 import type { PlannedStrengthSession, TrainingBlockPlan } from '@circuit/domain';
+import { localCalendarDate } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { V23Card, V23Chip, V23GroupedList, V23Icon, V23PrimaryButton, V23Row, V23ScenicBanner, V23Screen, V23SectionHeader } from '@/components/v23-ui';
+import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
 import { getLatestTrainingBlock, listWorkoutLedgerEntries, type WorkoutLedgerEntry } from '@/services/database';
 import { useTheme } from '@/state/theme-context';
 import { useWorkoutContext } from '@/state/workout-context';
@@ -14,7 +16,7 @@ export default function TrainTab() {
   const router = useRouter();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { setPreviewWorkout } = useWorkoutContext();
+  const { openPlannedWorkoutPreview, activeWorkout, activePlanLink, workoutSessionReady } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [lastWorkout, setLastWorkout] = useState<WorkoutLedgerEntry | null>(null);
 
@@ -27,10 +29,15 @@ export default function TrainTab() {
   }, []));
 
   const next = useMemo(() => nextSession(block), [block]);
-  const openNext = () => { if (next) { setPreviewWorkout(next.workout); router.push('/workout-preview' as Href); return; } router.push('/generate' as Href); };
+  const openNext = () => { if (next) { openPlannedWorkoutPreview(next); router.push('/workout-preview' as Href); return; } router.push('/generate' as Href); };
 
   return <V23Screen>
     <View style={styles.intro}><Text style={styles.pageTitle}>Train</Text><Text style={styles.pageBody}>Strength that fits the rest of your training.</Text></View>
+
+    {workoutSessionReady && activeWorkout ? (
+      <ActiveWorkoutResumeCard workout={activeWorkout} planLink={activePlanLink}
+        onResume={() => router.push('/active-workout' as Href)} />
+    ) : null}
 
     <V23Card elevated style={styles.heroCard}>
       <View style={styles.heroTop}><View style={styles.heroCopy}><Text style={styles.kicker}>Recommended today</Text><Text style={styles.title}>{next?.title ?? 'Full-body strength'}</Text><Text style={styles.meta}>{next ? `${Math.round(next.workout.totalWorkSeconds / 60)} min · ${capitalize(next.intendedLoad)}` : '45–60 min · Moderate'}</Text></View><View style={styles.heroIcon}><V23Icon name="train" color={tokens.accent} size={28} /></View></View>
@@ -40,13 +47,17 @@ export default function TrainTab() {
 
     <V23SectionHeader>Choose a workout</V23SectionHeader>
     <View style={styles.quickGrid}>
-      <Pressable onPress={() => router.push('/generate' as Href)} style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}><V23Icon name="clock" color={tokens.accent} size={22} /><Text style={styles.quickTitle}>Quick workout</Text><Text style={styles.quickBody}>Set time and equipment</Text></Pressable>
+      <Pressable testID="sidequest-qa-quick-workout" accessibilityRole="button"
+        accessibilityLabel="Quick workout, set time and equipment"
+        onPress={() => router.push('/generate' as Href)}
+        style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}><V23Icon name="clock" color={tokens.accent} size={22} /><Text style={styles.quickTitle}>Quick workout</Text><Text style={styles.quickBody}>Set time and equipment</Text></Pressable>
       <Pressable onPress={() => router.push('/favorites' as Href)} style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}><V23Icon name="heart" color={tokens.accent} size={22} /><Text style={styles.quickTitle}>Favorites</Text><Text style={styles.quickBody}>{lastWorkout ? 'Repeat a trusted session' : 'Your saved workouts'}</Text></Pressable>
     </View>
 
     <V23SectionHeader>Other options</V23SectionHeader>
     <V23GroupedList>
       <V23Row title="Exercise library" detail="Browse movements and demonstrations" onPress={() => router.push('/exercise-library' as Href)} icon={<V23Icon name="search" color={tokens.accent} size={20} />} />
+      <V23Row title="Log a completed run, ride or swim" detail="Manually record actual training when no watch import is available" onPress={() => router.push('/log-endurance' as Href)} icon={<V23Icon name="log" color={tokens.accent} size={20} />} />
       <V23Row title="Log a completed session" detail="Record strength you did elsewhere" onPress={() => router.push('/log-workout' as Href)} icon={<V23Icon name="log" color={tokens.accent} size={20} />} />
       <V23Row title="Need a shorter option?" detail="Keep the intent with less volume" onPress={() => router.push('/session-rescue' as Href)} icon={<V23Icon name="adjust" color={tokens.accent} size={20} />} last />
     </V23GroupedList>
@@ -54,7 +65,7 @@ export default function TrainTab() {
 }
 
 function Bullet({ children, tokens }: { children: string; tokens: DesignTokens }) { return <View style={stylesStatic.bulletRow}><View style={[stylesStatic.bulletDot, { backgroundColor: tokens.accent }]} /><Text style={[stylesStatic.bulletText, { color: tokens.text }]}>{children}</Text></View>; }
-function nextSession(block: TrainingBlockPlan | null): PlannedStrengthSession | null { if (!block) return null; const today = new Date().toISOString().slice(0, 10); return block.weeks.flatMap((week) => week.sessions).filter((session) => session.date >= today && !['completed', 'skipped'].includes(session.completionStatus)).sort((a, b) => a.date.localeCompare(b.date))[0] ?? null; }
+function nextSession(block: TrainingBlockPlan | null): PlannedStrengthSession | null { if (!block) return null; const today = localCalendarDate(new Date()); return block.weeks.flatMap((week) => week.sessions).filter((session) => session.date >= today && !['completed', 'skipped'].includes(session.completionStatus)).sort((a, b) => a.date.localeCompare(b.date))[0] ?? null; }
 function capitalize(value: string) { return value.charAt(0).toUpperCase() + value.slice(1).replaceAll('_', ' '); }
 
 const stylesStatic = StyleSheet.create({ bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 9 }, bulletDot: { width: 5, height: 5, borderRadius: 3 }, bulletText: { fontSize: 15, lineHeight: 21 } });

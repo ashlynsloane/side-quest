@@ -1,4 +1,4 @@
-import type { PerformanceGoal } from '@circuit/domain';
+import { resolveFirstWeekCapacity } from '@circuit/planner';
 import Storage from 'expo-sqlite/kv-store';
 
 import {
@@ -9,7 +9,6 @@ import {
 } from './database';
 import {
   clearSideQuestGeneratedPlanEvents,
-  type WholeAthleteCapacityInput,
   type WholeAthleteHealthPreferences,
 } from './whole-athlete-plan';
 import {
@@ -66,30 +65,12 @@ export async function refreshLatestWholeAthletePlan(): Promise<SpaceAwareWholeAt
   return generateAndPersistSpaceAwareWholeAthleteBlock({
     block: saved.block,
     goal,
-    capacity: capacityFromGoal(goal),
+    capacity: resolveFirstWeekCapacity(goal),
     healthPreferences: loadWholeAthleteHealthPreferences(),
     activeCheckIn,
     ptProfileActive: Boolean(ptProfile?.active),
     readiness,
   });
-}
-
-function capacityFromGoal(goal: PerformanceGoal): WholeAthleteCapacityInput {
-  const capacity = goal.capacityProfile;
-  if (capacity) {
-    return {
-      totalWeeklyHours: Math.max(0, capacity.totalWeeklyHours),
-      currentEnduranceHours: Math.max(0, capacity.currentEnduranceHours),
-      runStatus: capacity.runStatus,
-      boneStressInjuryHistory: capacity.boneStressInjuryHistory,
-    };
-  }
-  return {
-    totalWeeklyHours: 8,
-    currentEnduranceHours: goal.disciplines.length ? 5 : 0,
-    runStatus: goal.disciplines.includes('run') ? 'normal' : 'not_running',
-    boneStressInjuryHistory: 'none',
-  };
 }
 
 function isEnergyAvailability(value: unknown): value is WholeAthleteHealthPreferences['energyAvailability'] {

@@ -28,6 +28,27 @@ import type {
 import { createWorkoutVariant, generateWorkout } from '@circuit/generator';
 import { evaluateStrengthLoad, scaleWorkMinutes } from './strength-load-management';
 export { evaluateStrengthLoad } from './strength-load-management';
+export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
+export { buildFirstWeekTrainingSummary } from './first-week-training-summary';
+export { resolveFirstWeekCapacity } from './first-week-capacity';
+export { createManualEnduranceActivity } from './manual-endurance';
+export type { ManualEnduranceInput } from './manual-endurance';
+export { addLocalCalendarDays, localCalendarDate, nextLocalMonday, localMondayOf } from './first-week-dates';
+export type { ResolvedFirstWeekCapacity } from './first-week-capacity';
+export type { FirstWeekTrainingSummary, FirstWeekTrainingItem } from './first-week-training-summary';
+export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
+export { comparePlannedWeekWithFrozenLimits } from './training-week-comparison';
+export { buildPlanAdjustmentPreview, applyAcceptedPlanAdjustments, rawGeneratedEventSignature, planExposureSignature } from './training-plan-adjustments';
+export { PLAN_ADJUSTMENT_TABLE_SQL, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, effectiveTrainingCalendarEvents, planAdjustmentDecisionsForLocalWeek } from './training-adjustment-sqlite';
+export type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
+export type { PlanAdjustmentEvent, PlanAdjustmentCandidate, PlanAdjustmentPreview, PlanAdjustmentAction, PlanAdjustmentDecision } from './training-plan-adjustments';
+export { trainingSourceQueryEnvelope } from './training-source-window';
+export type { TrainingSourceQueryEnvelope } from './training-source-window';
+export type { PlanningWeekComparison, TrainingDimensionComparison } from './training-week-comparison';
+export type { CoverageReviewAttestation, ApprovedWeekSnapshot, BaselineReviewIssue } from './training-baseline-review';
+export type { TrainingWeekEvidence, TrainingWeekEvidenceInput } from './core-training-week-evidence';
+export { EXPERIMENTAL_TRAINING_POLICY_V1, freezeExperimentalTrainingAllowance, reconcileGuardrailExposure, evaluateExperimentalTrainingGuardrails } from './experimental-training-guardrails';
+export type { ApprovedCompletedBaseline, FrozenTrainingAllowance, TrainingExposureRecord, TrainingGuardrailEvaluation, PlanningInterruptionState, GuardrailStatus } from './experimental-training-guardrails';
 export { buildExerciseNoveltyDecision, classifyExerciseFamiliarity, profileExerciseNovelty } from './exercise-novelty';
 
 type SessionBlueprint = {

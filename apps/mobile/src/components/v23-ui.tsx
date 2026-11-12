@@ -115,10 +115,10 @@ export function V23Chip({ children, tone = 'accent' }: { children: ReactNode; to
   return <View style={[styles.chip, tone === 'neutral' && styles.chipNeutral, tone === 'warm' && styles.chipWarm, tone === 'info' && styles.chipInfo]}><Text style={styles.chipText}>{children}</Text></View>;
 }
 
-export function V23PrimaryButton({ children, onPress, icon = 'chevron' }: { children: ReactNode; onPress: () => void; icon?: V23IconName | '' }) {
+export function V23PrimaryButton({ children, onPress, icon = 'chevron', testID }: { children: ReactNode; onPress: () => void; icon?: V23IconName | ''; testID?: string }) {
   const { tokens } = useTheme();
   const styles = useMemo(() => makeUiStyles(tokens), [tokens]);
-  return <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}><Text style={styles.primaryButtonText}>{children}</Text>{icon ? <V23Icon name={icon} color="#FFFFFF" size={18} /> : null}</Pressable>;
+  return <Pressable testID={testID} accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}><Text style={styles.primaryButtonText}>{children}</Text>{icon ? <V23Icon name={icon} color="#FFFFFF" size={18} /> : null}</Pressable>;
 }
 
 export function V23OutlineButton({ children, onPress }: { children: ReactNode; onPress: () => void }) {

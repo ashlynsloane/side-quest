@@ -1,14 +1,20 @@
 import type { BodyRegion, EnduranceDiscipline, EnduranceSchedule, EquipmentId, PerformanceGoal, PerformanceGoalType, TrainingBlockPlan, Weekday } from '@circuit/domain';
-import { generateTrainingBlock, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
+import { addLocalCalendarDays, buildFirstWeekTrainingSummary, generateTrainingBlock, nextLocalMonday, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import Constants from 'expo-constants';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen, Surface } from '@/components/v12-ui';
-import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegionExposures, savePerformanceGoal, saveTrainingBlock } from '@/services/database';
+import { ensureDefaultEquipmentProfiles, getPreviousExerciseIds, getRecentRegionExposures, savePerformanceGoal, saveTrainingBlock, getTrainingBlockById, withVerifiedAthleteDatabase } from '@/services/database';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { useOnboarding } from '@/state/onboarding-context';
+import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
+import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
+import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
+import { firstWeekAttemptSeed } from '@/services/first-week-provenance';
+import { isSyntheticNativeGenerationRace, holdSyntheticFirstWeekBeforePersistence } from '@/services/native-qa-generation-race';
 
 type Params = { goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; background?: string; runStatus?: string; injury?: string; strength?: string };
 type BuildState = 'building' | 'ready' | 'error';
@@ -19,45 +25,169 @@ export default function OnboardingFirstWeekScreen() {
   const params = useLocalSearchParams<Params>();
   const router = useRouter();
   const { exercises } = useExerciseCatalog();
-  const { complete } = useOnboarding();
+  const { complete, state: onboardingState } = useOnboarding();
+  const { user, signOut } = useAuth();
+  // The interruption control is unreachable in any normal beta bundle.
+  const syntheticGenerationRace = isSyntheticNativeGenerationRace(
+    Constants.expoConfig?.ios?.bundleIdentifier, user,
+  );
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [state, setState] = useState<BuildState>('building');
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const started = useRef(false);
+  const [enduranceEvents, setEnduranceEvents] = useState<TrainingCalendarEvent[]>([]);
+  const [enduranceWarning, setEnduranceWarning] = useState<string | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [resultAttemptKey, setResultAttemptKey] = useState<string | null>(null);
+  const [syntheticGenerationReady, setSyntheticGenerationReady] = useState(false);
+  const currentAttempt = useRef(0);
+  const started = useRef<string | null>(null);
+  const activeAthleteId = useRef<string | null>(user?.id ?? null);
+  activeAthleteId.current = user?.id ?? null;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
-    if (started.current || exercises.length === 0) return;
-    started.current = true;
-    void buildFirstWeek(params, exercises).then(async (result) => {
-      await savePerformanceGoal(result.goal);
-      await saveTrainingBlock(result.block);
-      await complete();
-      setBlock(result.block);
-      setState('ready');
-    }).catch((caught: unknown) => {
-      setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
-      setState('error');
-    });
-  }, [complete, exercises, params]);
+    const athleteId = user?.id;
+    const attemptKey = `${athleteId ?? 'signed-out'}:${retryAttempt}`;
+    if (!athleteId || started.current === attemptKey || exercises.length === 0) return;
+    started.current = attemptKey;
+    setBlock(null);
+    setSyntheticGenerationReady(false);
+    setError(null);
+    setEnduranceWarning(null);
+    setEnduranceEvents([]);
+    setState('building');
+    const attemptNumber = ++currentAttempt.current;
+    const stillCurrent = () => mounted.current && activeAthleteId.current === athleteId
+      && currentAttempt.current === attemptNumber;
+    // The setup timestamp is durable and athlete-scoped. A restart after a
+    // partial SQLite write must target the SAME week and generated block ID.
+    const startedAt = onboardingState.firstWeekSetupStartedAt;
+    const referenceDate = startedAt ? new Date(startedAt) : new Date();
+    if (!Number.isFinite(referenceDate.getTime())) {
+      if (stillCurrent()) {
+        setError('First-week setup timestamp is invalid; return to setup and retry.');
+        setResultAttemptKey(attemptKey);
+        setState('error');
+      }
+      return;
+    }
+    const weekStartDate = nextLocalMonday(referenceDate);
+    const seed = firstWeekAttemptSeed(params, weekStartDate);
+    void buildFirstWeek(params, exercises, { weekStartDate, seed, referenceDate }, athleteId)
+      .then(async (result) => {
+        // QA-only deterministic post-generation / pre-SQL commit race. This
+        // fixture is available only in the isolated synthetic iOS bundle and
+        // after a fully calculated draft is awaiting its owner-locked save.
+        // If A signs out and B activates while we hold, stillCurrent MUST
+        // reject A's result rather than writing it to B's SQLite handle.
+        if (syntheticGenerationRace) {
+          if (stillCurrent()) setSyntheticGenerationReady(true);
+          await holdSyntheticFirstWeekBeforePersistence(true);
+        }
+        // Both identity checks matter: user changes during generation AND
+        // while waiting for the SQLite activation/write queue must fail closed.
+        if (!stillCurrent()) return;
+        const saved = await withVerifiedAthleteDatabase(athleteId, async () => {
+          if (!stillCurrent()) throw new Error('Athlete changed during first-week generation.');
+          // Ownership remains locked across ALL awaited writes, including
+          // weekly repair and endurance calendar refresh.
+          const canonical = (await getTrainingBlockById(result.block.id)) ?? result.block;
+          if (!stillCurrent()) throw new Error('Athlete changed before saving the first week.');
+          await savePerformanceGoal(canonical.goal);
+          await saveTrainingBlock(canonical);
+          let generatedEvents: TrainingCalendarEvent[] = [];
+          let warning: string | null = null;
+          try {
+            const wholeAthlete = await refreshLatestWholeAthletePlan();
+            generatedEvents = wholeAthlete?.generatedEvents ?? [];
+          } catch (planningError) {
+            warning = planningError instanceof Error ? planningError.message
+              : 'Endurance planning is not available; strength draft was saved.';
+          }
+          if (!stillCurrent()) return null;
+          await complete();
+          return { canonical, generatedEvents, warning };
+        });
+        if (!stillCurrent() || !saved) return;
+        setBlock(saved.canonical);
+        setEnduranceEvents(saved.generatedEvents);
+        setEnduranceWarning(saved.warning);
+        setResultAttemptKey(attemptKey);
+        setState('ready');
+      })
+      .catch((caught: unknown) => {
+        if (!stillCurrent()) return; // Don't show athlete A's errors on B's screen.
+        setError(caught instanceof Error ? caught.message : 'The first week could not be generated.');
+        setResultAttemptKey(attemptKey);
+        setState('error');
+      });
+  }, [complete, exercises, params, onboardingState.firstWeekSetupStartedAt, retryAttempt, syntheticGenerationRace, user?.id]);
 
-  if (state === 'building') return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface></AppScreen>;
+  // A profile switch invalidates the displayed A plan immediately, before
+  // React effects run or asynchronous SQLite activation finishes for B.
+  const expectedAttemptKey = `${user?.id ?? 'signed-out'}:${retryAttempt}`;
+  if (state === 'building' || resultAttemptKey !== expectedAttemptKey) return <AppScreen eyebrow="BUILDING YOUR WEEK" title="Making the first draft." subtitle="Using your schedule, equipment, restrictions, and athlete profile."><Surface style={styles.buildCard}>{['Balancing goal and available time','Applying sport-background context','Protecting run progression','Selecting a sustainable strength dose','Preparing the first-week preview'].map((item,index) => <View key={item} style={styles.buildRow}><View style={styles.buildDot}><Text style={styles.buildDotText}>{index < 4 ? '✓' : '…'}</Text></View><Text style={styles.buildText}>{item}</Text></View>)}</Surface>
+    {syntheticGenerationRace && syntheticGenerationReady ? <Pressable
+      testID="sidequest-qa-switch-during-first-week-generation"
+      accessibilityRole="button"
+      accessibilityLabel="Synthetic QA switch athlete during first-week generation"
+      onPress={() => void signOut()}
+      style={styles.secondary}>
+      <Text style={styles.secondaryText}>Synthetic QA: switch athlete before saving</Text>
+    </Pressable> : null}
+  </AppScreen>;
 
-  if (state === 'error' || !block) return <AppScreen eyebrow="FIRST DRAFT" title="The week needs one more review." subtitle={error ?? 'The draft could not be generated.'}><Surface style={styles.errorCard}><Text style={styles.errorTitle}>Nothing was saved.</Text><Text style={styles.body}>Open the advanced planner to review the detailed inputs, or return and change the fast-start answers.</Text></Surface><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
+  if (state === 'error' || !block) return <AppScreen eyebrow="FIRST DRAFT" title="The week needs one more review." subtitle={error ?? 'The draft could not be generated.'}><Surface style={styles.errorCard}><Text style={styles.errorTitle}>{block
+      ? 'The strength plan was saved, but setup could not finish.'
+      : 'The first training block could not be saved.'}</Text><Text style={styles.body}>You can retry the same first-week attempt without creating a new plan identity, or review the inputs in the advanced planner.</Text></Surface><Pressable
+    testID="sidequest-qa-retry-first-week" accessibilityRole="button"
+    onPress={() => {
+      setError(null);
+      setEnduranceWarning(null);
+      setState('building');
+      setRetryAttempt((current) => current + 1);
+    }}
+    style={styles.primary}><Text style={styles.primaryText}>Retry building this week</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
 
   const week = block.weeks[0];
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const firstWeek = week ? buildFirstWeekTrainingSummary({
+    weekStartDate: week.weekStartDate,
+    strengthSessions: week.sessions, generatedEvents: enduranceEvents, timezone,
+  }) : null;
   return <AppScreen eyebrow="YOUR FIRST DRAFT" title="Your first week is ready." subtitle="Start here, then let completed training and check-ins improve the next recommendation.">
-    <Surface style={styles.summary}><Text style={styles.summaryTitle}>{block.goal.name}</Text><Text style={styles.summaryMeta}>{week?.sessions.length ?? 0} strength sessions · {block.goal.defaultSessionMinutes} min each</Text><Text style={styles.profileLine}>{profileSummary(params)}</Text></Surface>
+    <Surface style={styles.summary}><Text style={styles.summaryTitle}>{block.goal.name}</Text><Text style={styles.summaryMeta}>{firstWeek ? `${firstWeek.sessions.length} proposed sessions · ${firstWeek.counts.strength} strength · ${firstWeek.counts.swim} swim · ${firstWeek.counts.bike} bike · ${firstWeek.counts.run} run` : 'Training week unavailable'}</Text><Text style={styles.profileLine}>{profileSummary(params)}</Text><Text style={styles.body}>This is a generated proposal using availability and self-reported context, not an approved increase from measured training history.</Text></Surface>
     <Text style={styles.sectionLabel}>WEEK 1</Text>
-    <Surface style={styles.weekCard}>{week?.sessions.map((session) => <View key={session.id} style={styles.sessionRow}><View style={styles.dateBadge}><Text style={styles.dateText}>{shortDate(session.date)}</Text></View><View style={styles.sessionCopy}><Text style={styles.sessionTitle}>{session.title}</Text><Text style={styles.sessionMeta}>{session.intendedLoad} · {Math.round(session.workout.estimatedElapsedSeconds / 60)} min</Text></View></View>)}</Surface>
-    <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text></View>
-    <Pressable onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Use this first week</Text><Text style={styles.arrow}>›</Text></Pressable>
+    <Surface style={styles.weekCard}>{firstWeek?.days.map((day) => <View key={day.date} style={styles.sessionRow}>
+      <View style={styles.dateBadge}><Text style={styles.dateText}>{shortDate(day.date)}</Text></View>
+      <View style={styles.sessionCopy}>
+        {day.sessions.length ? day.sessions.map((session) =>
+          <View key={session.id} style={{ marginBottom: 7 }}>
+            <Text style={styles.sessionTitle}>{session.title}</Text>
+            <Text style={styles.sessionMeta}>{session.sport} · {session.plannedMinutes === null
+              ? 'time not available' : session.plannedMinutes + ' min estimated'} · {session.status}</Text>
+          </View>) : <Text style={styles.sessionMeta}>No scheduled workout</Text>}
+      </View>
+    </View>)}</Surface>
+    {enduranceWarning ? <Surface style={styles.errorCard}><Text style={styles.errorTitle}>Endurance calendar needs review</Text><Text style={styles.body}>{enduranceWarning}</Text><Text style={styles.body}>Your strength block was saved. The Week screen can retry the wider plan.</Text></Surface> : null}
+    <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{params.restriction && params.restriction !== 'none' ? <Text style={styles.body}>A reported limitation still requires review of specific exercises and clinical restrictions before training.</Text> : null}</View>
+    <Pressable testID="sidequest-qa-review-first-week" accessibilityRole="button" onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
     <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
 }
 
-async function buildFirstWeek(params: Params, exercises: Parameters<typeof generateTrainingBlock>[1]['exercises']): Promise<{ goal: PerformanceGoal; block: TrainingBlockPlan }> {
+async function buildFirstWeek(
+  params: Params,
+  exercises: Parameters<typeof generateTrainingBlock>[1]['exercises'],
+  attempt: { weekStartDate: string; seed: string; referenceDate: Date },
+  athleteId: string,
+): Promise<{ goal: PerformanceGoal; block: TrainingBlockPlan }> {
   const goalType = parseGoal(params.goal);
   const totalHours = clamp(Number(params.hours) || 10, 3, 25);
   const capacity = buildCapacity(params, totalHours);
@@ -66,8 +196,9 @@ async function buildFirstWeek(params: Params, exercises: Parameters<typeof gener
   if (recommendation.validationErrors.length > 0) throw new Error(recommendation.validationErrors[0]);
   const preferredDays = parseDays(params.days);
   const sessionsPerWeek = Math.max(2, Math.min(recommendation.sessionsPerWeek, preferredDays.length)) as 2 | 3 | 4 | 5;
-  const now = new Date().toISOString();
-  const eventDate = goalType === 'general_offseason' ? undefined : addWeeks(12);
+  const now = attempt.referenceDate.toISOString();
+  const eventDate = goalType === 'general_offseason'
+    ? undefined : addWeeks(12, attempt.referenceDate);
   const goal: PerformanceGoal = {
     id: `goal_${goalType}`,
     type: goalType,
@@ -84,10 +215,20 @@ async function buildFirstWeek(params: Params, exercises: Parameters<typeof gener
     createdAt: now,
     updatedAt: now,
   };
-  const profiles = await ensureDefaultEquipmentProfiles();
-  const equipment = equipmentFor(params.equipment, profiles);
-  const [recentRegionExposures, previousExerciseIds] = await Promise.all([getRecentRegionExposures(), getPreviousExerciseIds()]);
-  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: nextMonday(), availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: `onboarding-${Date.now()}` }, { exercises, recentRegionExposures, previousExerciseIds });
+  // Default equipment initialization is itself a SQLite WRITE. Gather all
+  // athlete-specific source evidence under the same ownership lock as final
+  // persistence; otherwise a mid-generation profile switch could mix A's
+  // prior exercises with B's database or initialize B's equipment for A.
+  const evidence = await withVerifiedAthleteDatabase(athleteId, async () => {
+    const profiles = await ensureDefaultEquipmentProfiles();
+    const [recentRegionExposures, previousExerciseIds] = await Promise.all([
+      getRecentRegionExposures(), getPreviousExerciseIds(),
+    ]);
+    return { profiles, recentRegionExposures, previousExerciseIds };
+  });
+  const equipment = equipmentFor(params.equipment, evidence.profiles);
+  const { recentRegionExposures, previousExerciseIds } = evidence;
+  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: attempt.weekStartDate, availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
   return { goal, block };
@@ -98,12 +239,12 @@ function normalizeBlockSchedule(block: TrainingBlockPlan, preferredDays: Weekday
   return {
     ...block,
     weeks: block.weeks.map((week) => {
-      const weekStart = new Date(`${week.weekStartDate}T12:00:00`);
       const sessions = week.sessions.slice(0, sessionsPerWeek).map((session, index) => {
         const weekday = preferredDays[index % preferredDays.length] ?? 'monday';
-        const date = new Date(weekStart);
-        date.setDate(weekStart.getDate() + WEEKDAYS.indexOf(weekday));
-        return { ...session, date: date.toISOString().slice(0, 10) };
+        return {
+          ...session,
+          date: addLocalCalendarDays(week.weekStartDate, WEEKDAYS.indexOf(weekday)),
+        };
       });
       return { ...week, sessions };
     }),
@@ -113,9 +254,37 @@ function normalizeBlockSchedule(block: TrainingBlockPlan, preferredDays: Weekday
 function buildCapacity(params: Params, totalHours: number): AthleteCapacityProfile {
   const background = params.background ?? 'balanced';
   const injury = params.injury ?? 'none';
-  const runStatus = params.runStatus === 'reduced' || params.runStatus === 'return_to_run' || params.runStatus === 'not_running' ? params.runStatus : 'normal';
-  return { totalWeeklyHours: totalHours, currentEnduranceHours: Math.max(0, totalHours - 3), runStatus, maxRunMilesLast12Weeks: runStatus === 'not_running' ? 0 : runStatus === 'return_to_run' ? 5 : background === 'run' ? 30 : background === 'triathlon' ? 20 : 15, boneStressInjuryHistory: injury === 'recent_bone_stress' ? 'recent_or_current' : injury === 'remote_bone_stress' ? 'remote' : 'none', swimProficiency: background === 'swim' ? 'strong' : background === 'triathlon' ? 'average' : 'developing', bikeProficiency: background === 'bike' ? 'strong' : background === 'triathlon' ? 'average' : 'developing', runProficiency: background === 'run' ? 'strong' : injury === 'recurring_run' || runStatus !== 'normal' ? 'developing' : background === 'triathlon' ? 'average' : 'developing', strengthExperience: params.strength === 'beginner' || params.strength === 'advanced' ? params.strength : 'intermediate' };
+  const runStatus = params.runStatus === 'reduced' || params.runStatus === 'return_to_run'
+    || params.runStatus === 'not_running' ? params.runStatus : 'normal';
+
+  // Fast-start asks about AVAILABLE training hours, not actual completed volume.
+  // Reserving some hours for the goal-specific endurance calendar is a SCHEDULING
+  // assumption, not a measured baseline and never eligibility for progression.
+  const assumedEnduranceAllocation = Math.max(0, totalHours - 3);
+  return {
+    totalWeeklyHours: totalHours,
+    currentEnduranceHours: assumedEnduranceAllocation,
+    enduranceHoursEvidence: 'unverified_planning_assumption',
+    runStatus,
+    // No retrospective running mileage was collected. Previously the code
+    // fabricated 15/20/30 mi from background; zero is a conservative legacy
+    // numeric placeholder with explicit UNKNOWN evidence, not a zero-mile fact.
+    maxRunMilesLast12Weeks: 0,
+    runMileageEvidence: 'unknown',
+    boneStressInjuryHistory: injury === 'recent_bone_stress'
+      ? 'recent_or_current' : injury === 'remote_bone_stress' ? 'remote' : 'none',
+    swimProficiency: background === 'swim' ? 'strong'
+      : background === 'triathlon' ? 'average' : 'developing',
+    bikeProficiency: background === 'bike' ? 'strong'
+      : background === 'triathlon' ? 'average' : 'developing',
+    runProficiency: background === 'run' ? 'strong'
+      : injury === 'recurring_run' || runStatus !== 'normal' ? 'developing'
+        : background === 'triathlon' ? 'average' : 'developing',
+    strengthExperience: params.strength === 'beginner' || params.strength === 'advanced'
+      ? params.strength : 'intermediate',
+  };
 }
+
 function equipmentFor(value: string | undefined, profiles: Awaited<ReturnType<typeof ensureDefaultEquipmentProfiles>>): EquipmentId[] { if (value === 'bodyweight') return ['bodyweight']; const kind = value === 'full_gym' ? 'full_gym' : value === 'travel' ? 'travel' : 'home'; return profiles.find((profile) => profile.kind === kind)?.equipment ?? profiles.find((profile) => profile.isDefault)?.equipment ?? ['bodyweight']; }
 function excludedRegionsFor(value: string | undefined): BodyRegion[] { if (value === 'lower_body') return ['quadriceps','hamstrings','glutes','gastrocnemius','soleus','feet_ankles']; if (value === 'upper_body') return ['chest','shoulders','upper_back','lats','biceps','triceps']; if (value === 'back') return ['lower_back','core_rotation']; return []; }
 function parseDays(value: string | undefined): Weekday[] { const values = (value ?? '1,3,5').split(',').map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < 7).map((index) => WEEKDAYS[index]); return [...new Set(values)].length >= 2 ? [...new Set(values)] : ['tuesday','thursday','saturday']; }
@@ -124,8 +293,7 @@ function parsePriority(value: string | undefined): PerformanceGoal['priority'] {
 function disciplinesFor(goal: PerformanceGoalType): EnduranceDiscipline[] { if (goal === 'ironman_70_3' || goal === 'triathlon_olympic') return ['swim','bike','run']; if (goal === 'general_offseason') return []; return ['run']; }
 function enduranceScheduleFor(goal: PerformanceGoalType): EnduranceSchedule { return disciplinesFor(goal).includes('swim') ? { keySwim:'tuesday', keyBike:'saturday', keyRun:'sunday' } : disciplinesFor(goal).includes('run') ? { keyRun:'sunday' } : {}; }
 function goalLabel(goal: PerformanceGoalType): string { const labels: Record<PerformanceGoalType, string> = { triathlon_sprint:'Sprint triathlon', triathlon_olympic:'Olympic triathlon', ironman_70_3:'Ironman 70.3', ironman_full:'Ironman distance', swimrun:'Swimrun', road_10k:'Road 10K', road_half_marathon:'Half marathon', road_marathon:'Marathon', trail_50k:'Trail 50K', trail_100k:'Trail 100K', swim_speed:'Swim faster', general_offseason:'General strength' }; return labels[goal]; }
-function addWeeks(weeks: number): string { const date = new Date(); date.setDate(date.getDate() + weeks * 7); return date.toISOString().slice(0,10); }
-function nextMonday(): string { const date = new Date(); const day = date.getDay(); const add = day === 0 ? 1 : 8 - day; date.setDate(date.getDate() + add); return date.toISOString().slice(0,10); }
+function addWeeks(weeks: number, referenceDate: Date = new Date()): string { const date = new Date(referenceDate.getTime()); date.setDate(date.getDate() + weeks * 7); return date.toISOString().slice(0,10); }
 function shortDate(value: string): string { const date = new Date(`${value}T12:00:00`); return date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
 function profileSummary(params: Params): string { const background = params.background === 'swim' ? 'swim-strong' : params.background === 'bike' ? 'bike-strong' : params.background === 'run' ? 'run-strong' : params.background === 'triathlon' ? 'triathlon background' : 'mixed / newer background'; const run = params.runStatus === 'not_running' ? 'not currently running' : params.runStatus === 'return_to_run' ? 'returning to run' : params.runStatus === 'reduced' ? 'reduced running' : 'running normally'; return `${background} · ${run}`; }
 function rationaleFor(params: Params): string { if (params.injury === 'recent_bone_stress') return 'The starting dose preserves direct strength while using conservative lower-body progression because you reported a recent bone-stress concern.'; if (params.injury === 'recurring_run' || params.runStatus === 'return_to_run' || params.runStatus === 'not_running') return 'The starting dose treats running durability and impact tolerance as developing, rather than assuming endurance experience transfers evenly across sports.'; if (params.background === 'swim') return 'Your swim background is treated as real experience, while run and impact progression remain separate planning dimensions.'; if (params.background === 'triathlon') return 'Your multisport background is treated as experience across swim, bike, and run, while current run status and injury history still control progression.'; return 'The first draft uses your available time and current context without pretending it already knows your full training history.'; }

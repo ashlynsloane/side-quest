@@ -77,9 +77,23 @@ export interface LiveWorkoutSessionSnapshot {
   restRounds: number;
   restLoadUnit: 'lb' | 'kg';
   planLink?: ActiveWorkoutPlanLink;
+  /** Durable retry intent; cannot silently become a full completion after restart. */
+  pendingCompletion?: { completionFraction: number; completedAt: string };
 }
 
 const LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
+export const ACTIVE_WORKOUT_PROFILE_KEY = 'sidequest.active-workout.profile-id';
+const ORIGINAL_DATABASE_OWNER_KEY = 'circuit.original-database-owner';
+
+function scopedLiveSessionKey(storage: StorageLike, profileId?: string | null): string | null {
+  // Explicit null means unauthenticated. Never fall back to a prior account
+  // simply because an asynchronous callback is still finishing sign-out.
+  if (profileId === null) return null;
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+  if (!owner) return null;
+  return LIVE_SESSION_KEY + ':' + encodeURIComponent(owner);
+}
 
 type StorageLike = {
   getItem(key: string): string | null;
@@ -104,12 +118,22 @@ function isActiveWorkoutPlanLink(value: unknown): value is ActiveWorkoutPlanLink
 function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<LiveWorkoutSessionSnapshot>;
+  const pending = snapshot.pendingCompletion;
+  const pendingValid = pending === undefined || (
+    pending !== null
+    && Number.isFinite(pending.completionFraction)
+    && pending.completionFraction >= 0
+    && pending.completionFraction <= 1
+    && typeof pending.completedAt === 'string'
+    && Number.isFinite(Date.parse(pending.completedAt))
+  );
   return snapshot.schemaVersion === 1
     && Boolean(snapshot.workout?.id)
     && typeof snapshot.startedAt === 'string'
     && Number.isInteger(snapshot.stationIndex)
     && (snapshot.phase === 'work' || snapshot.phase === 'rest')
-    && typeof snapshot.remainingSeconds === 'number';
+    && typeof snapshot.remainingSeconds === 'number'
+    && pendingValid;
 }
 
 export function createInitialLiveWorkoutSession(
@@ -136,18 +160,109 @@ export function createInitialLiveWorkoutSession(
   };
 }
 
-export async function saveLiveWorkoutSession(snapshot: LiveWorkoutSessionSnapshot): Promise<void> {
-  getLocalStorage()?.setItem(LIVE_SESSION_KEY, JSON.stringify(snapshot));
+/**
+ * A pending completion is a durable, immutable write-ahead journal. Do not
+ * replace it with a new workout merely because the UI has been navigated to
+ * a different preview. Only a successful canonical ledger save and explicit
+ * checkpoint clear may unblock starting a new session.
+ */
+export function assertCanStartLiveWorkout(profileId?: string | null): void {
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) throw new Error('Cannot start an unowned workout.');
+  const raw = storage.getItem(key);
+  if (!raw) return;
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(raw);
+  } catch {
+    throw new Error('The previous workout checkpoint could not be read. Its data was preserved.');
+  }
+  if (!isLiveWorkoutSession(candidate)) {
+    throw new Error('The previous workout checkpoint could not be verified. Its data was preserved.');
+  }
+  if (candidate.pendingCompletion) {
+    throw new Error('Finish saving the previous workout before starting a new one. The original completion dose is preserved.');
+  }
 }
 
-export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapshot | null> {
+export async function saveLiveWorkoutSession(
+  snapshot: LiveWorkoutSessionSnapshot, profileId?: string | null,
+): Promise<void> {
   const storage = getLocalStorage();
-  const serialized = storage?.getItem(LIVE_SESSION_KEY);
+  if (!storage) throw new Error('Live workout storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) throw new Error('Cannot save an unowned live workout.');
+  const oldValue = storage.getItem(key);
+  if (oldValue) {
+    let previous: unknown;
+    try {
+      previous = JSON.parse(oldValue);
+    } catch {
+      // Never silently overwrite a malformed historical recovery record.
+      throw new Error('Existing workout checkpoint is unreadable. Its data was preserved.');
+    }
+    if (!isLiveWorkoutSession(previous)) {
+      throw new Error('Existing workout checkpoint is unverified. Its data was preserved.');
+    }
+    if (previous.pendingCompletion) {
+      // A pending dose owns this per-athlete slot until its canonical ledger
+      // write succeeds. A late timer write cannot turn 29% back into 100%.
+      const sameSession = previous.workout.id === snapshot.workout.id
+        && previous.startedAt === snapshot.startedAt;
+      if (!snapshot.pendingCompletion) {
+        if (!sameSession) {
+          throw new Error('Conflicting pending workout completion; save the original dose before replacement.');
+        }
+        return;
+      }
+      if (!sameSession
+        || previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
+        || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
+        throw new Error('Conflicting pending workout completion; original dose retained.');
+      }
+      // Idempotent retry of the exact same immutable journal.
+      return;
+    }
+  }
+  storage.setItem(key, JSON.stringify(snapshot));
+}
+
+export async function loadLiveWorkoutSession(
+  profileId?: string | null,
+): Promise<LiveWorkoutSessionSnapshot | null> {
+  const storage = getLocalStorage();
+  if (!storage) return null;
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) return null;
+  let serialized = storage.getItem(key);
+  if (!serialized) {
+    // Only the original database owner may adopt the single-profile legacy
+    // checkpoint. This is a copy-before-delete migration; failed writes leave
+    // the historical checkpoint untouched for explicit recovery.
+    const owner = profileId === undefined
+      ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+    if (owner && storage.getItem(ORIGINAL_DATABASE_OWNER_KEY) === owner) {
+      const legacy = storage.getItem(LIVE_SESSION_KEY);
+      if (legacy) {
+        try {
+          const candidate: unknown = JSON.parse(legacy);
+          if (!isLiveWorkoutSession(candidate)) return null;
+          storage.setItem(key, legacy);
+          storage.removeItem(LIVE_SESSION_KEY);
+          serialized = legacy;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
   if (!serialized) return null;
   try {
     const parsed: unknown = JSON.parse(serialized);
     if (!isLiveWorkoutSession(parsed)) {
-      storage?.removeItem(LIVE_SESSION_KEY);
+      // Do not silently remove an invalid persisted recovery journal.
       return null;
     }
     return {
@@ -157,11 +272,13 @@ export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapsh
       planLink: isActiveWorkoutPlanLink(parsed.planLink) ? parsed.planLink : undefined,
     };
   } catch {
-    storage?.removeItem(LIVE_SESSION_KEY);
     return null;
   }
 }
 
-export async function clearLiveWorkoutSession(): Promise<void> {
-  getLocalStorage()?.removeItem(LIVE_SESSION_KEY);
+export async function clearLiveWorkoutSession(profileId?: string | null): Promise<void> {
+  const storage = getLocalStorage();
+  if (!storage) return;
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (key) storage.removeItem(key);
 }

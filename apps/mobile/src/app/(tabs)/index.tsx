@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { V23Icon, V23ScenicBanner, V23Screen } from '@/components/v23-ui';
+import { ActiveWorkoutResumeCard } from '@/components/active-workout-resume-card';
 import { SportIcon, normalizeSportKind } from '@/components/sport-icon';
 import { conciseSessionLabel } from '@/services/training-synthesis';
 import { getLatestTrainingBlock, getTodayReadinessCheckIn, getTrainingCalendarEvents, listEnduranceActivities, listPlannedCompletedMatches } from '@/services/database';
@@ -17,7 +18,7 @@ export default function Home() {
   const { user } = useAuth();
   const { tokens } = useTheme();
   const styles = useMemo(() => makeStyles(tokens), [tokens]);
-  const { setPreviewWorkout } = useWorkoutContext();
+  const { openPlannedWorkoutPreview, activeWorkout, activePlanLink, workoutSessionReady } = useWorkoutContext();
   const [block, setBlock] = useState<TrainingBlockPlan | null>(null);
   const [readiness, setReadiness] = useState<DailyReadinessCheckIn | null>(null);
   const [events, setEvents] = useState<TrainingCalendarEvent[]>([]);
@@ -59,7 +60,7 @@ export default function Home() {
 
   const startWorkout = () => {
     if (recommendation) {
-      setPreviewWorkout(recommendation.workout);
+      openPlannedWorkoutPreview(recommendation);
       router.push('/workout-preview' as Href);
       return;
     }
@@ -72,6 +73,14 @@ export default function Home() {
         <Text style={styles.greeting}>{timeAwareGreeting()}, {firstName}.</Text>
         <Text style={styles.date}>{longDate()}</Text>
       </View>
+
+      {workoutSessionReady && activeWorkout ? (
+        <ActiveWorkoutResumeCard
+          workout={activeWorkout}
+          planLink={activePlanLink}
+          onResume={() => router.push('/active-workout' as Href)}
+        />
+      ) : null}
 
       {!hasUsablePlan ? (
         <ColdStartExperience styles={styles} tokens={tokens} router={router} />

@@ -493,6 +493,10 @@ export interface PerformanceGoal {
     currentEnduranceHours: number;
     runStatus: 'normal' | 'reduced' | 'return_to_run' | 'not_running';
     maxRunMilesLast12Weeks: number;
+    /** Data provenance: a conservative zero placeholder is NOT a recorded zero-mile week. */
+    runMileageEvidence?: 'unknown' | 'athlete_reported' | 'source_observed';
+    /** Reserved scheduling hours are NOT completed endurance hours. */
+    enduranceHoursEvidence?: 'unverified_planning_assumption' | 'athlete_reported' | 'source_observed';
     boneStressInjuryHistory: 'none' | 'remote' | 'recent_or_current';
     swimProficiency: 'developing' | 'average' | 'strong';
     bikeProficiency: 'developing' | 'average' | 'strong';
