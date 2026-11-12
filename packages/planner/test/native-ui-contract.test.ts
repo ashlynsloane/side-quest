@@ -343,6 +343,35 @@ describe('native synthetic UI automation contract', () => {
     expect(validator).toContain("B_BLOCKS");
   });
 
+  it('requires synthetic post-journal OS SIGKILL plus native recovery and SQL verification', () => {
+    const sourceScript = source('scripts/qa/kill-synthetic-pending-completion.sh');
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    const workflow = source('.github/workflows/native-ios-ui-only.yml');
+    const diag = source('scripts/qa/diagnose-native-evidence.mjs');
+    const before = source('e2e/maestro/synthetic-completion-kill-before.yaml');
+    const after = source('e2e/maestro/synthetic-completion-kill-after.yaml');
+    const profile = source('e2e/maestro/synthetic-completion-kill-profile.yaml');
+    expect(profile).toContain('synthetic-save-interrupt-a@example.invalid');
+    expect(before).toContain('sidequest-qa-completion-journal-durable-before-sql');
+    expect(after).toContain('Retry saving workout');
+    expect(before).toContain('PARTIAL WORKOUT');
+    expect(after).toContain('Completion was interrupted');
+    expect(runner).toContain('run_flow completion-kill-before');
+    expect(runner).toContain('run_flow completion-kill-after');
+    expect(runner).toContain('NATIVE_QA_COMPLETION_KILL=1');
+    expect(runner).toContain('kill-synthetic-pending-completion.sh before');
+    expect(runner).toContain('kill-synthetic-pending-completion.sh after');
+    expect(sourceScript).toContain("QA_BUNDLE_ID\" != 'com.sidequest.synthetic.qa'");
+    expect(sourceScript).toContain('launchctl list');
+    expect(sourceScript).toContain('kill -9 "$PIDS"');
+    expect(sourceScript).toContain('COUNT(*) FROM completed_workouts');
+    expect(sourceScript).toContain('COUNT(*) FROM workout_ledger');
+    expect(sourceScript).toContain('json_each(workout_ledger.exercises_json)');
+    expect(sourceScript).toContain('PRAGMA quick_check;');
+    expect(diag).toContain("'completion-kill': ['profile', 'onboarding', 'completion-kill-before', 'completion-kill-after']");
+    expect(workflow).toContain('          - completion-kill');
+  });
+
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
     const screen = source('apps/mobile/src/app/active-workout.tsx');
     const ledger = source('apps/mobile/src/services/database.ts');
@@ -513,7 +542,7 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('if [[ "$scope" == "strength" ]]');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
     const focused = source('.github/workflows/native-ios-ui-only.yml');
-    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery","generation-isolation"]');
+    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill"]');
     expect(focused).toContain('NATIVE_QA_SCOPE:');
     expect(focused).toContain('for ATTEMPT in 1 2 3 4');
     expect(focused).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
