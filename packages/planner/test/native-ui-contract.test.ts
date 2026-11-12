@@ -310,7 +310,10 @@ describe('native synthetic UI automation contract', () => {
     expect(flow).toContain('tapOn: "Finish station"');
     expect(flow.match(/- tapOn: "Leave"/g)).toHaveLength(1);
     expect(flow).toContain('visible: "Recover and record"');
-    expect(flow).toContain('assertVisible: ".*[1-9][0-9]?% completed"');
+    expect(flow).toContain('assertVisible: "Open .* strength workout, [1-9][0-9]? percent completed"');
+    expect(flow).toContain('assertNotVisible: "Open .* strength workout, 100 percent completed"');
+    expect(source('apps/mobile/src/app/training-history.tsx'))
+      .toContain('percent completed');
     expect(flow).toContain('assertNotVisible: "100% completed"');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
   });
