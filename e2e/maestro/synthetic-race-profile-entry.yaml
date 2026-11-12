@@ -8,13 +8,31 @@ appId: com.sidequest.synthetic.qa
     visible:
       id: "sidequest-qa-athlete-email"
     timeout: 45000
-- tapOn:
-    id: "sidequest-qa-athlete-email"
-- inputText: "synthetic-first-week-race-a@example.invalid"
+# Native iOS XCTest occasionally focuses the first form field while the
+# initial email tap is still settling (archived strength run 43152426701).
+# Fill NAME first, deliberately dismiss the keyboard, then enter EMAIL.
+# Assert real focused and enabled state so no malformed QA identity can pass.
+- waitForAnimationToEnd
 - tapOn:
     id: "sidequest-qa-athlete-name"
+- assertVisible:
+    id: "sidequest-qa-athlete-name"
+    focused: true
 - inputText: "Synthetic Race Athlete A"
 - tapOn: "Create your beta profile"
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- assertVisible:
+    id: "sidequest-qa-athlete-email"
+    focused: true
+- inputText: "synthetic-first-week-race-a@example.invalid"
+- tapOn: "Create your beta profile"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-enter-beta"
+      enabled: true
+    timeout: 30000
 - tapOn:
     id: "sidequest-qa-enter-beta"
 - extendedWaitUntil:
