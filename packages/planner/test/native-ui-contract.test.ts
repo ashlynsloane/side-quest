@@ -438,7 +438,7 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('if [[ "$scope" == "strength" ]]');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
     const focused = source('.github/workflows/native-ios-ui-only.yml');
-    expect(focused).toContain('["isolation","strength"]');
+    expect(focused).toContain('["isolation","strength","live-isolation"]');
     expect(focused).toContain('NATIVE_QA_SCOPE:');
     expect(focused).toContain('for ATTEMPT in 1 2 3 4');
     expect(focused).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
