@@ -274,6 +274,28 @@ describe('native synthetic UI automation contract', () => {
     expect(workflow).toContain('          - live-isolation');
   });
 
+  it('requires fail-closed synthetic native owner-denial and post-retry SQLite integrity evidence', () => {
+    const runner = source('scripts/qa/run-native-maestro.sh');
+    const diag = source('scripts/qa/diagnose-native-evidence.mjs');
+    const flow = source('e2e/maestro/synthetic-owner-recovery-steps.yaml');
+    const injection = source('scripts/qa/inject-synthetic-owner-mismatch.sh');
+    const workflow = source('.github/workflows/native-ios-ui-only.yml');
+    expect(runner).toContain('run_flow owner-recovery e2e/maestro/synthetic-owner-recovery-steps.yaml');
+    expect(runner).toContain('inject-synthetic-owner-mismatch.sh verify');
+    expect(runner).toContain('owner_recovery=1');
+    expect(diag).toContain("'owner-recovery': ['profile', 'onboarding', 'owner-recovery']");
+    expect(diag).toContain('POSTCONDITION FAILED');
+    expect(flow).toContain('Your local training history needs recovery.');
+    expect(flow).toContain('synthetic-owner-mismatch-retry-preserved');
+    expect(flow).toContain('assertNotVisible:');
+    expect(injection).toContain('com.sidequest.synthetic.qa');
+    expect(injection).toContain('NATIVE_QA_OWNER_RECOVERY');
+    expect(injection).toContain('PRAGMA quick_check;');
+    expect(injection).toContain('training_blocks;');
+    expect(injection).toContain('synthetic-owner-plan-count.txt');
+    expect(workflow).toContain('          - owner-recovery');
+  });
+
   it('does not report full planned work after partial completion and requires a durable Leave save', () => {
     const screen = source('apps/mobile/src/app/active-workout.tsx');
     const ledger = source('apps/mobile/src/services/database.ts');
@@ -444,7 +466,7 @@ describe('native synthetic UI automation contract', () => {
     expect(runner).toContain('if [[ "$scope" == "strength" ]]');
     expect(runner).toContain('run_flow strength e2e/maestro/synthetic-strength-restart-steps.yaml');
     const focused = source('.github/workflows/native-ios-ui-only.yml');
-    expect(focused).toContain('["isolation","strength","live-isolation"]');
+    expect(focused).toContain('["isolation","strength","live-isolation","owner-recovery"]');
     expect(focused).toContain('NATIVE_QA_SCOPE:');
     expect(focused).toContain('for ATTEMPT in 1 2 3 4');
     expect(focused).toContain('diff -u native-binary/native-source.sha256 current-native-source.sha256');
