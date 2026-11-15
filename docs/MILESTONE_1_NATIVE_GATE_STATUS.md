@@ -1,6 +1,6 @@
 # Side Quest — Milestone 1 authoritative native acceptance record
 
-**Status as of November 11, 2026 (local U.S. time): DRAFT / NOT RELEASED.**
+**Status as of November 14, 2026 (America/Denver): DRAFT / NOT RELEASED.**
 
 **Canonical candidate:** [PR #12](https://github.com/ashlynsloane/side-quest/pull/12),
 `test/automated-athlete-acceptance-v1`, targeting `sq2-experience-rebuild`.
@@ -11,24 +11,24 @@ cloud-feature enablement, or beta distribution is authorized by passing CI.
 
 | Gate | Verified evidence | Status |
 | --- | --- | --- |
-| Planner/mobile typecheck, actual mobile SQLite, full regression, iOS JS export | [CI #43162812460](https://github.com/ashlynsloane/side-quest/actions/runs/43162812460), `aacb6b6a` | **PASS — 723/723 tests, 118 files** |
-| Integrated six-stage native Release athlete journey | [Native #43147554597](https://github.com/ashlynsloane/side-quest/actions/runs/43147554597), updated synthetic Release source. Six stage-specific Maestro JUnit results all pass | **PASS — all six integrated stages on updated native binary** |
-| Separate A→B→A→B in-progress strength checkpoint isolation | [Native #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701), `live-isolation` independently successful with archived evidence | **PASS on updated native binary** |
+| Planner/mobile typecheck, actual mobile SQLite, full regression, iOS JS export | [CI #43667411684](https://github.com/ashlynsloane/side-quest/actions/runs/43667411684), `6750e369` | **PASS — 723/723 tests, 118 files** |
+| Integrated six-stage native Release athlete journey | [Native #43161667578](https://github.com/ashlynsloane/side-quest/actions/runs/43161667578), newer source-matched synthetic Release binary. Six stage-specific Maestro JUnit results all PASS | **PASS — all six integrated stages on updated native binary** |
+| Separate A→B→A→B in-progress strength checkpoint isolation | [Native #43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720), new independent `live-isolation` success on the current QA binary | **PASS on updated native binary** |
 | Synthetic owner-mismatch startup and retry on actual simulator | [Native #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701), `owner-recovery` JUnit + unchanged training-block count, owner mismatch, `PRAGMA quick_check` | **PASS — actual native UI plus SQLite postconditions** |
-| Synthetic A→B switch while A's generated first week is waiting to persist | [Native #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701), `generation-isolation` JUnit + distinct A/B goals and actual owner-tagged SQLite postconditions | **PASS — actual native UI plus SQLite postconditions** |
-| iOS process termination during pending workout completion + recovery | Node disk-backed SQLite OS `SIGKILL` rollback PASS; synthetic iOS `completion-kill` (post-journal/pre-SQL) and `completion-in-transaction-kill` (after uncommitted INSERT) both implemented with independent JUnit + SQLite checks | **SOURCE QA PASS; NEITHER TRUE NATIVE KILL HAS PASSED YET** |
+| Synthetic A→B switch while A's generated first week is waiting to persist | [Native #43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720), new `generation-isolation` JUnit success; prior SQL/A-B owner assertions retained | **PASS — actual native UI plus SQLite postconditions** |
+| iOS process termination during pending workout completion + recovery | [Native #43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720), both separate exact-bundle iOS `SIGKILL` jobs plus independently archived JUnit, app-death process logs, rollback/post-retry SQLite row counts, embedded-owner and integrity checks | **BOTH REAL SIMULATOR CRASH WINDOWS PASS — physical iPhone NOT RUN** |
 | Historical legacy database provenance and migration with rollback | Read-only legacy owner audit, consistent synthetic SQLite/WAL backup, and owner-checked synthetic restore into a NEW destination with original source hashes intact | **AUDIT/BACKUP/RESTORE QA PASS; REAL HUMAN OWNER PROVENANCE AND DEVICE MIGRATION NOT RUN** |
 | Signed physical iPhone acceptance / rollback | [P01–P15 physical-device protocol](MILESTONE_1_PHYSICAL_DEVICE_ACCEPTANCE.md) | **NOT RUN** |
 
-The synthetic native app was compiled and exercised in [run #43147554597](https://github.com/ashlynsloane/side-quest/actions/runs/43147554597), with all six integrated stages PASSED. Independent [run #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701) executed five focused jobs on that matching binary: **owner-recovery, generation-isolation, live-isolation and completed-history isolation PASSED**; the focused strength job **FAILED during QA profile-entry** because iOS entered the email into the name field, leaving email blank and Enter Beta disabled. It did **not** reach workout execution. This is separate from the six-stage native strength PASS. The original attempted native focus-flag assertion proved unreliable on iOS 26: the hierarchy reported focused=false even with the keyboard open. The synthetic flows now read back and assert the **actual exact name and email values** before requiring enabled Enter Beta. A new focused native run remains necessary to verify the change. Native UI-only execution is permitted only when the full native
+The synthetic native app was compiled and exercised in [run #43161667578](https://github.com/ashlynsloane/side-quest/actions/runs/43161667578), with all six integrated stages PASSED. Independent [run #43152426701](https://github.com/ashlynsloane/side-quest/actions/runs/43152426701) executed five focused jobs on that matching binary: **owner-recovery, generation-isolation, live-isolation and completed-history isolation PASSED**; the focused strength job **FAILED during QA profile-entry** because iOS entered the email into the name field, leaving email blank and Enter Beta disabled. It did **not** reach workout execution. This is separate from the six-stage native strength PASS. The original native focus-flag assertion was unreliable on iOS 26. The new exact name/email readback and enabled Enter Beta checks have **now passed in the current source-matched native strength, generation-isolation and both crash-kill jobs**. The earlier historical QA entry failure does not represent a current known strength-app defect. Native UI-only execution is permitted only when the full native
 source fingerprint exactly matches the archived synthetic Release binary.
 
 
-**Latest build and test limitations:** The later iOS Release build [#43156856872](https://github.com/ashlynsloane/side-quest/actions/runs/43156856872) compiled and archived successfully but its integrated test was blocked at the QA sign-in `focused` selector, **before onboarding/workouts**; it does not contradict the earlier all-six PASS in #43147554597. The corrected readback-based login and two distinct real-SIGKILL crash gates are awaiting acceptance on the newer source-matched Release [#43161667578](https://github.com/ashlynsloane/side-quest/actions/runs/43161667578), whose native result has not yet been verified.
+**Current native acceptance detail:** Updated six-stage Release [#43161667578](https://github.com/ashlynsloane/side-quest/actions/runs/43161667578) PASS. Five independent focused jobs in [#43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720) have completed successfully: strength, deterministic generation isolation, in-progress workout isolation, pre-SQL `SIGKILL`, and in-transaction `SIGKILL`. The remaining owner-recovery and completed-history isolation focused reruns are still in progress; both also previously passed on the earlier native binary in #43152426701. Native code-source fingerprint was checked against the archive, not inferred.
 
 ## What the native evidence actually proves
 
-The six integrated stages on #43147554597 executed, in sequence:
+The six integrated stages on #43161667578 executed, in sequence:
 
 1. Create a synthetic local athlete account.
 2. Generate the first seven-day multisport plan.
@@ -43,6 +43,31 @@ The independent seven-stage privacy coverage on #43138494416 tests a
 both survive a cold restart, and neither account sees the other's live session.
 The latest independent `live-isolation` job in #43152426701 succeeded on the updated native binary, with prerequisite profile/onboarding passes. Do not call this the
 original six-stage gate.
+
+### Two real iOS workout-save crash windows — native PASS
+
+Both independent native jobs completed successfully in
+[run #43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720).
+These tests run **on an isolated synthetic iPhone simulator bundle** with two
+different fake athletes and perform actual OS `kill -9`, not an ordinary
+route change or graceful app stop.
+
+- **After durable journal / before canonical SQL:** Evidence artifact
+  `synthetic-ui-reused-binary-evidence-completion-kill`
+  (GitHub artifact 14143278319) reports a verified exact QA app SIGKILL,
+  zero pre-SQL workout/ledger rows and, after relaunch, exactly one matching
+  partially completed workout/ledger pair with no fabricated sets.
+  Both native JUnits and SQL postconditions PASS.
+- **After real INSERT / before SQL COMMIT:** Evidence artifact
+  `synthetic-ui-reused-binary-evidence-completion-in-transaction-kill`
+  (GitHub artifact 14143082182) reports a verified exact QA app SIGKILL
+  while `withTransactionAsync` was held after an uncommitted INSERT,
+  full rollback to zero persisted workout/ledger rows, clean SQLite, and
+  exactly one original sub-100% record after retry. Both JUnits and SQL
+  postconditions PASS.
+
+Neither test substitutes for **signed physical-iPhone P08a/P08b** or
+authorizes any migration of historical real beta data.
 
 ### New native ownership-denial gate
 
@@ -119,7 +144,7 @@ journey.
 
 | Blocker | Tracking |
 | --- | --- |
-| Execute BOTH actual iOS SIGKILL windows—after immutable journal/before SQL and after uncommitted INSERT/before COMMIT—then verify separate native JUnits, owner-tagged SQLite rollback, idempotent partial retry | [Issue #13](https://github.com/ashlynsloane/side-quest/issues/13) |
+| BOTH native iOS SIGKILL windows **PASS** with archived OS-kill/JUnit/SQLite evidence; signed physical-iPhone P08a/P08b remain NOT RUN | [Issue #13](https://github.com/ashlynsloane/side-quest/issues/13) |
 | `generation-isolation` native JUnit and A/B SQLite postcondition PASSED; keep release integration tracked until approval | [Issue #19](https://github.com/ashlynsloane/side-quest/issues/19) |
 | `owner-recovery` native JUnit and original-row/owner/SQLite postcondition PASSED; real historical owner provenance still separate | [Issue #15](https://github.com/ashlynsloane/side-quest/issues/15) |
 | Document original owner provenance for any ambiguous historical real database, consistent restorable backup, deliberate migration and rollback | [Issue #15](https://github.com/ashlynsloane/side-quest/issues/15) |
