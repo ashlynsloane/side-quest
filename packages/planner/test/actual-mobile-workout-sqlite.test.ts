@@ -20,7 +20,10 @@ const state = vi.hoisted(() => ({
 // Use their real implementations without loading unrelated React Native UI exports.
 vi.mock('@circuit/planner', async () => {
   const sql = await import('../src/training-adjustment-sqlite');
+  const strength = await import('../src/daily-strength-decision-sqlite');
   return {
+    STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
+    readStrengthChoiceAudit: strength.readStrengthChoiceAudit,
     PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
     appendTrainingAdjustmentDecision: sql.appendTrainingAdjustmentDecision,
     readTrainingAdjustmentDecisions: sql.readTrainingAdjustmentDecisions,
