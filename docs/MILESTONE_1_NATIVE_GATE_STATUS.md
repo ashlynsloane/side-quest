@@ -24,7 +24,21 @@ The synthetic native app was compiled and exercised in [run #43161667578](https:
 source fingerprint exactly matches the archived synthetic Release binary.
 
 
-**Current native acceptance detail:** Updated six-stage Release [#43161667578](https://github.com/ashlynsloane/side-quest/actions/runs/43161667578) PASS. Six independent focused jobs in [#43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720) have completed successfully: strength, deterministic generation isolation, in-progress workout isolation, owner-recovery, pre-SQL `SIGKILL`, and in-transaction `SIGKILL`. The completed-history isolation rerun is still in progress; it previously passed in the all-six integrated native run #43161667578 and focused earlier binary #43152426701. Native code-source fingerprint was checked against the archive, not inferred.
+**Current native acceptance detail:** Updated six-stage Release [#43161667578](https://github.com/ashlynsloane/side-quest/actions/runs/43161667578) PASS. All **seven of seven** independent focused simulator jobs in [#43667407720](https://github.com/ashlynsloane/side-quest/actions/runs/43667407720) have completed successfully. Native code-source fingerprint was checked against the archived synthetic Release app, not inferred.
+
+### Exact focused native evidence inventory
+
+| Job | GitHub Actions result | Evidence artifact ID |
+| --- | --- | --- |
+| Strength restart and partial completion | PASS | 14142768918 |
+| First-week generation A→B isolation | PASS | 14142729004 |
+| In-progress workout A→B checkpoint isolation | PASS | 14142739118 |
+| Embedded-owner mismatch and retry | PASS | 14142818993 |
+| Real pre-SQL app SIGKILL and retry | PASS | 14143278319 |
+| Real in-transaction app SIGKILL and rollback/retry | PASS | 14143082182 |
+| Completed-history A→B→A isolation | PASS | 14144145444 |
+
+All artifacts belong to native run #43667407720 and are synthetic-only. This closes the **simulator acceptance** checks, not signed physical-iPhone validation, real legacy-owner provenance, or release approval. This documentation-only commit requires independent exact-head CI before that new head can be called green.
 
 ## What the native evidence actually proves
 
