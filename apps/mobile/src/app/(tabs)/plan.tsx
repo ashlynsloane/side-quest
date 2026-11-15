@@ -1,6 +1,6 @@
 // Legacy validation compatibility: THIS WEEK’S FOCUS; Strength priority; <DisclosureGroup; Current block; metricRow; More planning tools; This week; FOCUS THIS WEEK; Why this week?.
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
-import { localCalendarDate, localTrainingDate, type TrainingWeekEvidence } from '@circuit/planner';
+import { buildDailyTrainingReview, localCalendarDate, localTrainingDate, type DailyTrainingReview, type TrainingWeekEvidence } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +17,7 @@ import {
 } from '@/services/database';
 import { trainingSpaceAssignmentForPlannedSession } from '@/services/training-space-runtime';
 import { conciseSessionLabel } from '@/services/training-synthesis';
-import { loadCoreTrainingWeekEvidence } from '@/services/core-training-week-evidence';
+import { loadCoreTrainingWeekAudit } from '@/services/core-training-week-evidence';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
@@ -38,6 +38,7 @@ export default function PlanTab() {
   const [planningState, setPlanningState] = useState<'build' | 'hold' | 'protect' | 'recover' | null>(null);
   const [planningWarning, setPlanningWarning] = useState<string | null>(null);
   const [weekEvidence, setWeekEvidence] = useState<TrainingWeekEvidence | null>(null);
+  const [dailyReview, setDailyReview] = useState<DailyTrainingReview | null>(null);
   const [evidenceWarning, setEvidenceWarning] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -78,10 +79,25 @@ export default function PlanTab() {
       setHasConnectedTrainingData(sources.some((source) => source.active && source.sourceType !== 'manual'));
       try {
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-        const result = await loadCoreTrainingWeekEvidence(localTrainingDate(from, timezone), timezone);
-        if (live) { setWeekEvidence(result); setEvidenceWarning(null); }
+        const audit = await loadCoreTrainingWeekAudit(localTrainingDate(from, timezone), timezone);
+        const daily = buildDailyTrainingReview({
+          records: audit.plannedAndCompleted,
+          asOfLocalDate: localTrainingDate(new Date().toISOString(), timezone),
+          sourceCoverageVerified: false,
+          historyPossiblyTruncated: audit.historyPossiblyTruncated,
+          historyAuditIssues: audit.historyAuditIssues,
+        });
+        if (live) {
+          setWeekEvidence(audit.evidence);
+          setDailyReview(daily);
+          setEvidenceWarning(null);
+        }
       } catch (error) {
-        if (live) { setWeekEvidence(null); setEvidenceWarning(error instanceof Error ? error.message : 'Training evidence is unavailable.'); }
+        if (live) {
+          setWeekEvidence(null);
+          setDailyReview(null);
+          setEvidenceWarning(error instanceof Error ? error.message : 'Training evidence is unavailable.');
+        }
       }
     })();
     return () => { live = false; };
@@ -158,6 +174,10 @@ export default function PlanTab() {
       {weekEvidence ? <>
         <Text style={styles.evidenceText}>{weekEvidence.completed.count === 0 ? 'No completed training recorded in this week.' : `${weekEvidence.completed.count} completed records · ${weekEvidence.completed.combinedMinutes > 0 ? `${Math.round(weekEvidence.completed.combinedMinutes)} min with available duration data` : 'durations currently unknown'}`}</Text>
         <Text style={styles.evidenceText}>{weekEvidence.remainingPlanned.count} planned sessions not verified completed · {weekEvidence.remainingPlanned.combinedMinutes > 0 ? `${Math.round(weekEvidence.remainingPlanned.combinedMinutes)} min from available planning estimates` : 'duration unavailable or no scheduled sessions'}</Text>
+        {dailyReview?.pastUnverifiedCount ? <Text style={styles.evidenceWarning}>
+          {dailyReview.pastUnverifiedCount} earlier planned session{dailyReview.pastUnverifiedCount === 1 ? '' : 's'} without linked completion. This does not prove they were missed. No catch-up sessions have been scheduled.
+        </Text> : null}
+        {dailyReview?.pastUnverifiedCount ? <Text style={styles.evidenceText}>{dailyReview.advice}</Text> : null}
         <Text style={styles.evidenceWarning}>Source coverage and baseline eligibility are not yet verified. This is not an approved training progression allowance.</Text>
         {weekEvidence.unresolvedRecords.length || weekEvidence.sourceConflicts.length ? <Text style={styles.evidenceWarning}>{weekEvidence.unresolvedRecords.length + weekEvidence.sourceConflicts.length} record fields or source conflicts need review before calculating reliable weekly volume.</Text> : null}
       </> : <Text style={styles.evidenceWarning}>{evidenceWarning ?? 'Loading completed training evidence…'}</Text>}
