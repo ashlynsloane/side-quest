@@ -1747,3 +1747,6 @@ export type { DailyTrainingReview } from './daily-training-review';
 
 export { buildDailyFeedbackAdvice } from './daily-feedback-advice';
 export type { DailyFeedbackAdvice } from './daily-feedback-advice';
+
+export { buildDailySessionChoices } from './daily-session-choices';
+export type { DailySessionChoice, DailySessionChoices } from './daily-session-choices';
