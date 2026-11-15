@@ -34,6 +34,8 @@ test('synthetic backup and restore preserve every table and schema version', asy
       INSERT INTO training_blocks VALUES ('week-a');
       CREATE TABLE athlete_plan_notes(id INTEGER PRIMARY KEY, text TEXT);
       INSERT INTO athlete_plan_notes VALUES (1, 'fixture-only');
+      CREATE TABLE synthetic_blob_metadata(id INTEGER PRIMARY KEY, raw BLOB, note TEXT);
+      INSERT INTO synthetic_blob_metadata VALUES (1, x'00FF10', 'binary-fixture');
     `);
   } finally {
     db.close();
@@ -53,6 +55,7 @@ test('synthetic backup and restore preserve every table and schema version', asy
     assert.equal(check.prepare('PRAGMA user_version').get().user_version, 7);
     assert.equal(check.prepare('SELECT COUNT(*) AS n FROM athlete_plan_notes').get().n, 1);
     assert.equal(check.prepare('SELECT id FROM training_blocks').get().id, 'week-a');
+    assert.deepEqual(Array.from(check.prepare('SELECT raw FROM synthetic_blob_metadata').get().raw), [0, 255, 16]);
   } finally {
     check.close();
   }
