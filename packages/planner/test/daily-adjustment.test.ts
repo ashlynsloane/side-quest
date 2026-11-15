@@ -27,6 +27,23 @@ describe('daily adjustment engine', () => {
     expect(result.recommendedOptionId).toContain('shorten');
   });
 
+  it('requires explicit athlete approval for shorter, easier and recovery choices', () => {
+    for (const request of [
+      { sessionId: planned.id, reason: 'time' as const,
+        requestedAction: 'shorter' as const, availableMinutes: 35 },
+      { sessionId: planned.id, reason: 'fatigue' as const,
+        requestedAction: 'easier' as const },
+      { sessionId: planned.id, reason: 'pain' as const,
+        requestedAction: 'skip' as const, focalPain: true, symptomSeverity: 3 as const },
+    ]) {
+      const result = buildDailyAdjustmentOptions(request, {
+        plannedSession: planned, weekSessions: [planned], availableDates: ['2026-07-29'],
+      });
+      expect(result.options.length).toBeGreaterThan(0);
+      expect(result.options.every(option => option.requiresApproval)).toBe(true);
+    }
+  });
+
   it('does not substitute running during bone-stress return', () => {
     const result = buildDailyAdjustmentOptions({ sessionId: planned.id, reason: 'access', requestedAction: 'different', availableDisciplines: ['run', 'swim'] }, {
       plannedSession: planned, weekSessions: [planned], availableDates: [], recentBoneStress: true, returnToRun: true,
