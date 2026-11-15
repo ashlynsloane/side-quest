@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -530,6 +530,7 @@ export async function initializeDatabase(): Promise<void> {
     -- Append-only per-profile decisions. An approval is never updated in place;
     -- a later revocation or new approval is an additional event.
     ${PLAN_ADJUSTMENT_TABLE_SQL}
+    ${STRENGTH_CHOICE_AUDIT_SQL}
 
     CREATE TABLE IF NOT EXISTS training_baseline_review_events (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1403,6 +1404,18 @@ const trainingAdjustmentDriver: TrainingAdjustmentSqlDriver = {
     await db.withTransactionAsync(fn);
   },
 };
+/** Read-only per-athlete strength decision history. This does not enable
+ * approval in the UI; the fresh-safety approval workflow remains gated.
+ */
+export async function listDailyStrengthChoiceDecisions(
+  athleteId: string, blockId: string, sessionId: string,
+): Promise<StrengthChoiceDecision[]> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readStrengthChoiceAudit(trainingAdjustmentDriver, athleteId, blockId, sessionId);
+  });
+}
+
 export async function listTrainingPlanAdjustmentEvents(
   window?: { from: string; to: string },
 ): Promise<PlanAdjustmentEvent[]> {
