@@ -1741,3 +1741,6 @@ export * from './visible-progress-workspace';
 export * from './visible-you-workspace';
 
 export * from './recommendation-explanation';
+
+export { buildDailyTrainingReview } from './daily-training-review';
+export type { DailyTrainingReview } from './daily-training-review';
