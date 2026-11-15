@@ -74,4 +74,14 @@ test('synthetic backup and restore preserve every table and schema version', asy
   });
   assert.notEqual(deniedOverwrite.status, 0);
   assert.equal(existsSync(restored), true);
+  const unchanged = new DatabaseSync(restored, { readOnly: true });
+  try {
+    assert.equal(unchanged.prepare('PRAGMA quick_check').get().quick_check, 'ok');
+    assert.equal(unchanged.prepare('SELECT COUNT(*) AS n FROM athlete_plan_notes').get().n, 1);
+    assert.deepEqual(Array.from(unchanged.prepare(
+      'SELECT raw FROM synthetic_blob_metadata',
+    ).get().raw), [0, 255, 16]);
+  } finally {
+    unchanged.close();
+  }
 });
