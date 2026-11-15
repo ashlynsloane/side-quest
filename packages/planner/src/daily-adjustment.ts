@@ -124,7 +124,7 @@ function shortenOption(session: UnifiedTrainingSession, availableMinutes: number
     weeklyConsequences: [`Weekly training time decreases by ${session.durationMinutes - duration} minutes.`, preservesPurpose ? 'The primary objective is substantially preserved.' : 'The original objective remains only partially completed.'],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: false,
+    requiresApproval: true,
     confidence: 'high',
   };
 }
@@ -145,7 +145,7 @@ function easierOption(session: UnifiedTrainingSession, context: AdjustmentContex
     weeklyConsequences: ['Today’s hard-session objective is removed.', 'Upcoming key sessions remain in place unless fatigue continues.'],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: false,
+    requiresApproval: true,
     confidence: worsening ? 'high' : 'moderate',
   };
 }
