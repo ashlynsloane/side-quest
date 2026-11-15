@@ -1,6 +1,6 @@
 // Legacy validation compatibility: THIS WEEK’S FOCUS; Strength priority; <DisclosureGroup; Current block; metricRow; More planning tools; This week; FOCUS THIS WEEK; Why this week?.
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
-import { buildDailyTrainingReview, localCalendarDate, localTrainingDate, type DailyTrainingReview, type TrainingWeekEvidence } from '@circuit/planner';
+import { buildDailyFeedbackAdvice, buildDailyTrainingReview, localCalendarDate, localTrainingDate, type DailyFeedbackAdvice, type DailyTrainingReview, type TrainingWeekEvidence } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -11,6 +11,8 @@ import { V23Card, V23Chip, V23GroupedList, V23Icon, V23Row, V23Screen, V23SportP
 import {
   getLatestTrainingBlock,
   getTodayReadinessCheckIn,
+  getActiveTrainingCheckIn,
+  listWorkoutFeedbackSince,
   getTrainingCalendarEvents,
   listCompletedWorkoutSummaries,
   listTrainingCalendarSources,
@@ -18,6 +20,7 @@ import {
 import { trainingSpaceAssignmentForPlannedSession } from '@/services/training-space-runtime';
 import { conciseSessionLabel } from '@/services/training-synthesis';
 import { loadCoreTrainingWeekAudit } from '@/services/core-training-week-evidence';
+import { readinessBand, readinessScore } from '@/services/readiness';
 import { SIDE_QUEST_PLAN_SOURCE_ID } from '@/services/whole-athlete-plan';
 import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-runtime';
 import { useTheme } from '@/state/theme-context';
@@ -39,6 +42,7 @@ export default function PlanTab() {
   const [planningWarning, setPlanningWarning] = useState<string | null>(null);
   const [weekEvidence, setWeekEvidence] = useState<TrainingWeekEvidence | null>(null);
   const [dailyReview, setDailyReview] = useState<DailyTrainingReview | null>(null);
+  const [dailyAdvice, setDailyAdvice] = useState<DailyFeedbackAdvice | null>(null);
   const [evidenceWarning, setEvidenceWarning] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -89,15 +93,33 @@ export default function PlanTab() {
           historyPossiblyTruncated: audit.historyPossiblyTruncated,
           historyAuditIssues: audit.historyAuditIssues,
         });
+        const [checkIn, recentFeedback] = await Promise.all([
+          getActiveTrainingCheckIn(),
+          listWorkoutFeedbackSince(from),
+        ]);
+        // Only feedback from the selected training week may inform this
+        // displayed review; older workouts never masquerade as today's input.
+        const latestFeedback = recentFeedback.find(item =>
+          item.createdAt >= from && item.createdAt <= to);
+        const advice = buildDailyFeedbackAdvice({
+          daily,
+          readinessBand: readiness ? readinessBand(readinessScore(readiness)) : null,
+          recentDifficulty: latestFeedback?.difficulty ?? null,
+          activeRestriction: checkIn?.status === 'tightness_pain'
+            || checkIn?.status === 'unable_to_train',
+          historyIncomplete: audit.historyPossiblyTruncated || audit.historyAuditIssues.length > 0,
+        });
         if (live) {
           setWeekEvidence(audit.evidence);
           setDailyReview(daily);
+          setDailyAdvice(advice);
           setEvidenceWarning(null);
         }
       } catch (error) {
         if (live) {
           setWeekEvidence(null);
           setDailyReview(null);
+          setDailyAdvice(null);
           setEvidenceWarning(error instanceof Error ? error.message : 'Training evidence is unavailable.');
         }
       }
@@ -180,6 +202,12 @@ export default function PlanTab() {
           {dailyReview.pastUnverifiedCount} earlier planned session{dailyReview.pastUnverifiedCount === 1 ? '' : 's'} without linked completion. This does not prove they were missed. No catch-up sessions have been scheduled.
         </Text> : null}
         {dailyReview?.pastUnverifiedCount ? <Text style={styles.evidenceText}>{dailyReview.advice}</Text> : null}
+        {dailyAdvice ? <>
+          <Text style={styles.evidenceText}>{dailyAdvice.headline}</Text>
+          <Text style={styles.evidenceWarning}>{dailyAdvice.explanation}</Text>
+          <Text style={styles.evidenceWarning}>Review suggestion only · no training session changed automatically.</Text>
+        </> : null}
+
         <Text style={styles.evidenceWarning}>Source coverage and baseline eligibility are not yet verified. This is not an approved training progression allowance.</Text>
         {weekEvidence.unresolvedRecords.length || weekEvidence.sourceConflicts.length ? <Text style={styles.evidenceWarning}>{weekEvidence.unresolvedRecords.length + weekEvidence.sourceConflicts.length} record fields or source conflicts need review before calculating reliable weekly volume.</Text> : null}
       </> : <Text style={styles.evidenceWarning}>{evidenceWarning ?? 'Loading completed training evidence…'}</Text>}
