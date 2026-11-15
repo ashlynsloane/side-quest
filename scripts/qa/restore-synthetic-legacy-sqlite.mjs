@@ -39,6 +39,9 @@ async function main() {
     if (integrity.length !== 1 || integrity[0].quick_check !== 'ok') {
       throw new Error('Source integrity could not be verified.');
     }
+    if (source.prepare('PRAGMA foreign_key_check').all().length !== 0) {
+      throw new Error('Source relational integrity failed.');
+    }
     const ownerExists = source.prepare(
       "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='sidequest_athlete_database_owner'",
     ).get()?.n === 1;
@@ -57,6 +60,9 @@ async function main() {
       const result = restored.prepare('PRAGMA quick_check').all();
       if (result.length !== 1 || result[0].quick_check !== 'ok') {
         throw new Error('Restored database integrity failed.');
+      }
+      if (restored.prepare('PRAGMA foreign_key_check').all().length !== 0) {
+        throw new Error('Restored relational integrity failed.');
       }
       const restoredOwner = restored.prepare(
         'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton=1',
@@ -105,10 +111,25 @@ async function main() {
           throw new Error('Restored table contents differ.');
         }
       }
-      const sourceVersion = source.prepare('PRAGMA user_version').get()?.user_version;
-      const copiedVersion = restored.prepare('PRAGMA user_version').get()?.user_version;
-      if (sourceVersion !== copiedVersion) {
-        throw new Error('Restored schema version differs.');
+      for (const pragma of ['user_version', 'application_id']) {
+        const sourceValue = source.prepare('PRAGMA ' + pragma).get()?.[pragma];
+        const restoredValue = restored.prepare('PRAGMA ' + pragma).get()?.[pragma];
+        if (sourceValue !== restoredValue) {
+          throw new Error('Restored database metadata differs.');
+        }
+      }
+      // sqlite_sequence is an internal table omitted from the user schema
+      // inventory above, but is essential to preserve AUTOINCREMENT state.
+      const sequencePresent = source.prepare(
+        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'",
+      ).get()?.n === 1;
+      if (sequencePresent) {
+        const seqRows = (database) => database.prepare(
+          'SELECT name, seq FROM sqlite_sequence ORDER BY name',
+        ).all();
+        if (JSON.stringify(seqRows(source)) !== JSON.stringify(seqRows(restored))) {
+          throw new Error('Restored AUTOINCREMENT state differs.');
+        }
       }
     } finally {
       restored.close();
