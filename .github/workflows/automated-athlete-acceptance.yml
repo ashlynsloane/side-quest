@@ -42,7 +42,11 @@ jobs:
         run: |
           bash -n scripts/qa/run-native-maestro.sh scripts/qa/inject-synthetic-owner-mismatch.sh scripts/qa/verify-synthetic-generation-race.sh scripts/qa/kill-synthetic-pending-completion.sh scripts/qa/kill-synthetic-uncommitted-completion.sh
           node --check scripts/qa/diagnose-native-evidence.mjs
-      - name: Synthetic SQLite backup/restore acceptance\n        run: node --test scripts/qa/synthetic-restore-acceptance.test.mjs\n      - name: Typecheck planner
+      - name: Synthetic SQLite backup/restore acceptance
+        run: node --test scripts/qa/synthetic-restore-acceptance.test.mjs
+      - name: Physical-device evidence validator tests (synthetic fixtures only)
+        run: node --test scripts/qa/validate-physical-device-evidence.test.mjs
+      - name: Typecheck planner
         id: planner_typecheck
         run: pnpm --dir packages/planner typecheck
       - name: Typecheck mobile
