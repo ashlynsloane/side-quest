@@ -105,7 +105,9 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
     if (replacement) options.push(replacement);
   }
 
-  const move = chooseMove(session, context);
+  // Moving the original training dose is never an implicit fallback for
+  // fatigue, reduced time or equipment access. It must be expressly asked for.
+  const move = request.requestedAction === 'move' ? chooseMove(session, context) : null;
   if (move) options.push(move);
   options.push(skipOption(session, session.priority === 'optional' || request.athletePrefersRecovery ? 'recommended' : 'acceptable', [
     session.priority === 'optional'
