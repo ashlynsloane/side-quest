@@ -89,7 +89,7 @@ export async function appendStrengthChoiceDecision(
     throw new Error('Fresh safety review and explicit athlete confirmation required.');
   }
   const local = Date.parse(input.todayLocalDate + 'T00:00:00Z');
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(input.todayLocalDate)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.todayLocalDate)
     || !Number.isFinite(local)
     || new Date(local).toISOString().slice(0, 10) !== input.todayLocalDate) {
     throw new Error('An exact athlete-local review date is required.');
