@@ -137,6 +137,8 @@ export default function PlanTab() {
   // preview; never attach a recommendation to an already closed workout.
   const nextStrength = [...strength]
     .filter(session => session.date >= today
+      && session.date >= (days[0]?.date ?? today)
+      && session.date <= (days[6]?.date ?? today)
       && session.completionStatus !== 'completed'
       && session.completionStatus !== 'skipped')
     .sort((a, b) => a.date.localeCompare(b.date))[0];
