@@ -102,13 +102,21 @@ stale source regeneration, a changed/closed session, wrong athlete, corrupt
 audit records, injected rollback, duplicate acceptance, and restart/reopen
 durability. No actual athlete files are accessed.
 
-**Critical remaining gate:** A boolean supplied by a caller does *not*
-independently prove the current athlete's symptoms, readiness, source
-completeness, exercise-level dose, or rehabilitation restrictions.
-The future mobile approval action must re-read these persisted facts under
-the correct verified athlete and reject stale/restricted requests. Until that
-is implemented and tested, the write helper must remain inaccessible from
-the live UI. The effective duration overlay is a planning **limit**, not a
+**Write-time safety hardening:** The transaction now re-reads the
+active symptom/soreness check-in and the athlete-local day's readiness row.
+A persisted active restriction, recover-level readiness, missing/corrupt
+readiness, obsolete block or a linked completed workout prevents a reduced
+dose or restoration regardless of the caller's proposed safety flag. Deferral
+remains auditable without inventing an alternate dose.
+
+**Critical remaining gate:** These checks still do not independently prove
+provider/source completeness, an active physical-therapy restriction, the
+precise modified exercise-level dose, or clinician-directed return-to-sport
+permission. A caller-supplied safety boolean does **not** supply this evidence.
+The future mobile approval action must incorporate all pertinent current
+constraints and recheck them under the verified athlete before activating an
+`Apply` control. Until that is implemented and tested, the write helper
+remains inaccessible from the live UI. The effective duration overlay is a planning **limit**, not a
 modified exercise program or clinical prescription. In particular, do not
 claim that reducing `estimatedElapsedSeconds` alone scales station
 durations, sets, repetitions, exercise loading, or tissue stress.
