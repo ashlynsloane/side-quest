@@ -37,6 +37,17 @@ function open(athlete = 'synthetic-athlete-a') {
       id TEXT PRIMARY KEY, block_json TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE workout_ledger(id TEXT PRIMARY KEY, planned_session_id TEXT);
+    CREATE TABLE training_check_ins(
+      id TEXT PRIMARY KEY, check_in_json TEXT NOT NULL,
+      active INTEGER NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE readiness_check_ins(
+      date TEXT PRIMARY KEY, check_in_json TEXT NOT NULL
+    );
+    INSERT INTO readiness_check_ins VALUES (
+      '2026-11-14',
+      '{"sleep":4,"energy":4,"muscleFreshness":4,"stress":2,"motivation":4}'
+    );
     ${STRENGTH_CHOICE_AUDIT_SQL}
   `);
   const driver: TrainingAdjustmentSqlDriver = {
@@ -158,6 +169,52 @@ describe('real SQLite atomic strength approval and undo journal', () => {
       .rejects.toThrow(/completed workout/);
     expect(await readStrengthChoiceAudit(driver,
       'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
+  });
+  it('a stored active symptom hold overrides a stale caller safety approval', async () => {
+    for (const status of ['tightness_pain', 'unable_to_train', 'muscle_soreness']) {
+      const { driver, db } = open();
+      db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)')
+        .run('symptoms', JSON.stringify({ status }), 1, '2026-11-14T08:00:00Z');
+      await expect(appendStrengthChoiceDecision(
+        driver, decision('reduce'), review,
+      )).rejects.toThrow(/symptom or soreness hold/);
+      // Deferral remains available without permitting an exercise dose.
+      await appendStrengthChoiceDecision(driver, decision('defer'), review);
+      expect(await readStrengthChoiceAudit(driver,
+        'synthetic-athlete-a', 'block-1', 'strength-1')).toHaveLength(1);
+      await expect(appendStrengthChoiceDecision(
+        driver, decision('defer', 'restored', 'undo'), review,
+      )).rejects.toThrow(/symptom or soreness hold/);
+    }
+  });
+  it('a recover-level readiness check-in blocks reduction and restoration', async () => {
+    const { driver, db } = open();
+    db.prepare('UPDATE readiness_check_ins SET check_in_json = ? WHERE date = ?').run(
+      JSON.stringify({ sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1 }),
+      '2026-11-14',
+    );
+    await expect(appendStrengthChoiceDecision(
+      driver, decision('reduce'), review,
+    )).rejects.toThrow(/recovery-level readiness/);
+    await appendStrengthChoiceDecision(driver, decision('defer'), review);
+    await expect(appendStrengthChoiceDecision(
+      driver, decision('defer', 'restored', 'undo'), review,
+    )).rejects.toThrow(/recovery-level readiness/);
+  });
+  it('missing or corrupted same-day readiness fails closed despite caller approval', async () => {
+    for (const value of [null, '{bad-json', '{"sleep":7}']) {
+      const { driver, db } = open();
+      if (value === null) {
+        db.prepare('DELETE FROM readiness_check_ins').run();
+      } else {
+        db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(value);
+      }
+      await expect(appendStrengthChoiceDecision(
+        driver, decision('reduce'), review,
+      )).rejects.toThrow(/readiness/);
+      expect(await readStrengthChoiceAudit(driver,
+        'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
+    }
   });
   it('fails closed on absence of explicit approval, safe review or future session date', async () => {
     const { driver } = open();
