@@ -22,6 +22,30 @@ planning, with an explicit athlete-local date and optional displayed-week range.
   rows, workouts, athlete-selected ceilings, injury restrictions or calendar
   schedules.
 
+## Stage 2: Read-only readiness and workout-feedback interpretation
+
+`buildDailyFeedbackAdvice` combines the athlete-local daily training review with
+the latest recorded difficulty feedback in the displayed week, today's
+readiness band, and an active symptom restriction check-in.
+
+Priority order (highest first): active symptom/restriction -> today's
+`recover` readiness -> recent `too_hard` feedback or reduced readiness
+-> incomplete/unlinked source records -> no usable inputs -> maintain with
+review. A `too_easy` workout or high readiness **never** causes automatic
+progression. Every response declares `approvalRequired: true` and
+`autoChangedSessions: 0`.
+
+The Week screen displays the headline and rationale alongside reconciled
+training evidence and links to the existing review tools. It does not write
+calendar events, silently alter duration or infer running clearance.
+
+**Limitations:** The feedback source currently describes recorded workout
+difficulty, not a comprehensive athlete-wide physiological response. Readiness
+bands are self-reported and are not validated injury-risk estimates.
+Missing provider sources and missing injury information remain unknown. This
+stage is review guidance, **not an independently authorized clinical or
+rehabilitation dose prescription**.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
