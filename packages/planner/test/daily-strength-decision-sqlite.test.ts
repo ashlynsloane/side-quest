@@ -93,8 +93,8 @@ describe('real SQLite atomic strength approval and undo journal', () => {
   it('retains exact accepted dose and source identity after real file close/reopen', async () => {
     const { db, driver, file, directory } = open();
     await appendStrengthChoiceDecision(driver, decision('reduce'), review);
-    const source = (db.prepare('SELECT block_json FROM training_blocks').get()
-      as {block_json:string}).block_json;
+    const initialRow = db.prepare('SELECT block_json FROM training_blocks').get() as {block_json:string};
+    const source = initialRow.block_json;
     db.close();
     const reopened = new DatabaseSync(file);
     all.push({ db: reopened, directory });
@@ -107,8 +107,8 @@ describe('real SQLite atomic strength approval and undo journal', () => {
       sessionId: 'strength-1', action: 'reduce', proposedMinutes: 32,
     });
     expect(effectiveStrengthChoice(rawSession(), [audit]).effectivePlanningMinutes).toBe(32);
-    expect((reopened.prepare('SELECT block_json FROM training_blocks').get()
-      as {block_json:string}).block_json).toBe(source);
+    const reopenedRow = reopened.prepare('SELECT block_json FROM training_blocks').get() as {block_json:string};
+    expect(reopenedRow.block_json).toBe(source);
   });
   it('defers without deleting the source and can undo', async () => {
     const { driver } = open();
