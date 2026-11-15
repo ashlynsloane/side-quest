@@ -88,6 +88,12 @@ export async function appendStrengthChoiceDecision(
   if (!input.athleteConfirmed || !input.safeToReview) {
     throw new Error('Fresh safety review and explicit athlete confirmation required.');
   }
+  const local = Date.parse(input.todayLocalDate + 'T00:00:00Z');
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(input.todayLocalDate)
+    || !Number.isFinite(local)
+    || new Date(local).toISOString().slice(0, 10) !== input.todayLocalDate) {
+    throw new Error('An exact athlete-local review date is required.');
+  }
   if (!decision.id || !decision.athleteId || !decision.blockId || !decision.sessionId
     || !decision.sourceSignature || !decision.createdAt
     || !['accepted', 'restored'].includes(decision.decision)
@@ -100,6 +106,50 @@ export async function appendStrengthChoiceDecision(
     );
     if (owner?.user_id !== decision.athleteId) {
       throw new Error('Strength decision athlete ownership mismatch.');
+    }
+    // Re-read persisted symptom and readiness state under the same SQLite
+    // transaction used for the audit append. A caller-provided approval flag
+    // alone is never sufficient for a dose-reduction or restoration.
+    const activeCheckIn = await sql.getFirst<{ check_in_json: string }>(
+      'SELECT check_in_json FROM training_check_ins WHERE active = 1 ORDER BY updated_at DESC LIMIT 1',
+      [],
+    );
+    let symptomHold = false;
+    if (activeCheckIn) {
+      let check: { status?: string };
+      try { check = JSON.parse(activeCheckIn.check_in_json) as { status?: string }; }
+      catch { throw new Error('Active symptom check-in is unreadable.'); }
+      if (!['normal', 'muscle_soreness', 'tightness_pain', 'unable_to_train']
+        .includes(check.status ?? '')) {
+        throw new Error('Active symptom check-in status is unknown.');
+      }
+      symptomHold = check.status !== 'normal';
+    }
+    if ((decision.action === 'reduce' && decision.decision === 'accepted')
+      || decision.decision === 'restored') {
+      if (symptomHold) {
+        throw new Error('An active symptom or soreness hold prevents increasing planned training.');
+      }
+      const readinessRow = await sql.getFirst<{ check_in_json: string }>(
+        'SELECT check_in_json FROM readiness_check_ins WHERE date = ? LIMIT 1',
+        [input.todayLocalDate],
+      );
+      if (!readinessRow) throw new Error('Current-day readiness must be reviewed before approval.');
+      let readiness: Record<string, unknown>;
+      try { readiness = JSON.parse(readinessRow.check_in_json) as Record<string, unknown>; }
+      catch { throw new Error('Current-day readiness check-in is unreadable.'); }
+      const fields = ['sleep', 'energy', 'muscleFreshness', 'stress', 'motivation'];
+      if (fields.some(field => typeof readiness[field] !== 'number'
+          || !Number.isFinite(readiness[field]) || readiness[field] < 1
+          || readiness[field] > 5)) {
+        throw new Error('Current-day readiness check-in is invalid.');
+      }
+      const score = (Number(readiness.sleep) + Number(readiness.energy)
+        + Number(readiness.muscleFreshness) + 6 - Number(readiness.stress)
+        + Number(readiness.motivation)) / 5;
+      if (score < 2.4) {
+        throw new Error('Current recovery-level readiness prohibits training approval.');
+      }
     }
     const newest = await sql.getFirst<{ id: string }>(
       'SELECT id FROM training_blocks ORDER BY updated_at DESC LIMIT 1', [],
