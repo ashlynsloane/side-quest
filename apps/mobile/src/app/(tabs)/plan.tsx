@@ -1,6 +1,6 @@
 // Legacy validation compatibility: THIS WEEK’S FOCUS; Strength priority; <DisclosureGroup; Current block; metricRow; More planning tools; This week; FOCUS THIS WEEK; Why this week?.
 import type { PlannedStrengthSession, TrainingBlockPlan, TrainingCalendarEvent } from '@circuit/domain';
-import { buildDailyFeedbackAdvice, buildDailyTrainingReview, localCalendarDate, localTrainingDate, type DailyFeedbackAdvice, type DailyTrainingReview, type TrainingWeekEvidence } from '@circuit/planner';
+import { buildDailyFeedbackAdvice, buildDailySessionChoices, buildDailyTrainingReview, localCalendarDate, localTrainingDate, type DailyFeedbackAdvice, type DailyTrainingReview, type TrainingWeekEvidence } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -133,6 +133,25 @@ export default function PlanTab() {
   const selectedIndex = days.findIndex((day) => day.date === today);
   const counts = weeklyCounts(days);
   const upcomingWeek = Boolean(days[0]?.date && days[0].date > today);
+  // A single future/planned strength session is eligible for a read-only
+  // preview; never attach a recommendation to an already closed workout.
+  const nextStrength = [...strength]
+    .filter(session => session.date >= today
+      && session.completionStatus !== 'completed'
+      && session.completionStatus !== 'skipped')
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
+  const dailySessionChoices = dailyAdvice ? buildDailySessionChoices({
+    advice: dailyAdvice,
+    nextSession: nextStrength ? {
+      id: nextStrength.id,
+      date: nextStrength.date,
+      status: nextStrength.completionStatus === 'modified' ? 'modified' : 'planned',
+      estimatedMinutes: Number.isFinite(nextStrength.workout.estimatedElapsedSeconds)
+        && nextStrength.workout.estimatedElapsedSeconds > 0
+        ? nextStrength.workout.estimatedElapsedSeconds / 60 : null,
+    } : null,
+    todayLocalDate: today,
+  }) : null;
 
   const openStrength = (session: PlannedStrengthSession) => {
     openPlannedWorkoutPreview(session, {
@@ -206,6 +225,19 @@ export default function PlanTab() {
           <Text style={styles.evidenceText}>{dailyAdvice.headline}</Text>
           <Text style={styles.evidenceWarning}>{dailyAdvice.explanation}</Text>
           <Text style={styles.evidenceWarning}>Review suggestion only · no training session changed automatically.</Text>
+          {dailySessionChoices?.options.length ? <>
+            <Text style={styles.blockLabel}>NEXT PLANNED STRENGTH · REVIEW OPTIONS</Text>
+            <Text style={styles.evidenceText}>{nextStrength?.title} · {dailySessionChoices.sessionDate}</Text>
+            {dailySessionChoices.options.map(option => (
+              <View key={option.id}>
+                <Text style={styles.evidenceText}>{option.title}{option.proposedMinutes !== null
+                  ? ' · ' + Math.floor(option.proposedMinutes) + ' min planning estimate' : ''}</Text>
+                <Text style={styles.evidenceWarning}>{option.explanation}</Text>
+              </View>
+            ))}
+            <Text style={styles.evidenceWarning}>{dailySessionChoices.caveat}</Text>
+          </> : null}
+
         </> : null}
 
         <Text style={styles.evidenceWarning}>Source coverage and baseline eligibility are not yet verified. This is not an approved training progression allowance.</Text>
