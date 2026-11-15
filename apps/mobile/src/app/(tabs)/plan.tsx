@@ -83,6 +83,8 @@ export default function PlanTab() {
         const daily = buildDailyTrainingReview({
           records: audit.plannedAndCompleted,
           asOfLocalDate: localTrainingDate(new Date().toISOString(), timezone),
+          weekStartDate: audit.evidence.weekStartDate,
+          weekEndDate: audit.evidence.weekEndDate,
           sourceCoverageVerified: false,
           historyPossiblyTruncated: audit.historyPossiblyTruncated,
           historyAuditIssues: audit.historyAuditIssues,
