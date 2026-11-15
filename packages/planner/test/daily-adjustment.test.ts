@@ -19,6 +19,33 @@ describe('daily adjustment engine', () => {
     expect(result.safetyMessage).toContain('Stop');
   });
 
+  it('cannot bypass an active symptom restriction by choosing a time-based adjustment', () => {
+    const result = buildDailyAdjustmentOptions({
+      sessionId: planned.id, reason: 'time',
+      requestedAction: 'shorter', availableMinutes: 35,
+    }, {
+      plannedSession: planned, weekSessions: [planned],
+      availableDates: ['2026-07-29'], activeSymptomRestriction: true,
+    });
+    expect(result.options.map(option => option.action)).toEqual(['skip']);
+    expect(result.safetyMessage).toContain('Stop');
+    expect(result.options.every(option => option.requiresApproval)).toBe(true);
+  });
+
+  it('recovery hold prevents reducing or moving a workout regardless of selection', () => {
+    for (const reason of ['time', 'fatigue', 'preference'] as const) {
+      const result = buildDailyAdjustmentOptions({
+        sessionId: planned.id, reason, requestedAction: 'shorter',
+        availableMinutes: 35,
+      }, {
+        plannedSession: planned, weekSessions: [planned],
+        availableDates: ['2026-07-29'], recoveryHold: true,
+      });
+      expect(result.options.map(option => option.action)).toEqual(['skip']);
+      expect(result.recommendedOptionId).toContain('skip');
+    }
+  });
+
   it('preserves the main work when a session is shortened', () => {
     const result = buildDailyAdjustmentOptions({ sessionId: planned.id, reason: 'time', requestedAction: 'shorter', availableMinutes: 35 }, {
       plannedSession: planned, weekSessions: [planned], availableDates: ['2026-07-29'],
