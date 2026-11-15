@@ -27,7 +27,8 @@ const blockFor = (session = rawSession()): TrainingBlockPlan => ({
 
 function open(athlete = 'synthetic-athlete-a') {
   const directory = mkdtempSync(join(tmpdir(), 'sq-strength-approval-'));
-  const db = new DatabaseSync(join(directory, 'athlete.sqlite'));
+  const file = join(directory, 'athlete.sqlite');
+  const db = new DatabaseSync(file);
   all.push({ db, directory });
   db.exec(`
     CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT NOT NULL);
@@ -55,7 +56,7 @@ function open(athlete = 'synthetic-athlete-a') {
     );
   };
   saveBlock(blockFor());
-  return { db, driver, saveBlock };
+  return { db, driver, saveBlock, file, directory };
 }
 afterEach(() => {
   for (const { db, directory } of all.splice(0)) {
@@ -88,6 +89,26 @@ describe('real SQLite atomic strength approval and undo journal', () => {
     const history = await readStrengthChoiceAudit(driver, 'synthetic-athlete-a', 'block-1', 'strength-1');
     expect(history.map(item => item.decision)).toEqual(['accepted', 'restored']);
     expect(effectiveStrengthChoice(rawSession(), history).effectivePlanningMinutes).toBe(40);
+  });
+  it('retains exact accepted dose and source identity after real file close/reopen', async () => {
+    const { db, driver, file, directory } = open();
+    await appendStrengthChoiceDecision(driver, decision('reduce'), review);
+    const source = (db.prepare('SELECT block_json FROM training_blocks').get()
+      as {block_json:string}).block_json;
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    const stored = reopened.prepare(
+      'SELECT event_json FROM daily_strength_choice_events WHERE id = ?',
+    ).get('approve') as {event_json:string};
+    const audit = JSON.parse(stored.event_json) as StrengthChoiceDecision;
+    expect(audit).toMatchObject({
+      athleteId: 'synthetic-athlete-a', blockId: 'block-1',
+      sessionId: 'strength-1', action: 'reduce', proposedMinutes: 32,
+    });
+    expect(effectiveStrengthChoice(rawSession(), [audit]).effectivePlanningMinutes).toBe(32);
+    expect((reopened.prepare('SELECT block_json FROM training_blocks').get()
+      as {block_json:string}).block_json).toBe(source);
   });
   it('defers without deleting the source and can undo', async () => {
     const { driver } = open();
