@@ -94,6 +94,26 @@ describe('explicit athlete-reviewed plan changes', () => {
     });
     expect(p.candidates).toEqual([]);
   });
+  it('does not offer ineffective shortening when only running distance exceeds its cap', () => {
+    const p = preview([
+      row('run-distance-only', 'run', 35, { runDistanceKm: 20 }),
+    ]);
+    expect(p.current.comparisons.find(c => c.dimension === 'running_distance')?.status)
+      .toBe('over_ceiling');
+    expect(p.current.comparisons.find(c => c.dimension === 'combined_duration')?.status)
+      .toBe('below_ceiling_provisional');
+    expect(p.candidates.some(c => c.eventId === 'run-distance-only'
+      && c.action === 'shorten_20_percent')).toBe(false);
+    expect(p.candidates.some(c => c.eventId === 'run-distance-only'
+      && c.action === 'defer')).toBe(true);
+  });
+  it('still offers a shorter run when it measurably improves an exceeded time cap', () => {
+    const p = preview([
+      row('run-time-overage', 'run', 330, { runDistanceKm: 5 }),
+    ]);
+    expect(p.candidates.some(c => c.eventId === 'run-time-overage'
+      && c.action === 'shorten_20_percent')).toBe(true);
+  });
   it('does not misrepresent a shortened run as reducing its unmeasured distance', () => {
     const p = preview([row('run-1', 'run', 330)]);
     const shorter = p.candidates.find(c => c.action === 'shorten_20_percent');
