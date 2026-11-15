@@ -33,7 +33,10 @@ function open(athlete = 'synthetic-athlete-a') {
   db.exec(`
     CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT NOT NULL);
     INSERT INTO sidequest_athlete_database_owner VALUES (1, '${athlete}');
-    CREATE TABLE training_blocks(id TEXT PRIMARY KEY, block_json TEXT NOT NULL);
+    CREATE TABLE training_blocks(
+      id TEXT PRIMARY KEY, block_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE workout_ledger(id TEXT PRIMARY KEY, planned_session_id TEXT);
     ${STRENGTH_CHOICE_AUDIT_SQL}
   `);
   const driver: TrainingAdjustmentSqlDriver = {
@@ -51,8 +54,8 @@ function open(athlete = 'synthetic-athlete-a') {
     },
   };
   const saveBlock = (block: TrainingBlockPlan) => {
-    db.prepare('INSERT OR REPLACE INTO training_blocks VALUES (?, ?)').run(
-      block.id, JSON.stringify(block),
+    db.prepare('INSERT OR REPLACE INTO training_blocks VALUES (?, ?, ?)').run(
+      block.id, JSON.stringify(block), block.id === 'block-1' ? '2026-11-01T00:00:00Z' : '2026-11-14T00:00:00Z',
     );
   };
   saveBlock(blockFor());
@@ -137,6 +140,24 @@ describe('real SQLite atomic strength approval and undo journal', () => {
         driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
       )).toEqual([]);
     }
+  });
+  it('does not approve an obsolete training block after a newer generation', async () => {
+    const { driver, saveBlock } = open();
+    saveBlock({ ...blockFor(), id: 'block-newest' });
+    await expect(appendStrengthChoiceDecision(driver, decision('reduce'), review))
+      .rejects.toThrow(/no longer the active/);
+    expect(await readStrengthChoiceAudit(driver,
+      'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
+  });
+  it('does not re-edit a session already linked to a completed workout ledger row', async () => {
+    const { driver, db } = open();
+    db.prepare('INSERT INTO workout_ledger VALUES (?, ?)').run(
+      'completed-partial', 'strength-1',
+    );
+    await expect(appendStrengthChoiceDecision(driver, decision('reduce'), review))
+      .rejects.toThrow(/completed workout/);
+    expect(await readStrengthChoiceAudit(driver,
+      'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
   });
   it('fails closed on absence of explicit approval, safe review or future session date', async () => {
     const { driver } = open();
