@@ -45,6 +45,9 @@ test('isolated QA EAS profile targets physical iPhone without store distribution
   assert.equal(qa.distribution, 'internal');
   assert.equal(qa.env.SIDEQUEST_ISOLATED_QA, '1');
   assert.equal(qa.env.EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA, '1');
+  assert.equal(qa.env.EXPO_PUBLIC_SUPABASE_URL, '');
+  assert.equal(qa.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, '');
+  assert.equal(qa.env.EXPO_PUBLIC_BETA_INVITE_CODE, '');
   assert.equal(qa.ios.simulator, false);
   assert.equal(eas.build.preview.env?.SIDEQUEST_ISOLATED_QA, undefined);
   assert.equal(eas.build.production.env?.SIDEQUEST_ISOLATED_QA, undefined);
@@ -58,4 +61,12 @@ test('synthetic QA runtime prevents cloud client construction even with preview 
   )), 'utf8');
   assert.match(source, /process\.env\.EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA === '1'/);
   assert.match(source, /cloudAuthConfigured = !isIsolatedQaRuntime && Boolean\(url && key\)/);
+});
+
+test('synthetic QA background sync cannot fetch external calendars', () => {
+  const runtime = readFileSync(fileURLToPath(new URL(
+    '../../apps/mobile/src/services/integration-runtime.ts', import.meta.url,
+  )), 'utf8');
+  assert.match(runtime, /if \(isIsolatedQaRuntime\) \{ await markRuntimeSuccess\(attemptedAt\); return; \}/);
+  assert.ok(runtime.indexOf('if (isIsolatedQaRuntime)') < runtime.indexOf('await autoRefreshTrainingCalendars({ force })'));
 });
