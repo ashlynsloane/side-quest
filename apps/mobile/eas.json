@@ -23,7 +23,8 @@
       "distribution": "internal",
       "environment": "preview",
       "env": {
-        "SIDEQUEST_ISOLATED_QA": "1"
+        "SIDEQUEST_ISOLATED_QA": "1",
+        "EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA": "1"
       },
       "ios": {
         "simulator": false
