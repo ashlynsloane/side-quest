@@ -19,6 +19,13 @@ export interface DailySessionChoices {
   caveat: string;
 }
 
+function isValidLocalDate(value: string): boolean {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(value + 'T00:00:00Z');
+  return Number.isFinite(timestamp)
+    && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+
 /**
  * A proposed shorter duration is a ceiling, not a target or clinical permission.
  * No catch-up volume, intensity increase, alternative sport or move is generated.
@@ -41,7 +48,9 @@ export function buildDailySessionChoices(input: {
     caveat: 'Review only. Original plan is unchanged. No new training, catch-up volume, medical clearance, or automatic approval.',
   };
   const session = input.nextSession;
-  if (!session || (session.status !== 'planned' && session.status !== 'modified')
+  if (!session || !isValidLocalDate(input.todayLocalDate)
+    || !isValidLocalDate(session.date) || !session.id.trim()
+    || (session.status !== 'planned' && session.status !== 'modified')
     || session.date < input.todayLocalDate) {
     return { ...base, state: 'no_session', options: [] };
   }
@@ -60,6 +69,14 @@ export function buildDailySessionChoices(input: {
   if (input.advice.kind === 'hold' || input.advice.kind === 'review'
     && input.advice.headline === 'Reconcile training records first') {
     return { ...base, state: 'needs_review', options: [defer] };
+  }
+  // A missing or corrupt time estimate must never be displayed as a
+  // reviewable dose, including in the nominal "keep" path.
+  if (session.estimatedMinutes === null
+    || !Number.isFinite(session.estimatedMinutes)
+    || session.estimatedMinutes <= 0) {
+    return { ...base, state: 'needs_review', options: [defer],
+      caveat: 'Original duration is missing or invalid. Review the source workout before considering a training dose; no changes have been made.' };
   }
   const keep: DailySessionChoice = {
     id: session.id + ':keep', kind: 'keep',
