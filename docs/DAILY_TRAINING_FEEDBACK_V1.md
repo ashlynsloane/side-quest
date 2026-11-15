@@ -63,6 +63,8 @@ the stored workout, the training block, session status, SQLite or scheduling.
 - **Unrestricted positive feedback:** original plan can be reviewed, but there
   is no additional training or positive-readiness progression.
 
+Preview input validation now fails closed for malformed athlete-local dates, blank session identities, and missing, zero, negative, or non-finite source minutes. Those inputs cannot generate a `keep` or `reduce` dose choice; the current source plan remains unchanged. Regression tests cover these cases. **The new commit's GitHub Actions results have not yet been verified.**
+
 Every `DailySessionChoice` has `requiresAthleteApproval: true`, and the
 result has `autoAppliedCount: 0`. The current Week UI **shows** these choices
 as explanations but does not provide a misleading `Apply` button.
