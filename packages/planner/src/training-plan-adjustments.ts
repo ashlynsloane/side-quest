@@ -158,6 +158,22 @@ export function buildPlanAdjustmentPreview(input: {
           coverage: 'unverified',
         });
         const preview = comparePlannedWeekWithFrozenLimits(previewEvidence, input.allowance);
+        // A shorter workout must actually reduce a known over-limit
+        // dimension. For example, shortening a run does not establish a
+        // smaller running distance, and should not be offered as a fix when
+        // the only breached constraint is running distance.
+        if (action === 'shorten_20_percent') {
+          const improvesAnOverage = current.comparisons.some(before => {
+            if (before.status !== 'over_ceiling'
+              && before.status !== 'possible_overage') return false;
+            const after = preview.comparisons.find(
+              comparison => comparison.dimension === before.dimension,
+            );
+            return after != null
+              && after.proposedKnownSubtotal < before.proposedKnownSubtotal - 1e-9;
+          });
+          if (!improvesAnOverage) continue;
+        }
         candidates.push({
           id: record.recordId + ':' + action,
           eventId: record.recordId.slice('calendar:'.length),
