@@ -1,7 +1,8 @@
 // Standalone synthetic-only SQLite recovery acceptance using Node 22's SQLite.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,7 @@ import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 
 const backupScript = fileURLToPath(new URL('./backup-synthetic-legacy-sqlite.mjs', import.meta.url));
+const checksum = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const restoreScript = fileURLToPath(new URL('./restore-synthetic-legacy-sqlite.mjs', import.meta.url));
 
 function execute(script, args, env) {
@@ -35,20 +37,26 @@ test('synthetic backup and restore preserve every table and schema version', asy
       CREATE TABLE athlete_plan_notes(id INTEGER PRIMARY KEY, text TEXT);
       INSERT INTO athlete_plan_notes VALUES (1, 'fixture-only');
       CREATE TABLE synthetic_blob_metadata(id INTEGER PRIMARY KEY, raw BLOB, note TEXT);
+      CREATE INDEX idx_notes_text ON athlete_plan_notes(text);
+      CREATE VIEW synthetic_notes_view AS SELECT id, text FROM athlete_plan_notes;
       INSERT INTO synthetic_blob_metadata VALUES (1, x'00FF10', 'binary-fixture');
     `);
   } finally {
     db.close();
   }
+  const originalHash = checksum(input);
   const backup = execute(backupScript, [input, snapshot], {
     SIDEQUEST_QA_SYNTHETIC_BACKUP: '1',
   });
   assert.equal(backup.status, 0, backup.stderr);
+  assert.equal(checksum(input), originalHash, 'Original SQLite bytes changed during backup');
+  const snapshotHash = checksum(snapshot);
   const restore = execute(restoreScript, [snapshot, restored], {
     SIDEQUEST_QA_SYNTHETIC_RESTORE: '1',
     SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-athlete-a',
   });
   assert.equal(restore.status, 0, restore.stderr);
+  assert.equal(checksum(snapshot), snapshotHash, 'Backup bytes changed during restore');
   assert.equal(JSON.parse(restore.stdout).restoredToNewFile, true);
   const check = new DatabaseSync(restored, { readOnly: true });
   try {
@@ -66,14 +74,17 @@ test('synthetic backup and restore preserve every table and schema version', asy
     SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-athlete-b',
   });
   assert.notEqual(denied.status, 0);
+  assert.equal(checksum(snapshot), snapshotHash, 'Denied owner attempt modified source');
   assert.equal(existsSync(deniedOwner), false);
 
+  const restoredHash = checksum(restored);
   const deniedOverwrite = execute(restoreScript, [snapshot, restored], {
     SIDEQUEST_QA_SYNTHETIC_RESTORE: '1',
     SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-athlete-a',
   });
   assert.notEqual(deniedOverwrite.status, 0);
   assert.equal(existsSync(restored), true);
+  assert.equal(checksum(restored), restoredHash, 'Rejected overwrite altered destination');
   const unchanged = new DatabaseSync(restored, { readOnly: true });
   try {
     assert.equal(unchanged.prepare('PRAGMA quick_check').get().quick_check, 'ok');
