@@ -1750,3 +1750,6 @@ export type { DailyFeedbackAdvice } from './daily-feedback-advice';
 
 export { buildDailySessionChoices } from './daily-session-choices';
 export type { DailySessionChoice, DailySessionChoices } from './daily-session-choices';
+
+export { STRENGTH_CHOICE_AUDIT_SQL, appendStrengthChoiceDecision, readStrengthChoiceAudit, strengthSessionSignature, effectiveStrengthChoice } from './daily-strength-decision-sqlite';
+export type { StrengthChoiceDecision, EffectiveStrengthChoice } from './daily-strength-decision-sqlite';
