@@ -9,6 +9,12 @@ on:
       - 'e2e/maestro/**/*.yaml'
       - 'scripts/qa/run-native-maestro.sh'
       - 'scripts/qa/diagnose-native-evidence.mjs'
+      # Changes to native SQL postconditions/fixture ownership must run their
+      # actual simulator gates, not only the fast source-level unit tests.
+      - 'scripts/qa/kill-synthetic-pending-completion.sh'
+      - 'scripts/qa/kill-synthetic-uncommitted-completion.sh'
+      - 'scripts/qa/verify-synthetic-generation-race.sh'
+      - 'scripts/qa/inject-synthetic-owner-mismatch.sh'
       - '.github/workflows/native-ios-ui-only.yml'
   workflow_dispatch:
     inputs:
