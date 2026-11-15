@@ -64,7 +64,10 @@ export async function readStrengthChoiceAudit(
     if (!d || !d.id || d.athleteId !== athleteId || d.blockId !== blockId
       || d.sessionId !== sessionId || !d.sourceSignature || !d.createdAt
       || !['accepted', 'restored'].includes(d.decision)
-      || !['reduce', 'defer'].includes(d.action)) {
+      || !['reduce', 'defer'].includes(d.action)
+      || (d.action === 'defer' && d.proposedMinutes !== null)
+      || (d.action === 'reduce' && (typeof d.proposedMinutes !== 'number'
+        || !Number.isFinite(d.proposedMinutes) || d.proposedMinutes <= 0))) {
       throw new Error('Strength adjustment audit is invalid.');
     }
     return d;
@@ -141,6 +144,9 @@ export async function appendStrengthChoiceDecision(
     } else if (previous?.decision === 'accepted') {
       throw new Error('An accepted strength choice already exists; restore it first.');
     }
+    if (previous && decision.createdAt < previous.createdAt) {
+      throw new Error('Strength adjustment decision clock moved backwards.');
+    }
     await sql.run(
       `INSERT INTO daily_strength_choice_events
        (id, athlete_id, block_id, session_id, event_json, created_at)
@@ -160,7 +166,10 @@ export function effectiveStrengthChoice(
   if (!latest || latest.decision === 'restored') {
     return { source: session, action: 'keep', effectivePlanningMinutes: original, stale: false };
   }
-  if (latest.sourceSignature !== strengthSessionSignature(session)) {
+  if (latest.sourceSignature !== strengthSessionSignature(session)
+    || (latest.action === 'reduce' && (original === null || original < 20
+      || latest.proposedMinutes !== Math.floor(original * 0.8)))
+    || (latest.action === 'defer' && latest.proposedMinutes !== null)) {
     return { source: session, action: 'keep', effectivePlanningMinutes: original, stale: true };
   }
   return {
