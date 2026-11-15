@@ -24,7 +24,10 @@
       "environment": "preview",
       "env": {
         "SIDEQUEST_ISOLATED_QA": "1",
-        "EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA": "1"
+        "EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA": "1",
+        "EXPO_PUBLIC_SUPABASE_URL": "",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "",
+        "EXPO_PUBLIC_BETA_INVITE_CODE": ""
       },
       "ios": {
         "simulator": false
