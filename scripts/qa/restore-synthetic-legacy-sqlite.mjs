@@ -75,6 +75,13 @@ async function main() {
       if (JSON.stringify(originalTables) !== JSON.stringify(copiedTables)) {
         throw new Error('Restored table inventory differs.');
       }
+      // SQLite backup also must preserve indexes, views and triggers.
+      const schema = (database) => database.prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+      ).all();
+      if (JSON.stringify(schema(source)) !== JSON.stringify(schema(restored))) {
+        throw new Error('Restored schema objects differ.');
+      }
       for (const name of originalTables) {
         const quoted = '"' + name.replaceAll('"', '""') + '"';
         const originalCount = source.prepare(
