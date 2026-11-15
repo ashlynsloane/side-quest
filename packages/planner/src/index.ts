@@ -1744,3 +1744,6 @@ export * from './recommendation-explanation';
 
 export { buildDailyTrainingReview } from './daily-training-review';
 export type { DailyTrainingReview } from './daily-training-review';
+
+export { buildDailyFeedbackAdvice } from './daily-feedback-advice';
+export type { DailyFeedbackAdvice } from './daily-feedback-advice';
