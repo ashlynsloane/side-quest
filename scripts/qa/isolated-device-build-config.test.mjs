@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -42,7 +44,18 @@ test('isolated QA EAS profile targets physical iPhone without store distribution
   const qa = eas.build['synthetic-device-qa'];
   assert.equal(qa.distribution, 'internal');
   assert.equal(qa.env.SIDEQUEST_ISOLATED_QA, '1');
+  assert.equal(qa.env.EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA, '1');
   assert.equal(qa.ios.simulator, false);
   assert.equal(eas.build.preview.env?.SIDEQUEST_ISOLATED_QA, undefined);
   assert.equal(eas.build.production.env?.SIDEQUEST_ISOLATED_QA, undefined);
+  assert.equal(eas.build.production.env?.EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA, undefined);
+  assert.equal(eas.build.preview.env?.EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA, undefined);
+});
+
+test('synthetic QA runtime prevents cloud client construction even with preview credentials', () => {
+  const source = readFileSync(fileURLToPath(new URL(
+    '../../apps/mobile/src/services/supabase.ts', import.meta.url,
+  )), 'utf8');
+  assert.match(source, /process\.env\.EXPO_PUBLIC_SIDEQUEST_ISOLATED_QA === '1'/);
+  assert.match(source, /cloudAuthConfigured = !isIsolatedQaRuntime && Boolean\(url && key\)/);
 });
