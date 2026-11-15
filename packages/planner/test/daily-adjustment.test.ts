@@ -88,6 +88,31 @@ describe('daily adjustment engine', () => {
     expect(replacement.options.find(option => option.action === 'replace')?.requiresApproval).toBe(true);
   });
 
+  it('does not quietly move training when the athlete requested fatigue or time reduction', () => {
+    for (const reason of ['fatigue', 'time', 'access'] as const) {
+      const result = buildDailyAdjustmentOptions({
+        sessionId: planned.id, reason,
+        requestedAction: reason === 'fatigue' ? 'easier'
+          : reason === 'time' ? 'shorter' : 'different',
+        availableMinutes: 35,
+        availableDisciplines: ['swim'],
+      }, {
+        plannedSession: planned, weekSessions: [planned],
+        availableDates: ['2026-07-29', '2026-07-30'],
+      });
+      expect(result.options.some(option => option.action === 'move')).toBe(false);
+    }
+    const explicitlyMoved = buildDailyAdjustmentOptions({
+      sessionId: planned.id, reason: 'preference', requestedAction: 'move',
+    }, {
+      plannedSession: planned, weekSessions: [planned],
+      availableDates: ['2026-07-29'],
+    });
+    expect(explicitlyMoved.options.some(option => option.action === 'move')).toBe(true);
+    expect(explicitlyMoved.options.find(option => option.action === 'move')?.requiresApproval)
+      .toBe(true);
+  });
+
   it('does not substitute running during bone-stress return', () => {
     const result = buildDailyAdjustmentOptions({ sessionId: planned.id, reason: 'access', requestedAction: 'different', availableDisciplines: ['run', 'swim'] }, {
       plannedSession: planned, weekSessions: [planned], availableDates: [], recentBoneStress: true, returnToRun: true,
