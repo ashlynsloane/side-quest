@@ -68,7 +68,7 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
     const rest = skipOption(session, 'recommended', [
       'New focal pain, illness-like symptoms, or worsening symptoms take priority over plan completion.',
       'The app should pause incompatible progression rather than diagnose the cause.',
-    ], ['Today’s training load is removed.', 'The week should be reviewed before impact or heavy loading resumes.']);
+    ], ['If approved, today’s planned training load would be removed.', 'The week requires review before impact or heavy loading resumes.']);
     return {
       headline: 'Protect health today',
       recommendedOptionId: rest.id,
