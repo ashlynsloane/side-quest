@@ -96,3 +96,65 @@ test('synthetic backup and restore preserve every table and schema version', asy
     unchanged.close();
   }
 });
+
+test('backup captures committed WAL pages and leaves live synthetic source unchanged', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sidequest-synthetic-wal-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const input = join(dir, 'synthetic-live-wal.db');
+  const snapshot = join(dir, 'synthetic-live-snapshot.db');
+  const restored = join(dir, 'synthetic-live-restored.db');
+  const db = new DatabaseSync(input);
+  try {
+    db.exec(`PRAGMA journal_mode=WAL;
+      PRAGMA wal_autocheckpoint=0;
+      CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT NOT NULL);
+      INSERT INTO sidequest_athlete_database_owner VALUES (1, 'synthetic-wal-a');
+      CREATE TABLE training_blocks(id TEXT PRIMARY KEY);
+      INSERT INTO training_blocks VALUES ('committed-before-backup');
+    `);
+    assert.equal(existsSync(input + '-wal'), true, 'WAL file must be present');
+    const sourceHash = checksum(input);
+    const walHash = checksum(input + '-wal');
+    const backed = execute(backupScript, [input, snapshot], {
+      SIDEQUEST_QA_SYNTHETIC_BACKUP: '1',
+    });
+    assert.equal(backed.status, 0, backed.stderr);
+    assert.equal(checksum(input), sourceHash, 'Source main database bytes changed');
+    assert.equal(checksum(input + '-wal'), walHash, 'Live WAL bytes changed');
+    const restoredRun = execute(restoreScript, [snapshot, restored], {
+      SIDEQUEST_QA_SYNTHETIC_RESTORE: '1',
+      SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-wal-a',
+    });
+    assert.equal(restoredRun.status, 0, restoredRun.stderr);
+    const check = new DatabaseSync(restored, { readOnly: true });
+    try {
+      assert.equal(check.prepare('SELECT id FROM training_blocks').get().id,
+        'committed-before-backup');
+    } finally {
+      check.close();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('unverified synthetic legacy owner refuses restore without output', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sidequest-synthetic-unknown-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const source = join(dir, 'synthetic-unmarked.db');
+  const output = join(dir, 'synthetic-denied.db');
+  const db = new DatabaseSync(source);
+  try {
+    db.exec("CREATE TABLE training_blocks(id TEXT); INSERT INTO training_blocks VALUES ('unclaimed');");
+  } finally {
+    db.close();
+  }
+  const originalHash = checksum(source);
+  const denied = execute(restoreScript, [source, output], {
+    SIDEQUEST_QA_SYNTHETIC_RESTORE: '1',
+    SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-unknown-a',
+  });
+  assert.notEqual(denied.status, 0);
+  assert.equal(existsSync(output), false);
+  assert.equal(checksum(source), originalHash);
+});
