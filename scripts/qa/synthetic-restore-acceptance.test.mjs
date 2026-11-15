@@ -30,13 +30,14 @@ test('synthetic backup and restore preserve every table and schema version', asy
   const db = new DatabaseSync(input);
   try {
     db.exec(`PRAGMA user_version = 7;
+      PRAGMA application_id = 12345;
       CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT NOT NULL);
       INSERT INTO sidequest_athlete_database_owner VALUES (1, 'synthetic-athlete-a');
       CREATE TABLE training_blocks(id TEXT PRIMARY KEY);
       INSERT INTO training_blocks VALUES ('week-a');
       CREATE TABLE athlete_plan_notes(id INTEGER PRIMARY KEY, text TEXT);
       INSERT INTO athlete_plan_notes VALUES (1, 'fixture-only');
-      CREATE TABLE synthetic_blob_metadata(id INTEGER PRIMARY KEY, raw BLOB, note TEXT);
+      CREATE TABLE synthetic_blob_metadata(id INTEGER PRIMARY KEY AUTOINCREMENT, raw BLOB, note TEXT);
       CREATE INDEX idx_notes_text ON athlete_plan_notes(text);
       CREATE VIEW synthetic_notes_view AS SELECT id, text FROM athlete_plan_notes;
       INSERT INTO synthetic_blob_metadata VALUES (1, x'00FF10', 'binary-fixture');
@@ -61,6 +62,8 @@ test('synthetic backup and restore preserve every table and schema version', asy
   const check = new DatabaseSync(restored, { readOnly: true });
   try {
     assert.equal(check.prepare('PRAGMA user_version').get().user_version, 7);
+    assert.equal(check.prepare('PRAGMA application_id').get().application_id, 12345);
+    assert.equal(check.prepare("SELECT seq FROM sqlite_sequence WHERE name='synthetic_blob_metadata'").get().seq, 1);
     assert.equal(check.prepare('SELECT COUNT(*) AS n FROM athlete_plan_notes').get().n, 1);
     assert.equal(check.prepare('SELECT id FROM training_blocks').get().id, 'week-a');
     assert.deepEqual(Array.from(check.prepare('SELECT raw FROM synthetic_blob_metadata').get().raw), [0, 255, 16]);
@@ -153,6 +156,34 @@ test('unverified synthetic legacy owner refuses restore without output', (t) => 
   const denied = execute(restoreScript, [source, output], {
     SIDEQUEST_QA_SYNTHETIC_RESTORE: '1',
     SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-unknown-a',
+  });
+  assert.notEqual(denied.status, 0);
+  assert.equal(existsSync(output), false);
+  assert.equal(checksum(source), originalHash);
+});
+
+test('foreign key corruption fails closed without publishing synthetic restore', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sidequest-synthetic-fk-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const source = join(dir, 'synthetic-invalid-fk.db');
+  const output = join(dir, 'synthetic-invalid-fk-restored.db');
+  const db = new DatabaseSync(source);
+  try {
+    db.exec(`CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT);
+      INSERT INTO sidequest_athlete_database_owner VALUES (1, 'synthetic-fk-a');
+      CREATE TABLE parent(id INTEGER PRIMARY KEY);
+      CREATE TABLE child(id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));
+      PRAGMA foreign_keys = OFF;
+      INSERT INTO child VALUES (1, 999);
+    `);
+    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 1);
+  } finally {
+    db.close();
+  }
+  const originalHash = checksum(source);
+  const denied = execute(restoreScript, [source, output], {
+    SIDEQUEST_QA_SYNTHETIC_RESTORE: '1',
+    SIDEQUEST_QA_EXPECTED_OWNER_ID: 'synthetic-fk-a',
   });
   assert.notEqual(denied.status, 0);
   assert.equal(existsSync(output), false);
