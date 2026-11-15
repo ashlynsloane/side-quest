@@ -101,6 +101,19 @@ export async function appendStrengthChoiceDecision(
     if (owner?.user_id !== decision.athleteId) {
       throw new Error('Strength decision athlete ownership mismatch.');
     }
+    const newest = await sql.getFirst<{ id: string }>(
+      'SELECT id FROM training_blocks ORDER BY updated_at DESC LIMIT 1', [],
+    );
+    if (newest?.id !== decision.blockId) {
+      throw new Error('Training block is no longer the active latest plan.');
+    }
+    const ledger = await sql.getFirst<{ id: string }>(
+      'SELECT id FROM workout_ledger WHERE planned_session_id = ? LIMIT 1',
+      [decision.sessionId],
+    );
+    if (ledger) {
+      throw new Error('A completed workout already references this planned session.');
+    }
     const row = await sql.getFirst<{ block_json: string }>(
       'SELECT block_json FROM training_blocks WHERE id = ?', [decision.blockId],
     );
