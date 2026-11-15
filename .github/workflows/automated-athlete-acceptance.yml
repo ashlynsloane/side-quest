@@ -46,6 +46,8 @@ jobs:
         run: node --test scripts/qa/synthetic-restore-acceptance.test.mjs
       - name: Physical-device evidence validator tests (synthetic fixtures only)
         run: node --test scripts/qa/validate-physical-device-evidence.test.mjs
+      - name: Verify physically isolated QA app identity
+        run: node --test scripts/qa/isolated-device-build-config.test.mjs
       - name: Typecheck planner
         id: planner_typecheck
         run: pnpm --dir packages/planner typecheck
