@@ -16,7 +16,7 @@ const includes = (path) =>
   || path.startsWith('packages/exercise-content/data/')
   || path.startsWith('packages/design-system/src/')
   || /^packages\/[^/]+\/package\.json$/.test(path)
-  || /^apps\/mobile\/(app\.json|package\.json|eas\.json|babel\.config\.[^/]+|metro\.config\.[^/]+)$/.test(path)
+  || /^apps\/mobile\/(app\.json|app\.config\.js|package\.json|eas\.json|babel\.config\.[^/]+|metro\.config\.[^/]+)$/.test(path)
   || ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(path);
 const relevant = tracked.filter(includes).sort();
 if (relevant.length < 30) throw new Error('Native source inventory unexpectedly small.');
