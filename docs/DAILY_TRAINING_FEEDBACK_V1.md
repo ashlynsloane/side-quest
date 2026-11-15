@@ -79,6 +79,40 @@ restrictions or today's recover-level readiness override user-selected
 time/fatigue/preference reasons and return a recovery-only preview.
 This is defensive review behavior and does not persist a change.
 
+## Stage 4: Transactional, reversible strength approval journal — backend only
+
+Added platform-neutral `daily-strength-decision-sqlite.ts`, using the
+same SQLite driver abstraction as the already verified endurance decision
+repository. On the draft branch, the mobile SQLite initialization also creates
+`daily_strength_choice_events`, and exposes an athlete-locked **read-only**
+history query. There is deliberately **no enabled mobile approval button**.
+
+The new append helper is callable by a future explicitly reviewed mobile
+workflow. Inside a SQLite transaction it checks the embedded athlete owner,
+the current training block, an exact JSON signature of the original planned
+strength session, the still-open session status and local date, and the exact
+approved 20% duration reduction (or null duration for deferral). The helper
+requires a caller-supplied explicit athlete-confirmation and safety-review
+gate, refuses an unresolved prior approval or invalid undo, and appends an
+immutable decision rather than changing the generator's source workout.
+Restoration appends another event, preserving the full audit.
+
+Tests use **actual file-backed SQLite**, exercising acceptance, restoration,
+stale source regeneration, a changed/closed session, wrong athlete, corrupt
+audit records, injected rollback, duplicate acceptance, and restart/reopen
+durability. No actual athlete files are accessed.
+
+**Critical remaining gate:** A boolean supplied by a caller does *not*
+independently prove the current athlete's symptoms, readiness, source
+completeness, exercise-level dose, or rehabilitation restrictions.
+The future mobile approval action must re-read these persisted facts under
+the correct verified athlete and reject stale/restricted requests. Until that
+is implemented and tested, the write helper must remain inaccessible from
+the live UI. The effective duration overlay is a planning **limit**, not a
+modified exercise program or clinical prescription. In particular, do not
+claim that reducing `estimatedElapsedSeconds` alone scales station
+durations, sets, repetitions, exercise loading, or tissue stress.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
