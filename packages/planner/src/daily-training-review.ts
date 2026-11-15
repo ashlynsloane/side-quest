@@ -22,6 +22,8 @@ export interface DailyTrainingReview {
 export function buildDailyTrainingReview(input: {
   records: TrainingExposureRecord[];
   asOfLocalDate: string;
+  weekStartDate?: string;
+  weekEndDate?: string;
   sourceCoverageVerified: boolean;
   historyPossiblyTruncated?: boolean;
   historyAuditIssues?: string[];
@@ -33,7 +35,15 @@ export function buildDailyTrainingReview(input: {
     || new Date(timestamp).toISOString().slice(0, 10) !== asOfLocalDate) {
     throw new Error('Daily training review requires a valid athlete-local date.');
   }
-  const resolved = reconcileGuardrailExposure(input.records);
+  if ((input.weekStartDate == null) !== (input.weekEndDate == null)
+    || (input.weekStartDate && input.weekEndDate
+      && input.weekStartDate > input.weekEndDate)) {
+    throw new Error('Daily training review requires a coherent week range.');
+  }
+  const scoped = input.records.filter(record =>
+    (!input.weekStartDate || record.localDate >= input.weekStartDate)
+    && (!input.weekEndDate || record.localDate <= input.weekEndDate));
+  const resolved = reconcileGuardrailExposure(scoped);
   const planned = resolved.records.filter(record => record.status === 'planned');
   const completed = resolved.records.filter(record => record.status === 'completed');
   const unlinkedSameDay = planned.some(plan => completed.some(actual =>
