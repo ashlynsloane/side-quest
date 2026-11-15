@@ -71,6 +71,23 @@ describe('daily adjustment engine', () => {
     }
   });
 
+  it('optional sessions still require signoff before skip or replacement', () => {
+    const optional = { ...planned, priority: 'optional' as const, keySession: false };
+    const skip = buildDailyAdjustmentOptions({
+      sessionId: optional.id, reason: 'preference', requestedAction: 'skip',
+    }, {
+      plannedSession: optional, weekSessions: [optional], availableDates: [],
+    });
+    expect(skip.options.find(option => option.action === 'skip')?.requiresApproval).toBe(true);
+    const replacement = buildDailyAdjustmentOptions({
+      sessionId: optional.id, reason: 'access',
+      requestedAction: 'different', availableDisciplines: ['swim'],
+    }, {
+      plannedSession: optional, weekSessions: [optional], availableDates: [],
+    });
+    expect(replacement.options.find(option => option.action === 'replace')?.requiresApproval).toBe(true);
+  });
+
   it('does not substitute running during bone-stress return', () => {
     const result = buildDailyAdjustmentOptions({ sessionId: planned.id, reason: 'access', requestedAction: 'different', availableDisciplines: ['run', 'swim'] }, {
       plannedSession: planned, weekSessions: [planned], availableDates: [], recentBoneStress: true, returnToRun: true,
