@@ -172,16 +172,16 @@ describe('real SQLite atomic strength approval and undo journal', () => {
   });
   it('injected SQLite failure rolls back without changing the source or history', async () => {
     const { driver, db } = open();
-    const source = (db.prepare('SELECT block_json FROM training_blocks').get()
-      as {block_json:string}).block_json;
+    const sourceRow = db.prepare('SELECT block_json FROM training_blocks').get() as {block_json:string};
+    const source = sourceRow.block_json;
     await expect(appendStrengthChoiceDecision({
       ...driver,
       run: async () => { throw new Error('injected power interruption'); },
     }, decision('reduce'), review)).rejects.toThrow(/power interruption/);
     expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
       .get() as {n:number}).n).toBe(0);
-    expect((db.prepare('SELECT block_json FROM training_blocks').get()
-      as {block_json:string}).block_json).toBe(source);
+    const afterRow = db.prepare('SELECT block_json FROM training_blocks').get() as {block_json:string};
+    expect(afterRow.block_json).toBe(source);
   });
   it('rejects stale-time events after a newer accepted record', async () => {
     const { driver } = open();
