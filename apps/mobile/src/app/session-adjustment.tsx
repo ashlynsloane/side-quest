@@ -1,10 +1,11 @@
-import { buildDailyAdjustmentOptions, normalizeStrengthSession, type AdjustmentReason, type DailyAdjustmentResult } from '@circuit/planner';
+import { addLocalCalendarDays, buildDailyAdjustmentOptions, localCalendarDate, normalizeStrengthSession, type AdjustmentReason, type DailyAdjustmentResult } from '@circuit/planner';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getLatestTrainingBlock } from '@/services/database';
+import { getActiveTrainingCheckIn, getLatestTrainingBlock, getTodayReadinessCheckIn } from '@/services/database';
+import { readinessBand, readinessScore } from '@/services/readiness';
 
 const REASONS: Array<{ id: AdjustmentReason; title: string; detail: string }> = [
   { id: 'fatigue', title: 'I’m too tired', detail: 'Use current fatigue without treating it as a failure.' },
@@ -23,8 +24,12 @@ export default function SessionAdjustmentScreen() {
   const requestAction = useMemo(() => reason === 'time' ? 'shorter' : reason === 'fatigue' ? 'easier' : reason === 'pain' ? 'skip' : 'different', [reason]);
 
   const load = useCallback(() => {
-    void getLatestTrainingBlock().then((saved) => {
-      const today = new Date().toISOString().slice(0, 10);
+    void Promise.all([
+      getLatestTrainingBlock(),
+      getActiveTrainingCheckIn(),
+      getTodayReadinessCheckIn(),
+    ]).then(([saved, activeCheckIn, readiness]) => {
+      const today = localCalendarDate(new Date());
       const sessions = saved?.block.weeks.flatMap((week) => week.sessions) ?? [];
       const planned = sessions.find((session) => session.date === today && session.completionStatus !== 'completed' && session.completionStatus !== 'skipped');
       if (!planned) {
@@ -34,9 +39,12 @@ export default function SessionAdjustmentScreen() {
       setSessionTitle(planned.title);
       const unified = normalizeStrengthSession(planned);
       const week = sessions.filter((session) => Math.abs(new Date(session.date).getTime() - new Date(today).getTime()) <= 6 * 86400000).map(normalizeStrengthSession);
-      const availableDates = Array.from({ length: 6 }, (_, index) => {
-        const date = new Date(); date.setDate(date.getDate() + index + 1); return date.toISOString().slice(0, 10);
-      });
+      const availableDates = Array.from({ length: 6 }, (_, index) =>
+        addLocalCalendarDays(today, index + 1));
+      const activeSymptomRestriction = activeCheckIn?.status === 'tightness_pain'
+        || activeCheckIn?.status === 'unable_to_train';
+      const recoveryHold = readiness != null
+        && readinessBand(readinessScore(readiness)) === 'recover';
       setResult(buildDailyAdjustmentOptions({
         sessionId: unified.id,
         reason,
@@ -50,6 +58,8 @@ export default function SessionAdjustmentScreen() {
         weekSessions: week,
         availableDates,
         recentFatigueTrend: reason === 'fatigue' ? 'stable' : undefined,
+        activeSymptomRestriction,
+        recoveryHold,
       }));
     });
   }, [reason, requestAction]);
@@ -95,7 +105,7 @@ export default function SessionAdjustmentScreen() {
                 {option.weeklyConsequences.map((line) => <Text key={line} style={styles.bullet}>• {line}</Text>)}
               </View>
             ))}
-            <Text style={styles.footer}>Major changes remain proposals until the athlete approves them. Missed work is never automatically compressed into later days.</Text>
+            <Text style={styles.footer}>All options are previews and require explicit athlete approval. This screen does not apply or save a change. Missed work is never automatically compressed into later days.</Text>
           </View>
         ) : <Text style={styles.helper}>No adjustable planned strength session was found for today.</Text>}
       </ScrollView>
