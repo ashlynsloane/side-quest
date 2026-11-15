@@ -143,6 +143,56 @@ describe('real SQLite atomic strength approval and undo journal', () => {
     expect(await readStrengthChoiceAudit(driver, 'synthetic-athlete-a', 'block-1', 'strength-1'))
       .toHaveLength(1);
   });
+  it('rejects corrupt or inflated persisted dose instead of presenting it as approved', async () => {
+    const { driver, db } = open();
+    await appendStrengthChoiceDecision(driver, decision('reduce'), review);
+    const bad = { ...decision('reduce'), proposedMinutes: 900 };
+    db.prepare('UPDATE daily_strength_choice_events SET event_json = ? WHERE id = ?')
+      .run(JSON.stringify(bad), 'approve');
+    const audit = await readStrengthChoiceAudit(
+      driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+    );
+    expect(effectiveStrengthChoice(rawSession(), audit)).toMatchObject({
+      action: 'keep', stale: true, effectivePlanningMinutes: 40,
+    });
+  });
+  it('invalid JSON in the audit fails closed and prevents another approval', async () => {
+    const { driver, db } = open();
+    await appendStrengthChoiceDecision(driver, decision('defer'), review);
+    db.prepare('UPDATE daily_strength_choice_events SET event_json = ? WHERE id = ?')
+      .run('{not-valid-json', 'approve');
+    await expect(readStrengthChoiceAudit(
+      driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+    )).rejects.toThrow(/unreadable/);
+    await expect(appendStrengthChoiceDecision(
+      driver, decision('reduce', 'accepted', 'second'), review,
+    )).rejects.toThrow(/unreadable/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as {n:number}).n).toBe(1);
+  });
+  it('injected SQLite failure rolls back without changing the source or history', async () => {
+    const { driver, db } = open();
+    const source = (db.prepare('SELECT block_json FROM training_blocks').get()
+      as {block_json:string}).block_json;
+    await expect(appendStrengthChoiceDecision({
+      ...driver,
+      run: async () => { throw new Error('injected power interruption'); },
+    }, decision('reduce'), review)).rejects.toThrow(/power interruption/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as {n:number}).n).toBe(0);
+    expect((db.prepare('SELECT block_json FROM training_blocks').get()
+      as {block_json:string}).block_json).toBe(source);
+  });
+  it('rejects stale-time events after a newer accepted record', async () => {
+    const { driver } = open();
+    await appendStrengthChoiceDecision(driver, {
+      ...decision('defer'), createdAt: '2026-11-14T13:00:00Z',
+    }, review);
+    await expect(appendStrengthChoiceDecision(driver, {
+      ...decision('defer', 'restored', 'old-undo'),
+      createdAt: '2026-11-14T12:59:59Z',
+    }, review)).rejects.toThrow(/clock moved backwards/);
+  });
   it('marks old approvals stale if generator changes rather than applying them', async () => {
     const { driver } = open();
     await appendStrengthChoiceDecision(driver, decision('reduce'), review);
