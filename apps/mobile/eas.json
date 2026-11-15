@@ -18,6 +18,16 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal"
+    },
+    "synthetic-device-qa": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "SIDEQUEST_ISOLATED_QA": "1"
+      },
+      "ios": {
+        "simulator": false
+      }
     }
   },
   "submit": {
