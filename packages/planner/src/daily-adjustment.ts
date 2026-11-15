@@ -186,7 +186,7 @@ function chooseReplacement(session: UnifiedTrainingSession, available: UnifiedDi
     weeklyConsequences: [`${session.discipline} frequency decreases unless the original session is moved.`, `${safe} volume increases modestly without adding a new hard day.`],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: session.keySession,
+    requiresApproval: true,
     confidence: 'moderate',
   };
 }
@@ -227,7 +227,7 @@ function skipOption(session: UnifiedTrainingSession, level: AdjustmentOption['re
     weeklyConsequences,
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: session.keySession,
+    requiresApproval: true,
     confidence: 'high',
   };
 }
