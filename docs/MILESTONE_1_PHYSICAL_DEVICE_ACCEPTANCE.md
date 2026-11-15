@@ -10,6 +10,20 @@
 - Record tester initials, iPhone model, iOS version, installation method, QA build SHA, local timezone and each test date. Collect only synthetic screenshots/logs; redact identifiers if unexpectedly present.
 - For every failure, archive the *first* failure's screenshot and log. Restart tests on a clean test profile; do not delete real app documents to force success.
 
+## Isolated QA build preparation — no install yet
+
+The previous `apps/mobile/eas.json` `preview` build profile retained the **same bundle ID as the installed beta**, making it unsafe to use as an independent acceptance app. Milestone 1 now has a dedicated **opt-in** EAS profile, `synthetic-device-qa`, which sets `SIDEQUEST_ISOLATED_QA=1`. `apps/mobile/app.config.js` then produces an independent app named **Side Quest QA**, with bundle ID `com.sidequest.synthetic.qa` and a distinct URL scheme. The ordinary beta identity and existing `preview`/`production` profiles remain unchanged.
+
+**This is build configuration, NOT an already signed or installed iPhone build.** Before any device distribution, independently inspect the Expo-resolved configuration, credential/provisioning requirements, environment variables, privacy disclosures and actual bundle ID. In particular, the EAS `preview` environment may have configured cloud URLs or credentials: do not build or distribute to a device until someone has verified that the QA runtime operates local-first with **cloud/social OFF**. No real Health, Strava, Garmin, production Supabase, or athlete identity may be connected to the QA app.
+
+A possible build command **only after those checks and explicit device/build authorization**, from `apps/mobile`, is:
+
+```bash
+eas build --platform ios --profile synthetic-device-qa
+```
+
+The build must produce an internally distributable signed artifact with a documented device provision and installer path. The normal installed beta must never be uninstalled or overwritten during this exercise. No signing certificate, provisioning profile or device access is assumed to be present.
+
 ## Physical-device scenarios (each requires separate observed evidence)
 
 | ID | Native scenario | Required observation | Status |
