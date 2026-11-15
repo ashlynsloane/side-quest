@@ -22,6 +22,8 @@ export interface AdjustmentContext {
   availableDates: string[];
   recentFatigueTrend?: 'stable' | 'worsening' | 'improving';
   recentBoneStress?: boolean;
+  activeSymptomRestriction?: boolean;
+  recoveryHold?: boolean;
   returnToRun?: boolean;
   minimumStrengthMinutesRemaining?: number;
   primaryProgressionDiscipline?: UnifiedDiscipline;
@@ -54,7 +56,8 @@ export interface DailyAdjustmentResult {
 export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, context: AdjustmentContext): DailyAdjustmentResult {
   const session = context.plannedSession;
   const safetyConcern = Boolean(
-    request.reason === 'illness'
+    context.activeSymptomRestriction
+    || request.reason === 'illness'
     || request.focalPain
     || (request.reason === 'pain' && (request.symptomSeverity ?? 0) >= 3)
     || request.fatigueKind === 'illness_like'
@@ -71,6 +74,19 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
       recommendedOptionId: rest.id,
       options: [rest],
       safetyMessage: 'Stop the session. Seek appropriate medical assessment for severe, worsening, or concerning symptoms.',
+    };
+  }
+
+  if (context.recoveryHold) {
+    const rest = skipOption(session, 'recommended', [
+      'Low self-reported readiness requires review before proceeding with the original dose.',
+      'Do not add replacement work or automatically increase another day.',
+    ], ['The planned workout remains unchanged until explicitly reviewed.']);
+    return {
+      headline: 'Review recovery before training',
+      recommendedOptionId: rest.id,
+      options: [rest],
+      safetyMessage: 'Consider rest. This is not a diagnosis or medical clearance; revisit the plan when readiness improves.',
     };
   }
 
