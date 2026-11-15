@@ -43,6 +43,20 @@ The legacy SQLite owner problem is fundamentally a provenance question; syntheti
 4. Rehearse ownership verification and rollback on a COPY of synthetic data, including two colliding normalized profile IDs, missing localStorage, interrupted migration and mismatched embedded owner. Never infer original ownership by recency or first sign-in.
 5. Only after provenance is independently established and a restorable backup is verified may an explicitly authorized one-time migration be considered. Otherwise leave the original bytes untouched and show a recovery error, not an infinite spinner.
 
+## Machine-checkable evidence manifest (synthetic QA only)
+
+The source-controlled `scripts/qa/validate-physical-device-evidence.mjs` provides a **fail-closed completeness check** for a *separately collected* physical-device manifest. `scripts/qa/validate-physical-device-evidence.test.mjs` exercises missing stages, fake crash windows, mismatched build identities, missing signoff and unsafe paths using invented fixtures. CI runs the tests but **never fabricates or executes physical-device results**.
+
+To validate an independently collected evidence manifest:
+
+```bash
+node scripts/qa/validate-physical-device-evidence.mjs /secure/local/path/to/synthetic-device-evidence.json
+```
+
+Required top-level fields: `build` (40-character `gitSha`, 40-character `sourceFingerprint`, isolated `bundleId`, `buildNumber`, `iosVersion`, `deviceModel`), `syntheticOnly: true`, `cloudEnabled: false`, `realAthleteDataAccessed: false`, `releaseOwnerApproved: true`, `signedBy`, and `scenarios`. Every scenario requires `id`, `status: "PASS"`, `observedOnDevice: true`, matching `gitSha` and `bundleId`, ISO timestamp `observedAt` and one or more relative `evidence` paths. Both P08a/P08b also require `actualProcessKill`, `sqliteIntegrityOk`, `canonicalRowCountVerified` and `originalFractionPreserved` to be true.
+
+**Important limitation:** The parser checks *manifest structure and attestations*, not the authenticity, existence, or contents of referenced screenshots, crash logs or SQLite files. A syntactically passing manifest is **not** independent verification of native tests, proof of ownership, or permission to release. The release owner must inspect the actual signed-device artifacts and approve explicitly. Do not commit personally identifying device evidence or actual athlete SQLite files to the repository.
+
 ## Evidence and release decision
 
 - **Source QA:** require exact-head planner/mobile typechecks, real-file SQLite regression and iOS export; [CI history](https://github.com/ashlynsloane/side-quest/actions).
