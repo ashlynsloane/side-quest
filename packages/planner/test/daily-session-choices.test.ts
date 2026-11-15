@@ -39,6 +39,29 @@ describe('read-only bounded next session options', () => {
       expect(result.options.map(item => item.kind)).toEqual(['defer']);
     }
   });
+  it('invalid source duration never becomes a keep-dose review option', () => {
+    for (const minutes of [null, 0, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      for (const kind of ['maintain', 'review'] as const) {
+        const result = options(kind, { ...session, estimatedMinutes: minutes });
+        expect(result.state).toBe('needs_review');
+        expect(result.options.map(item => item.kind)).toEqual(['defer']);
+        expect(result.autoAppliedCount).toBe(0);
+      }
+    }
+  });
+  it('invalid dates and missing session identities cannot be targeted', () => {
+    for (const date of ['2026-02-30', '2026-11-14T12:00:00Z', 'bad']) {
+      const result = options('maintain', { ...session, date });
+      expect(result.state).toBe('no_session');
+      expect(result.options).toEqual([]);
+    }
+    expect(options('maintain', { ...session, id: '  ' }).state).toBe('no_session');
+    const invalidToday = buildDailySessionChoices({
+      advice: advice('maintain'), nextSession: session, todayLocalDate: '2026-11-31',
+    });
+    expect(invalidToday.state).toBe('no_session');
+    expect(invalidToday.options).toEqual([]);
+  });
   it('source conflicts prohibit a fabricated 20% reduction', () => {
     const result = options('review', session, 'Reconcile training records first');
     expect(result.state).toBe('needs_review');
