@@ -64,15 +64,33 @@ async function main() {
       if (restoredOwner !== expectedOwner) {
         throw new Error('Restored owner marker changed.');
       }
-      for (const name of ['completed_workouts', 'workout_ledger', 'training_blocks']) {
-        const exists = source.prepare(
-          "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=?",
-        ).get(name)?.n === 1;
-        if (!exists) continue;
-        const table = '"' + name + '"';
-        const originalCount = source.prepare('SELECT COUNT(*) AS n FROM ' + table).get()?.n;
-        const restoredCount = restored.prepare('SELECT COUNT(*) AS n FROM ' + table).get()?.n;
-        if (originalCount !== restoredCount) throw new Error('Restored row counts differ.');
+      // Compare every ordinary persisted table, not just the three core
+      // training tables. Otherwise a restore can appear successful while
+      // silently omitting profile, plan or exercise metadata.
+      const tableNames = (database) => database.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      ).all().map((row) => String(row.name));
+      const originalTables = tableNames(source);
+      const copiedTables = tableNames(restored);
+      if (JSON.stringify(originalTables) !== JSON.stringify(copiedTables)) {
+        throw new Error('Restored table inventory differs.');
+      }
+      for (const name of originalTables) {
+        const quoted = '"' + name.replaceAll('"', '""') + '"';
+        const originalCount = source.prepare(
+          'SELECT COUNT(*) AS n FROM ' + quoted,
+        ).get()?.n;
+        const restoredCount = restored.prepare(
+          'SELECT COUNT(*) AS n FROM ' + quoted,
+        ).get()?.n;
+        if (originalCount !== restoredCount) {
+          throw new Error('Restored table row counts differ.');
+        }
+      }
+      const sourceVersion = source.prepare('PRAGMA user_version').get()?.user_version;
+      const copiedVersion = restored.prepare('PRAGMA user_version').get()?.user_version;
+      if (sourceVersion !== copiedVersion) {
+        throw new Error('Restored schema version differs.');
       }
     } finally {
       restored.close();
