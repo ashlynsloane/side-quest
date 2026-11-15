@@ -86,6 +86,17 @@ async function main() {
         if (originalCount !== restoredCount) {
           throw new Error('Restored table row counts differ.');
         }
+        // A matching count is insufficient: compare actual synthetic values,
+        // including BLOB bytes, without ever printing their contents.
+        // This script is deliberately limited to small QA fixtures.
+        const rows = (database) => database.prepare(
+          'SELECT * FROM ' + quoted,
+        ).all().map((row) => JSON.stringify(row)).sort();
+        const originalRows = rows(source);
+        const copiedRows = rows(restored);
+        if (JSON.stringify(originalRows) !== JSON.stringify(copiedRows)) {
+          throw new Error('Restored table contents differ.');
+        }
       }
       const sourceVersion = source.prepare('PRAGMA user_version').get()?.user_version;
       const copiedVersion = restored.prepare('PRAGMA user_version').get()?.user_version;
