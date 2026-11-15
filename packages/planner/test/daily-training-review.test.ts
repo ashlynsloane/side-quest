@@ -76,6 +76,21 @@ describe('read-only daily training feedback reconciliation', () => {
     ], true);
     expect(duplicates.needsSourceReview).toBe(true);
   });
+  it('does not report planned sessions from adjacent query-envelope weeks', () => {
+    const result = buildDailyTrainingReview({
+      asOfLocalDate: '2026-11-14',
+      weekStartDate: '2026-11-09',
+      weekEndDate: '2026-11-15',
+      sourceCoverageVerified: false,
+      records: [
+        planned('old-week', '2026-11-08'),
+        planned('current-week', '2026-11-13'),
+        planned('next-week', '2026-11-16'),
+      ],
+    });
+    expect(result.pastUnverifiedIds).toEqual(['calendar:current-week']);
+    expect(result.upcomingPlannedCount).toBe(0);
+  });
   it('rejects impossible athlete-local dates', () => {
     for (const date of ['2026-02-30', '2026-11-14T00:00Z', 'not-a-date']) {
       expect(() => buildDailyTrainingReview({
