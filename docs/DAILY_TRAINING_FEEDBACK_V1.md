@@ -46,6 +46,39 @@ Missing provider sources and missing injury information remain unknown. This
 stage is review guidance, **not an independently authorized clinical or
 rehabilitation dose prescription**.
 
+## Stage 3: Bounded next-session options (preview only)
+
+The pure planner function `buildDailySessionChoices` selects at most one
+upcoming, not-yet-closed strength session in the displayed local training week.
+It generates an explicit menu of **hypothetical** choices without changing
+the stored workout, the training block, session status, SQLite or scheduling.
+
+- **Active restriction / recovery hold:** only review rest or deferral. Neither
+  original full dose nor reduced training is presented as clearance.
+- **Reduced readiness / recent too-hard workout:** a provisional 20% shorter
+  time cap can be shown **only when duration is finite and at least 20 min**.
+  It never increases intensity or prescribes new exercises. The athlete may
+  instead review deferral.
+- **Source conflicts / missing feedback:** no fabricated numerical reduction.
+- **Unrestricted positive feedback:** original plan can be reviewed, but there
+  is no additional training or positive-readiness progression.
+
+Every `DailySessionChoice` has `requiresAthleteApproval: true`, and the
+result has `autoAppliedCount: 0`. The current Week UI **shows** these choices
+as explanations but does not provide a misleading `Apply` button.
+A future implementation must validate the current owner, plan version,
+clinical restrictions, and fresh workout history **again at approval time**,
+then persist an auditable decision atomically. That part is **not yet built**.
+
+### Existing adjustment-screen safety
+
+The pre-existing `/session-adjustment` planner now marks **all** proposed
+actions as requiring approval, including shorter/easier options. Its UI also
+uses local calendar dates rather than UTC-derived dates. Active symptom
+restrictions or today's recover-level readiness override user-selected
+time/fatigue/preference reasons and return a recovery-only preview.
+This is defensive review behavior and does not persist a change.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
