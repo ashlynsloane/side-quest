@@ -8,6 +8,12 @@ import type { TrainingAdjustmentSqlDriver } from '../src/training-adjustment-sql
 import { STRENGTH_CHOICE_AUDIT_SQL, strengthSessionSignature, type StrengthChoiceDecision } from '../src/daily-strength-decision-sqlite';
 import type { CurrentStrengthReviewEvidence } from '../src/strength-revision-decision-review';
 import {
+  STRENGTH_PREVIEW_REVIEW_EVENTS_SQL,
+  readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent,
+  type StrengthPreviewReviewEvent,
+} from '../src/strength-preview-review-events-sqlite';
+import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
+import {
   STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview,
   readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview,
 } from '../src/strength-revision-preview-sqlite';
@@ -113,6 +119,7 @@ function open(owner = 'synthetic-athlete-a') {
       id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     ${STRENGTH_REVISION_PREVIEW_SQL}
+    ${STRENGTH_PREVIEW_REVIEW_EVENTS_SQL}
     ${STRENGTH_CHOICE_AUDIT_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
@@ -357,5 +364,152 @@ describe('immutable unapproved strength revision preview: actual SQLite file', (
     await appendStrengthRevisionPreview(sql, input());
     await expect(readStrengthRevisionPreview(sql, 'other-athlete', 'preview-1'))
       .rejects.toThrow(/ownership mismatch/);
+  });
+});
+
+function reviewEvent(
+  preview: StoredStrengthRevisionPreview,
+  action: 'dismiss' | 'restore',
+  id = action + '-1',
+  createdAt = action === 'dismiss'
+    ? '2026-11-15T11:20:00Z' : '2026-11-15T11:30:00Z',
+): StrengthPreviewReviewEvent {
+  return {
+    schemaVersion: 1, id, athleteId: 'synthetic-athlete-a',
+    previewId: preview.id, bindingSignature: JSON.stringify(preview.binding),
+    action, createdAt, executableWorkoutApproved: false,
+  };
+}
+const reviewEventCount = (db: DatabaseSync) =>
+  (db.prepare('SELECT COUNT(*) AS n FROM strength_revision_preview_review_events')
+    .get() as { n: number }).n;
+
+describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
+  it('dismisses, reopens, and reads full history after file restart with no workout approval', async () => {
+    const { db, sql, file, directory } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    const initial = await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    );
+    expect(initial).toMatchObject({
+      status: 'pending_review', latestEventId: null,
+      executableWorkoutApproved: false, requiresWriteTimeRevalidation: true,
+    });
+    await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
+    expect((await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    )).status).toBe('dismissed');
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    const freshDriver = driver(reopened);
+    await appendStrengthPreviewReviewEvent(
+      freshDriver, reviewEvent(stored, 'restore'), evidence(),
+    );
+    const restored = await readStrengthPreviewReviewState(
+      freshDriver, 'synthetic-athlete-a', stored.id,
+    );
+    expect(restored.status).toBe('pending_review');
+    expect(restored.events.map(e => e.action)).toEqual(['dismiss', 'restore']);
+    expect(restored.executableWorkoutApproved).toBe(false);
+    expect((reopened.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as { n: number }).n).toBe(0);
+    expect((reopened.prepare('SELECT block_json FROM training_blocks').get()
+      as { block_json: string }).block_json).toBe(JSON.stringify(block()));
+  });
+  it('rejects duplicate dismissal, orphan restoration and wrong athlete owner', async () => {
+    const { db, sql } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    await expect(appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'restore'), evidence(),
+    )).rejects.toThrow(/Only a dismissed/);
+    await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
+    await expect(appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'dismiss', 'second-dismiss', '2026-11-15T11:25:00Z'),
+    )).rejects.toThrow(/already dismissed/);
+    await expect(readStrengthPreviewReviewState(
+      sql, 'other-athlete', stored.id,
+    )).rejects.toThrow(/ownership mismatch/);
+    expect(reviewEventCount(db)).toBe(1);
+  });
+  it('permits dismissal of stale source but refuses reopening without fresh review', async () => {
+    const { db, sql, saveBlock } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    saveBlock(block({ ...sourceSession(), title: 'Rebuilt source' }));
+    await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
+    await expect(appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'restore'), evidence(),
+    )).rejects.toThrow(/stale/);
+    expect((await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    )).status).toBe('dismissed');
+    expect(reviewEventCount(db)).toBe(1);
+  });
+  it('refuses reopening on changed PT, symptoms, readiness, or incomplete coverage', async () => {
+    for (const change of ['pt', 'symptoms', 'readiness', 'evidence'] as const) {
+      const { db, sql } = open();
+      const stored = await appendStrengthRevisionPreview(sql, input());
+      await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
+      if (change === 'pt') {
+        db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+      } else if (change === 'symptoms') {
+        db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            status: 'tightness_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400000).toISOString(),
+          }),
+        );
+      } else if (change === 'readiness') {
+        db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(
+          JSON.stringify({ sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1 }),
+        );
+      }
+      const current = change === 'evidence'
+        ? { ...evidence(), sourceCoverage: 'incomplete' as const } : evidence();
+      await expect(appendStrengthPreviewReviewEvent(
+        sql, reviewEvent(stored, 'restore'), current,
+      )).rejects.toThrow(/stale/);
+      expect(reviewEventCount(db)).toBe(1);
+    }
+  });
+  it('detects forged impossible transitions, changed binding, and invalid JSON', async () => {
+    for (const tamper of ['repeated', 'source', 'json'] as const) {
+      const { db, sql } = open();
+      const stored = await appendStrengthRevisionPreview(sql, input());
+      const acceptedDismissal = reviewEvent(stored, 'dismiss');
+      await appendStrengthPreviewReviewEvent(sql, acceptedDismissal);
+      const forged = reviewEvent(
+        stored, 'dismiss', 'forged', '2026-11-15T11:25:00Z',
+      );
+      if (tamper === 'source') forged.bindingSignature = 'different-binding';
+      db.prepare(`INSERT INTO strength_revision_preview_review_events
+        (id, athlete_id, preview_id, event_json, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+        forged.id, forged.athleteId, forged.previewId,
+        tamper === 'json' ? '{invalid-json' : JSON.stringify(forged), forged.createdAt,
+      );
+      await expect(readStrengthPreviewReviewState(
+        sql, 'synthetic-athlete-a', stored.id,
+      )).rejects.toThrow(/repeated dismissal|invalid or altered|unreadable/);
+      await expect(appendStrengthPreviewReviewEvent(
+        sql, reviewEvent(stored, 'restore'), evidence(),
+      )).rejects.toThrow();
+      expect(reviewEventCount(db)).toBe(2);
+    }
+  });
+  it('injected SQL failure rolls back without changing preview or training history', async () => {
+    const { db, sql } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    const original = JSON.stringify(stored);
+    await expect(appendStrengthPreviewReviewEvent({
+      ...sql,
+      run: async () => { throw new Error('injected SQLite write failure'); },
+    }, reviewEvent(stored, 'dismiss'))).rejects.toThrow(/injected SQLite/);
+    expect(reviewEventCount(db)).toBe(0);
+    expect((await readStrengthRevisionPreview(
+      sql, 'synthetic-athlete-a', stored.id,
+    ))).toEqual(JSON.parse(original));
+    expect((await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    )).status).toBe('pending_review');
   });
 });
