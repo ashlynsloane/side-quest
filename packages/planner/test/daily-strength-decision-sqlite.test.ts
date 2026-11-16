@@ -44,6 +44,12 @@ function open(athlete = 'synthetic-athlete-a') {
     CREATE TABLE readiness_check_ins(
       date TEXT PRIMARY KEY, check_in_json TEXT NOT NULL
     );
+    CREATE TABLE pt_profiles(
+      id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    INSERT INTO pt_profiles VALUES (
+      'synthetic-pt', '{"active":false}', '2026-11-14T08:00:00Z'
+    );
     INSERT INTO training_check_ins VALUES (
       'normal-checkin', '{"status":"normal"}', 1, '2026-11-14T08:00:00Z'
     );
@@ -226,6 +232,29 @@ describe('real SQLite atomic strength approval and undo journal', () => {
         .rejects.toThrow(/expired or lacks a valid expiry/);
       expect(await readStrengthChoiceAudit(driver,
         'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
+    }
+  });
+  it('denies dose decisions for missing, corrupt, and active PT profiles', async () => {
+    for (const scenario of ['missing', 'malformed', 'active', 'unknown'] as const) {
+      const { driver, db } = open();
+      if (scenario === 'missing') {
+        db.prepare('DELETE FROM pt_profiles').run();
+      } else {
+        const value = scenario === 'malformed' ? '{bad-json'
+          : scenario === 'active' ? '{"active":true}' : '{"name":"unknown"}';
+        db.prepare('UPDATE pt_profiles SET profile_json = ?').run(value);
+      }
+      await expect(appendStrengthChoiceDecision(driver, decision('reduce'), review))
+        .rejects.toThrow(/PT restriction/);
+      expect(await readStrengthChoiceAudit(driver, 'synthetic-athlete-a',
+        'block-1', 'strength-1')).toEqual([]);
+      // Deferral does not authorize exercise and is still available.
+      await appendStrengthChoiceDecision(driver, decision('defer'), review);
+      await expect(appendStrengthChoiceDecision(
+        driver, decision('defer', 'restored', 'undo'), review,
+      )).rejects.toThrow(/PT restriction/);
+      expect(await readStrengthChoiceAudit(driver, 'synthetic-athlete-a',
+        'block-1', 'strength-1')).toHaveLength(1);
     }
   });
   it('a recover-level readiness check-in blocks reduction and restoration', async () => {
