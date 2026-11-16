@@ -1766,3 +1766,7 @@ export type { StrengthRevisionPreviewBinding, StrengthRevisionBindingResult } fr
 // Durable unapproved exercise-preview journal; never used to authorize a workout.
 export { STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview, readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview } from './strength-revision-preview-sqlite';
 export type { StoredStrengthRevisionPreview, StoredStrengthPreviewAssessment } from './strength-revision-preview-sqlite';
+
+// Reversible preview-review disposition only; NEVER executable strength authorization.
+export { STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent } from './strength-preview-review-events-sqlite';
+export type { StrengthPreviewReviewEvent, StrengthPreviewReviewState } from './strength-preview-review-events-sqlite';
