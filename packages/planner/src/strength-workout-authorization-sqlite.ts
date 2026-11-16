@@ -155,6 +155,20 @@ function authorizationEligibility(
   return reasons;
 }
 
+/**
+ * Read-only eligibility guidance for the confirmation UI. This is never
+ * permission to execute; the transaction repeats every check and rejects a
+ * changed observation token.
+ */
+export function getRoutineStrengthAuthorizationReadiness(
+  detail: UnapprovedStrengthReviewDetail,
+  todayLocalDate = localCalendarDate(new Date()),
+): { canRequestAuthorization: boolean; blockers: string[] } {
+  const simulatedEvidence = { todayLocalDate } as CurrentStrengthReviewEvidence;
+  const blockers = authorizationEligibility(detail, simulatedEvidence);
+  return { canRequestAuthorization: blockers.length === 0, blockers };
+}
+
 function parseAuthorization(row: {
   id: string; athlete_id: string; block_id: string; session_id: string;
   preview_id: string; authorization_json: string; created_at: string;
@@ -277,11 +291,14 @@ export async function authorizeRoutineStrengthWorkout(
       !== preview.binding.candidateSignature) {
       throw new Error('Authorized candidate workout source is missing or changed.');
     }
-    const existing = await txn.getAll<{ id: string }>(
-      `SELECT id FROM strength_workout_authorizations
-       WHERE athlete_id = ? AND (session_id = ? OR preview_id = ?) LIMIT 2`,
-      [athleteId, preview.binding.sessionId, previewId],
+    const existing = await txn.getAll<{ id: string; athlete_id: string }>(
+      `SELECT id, athlete_id FROM strength_workout_authorizations
+       WHERE session_id = ? OR preview_id = ? LIMIT 2`,
+      [preview.binding.sessionId, previewId],
     );
+    if (existing.some(row => row.athlete_id !== athleteId)) {
+      throw new Error('Foreign-owned routine authorization detected in athlete database.');
+    }
     if (existing.length) {
       throw new Error('Routine workout version has already been authorized; no duplicate execution approval.');
     }
