@@ -90,6 +90,17 @@ describe('strength workout revision is structural only, never clinical authoriza
     provenance.source = 'manual';
     expect(review(provenance).structurallyValid).toBe(false);
   });
+  it('refuses altered workout identity, station purpose or exercise instructions', () => {
+    const identity = shortened();
+    identity.id = 'other-workout';
+    expect(review(identity).structurallyValid).toBe(false);
+    const purpose = shortened();
+    purpose.stations[0]!.purpose = 'higher intensity';
+    expect(review(purpose).structurallyValid).toBe(false);
+    const guidance = shortened();
+    guidance.stations[0]!.exercises[0]!.adaptationNote = 'Add explosive reps';
+    expect(review(guidance).structurallyValid).toBe(false);
+  });
   it('fails closed on malformed time and incomplete workout structures', () => {
     const invalid = shortened();
     invalid.totalRestSeconds = Number.NaN;
