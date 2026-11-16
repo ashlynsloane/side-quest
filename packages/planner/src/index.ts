@@ -1773,3 +1773,7 @@ export type { StrengthPreviewReviewEvent, StrengthPreviewReviewState } from './s
 
 export { listUnapprovedStrengthReviewInbox } from './strength-revision-review-inbox';
 export type { UnapprovedStrengthReviewInboxItem } from './strength-revision-review-inbox';
+
+// Exact before/after workout visualization only; cannot authorize or start exercise.
+export { summarizeUnapprovedStrengthRevision } from './strength-revision-review-summary';
+export type { StrengthReviewDoseChange, StrengthRevisionReadOnlySummary } from './strength-revision-review-summary';
