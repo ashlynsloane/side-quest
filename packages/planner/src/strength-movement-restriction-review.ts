@@ -168,11 +168,21 @@ export function assessStrengthMovementRestrictions(
     || !context || context.schemaVersion !== 1
     || context.executableWorkoutApproved !== false
     || !Array.isArray(context.activeProtectedMovements)
+    || context.activeProtectedMovements.some(movement => ![
+      'impact_running', 'loaded_spinal_rotation', 'shoulder_loading',
+      'deep_hip_flexion', 'other_movement',
+    ].includes(movement))
     || !policy || policy.schemaVersion !== 1
     || policy.executableWorkoutApproved !== false
     || policy.canApproveExerciseRevision !== false
     || (policy.track === 'routine_training_review'
-      && context.activeProtectedMovements.length > 0)) {
+      && (context.activeProtectedMovements.length > 0
+        || context.legacyRestrictionReported !== false
+        || context.ptProfile === 'active'
+        || context.ptProfile === 'unknown'
+        || context.symptoms === 'reported'
+        || context.symptoms === 'unknown'
+        || context.intent !== 'general_training'))) {
     throw new Error('Movement restriction review has incomplete safety inputs.');
   }
   const protectedMovements = [...new Set(context.activeProtectedMovements)];
