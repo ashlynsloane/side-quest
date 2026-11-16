@@ -70,11 +70,14 @@ export async function readUnapprovedStrengthReviewDetail(
     snapshot, athleteId, previewId,
   );
   const summary = summarizeUnapprovedStrengthRevision(assessment.preview);
-  // One evaluation instant prevents the preflight and provenance summaries
-  // from disagreeing if an observation expires mid-read.
+  // Compare all athlete-owned evidence inside one read snapshot. A routine
+  // training intent can remove the generic *clinician paperwork requirement*,
+  // but never an actual restriction or the executable approval lock.
+  const trainingContext = await readAthleteTrainingSafetyContext(snapshot, athleteId);
+  const trainingPolicy = evaluateTrainingSafetyPolicy(trainingContext);
   const evaluatedAtMs = Date.now();
   const preflight = await inspectStrengthApprovalPreflight(
-    snapshot, assessment, review, evidence, evaluatedAtMs,
+    snapshot, assessment, review, evidence, evaluatedAtMs, trainingPolicy,
   );
   const provenance = await readStrengthEvidenceProvenance(
     snapshot, athleteId, previewId, evaluatedAtMs,
@@ -82,11 +85,6 @@ export async function readUnapprovedStrengthReviewDetail(
   const reconciliation = createStrengthReconciliationChecklist(
     preflight, provenance,
   );
-  // Routine training and rehabilitation are separate from this unfinished
-  // executable workout-revision approval path. Historical restrictions in
-  // other drafts still constrain the athlete-wide review classification.
-  const trainingContext = await readAthleteTrainingSafetyContext(snapshot, athleteId);
-  const trainingPolicy = evaluateTrainingSafetyPolicy(trainingContext);
   const provenanceBlockers = preflight.gates.filter(gate =>
     (gate.id === 'external_provider_restrictions' || gate.id === 'source_provenance')
     && gate.status === 'blocked').map(gate => gate.detail);
