@@ -38,7 +38,7 @@ records explicit training modes or additional restrictions; it cannot
 retire constraints, claim clinical verification, modify exercises, or
 start a workout.
 
-The 12-gate **unapproved exercise-revision** report uses
+The 13-gate **unapproved exercise-revision** report uses
 `not_applicable` for clinician paperwork only in an explicitly routine,
 unrestricted case. It continues to require missing safety information
 where relevant and ALWAYS refuses executable revision confirmation because
@@ -46,6 +46,31 @@ the final write-time authorization mechanism is not implemented. This is
 not evidence that the ordinary workout generator has been connected to
 protected-movement matching yet. That integration and native acceptance
 remain blocking tasks.
+
+## Protected-movement gate enforcement (non-executable)
+
+The exercise-level restriction result is now integrated into **all three**
+read-only review surfaces: the draft detail, paginated inbox, and the
+thirteen-gate approval prerequisites/reconciliation checklist. A candidate
+with a current protected movement and a flagged exercise or missing
+interpretable exercise metadata is marked **stale**, with a concrete
+movement-specific hold. A shortened duration or fewer repetitions cannot
+negate that hold.
+
+The new `movement_compatibility` prerequisite distinguishes:
+- **Blocked:** protected movements coexist with candidate conflicts or
+  exercises needing individual review
+- **Unverified:** tags detect no conflict but cannot establish clinical
+  compatibility, or the training context/annotations are incomplete
+- **Not applicable:** uncomplicated routine training with no recorded
+  protected movement and interpretable exercise metadata
+
+This does not require clinician paperwork for every healthy routine athlete.
+The check accepts no provider clearance, returns no executable workout and
+cannot approve exercise. Its catalog validation now rejects unknown
+movement/avoidance tags, unrecognized load regions and all-empty movement
+annotations for restricted athletes. File-backed tests cover routine,
+injury-restricted, unknown-metadata and forged tag cases.
 
 ## Exercise-level restriction-tag diagnostics (non-clinical)
 
@@ -139,7 +164,7 @@ rehabilitation exercise contraindication engine or native device acceptance.
   verifies dismiss/restore, stale visibility remaining stale, injected SQL
   failure rollback, cold-start audit recovery and unchanged workout/ledger data.
   These are not workout confirmation, return-to-sport clearance, or release.
-- The read-only detail now includes a **12-gate pre-approval diagnostic**
+- The read-only detail now includes a **13-gate pre-approval diagnostic**
   that distinguishes local snapshot checks (source identity, exercise structure,
   completion, planning choices, draft status, symptoms, readiness, in-app PT
   profile) from unverified external clinician restrictions and training-source
@@ -161,7 +186,7 @@ rehabilitation exercise contraindication engine or native device acceptance.
 - The app detail screen can explicitly flag a possible restriction or missing
   training history. These are risk-increasing, confirmed inputs only: this
   mobile API cannot assert provider clearance, reconcile outside health
-  sources, or change an exercise prescription. The inbox and 12-gate
+  sources, or change an exercise prescription. The inbox and 13-gate
   assessment mark unresolved reported restrictions and incomplete coverage
   as blocked, even if a later unverified statement contradicts them.
 - The provenance journal is included in the mobile local-data export and
@@ -171,7 +196,7 @@ rehabilitation exercise contraindication engine or native device acceptance.
   changed preflight status and an unchanged workout ledger. This is a
   **provenance scaffold**, not independently authenticated provider evidence.
 - The review detail now exposes a deterministic **evidence reconciliation
-  checklist** derived from all twelve approval gates. Active safety holds
+  checklist** derived from all thirteen approval gates. Active safety holds
   appear before missing-source reviews, followed by intentionally unavailable
   executable-approval features. Every task explains its next investigative
   step and explicitly marks `canResolveAutomatically: false`. Even a perfect
