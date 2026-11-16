@@ -3,6 +3,7 @@ import { withUnapprovedStrengthReadSnapshot } from './strength-review-read-snaps
 import type { CurrentStrengthReviewEvidence } from './strength-revision-decision-review';
 import { reassessStoredStrengthRevisionPreview } from './strength-revision-preview-sqlite';
 import { readStrengthPreviewReviewState } from './strength-preview-review-events-sqlite';
+import { readStrengthEvidenceProvenance } from './strength-evidence-provenance-sqlite';
 
 /** Read-only queue. No item in this list is an executable prescription. */
 export interface UnapprovedStrengthReviewInboxItem {
@@ -76,7 +77,19 @@ export async function listUnapprovedStrengthReviewInbox(
       snapshot, athleteId, row.id, evidence,
     );
     const preview = assessment.preview;
-    const stale = assessment.status === 'stale';
+    const lineage = await readStrengthEvidenceProvenance(
+      snapshot, athleteId, row.id,
+    );
+    const lineageReasons: string[] = [];
+    if (['reported_restriction', 'conflicting', 'expired'].includes(
+      lineage.restriction.status,
+    )) {
+      lineageReasons.push('Unverified or contradictory provider restriction claims require review.');
+    }
+    if (['partial', 'conflicting', 'expired'].includes(lineage.coverage.status)) {
+      lineageReasons.push('Training source provenance is incomplete or expired.');
+    }
+    const stale = assessment.status === 'stale' || lineageReasons.length > 0;
     const status = review.status === 'dismissed'
       ? 'dismissed' : stale ? 'stale' : 'needs_review';
     if (typeof preview.decision.proposedMinutes !== 'number'
@@ -89,7 +102,7 @@ export async function listUnapprovedStrengthReviewInbox(
       blockId: preview.binding.blockId, sessionId: preview.binding.sessionId,
       decisionId: preview.decision.id,
       proposedMinutes: preview.decision.proposedMinutes,
-      status, stale, reasons: assessment.reasons,
+      status, stale, reasons: [...assessment.reasons, ...lineageReasons],
       executableWorkoutApproved: false, requiresWriteTimeRevalidation: true,
     });
   }
