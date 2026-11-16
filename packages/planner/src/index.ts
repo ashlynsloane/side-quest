@@ -1781,3 +1781,7 @@ export type { StrengthReviewDoseChange, StrengthRevisionReadOnlySummary } from '
 // One owner-locked, read-only detail snapshot with current stale-state assessment.
 export { readUnapprovedStrengthReviewDetail } from './strength-revision-review-detail';
 export type { UnapprovedStrengthReviewDetail } from './strength-revision-review-detail';
+
+// Structured, non-executable approval readiness diagnostics only.
+export { inspectStrengthApprovalPreflight } from './strength-approval-preflight';
+export type { StrengthApprovalPreflight, StrengthApprovalDiagnosticGate, StrengthApprovalGateId } from './strength-approval-preflight';
