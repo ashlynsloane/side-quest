@@ -145,6 +145,12 @@ The SQLite decision transaction now re-reads the most recently stored `pt_profil
 
 A stored `active: false` profile means only that this particular in-app profile is inactive; it **does not independently prove the athlete has no external restrictions**. The helper does not yet reconcile clinician data or authorize an executable workout. The UI remains read-only, and physical-iPhone and original-data acceptance gates are still outstanding.
 
+## Stage 8: Exact-source exercise preview identity (read-only)
+
+Added `createStrengthRevisionPreviewBinding` and `verifyStrengthRevisionPreviewBinding`. A reviewable candidate is associated with the exact serialized source session, proposed exercise-level workout, decision event, athlete/block/session identity and review evidence. Reopening the preview with different exercise targets, changed source provenance, a different decision ID, changed evidence or injected binding metadata invalidates the prior review. Tests exercise intact previews, source regeneration, exercise mutation, changed provider/history evidence and tampering.
+
+These JSON identities are **exact-match stale-detection values, not cryptographic signatures or independently authenticated evidence**. This module **does not save a revision, update SQLite, confer provider clearance, start a workout or create a user-facing approval button**. The actual persist-and-execute flow still requires durable candidate storage, authoritative source reconciliation and atomic write-time revalidation before release.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
