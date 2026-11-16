@@ -55,12 +55,15 @@ that still requires a real athlete, provider source, or native device.
   handle to every nested repository query. The callback reader rejects writes
   and nested transactions; missing/unsupported snapshot support fails closed.
   This is a review-display safety gate, **not** executable approval.
-- File-backed concurrency tests attempt a competing PT-profile write from a
-  second SQLite connection mid-review. The write is rejected while the
-  transaction is held; the subsequent fresh review sees the new restriction.
-  Tests also verify rollback/release of locks and that both inbox and detail
-  perform no unprotected queries outside the snapshot. Mobile SQLite acceptance
-  mocks native exclusive transactions and tests failure when they are unavailable.
+- File-backed concurrency tests use a synthetic `BEGIN IMMEDIATE`
+  transaction and attempt a competing PT-profile write from another SQLite
+  connection. The synthetic writer is rejected while that transaction is held;
+  a subsequent review sees the changed restriction after the transaction ends.
+  Native Expo transactions use a separate transaction handle, but **native
+  writer-blocking behavior has not been verified** and can differ from this
+  synthetic immediate transaction. Tests also verify rollback/release of locks
+  and that inbox/detail never issue unprotected queries outside the snapshot.
+  Mobile SQLite acceptance mocks the native API and rejects unavailable support.
 - The exclusive transaction API is native-only; the web review screen must
   report unavailable evidence rather than silently falling back to weaker,
   interleavable transactions. This API is not an iPhone launch test.
