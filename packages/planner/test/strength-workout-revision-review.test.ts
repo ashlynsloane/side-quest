@@ -101,6 +101,28 @@ describe('strength workout revision is structural only, never clinical authoriza
     guidance.stations[0]!.exercises[0]!.adaptationNote = 'Add explosive reps';
     expect(review(guidance).structurallyValid).toBe(false);
   });
+  it('rejects changed or injected metadata outside the explicitly reduced dose', () => {
+    const changedName = shortened();
+    changedName.name = 'Different workout';
+    expect(review(changedName).structurallyValid).toBe(false);
+    const addedWorkoutField = shortened() as GeneratedWorkout & { bonus?: string };
+    addedWorkoutField.bonus = 'extra training';
+    expect(review(addedWorkoutField).structurallyValid).toBe(false);
+    const changedStation = shortened();
+    changedStation.stations[0]!.purpose = 'Different execution instructions';
+    expect(review(changedStation).structurallyValid).toBe(false);
+    const extraStation = shortened();
+    const station = extraStation.stations[0]! as typeof extraStation.stations[number] & {
+      additionalRounds?: number;
+    };
+    station.additionalRounds = 3;
+    expect(review(extraStation).structurallyValid).toBe(false);
+    const changedExercise = shortened();
+    const exercise = changedExercise.stations[0]!.exercises[0]! as
+      typeof changedExercise.stations[number]['exercises'][number] & { extraSets?: number };
+    exercise.extraSets = 5;
+    expect(review(changedExercise).structurallyValid).toBe(false);
+  });
   it('fails closed on malformed time and incomplete workout structures', () => {
     const invalid = shortened();
     invalid.totalRestSeconds = Number.NaN;
