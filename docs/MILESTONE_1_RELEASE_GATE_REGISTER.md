@@ -96,6 +96,25 @@ that still requires a real athlete, provider source, or native device.
   claims saved with the original draft are caller assertions, **not**
   independent attestations. All checks run inside the same owner-scoped
   read-only SQLite snapshot as the historical review.
+- An isolated append-only **unverified source provenance journal** now records
+  athlete-reported exercise restrictions and incomplete training-history
+  concerns, plus references to clinician documents/integration records as
+  *unverified references only*. Entries are bound to the exact preview,
+  athlete owner and source signature, checked for tampered verification
+  metadata, impossible dates, conflicting claims, expiry and stale concurrent
+  updates. They are copied by value before exclusive SQLite append.
+- The app detail screen can explicitly flag a possible restriction or missing
+  training history. These are risk-increasing, confirmed inputs only: this
+  mobile API cannot assert provider clearance, reconcile outside health
+  sources, or change an exercise prescription. The inbox and 12-gate
+  assessment mark unresolved reported restrictions and incomplete coverage
+  as blocked, even if a later unverified statement contradicts them.
+- The provenance journal is included in the mobile local-data export and
+  fail-closed critical-table deletion registry. File-backed SQLite and
+  mobile acceptance tests cover restart recovery, source ownership,
+  contradictions, stale reports, invalid metadata, failed transactions,
+  changed preflight status and an unchanged workout ledger. This is a
+  **provenance scaffold**, not independently authenticated provider evidence.
 - A full mobile-service SQLite test creates an isolated synthetic source block,
   saves a preview, then verifies retrieval, history, read-only inbox and
   preservation of the unchanged original block and empty completion journal.
