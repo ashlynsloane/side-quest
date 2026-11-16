@@ -53,6 +53,13 @@ function open(athlete = 'synthetic-athlete-a') {
     );
     ${STRENGTH_CHOICE_AUDIT_SQL}
   `);
+  db.prepare('UPDATE training_check_ins SET check_in_json = ? WHERE id = ?').run(
+    JSON.stringify({
+      status: 'normal',
+      activeUntil: new Date(Date.now() + 86400000).toISOString(),
+    }),
+    'normal-checkin',
+  );
   const driver: TrainingAdjustmentSqlDriver = {
     getFirst: async <T>(sql: string, params: Array<string | number | null>) =>
       db.prepare(sql).get(...params) as T | null,
@@ -203,6 +210,23 @@ describe('real SQLite atomic strength approval and undo journal', () => {
     )).rejects.toThrow(/symptom status is unknown/);
     expect(await readStrengthChoiceAudit(driver,
       'synthetic-athlete-a', 'block-1', 'strength-1')).toHaveLength(1);
+  });
+  it('expired or incomplete normal check-ins cannot authorize dose decisions', async () => {
+    for (const activeUntil of [
+      new Date(Date.now() - 86400000).toISOString(),
+      'not-a-date',
+      undefined,
+    ]) {
+      const { driver, db } = open();
+      db.prepare('UPDATE training_check_ins SET check_in_json = ? WHERE id = ?').run(
+        JSON.stringify({ status: 'normal', activeUntil }),
+        'normal-checkin',
+      );
+      await expect(appendStrengthChoiceDecision(driver, decision('reduce'), review))
+        .rejects.toThrow(/expired or lacks a valid expiry/);
+      expect(await readStrengthChoiceAudit(driver,
+        'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
+    }
   });
   it('a recover-level readiness check-in blocks reduction and restoration', async () => {
     const { driver, db } = open();
