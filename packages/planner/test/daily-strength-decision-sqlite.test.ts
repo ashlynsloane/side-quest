@@ -255,6 +255,38 @@ describe('real SQLite atomic strength approval and undo journal', () => {
       action: 'keep', stale: true, effectivePlanningMinutes: 40,
     });
   });
+  it('a shortened planning cap never becomes an executable exercise modification', async () => {
+    const { driver } = open();
+    await appendStrengthChoiceDecision(driver, decision('reduce'), review);
+    const audit = await readStrengthChoiceAudit(
+      driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+    );
+    const result = effectiveStrengthChoice(rawSession(), audit);
+    expect(result).toMatchObject({
+      action: 'reduce', effectivePlanningMinutes: 32,
+      executableWorkoutModified: false, requiresExerciseLevelReview: true,
+    });
+    expect(result.source.workout).toEqual(rawSession().workout);
+  });
+  it('rejects audit payloads whose identity or timestamp disagrees with the SQLite row', async () => {
+    for (const alteration of [
+      { id: 'different-event-id' },
+      { createdAt: '2026-11-15T10:00:00Z' },
+    ]) {
+      const { driver, db } = open();
+      await appendStrengthChoiceDecision(driver, decision('defer'), review);
+      db.prepare('UPDATE daily_strength_choice_events SET event_json = ? WHERE id = ?')
+        .run(JSON.stringify({ ...decision('defer'), ...alteration }), 'approve');
+      await expect(readStrengthChoiceAudit(
+        driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+      )).rejects.toThrow(/invalid/);
+      await expect(appendStrengthChoiceDecision(
+        driver, decision('reduce', 'accepted', 'another-approval'), review,
+      )).rejects.toThrow(/invalid/);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+        .get() as {n:number}).n).toBe(1);
+    }
+  });
   it('invalid JSON in the audit fails closed and prevents another approval', async () => {
     const { driver, db } = open();
     await appendStrengthChoiceDecision(driver, decision('defer'), review);
