@@ -13,6 +13,7 @@ import {
   type StrengthPreviewReviewEvent,
 } from '../src/strength-preview-review-events-sqlite';
 import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
+import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
 import {
   STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview,
   readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview,
@@ -513,5 +514,70 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     expect((await readStrengthPreviewReviewState(
       sql, 'synthetic-athlete-a', stored.id,
     )).status).toBe('pending_review');
+  });
+});
+
+describe('bounded owner-scoped read-only strength preview inbox', () => {
+  it('lists pending and dismissed previews in newest-first order without approvals', async () => {
+    const { db, sql } = open();
+    const original = await appendStrengthRevisionPreview(sql, input());
+    const later = input();
+    later.id = 'preview-2';
+    later.createdAt = '2026-11-15T12:00:00Z';
+    later.decision.id = 'candidate-decision-2';
+    await appendStrengthRevisionPreview(sql, later);
+    const list = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(list.map(item => item.previewId)).toEqual(['preview-2', 'preview-1']);
+    expect(list.map(item => item.status)).toEqual(['needs_review', 'needs_review']);
+    expect(list.every(item => item.executableWorkoutApproved === false)).toBe(true);
+    await appendStrengthPreviewReviewEvent(sql, reviewEvent(original, 'dismiss'));
+    const latest = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(latest.map(item => item.status)).toEqual(['needs_review', 'dismissed']);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as { n: number }).n).toBe(0);
+  });
+  it('marks superseded plans stale without hiding dismissed items or mutating records', async () => {
+    const { db, sql, saveBlock } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
+    saveBlock(block({ ...sourceSession(), title: 'Regenerated' }));
+    const inbox = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]).toMatchObject({
+      status: 'dismissed', stale: true,
+      executableWorkoutApproved: false,
+      requiresWriteTimeRevalidation: true,
+    });
+    expect(inbox[0]?.reasons.join(' ')).toMatch(/cannot be reviewed/);
+    expect(reviewEventCount(db)).toBe(1);
+  });
+  it('rejects wrong owner, invalid paging and corrupted history instead of omitting entries', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    await expect(listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', { ...evidence(), athleteId: 'another-athlete' },
+    )).rejects.toThrow(/athlete evidence mismatch/);
+    await expect(listUnapprovedStrengthReviewInbox(
+      sql, 'wrong-athlete', { ...evidence(), athleteId: 'wrong-athlete' },
+    )).rejects.toThrow(/database ownership mismatch/);
+    for (const size of [0, -1, 51, Number.NaN, 2.5]) {
+      await expect(listUnapprovedStrengthReviewInbox(
+        sql, 'synthetic-athlete-a', evidence(), size,
+      )).rejects.toThrow(/page size/);
+    }
+    expect(await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(), 1,
+    )).toHaveLength(1);
+    db.prepare('UPDATE strength_revision_previews SET preview_json = ?')
+      .run('{unreadable');
+    await expect(listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    )).rejects.toThrow(/unreadable/);
   });
 });
