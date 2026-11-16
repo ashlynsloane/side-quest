@@ -149,12 +149,27 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
   it('initializes unapproved revision storage and exposes no execution approval', async () => {
     const snapshot = await service.exportLocalData();
     expect(snapshot).toHaveProperty('strength_revision_previews', []);
+    expect(snapshot).toHaveProperty('daily_strength_choice_events', []);
+    expect(snapshot).toHaveProperty('training_plan_adjustment_events', []);
+    expect(snapshot).toHaveProperty('training_baseline_review_events', []);
     expect(await service.getUnapprovedStrengthRevisionPreview(
       'synthetic-athlete-one', 'missing-preview',
     )).toBeNull();
     expect(await service.listDailyStrengthChoiceDecisions(
       'synthetic-athlete-one', 'unknown-block', 'unknown-session',
     )).toEqual([]);
+  });
+
+  it('fails export and rolls back deletion if a critical revision journal is unreadable', async () => {
+    await service.saveTrainingBlock(weeklyBlock());
+    const { DatabaseSync } = await import('node:sqlite');
+    const isolated = new DatabaseSync(join(state.directory, service.getActiveDatabaseName()));
+    isolated.exec('DROP TABLE strength_revision_previews');
+    isolated.close();
+    await expect(service.exportLocalData()).rejects.toThrow(/Cannot export critical audit history/);
+    await expect(service.deleteAllLocalData())
+      .rejects.toThrow(/Cannot safely delete critical audit history/);
+    expect(await service.getLatestTrainingBlock()).not.toBeNull();
   });
 
   it('finishes a planned workout and writes one canonical linked ledger record', async () => {
