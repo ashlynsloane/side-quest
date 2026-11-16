@@ -44,7 +44,9 @@ export interface StrengthPreviewReviewState {
 function validTimestamp(value: string): boolean {
   return typeof value === 'string'
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
-    && Number.isFinite(Date.parse(value));
+    && Number.isFinite(Date.parse(value))
+    && (value === new Date(Date.parse(value)).toISOString()
+      || value === new Date(Date.parse(value)).toISOString().replace('.000Z', 'Z'));
 }
 
 /**
