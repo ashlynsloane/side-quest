@@ -670,6 +670,59 @@ describe('read-only exact exercise dose change summary', () => {
       },
     ]);
   });
+  it('compares omitted stations and exercises with a strict reduced-dose ceiling', async () => {
+    const { sql, saveBlock } = open();
+    const original = sourceSession();
+    const first = original.workout.stations[0]!;
+    const secondExercise = {
+      ...first.exercises[0]!,
+      exerciseId: 'exercise-2',
+      exerciseSnapshot: { ...first.exercises[0]!.exerciseSnapshot, id: 'exercise-2',
+        name: 'Synthetic second movement' },
+      order: 1,
+    };
+    first.exercises.push(secondExercise);
+    original.workout.stations.push({
+      ...structuredClone(first), id: 'station-2', order: 1,
+      purpose: 'secondary station', durationSeconds: 600,
+      exercises: [{ ...structuredClone(secondExercise), exerciseId: 'exercise-3',
+        exerciseSnapshot: { ...secondExercise.exerciseSnapshot,
+          id: 'exercise-3', name: 'Synthetic third movement' }, order: 0 }],
+    });
+    original.workout.totalWorkSeconds = 2400;
+    original.workout.estimatedElapsedSeconds = 3000;
+    saveBlock(block(original));
+    const revised = structuredClone(original.workout);
+    revised.stations = [{
+      ...structuredClone(original.workout.stations[0]!),
+      exercises: [structuredClone(original.workout.stations[0]!.exercises[0]!)],
+    }];
+    revised.stations[0]!.exercises[0]!.target = 8;
+    revised.totalWorkSeconds = 1800;
+    revised.estimatedElapsedSeconds = 2400;
+    const record = decision();
+    record.sourceSignature = strengthSessionSignature(original);
+    record.proposedMinutes = 40;
+    const saved = await appendStrengthRevisionPreview(sql, {
+      ...input(), source: original, candidate: revised, decision: record,
+    });
+    const summary = summarizeUnapprovedStrengthRevision(saved);
+    expect(summary.stationCountBefore).toBe(2);
+    expect(summary.stationCountAfter).toBe(1);
+    expect(summary.changes.map(item => item.kind)).toContain('station_removed');
+    expect(summary.changes.map(item => item.kind)).toContain('exercise_removed');
+    expect(summary.changes.map(item => item.kind)).toContain('exercise_target');
+    expect(summary.secondsReduced).toBe(600);
+    expect(summary.executableWorkoutApproved).toBe(false);
+  });
+  it('refuses to display a draft that claims execution was approved', async () => {
+    const { sql } = open();
+    const saved = await appendStrengthRevisionPreview(sql, input());
+    const forged = structuredClone(saved);
+    Object.assign(forged, { executableWorkoutApproved: true });
+    expect(() => summarizeUnapprovedStrengthRevision(forged))
+      .toThrow(/Only a verified, unapproved/);
+  });
   it('never renders a tampered candidate or mismatched historical source', async () => {
     const { sql } = open();
     const saved = await appendStrengthRevisionPreview(sql, input());
