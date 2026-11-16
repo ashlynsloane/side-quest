@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, listUnapprovedStrengthReviewInbox, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -1450,6 +1450,22 @@ export async function listUnapprovedStrengthReviewItems(
     await initializeDatabase();
     return listUnapprovedStrengthReviewInbox(
       trainingAdjustmentDriver, athleteId, evidence, pageSize,
+    );
+  });
+}
+
+/** Single owner-locked read-only detail, including a fresh stale assessment.
+ * This does not approve or execute a workout.
+ */
+export async function getUnapprovedStrengthReviewDetail(
+  athleteId: string,
+  previewId: string,
+  evidence: CurrentStrengthReviewEvidence,
+): Promise<UnapprovedStrengthReviewDetail> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readUnapprovedStrengthReviewDetail(
+      trainingAdjustmentDriver, athleteId, previewId, evidence,
     );
   });
 }
