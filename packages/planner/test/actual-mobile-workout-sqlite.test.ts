@@ -29,6 +29,7 @@ vi.mock('@circuit/planner', async () => {
   const review = await import('../src/strength-preview-review-events-sqlite');
   const inbox = await import('../src/strength-revision-review-inbox');
   const detail = await import('../src/strength-revision-review-detail');
+  const evidence = await import('../src/strength-evidence-provenance-sqlite');
   return {
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
@@ -37,6 +38,8 @@ vi.mock('@circuit/planner', async () => {
     appendStrengthPreviewReviewEvent: review.appendStrengthPreviewReviewEvent,
     listUnapprovedStrengthReviewInbox: inbox.listUnapprovedStrengthReviewInbox,
     readUnapprovedStrengthReviewDetail: detail.readUnapprovedStrengthReviewDetail,
+    STRENGTH_EVIDENCE_PROVENANCE_SQL: evidence.STRENGTH_EVIDENCE_PROVENANCE_SQL,
+    appendStrengthEvidenceProvenance: evidence.appendStrengthEvidenceProvenance,
     readStrengthRevisionPreview: preview.readStrengthRevisionPreview,
     readStrengthChoiceAudit: strength.readStrengthChoiceAudit,
     PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
@@ -360,6 +363,47 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.preflight.gates.find(
       gate => gate.id === 'executable_write_authorization',
     )?.status).toBe('not_implemented');
+    expect(detail.provenance.events).toEqual([]);
+    await service.flagUnverifiedStrengthReviewConcern({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      kind: 'provider_restriction', expectedLastEventId: null,
+    });
+    const withRestriction = await service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    );
+    expect(withRestriction.provenance.restriction.status).toBe('reported_restriction');
+    expect(withRestriction.preflight.gates.find(
+      gate => gate.id === 'external_provider_restrictions',
+    )?.status).toBe('blocked');
+    expect(withRestriction.preflight.canConfirmExecutableWorkout).toBe(false);
+    await expect(service.flagUnverifiedStrengthReviewConcern({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      kind: 'provider_restriction', expectedLastEventId: null,
+    })).rejects.toThrow(/history changed/);
+    await service.flagUnverifiedStrengthReviewConcern({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      kind: 'training_coverage', expectedLastEventId: null,
+    });
+    const withBoth = await service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    );
+    expect(withBoth.provenance.coverage.status).toBe('partial');
+    expect(withBoth.preflight.gates.find(
+      gate => gate.id === 'source_provenance',
+    )?.status).toBe('blocked');
+    expect(withBoth.preflight.executableWorkoutApproved).toBe(false);
+    expect((await service.exportLocalData()).strength_evidence_provenance_events)
+      .toHaveLength(2);
     expect(state.exclusiveSnapshotReads).toBeGreaterThanOrEqual(2);
     state.failExclusiveReview = true;
     await expect(service.getUnapprovedStrengthReviewDetail(
@@ -437,6 +481,7 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     const exported = await service.exportLocalData();
     expect(exported.strength_revision_preview_review_events).toHaveLength(2);
     expect(exported.strength_revision_previews).toHaveLength(1);
+    expect(exported.strength_evidence_provenance_events).toHaveLength(2);
     expect(exported.daily_strength_choice_events).toEqual([]);
     expect(exported.workout_ledger).toEqual([]);
     const savedBlock = await service.getLatestTrainingBlock();
