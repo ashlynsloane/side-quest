@@ -20,6 +20,33 @@ that still requires a real athlete, provider source, or native device.
 | Native device acceptance | Physical iPhone P01–P15, correct isolated app identity, install/launch, cold restart, permissions and UI interactions, crash/recovery behavior | **NOT VERIFIED.** An iOS JavaScript export is not a native launch |
 | Release owner authorization | Review and explicit approval of final merge/deployment after all blocking gates pass | **NOT AUTHORIZED** |
 
+## Training-mode policy: no universal clinician approval requirement
+
+The development branch distinguishes ordinary general training from injury
+rehabilitation and return-to-sport review. An explicit **general-training**
+context with no known restriction can be reviewed without demanding a
+clinician-issued document. A missing medical file is not, by itself, an
+injury or a reason to lock out ordinary training.
+
+An athlete-owned append-only safety-context journal preserves protected
+movements across different training plans, previous preview-specific
+restriction reports, and switches back to general training. Recorded PT
+restrictions, injury symptoms or protected movements take precedence over a
+newly selected mode. Missing/malformed local records are not treated as
+verified medical clearance. The new Profile-linked safety-context screen
+records explicit training modes or additional restrictions; it cannot
+retire constraints, claim clinical verification, modify exercises, or
+start a workout.
+
+The 12-gate **unapproved exercise-revision** report uses
+`not_applicable` for clinician paperwork only in an explicitly routine,
+unrestricted case. It continues to require missing safety information
+where relevant and ALWAYS refuses executable revision confirmation because
+the final write-time authorization mechanism is not implemented. This is
+not evidence that the ordinary workout generator has been connected to
+protected-movement matching yet. That integration and native acceptance
+remain blocking tasks.
+
 ## What is implemented (not executable approval)
 
 - Read-only daily training reconciliation, readiness and feedback guidance, and bounded next-session choices.
