@@ -1887,3 +1887,66 @@ describe('restriction-aware routine training versus rehabilitation policy', () =
     expect(persistedCount.n).toBe(0);
   });
 });
+
+describe('conditional clinician documentation policy without approving workout revisions', () => {
+  it('marks provider paperwork not applicable for a routine athlete without known restrictions', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    await appendTrainingSafetyContextEvent(sql,
+      safetyEvent('routine-intent', 'training_intent', 'general_training'), null);
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(detail.trainingPolicy.track).toBe('routine_training_review');
+    expect(detail.trainingPolicy.clinicianDocumentRequiredForRoutineTraining).toBe(false);
+    expect(detail.preflight.gates.find(g =>
+      g.id === 'external_provider_restrictions')?.status).toBe('not_applicable');
+    expect(detail.preflight.requiresIndependentProviderVerification).toBe(false);
+    expect(detail.reconciliation.clinicalSourceVerificationRequired).toBe(false);
+    expect(detail.reconciliation.tasks.map(task => task.id))
+      .not.toContain('external_provider_restrictions');
+    expect(detail.reconciliation.unresolvedCount).toBe(
+      detail.preflight.blockingGateCount);
+    expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+    expect(detail.reconciliation.executableWorkoutApproved).toBe(false);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+
+  it('restores provider restriction review when an active limitation is later reported', async () => {
+    const { sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    await appendTrainingSafetyContextEvent(sql,
+      safetyEvent('general', 'training_intent', 'general_training'), null);
+    await appendTrainingSafetyContextEvent(sql,
+      safetyEvent('impact', 'protect_movement', 'impact_running',
+        '2026-11-15T12:01:00Z'), 'general');
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(detail.trainingPolicy.track).toBe('restriction_aware_review');
+    expect(detail.preflight.requiresIndependentProviderVerification).toBe(true);
+    expect(detail.preflight.gates.find(g =>
+      g.id === 'external_provider_restrictions')?.status).toBe('unverified');
+    expect(detail.reconciliation.tasks.map(task => task.id))
+      .toContain('external_provider_restrictions');
+    expect(detail.preflight.executableWorkoutApproved).toBe(false);
+  });
+
+  it('does not remove the clinical requirement for routine mode when earlier drafts reported restrictions', async () => {
+    const { sql } = open();
+    const oldDraft = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      oldDraft, 'provider_restriction', 'reported_present', 'prior-hold',
+    ), null);
+    await appendTrainingSafetyContextEvent(sql,
+      safetyEvent('general', 'training_intent', 'general_training'), null);
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', oldDraft.id, evidence(),
+    );
+    expect(detail.trainingPolicy.legacyRestrictionReported).toBeUndefined();
+    expect(detail.trainingPolicy.track).toBe('restriction_aware_review');
+    expect(detail.preflight.gates.find(g =>
+      g.id === 'external_provider_restrictions')?.status).toBe('blocked');
+    expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+  });
+});
