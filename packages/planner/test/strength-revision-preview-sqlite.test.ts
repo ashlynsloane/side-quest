@@ -1269,3 +1269,205 @@ describe('non-executable strength approval prerequisite diagnostics', () => {
     expect(count(db, 'daily_strength_choice_events')).toBe(0);
   });
 });
+
+function reportedEvidence(
+  preview: StoredStrengthRevisionPreview,
+  kind: 'provider_restriction' | 'training_coverage',
+  claim: StrengthEvidenceProvenanceEvent['claim'],
+  id: string,
+  recordedAt = '2026-11-15T12:00:00Z',
+): StrengthEvidenceProvenanceEvent {
+  return {
+    schemaVersion: 1, id,
+    athleteId: 'synthetic-athlete-a', previewId: preview.id,
+    bindingSignature: JSON.stringify(preview.binding),
+    kind, source: 'athlete_self_report', claim, sourceReference: null,
+    observedAt: recordedAt, recordedAt, expiresAt: null,
+    verification: 'unverified', executableWorkoutApproved: false,
+  };
+}
+const provenanceRows = (db: DatabaseSync) =>
+  (db.prepare('SELECT COUNT(*) AS n FROM strength_evidence_provenance_events')
+    .get() as { n: number }).n;
+
+describe('durable unverified restriction and training provenance', () => {
+  it('missing source records never become independent clinical verification', async () => {
+    const { sql } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    const ledger = await readStrengthEvidenceProvenance(
+      sql, 'synthetic-athlete-a', preview.id,
+    );
+    expect(ledger.events).toEqual([]);
+    expect(ledger.restriction.status).toBe('missing');
+    expect(ledger.coverage.status).toBe('missing');
+    expect(ledger.independentlyVerified).toBe(false);
+    expect(ledger.executableWorkoutApproved).toBe(false);
+  });
+  it('reports an active restriction and makes detail/inbox stale without modifying exercise', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    const originalPlan = (db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json;
+    const report = reportedEvidence(
+      preview, 'provider_restriction', 'reported_present', 'reported-restriction',
+    );
+    await appendStrengthEvidenceProvenance(sql, report, null);
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', preview.id, evidence(),
+    );
+    expect(detail.provenance.restriction.status).toBe('reported_restriction');
+    expect(detail.provenance.restriction.independentlyVerified).toBe(false);
+    expect(detail.preflight.gates.find(
+      gate => gate.id === 'external_provider_restrictions',
+    )?.status).toBe('blocked');
+    expect(detail.stale).toBe(true);
+    expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+    const inbox = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(inbox[0]?.status).toBe('stale');
+    expect(inbox[0]?.reasons.join(' ')).toMatch(/provider restriction claims/);
+    expect(provenanceRows(db)).toBe(1);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(originalPlan);
+  });
+  it('flagging incomplete training coverage blocks preflight and survives file restart', async () => {
+    const { sql, db, file, directory } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'training_coverage', 'partial', 'partial-coverage',
+    ), null);
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    const reader = driver(reopened);
+    const detail = await readUnapprovedStrengthReviewDetail(
+      reader, 'synthetic-athlete-a', preview.id, evidence(),
+    );
+    expect(detail.provenance.coverage.status).toBe('partial');
+    expect(detail.provenance.coverage.events).toBeUndefined();
+    expect(detail.preflight.gates.find(g => g.id === 'source_provenance')?.status)
+      .toBe('blocked');
+    expect(detail.provenance.events.map(e => e.id)).toEqual(['partial-coverage']);
+    expect(detail.executableWorkoutApproved).toBe(false);
+  });
+  it('never clears conflicting claims based on a later self-report of no restrictions', async () => {
+    const { db, sql } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'provider_restriction', 'reported_present', 'restriction-on',
+    ), null);
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'provider_restriction', 'reported_none', 'restriction-off',
+      '2026-11-15T12:01:00Z',
+    ), 'restriction-on');
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', preview.id, evidence(),
+    );
+    expect(detail.provenance.restriction.status).toBe('conflicting');
+    expect(detail.preflight.gates.find(
+      gate => gate.id === 'external_provider_restrictions',
+    )?.status).toBe('blocked');
+    expect(detail.preflight.executableWorkoutApproved).toBe(false);
+    expect(provenanceRows(db)).toBe(2);
+  });
+  it('detects obsolete claims and refuses clinician-sounding source labels as clearance', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    const observation = reportedEvidence(
+      preview, 'provider_restriction', 'reported_none',
+      'unverified-clinician-reference', '2026-10-01T12:00:00Z',
+    );
+    observation.source = 'document_reference';
+    observation.sourceReference = 'reviewed-note-id';
+    await appendStrengthEvidenceProvenance(sql, observation, null);
+    const ledger = await readStrengthEvidenceProvenance(
+      sql, 'synthetic-athlete-a', preview.id,
+      Date.parse('2026-11-16T12:00:00Z'),
+    );
+    expect(ledger.restriction.status).toBe('expired');
+    expect(ledger.restriction.independentlyVerified).toBe(false);
+    expect(ledger.restriction.applicableRestrictionsCleared).toBe(false);
+    expect(provenanceRows(db)).toBe(1);
+  });
+  it('rejects forgery, noncanonical timestamps, unsupported claims, and missing references', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    for (const alter of [
+      (e: StrengthEvidenceProvenanceEvent) => { e.verification = 'verified' as 'unverified'; },
+      (e: StrengthEvidenceProvenanceEvent) => { e.executableWorkoutApproved = true as false; },
+      (e: StrengthEvidenceProvenanceEvent) => { e.claim = 'claimed_complete'; },
+      (e: StrengthEvidenceProvenanceEvent) => { e.recordedAt = '2026-02-30T12:00:00Z'; },
+      (e: StrengthEvidenceProvenanceEvent) => { e.source = 'document_reference'; },
+      (e: StrengthEvidenceProvenanceEvent) => { e.observedAt = '2026-11-16T12:00:00Z'; },
+    ]) {
+      const bad = reportedEvidence(preview, 'provider_restriction', 'reported_present', 'bad');
+      alter(bad);
+      await expect(appendStrengthEvidenceProvenance(sql, bad, null))
+        .rejects.toThrow(/Invalid unverified evidence provenance/);
+    }
+    expect(provenanceRows(db)).toBe(0);
+  });
+  it('prevents lost updates and wrong-owner reads and fails closed on corrupted audit row', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    const first = reportedEvidence(
+      preview, 'training_coverage', 'partial', 'first-coverage',
+    );
+    await appendStrengthEvidenceProvenance(sql, first, null);
+    await expect(appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'training_coverage', 'claimed_complete', 'second-coverage',
+      '2026-11-15T12:02:00Z',
+    ), null)).rejects.toThrow(/history changed/);
+    await expect(readStrengthEvidenceProvenance(
+      sql, 'different-athlete', preview.id,
+    )).rejects.toThrow(/ownership mismatch/);
+    db.prepare('UPDATE strength_evidence_provenance_events SET athlete_id = ?')
+      .run('forged-owner');
+    await expect(readStrengthEvidenceProvenance(
+      sql, 'synthetic-athlete-a', preview.id,
+    )).rejects.toThrow(/identity or verification metadata mismatch/);
+    expect(provenanceRows(db)).toBe(1);
+  });
+  it('atomic write interruption leaves review and training journals unchanged', async () => {
+    const { db, sql } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    const interrupted: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        operation: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('No exclusive fixture.');
+        return sql.exclusiveTransaction(writer => operation({
+          ...writer,
+          run: async () => { throw new Error('synthetic evidence write failure'); },
+        }));
+      },
+    };
+    await expect(appendStrengthEvidenceProvenance(
+      interrupted, reportedEvidence(
+        preview, 'provider_restriction', 'reported_present', 'interrupted',
+      ), null,
+    )).rejects.toThrow(/synthetic evidence write failure/);
+    expect(provenanceRows(db)).toBe(0);
+    expect(count(db, 'strength_revision_previews')).toBe(1);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    await appendStrengthEvidenceProvenance(
+      sql, reportedEvidence(
+        preview, 'provider_restriction', 'reported_present', 'recovered',
+      ), null,
+    );
+    expect(provenanceRows(db)).toBe(1);
+  });
+  it('will not downgrade transaction isolation for a provenance write', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    await expect(appendStrengthEvidenceProvenance(
+      { ...sql, exclusiveTransaction: undefined },
+      reportedEvidence(preview, 'provider_restriction', 'reported_present', 'unsafe'),
+      null,
+    )).rejects.toThrow(/Exclusive evidence provenance writes are unavailable/);
+    expect(provenanceRows(db)).toBe(0);
+  });
+});
