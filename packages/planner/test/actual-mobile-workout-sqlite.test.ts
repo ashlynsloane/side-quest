@@ -361,7 +361,9 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
-    expect(detail.preflight.gates).toHaveLength(12);
+    expect(detail.preflight.gates).toHaveLength(13);
+    expect(detail.preflight.gates.find(g => g.id === 'movement_compatibility')?.status)
+      .toBe('unverified');
     expect(detail.movementRestrictions.canApplyWorkout).toBe(false);
     expect(detail.movementRestrictions.matchingIsClinicalClearance).toBe(false);
     expect(detail.movementRestrictions.findings).toHaveLength(1);
