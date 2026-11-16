@@ -414,8 +414,10 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     expect(restored.executableWorkoutApproved).toBe(false);
     expect((reopened.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
       .get() as { n: number }).n).toBe(0);
-    expect((reopened.prepare('SELECT block_json FROM training_blocks').get()
-      as { block_json: string }).block_json).toBe(JSON.stringify(block()));
+    const persistedBlock = reopened.prepare(
+      'SELECT block_json FROM training_blocks',
+    ).get() as { block_json: string };
+    expect(persistedBlock.block_json).toBe(JSON.stringify(block()));
   });
   it('rejects duplicate dismissal, orphan restoration and wrong athlete owner', async () => {
     const { db, sql } = open();
