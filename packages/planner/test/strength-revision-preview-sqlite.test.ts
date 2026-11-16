@@ -1396,6 +1396,10 @@ describe('durable unverified restriction and training provenance', () => {
     const preview = await appendStrengthRevisionPreview(sql, input());
     for (const alter of [
       (e: StrengthEvidenceProvenanceEvent) => { e.verification = 'verified' as 'unverified'; },
+      (e: StrengthEvidenceProvenanceEvent) => {
+        (e as StrengthEvidenceProvenanceEvent & { independentlyVerified?: boolean })
+          .independentlyVerified = true;
+      },
       (e: StrengthEvidenceProvenanceEvent) => { e.executableWorkoutApproved = true as false; },
       (e: StrengthEvidenceProvenanceEvent) => { e.claim = 'claimed_complete'; },
       (e: StrengthEvidenceProvenanceEvent) => { e.recordedAt = '2026-02-30T12:00:00Z'; },
@@ -1429,6 +1433,31 @@ describe('durable unverified restriction and training provenance', () => {
       sql, 'synthetic-athlete-a', preview.id,
     )).rejects.toThrow(/identity or verification metadata mismatch/);
     expect(provenanceRows(db)).toBe(1);
+  });
+  it('rejects forged verification claims injected into a previously stored JSON event', async () => {
+    for (const injection of ['verification', 'extra_field'] as const) {
+      const { db, sql } = open();
+      const preview = await appendStrengthRevisionPreview(sql, input());
+      const event = reportedEvidence(
+        preview, 'provider_restriction', 'reported_none', 'original',
+      );
+      await appendStrengthEvidenceProvenance(sql, event, null);
+      const parsed = { ...event } as Record<string, unknown>;
+      if (injection === 'verification') {
+        parsed.verification = 'verified';
+      } else {
+        parsed.independentlyVerified = true;
+      }
+      db.prepare('UPDATE strength_evidence_provenance_events SET event_json = ?')
+        .run(JSON.stringify(parsed));
+      await expect(readStrengthEvidenceProvenance(
+        sql, 'synthetic-athlete-a', preview.id,
+      )).rejects.toThrow(/identity or verification metadata mismatch/);
+      await expect(readUnapprovedStrengthReviewDetail(
+        sql, 'synthetic-athlete-a', preview.id, evidence(),
+      )).rejects.toThrow(/identity or verification metadata mismatch/);
+      expect(provenanceRows(db)).toBe(1);
+    }
   });
   it('atomic write interruption leaves review and training journals unchanged', async () => {
     const { db, sql } = open();
