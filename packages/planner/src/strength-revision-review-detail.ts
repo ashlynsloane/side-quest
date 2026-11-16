@@ -25,6 +25,10 @@ import {
   readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy,
   type TrainingSafetyPolicy,
 } from './training-safety-context-sqlite';
+import {
+  assessStrengthMovementRestrictions,
+  type StrengthMovementRestrictionAssessment,
+} from './strength-movement-restriction-review';
 
 /**
  * One read-only athlete-owned detail assessment. The source, saved candidate,
@@ -41,6 +45,7 @@ export interface UnapprovedStrengthReviewDetail {
   provenance: StrengthEvidenceProvenanceLedger;
   reconciliation: StrengthReconciliationChecklist;
   trainingPolicy: TrainingSafetyPolicy;
+  movementRestrictions: StrengthMovementRestrictionAssessment;
   executableWorkoutApproved: false;
   requiresWriteTimeRevalidation: true;
 }
@@ -75,6 +80,9 @@ export async function readUnapprovedStrengthReviewDetail(
   // but never an actual restriction or the executable approval lock.
   const trainingContext = await readAthleteTrainingSafetyContext(snapshot, athleteId);
   const trainingPolicy = evaluateTrainingSafetyPolicy(trainingContext);
+  const movementRestrictions = assessStrengthMovementRestrictions(
+    assessment.preview.candidate, trainingContext, trainingPolicy,
+  );
   const evaluatedAtMs = Date.now();
   const preflight = await inspectStrengthApprovalPreflight(
     snapshot, assessment, review, evidence, evaluatedAtMs, trainingPolicy,
@@ -99,6 +107,7 @@ export async function readUnapprovedStrengthReviewDetail(
     provenance,
     reconciliation,
     trainingPolicy,
+    movementRestrictions,
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
