@@ -12,8 +12,8 @@ that still requires a real athlete, provider source, or native device.
 | --- | --- | --- |
 | Deterministic planner / synthetic athlete QA | Exact-head TypeScript + full planner test run; reject invalid dose and stale histories | Implemented and exercised in GitHub Actions; re-run on final head |
 | SQLite persistence / recovery | Real file-backed preview and decision history, restart, tampering, injected rollback, wrong-owner rejection | Implemented and covered by synthetic tests; not a substitute for real athlete database recovery |
-| Read-only review lifecycle | Pending / dismiss / restore, immutable candidate, stale-source detection, bounded inbox, no implicit approval | Implemented in planner and owner-scoped read-only mobile APIs |
-| Read-only native navigation and exact exercise diff | Profile/adjustment links to inbox; detail view shows exact station, target and resistance changes and audit history; zero confirm/start actions | Implemented on development branch; mobile TypeScript + iOS JS export verified, physical rendering/interaction **NOT VERIFIED** |
+| Draft organization and review lifecycle | Pending / dismiss / restore, immutable candidate, stale-source detection, exclusive write transactions, bounded inbox, no implicit approval | Implemented in planner and draft mobile UI; native controls **NOT DEVICE-VERIFIED** |
+| Review navigation and exact exercise diff | Profile/adjustment links to inbox; detail shows exact changes and audit history; only explicit dismiss/restore actions, zero executable workout start/confirm actions | Implemented on development branch; physical rendering/interaction **NOT VERIFIED** |
 | Mobile SQLite draft integration | Seed a real file-backed synthetic athlete DB and verify mobile read, preview diff, inbox, and no approved workout/decision | Implemented in automated mobile SQLite acceptance; never uses real athlete records |
 | Trusted restrictions and exercise execution | Provider/injury restrictions verified from authoritative sources; exact candidate validated in the *same write transaction* that would authorize executable exercise | **NOT IMPLEMENTED.** In-app profile flags and caller-declared coverage are insufficient |
 | Real athlete data backup / restore | Explicit export, restore, migration, historical workout reconciliation, cross-profile isolation and rollback on an isolated original-data copy | **NOT VERIFIED.** Synthetic SQLite tests cannot establish this |
@@ -42,8 +42,10 @@ that still requires a real athlete, provider source, or native device.
   owner-scoped service read that combines the exact dose comparison, append-only
   review history and current stale-state assessment. It displays missing or
   changed restrictions as a hold, not a clearance. Late inbox pages from a
-  different athlete profile are ignored. No button in either screen writes
-  to the approval journal or launches the workout.
+  different athlete profile are ignored. The detail screen now has
+  confirmed Dismiss/Return-to-inbox controls; their exclusive-transaction
+  events affect only unapproved draft visibility, not the planning approval
+  journal or workout execution.
 - A planner-generated dose summary compares the exact serialized source
   to the full saved candidate. It shows unchanged units, lowered resistance,
   reduced exercise targets, and removed exercises/stations. Any altered
@@ -70,14 +72,24 @@ that still requires a real athlete, provider source, or native device.
 - The exclusive transaction API is native-only; the web review screen must
   report unavailable evidence rather than silently falling back to weaker,
   interleavable transactions. This API is not an iPhone launch test.
+- Draft disposition **writes** also require the native exclusive SQLite
+  transaction handle. Optimistic concurrency rejects an outdated last-seen
+  event even if a dismiss-and-restore sequence returned the draft to the same
+  apparent status. File-backed/mobile tests cover failed writes and rollback.
+  The UI requires direct athlete confirmation for both visibility actions.
+  These are not workout confirmation, return-to-sport clearance, or release.
 - A full mobile-service SQLite test creates an isolated synthetic source block,
   saves a preview, then verifies retrieval, history, read-only inbox and
   preservation of the unchanged original block and empty completion journal.
 
-The only mobile endpoints added for review previews are read-only. The
-preview event append methods remain backend-only. No preview status, including
-`needs_review`, `pending_review` or `reviewable_preview`, permits exercise
-execution or claims clinician authorization.
+The mobile review-detail endpoint and review inbox remain read-only.
+A separate, athlete-owned disposition endpoint can now append only
+**dismiss** / **restore-to-inbox** events. It uses one exclusive transaction
+handle, revalidates the full history and the last-seen event ID, and cannot
+write an executable workout or alter the approved strength-choice journal.
+Returning a stale draft to the inbox does not make it clinically reviewable.
+No preview status, including `needs_review`, `pending_review` or
+`reviewable_preview`, permits exercise execution or claims clinician clearance.
 
 ## Definition of the next implementation gate
 
