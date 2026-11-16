@@ -1162,7 +1162,7 @@ describe('non-executable strength approval prerequisite diagnostics', () => {
       sql, 'synthetic-athlete-a', 'preview-1', evidence(),
     );
     expect(detail.preflight.schemaVersion).toBe(1);
-    expect(detail.preflight.gates).toHaveLength(12);
+    expect(detail.preflight.gates).toHaveLength(13);
     expect(detail.preflight.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
     expect(detail.preflight.requiresIndependentProviderVerification).toBe(true);
@@ -1171,6 +1171,8 @@ describe('non-executable strength approval prerequisite diagnostics', () => {
       .toBe('local_check_passed');
     expect(detail.preflight.gates.find(g => g.id === 'candidate_structure')?.status)
       .toBe('local_check_passed');
+    expect(detail.preflight.gates.find(g => g.id === 'movement_compatibility')?.status)
+      .toBe('unverified');
     expect(detail.preflight.gates.find(g => g.id === 'symptom_check_in')?.status)
       .toBe('local_check_passed');
     expect(detail.preflight.gates.find(g => g.id === 'local_pt_profile')?.status)
@@ -1524,7 +1526,7 @@ describe('fail-closed evidence reconciliation and source integrity', () => {
       detail.preflight.blockingGateCount,
     );
     expect(detail.reconciliation.tasks.map(task => task.id)).toEqual([
-      'external_provider_restrictions', 'source_provenance',
+      'movement_compatibility', 'external_provider_restrictions', 'source_provenance',
       'athlete_execution_confirmation', 'executable_write_authorization',
     ]);
     expect(detail.reconciliation.tasks.every(task =>
@@ -1932,6 +1934,15 @@ describe('conditional clinician documentation policy without approving workout r
     expect(detail.movementRestrictions.findings[0]?.status)
       .toBe('needs_individual_review');
     expect(detail.movementRestrictions.canApplyWorkout).toBe(false);
+    expect(detail.preflight.gates.find(g => g.id === 'movement_compatibility')?.status)
+      .toBe('blocked');
+    expect(detail.stale).toBe(true);
+    expect(detail.reasons.join(' ')).toMatch(/Protected movement|individual review/);
+    const inbox = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(inbox[0]?.status).toBe('stale');
+    expect(inbox[0]?.reasons.join(' ')).toMatch(/Protected movement/);
     expect(detail.preflight.requiresIndependentProviderVerification).toBe(true);
     expect(detail.preflight.gates.find(g =>
       g.id === 'external_provider_restrictions')?.status).toBe('unverified');
