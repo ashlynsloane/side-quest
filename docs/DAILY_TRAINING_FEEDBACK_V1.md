@@ -169,13 +169,13 @@ These safeguards improve local data durability and truthful error reporting, but
 
 ## Stage 11: Append-only preview disposition and safe review inbox (backend/read-only mobile)
 
-Added `strength_revision_preview_review_events` as an independent athlete-owned SQLite journal of **dismiss** and **restore-to-pending** transitions for the *unapproved preview*, never the workout. The initial state is `pending_review`. Dismissal is permissible even after plan regeneration or new symptoms, because it authorizes no training. Restoration requires the most recent state to be `dismissed`, an exact candidate/source/evidence match, and a new SQLite read of current in-app PT, readiness, symptom and completion data. This does not convert a preview into an accepted training decision.
+Added `strength_revision_preview_review_events` as an independent athlete-owned SQLite journal of **dismiss** and **restore-to-pending** transitions for the *unapproved preview*, never the workout. The initial state is `pending_review`. Dismissal is permissible even after plan regeneration or new symptoms, because it authorizes no training. Restoration was originally constrained to fresh review evidence, but the Stage 13 design explicitly separates **returning draft visibility** from **exercise eligibility**. Restoration still requires the most recent state to be dismissed and the exact bound preview identity, while the independent read-only reassessment continues to report a stale proposal as stale. Neither disposition authorizes exercise.
 
 Each event is bound to the exact serialized preview identity, row ID, athlete, timestamp and action. The reader validates every historical transition and fails closed for corrupted JSON, mismatched identity, overlapping dismissals or orphaned restorations. Failed writes roll back without editing the original preview or the training decision journal. File-backed synthetic SQLite tests cover restart, dismissal/restoration, active or changed restrictions, stale regenerated source, corrupt history, wrong owner and injected write failure.
 
 Added `listUnapprovedStrengthReviewInbox`, a bounded (1–50 records), owner-verified, newest-first, **read-only** query. Every preview and event history must be readable; the inbox never silently hides corrupted records. It reports `needs_review`, `dismissed` or `stale`, with explicit stale reasons and `executableWorkoutApproved: false` for every item. A dismissed preview can simultaneously be stale; both facts remain visible.
 
-The draft mobile database now creates and exports the new journal, includes it in critical audit deletion/backup failure handling, and exposes athlete-locked **read-only** retrieval and inbox functions. There is deliberately no UI button that invokes event writes or workout execution. Any 'needs_review' status is not exercise clearance or provider verification; the final confirmation transaction, trusted external medical information, full original-data recovery testing and physical iPhone acceptance are still missing.
+The draft mobile database now creates and exports the new journal, includes it in critical audit deletion/backup failure handling, and exposes athlete-locked **read-only** retrieval and inbox functions. The UI originally exposed no disposition writes; Stage 13 adds only the explicitly confirmed dismiss/restore-to-inbox controls, never workout execution. Any 'needs_review' status is not exercise clearance or provider verification; the final confirmation transaction, trusted external medical information, full original-data recovery testing and physical iPhone acceptance are still missing.
 
 **Audit-chain defense:** The existing strength decision history reader now rejects impossible accepted/restored sequences, mismatched restoration payloads and malformed event timestamps, instead of treating individually well-formed rows as a valid audit history. Existing effective workout overrides remain planning metadata only.
 
@@ -186,6 +186,32 @@ Preview creation and read-only reassessment now consult the existing **validated
 Strength decision writes now require a canonical, valid UTC event timestamp before inserting any audit row. The history reader uses the same validation, including rejecting impossible calendar dates that native date parsers would normalize. Synthetic tests cover malformed dates, noncanonical offsets and event histories.
 
 These checks prevent misleading parallel review states; they **do not** merge a planning-minute choice with an executable revised workout or certify clinical clearance. Real write-time exercise approval remains a separate, intentionally disabled release gate.
+
+## Stage 13: Athlete-controlled draft disposition without exercise authorization
+
+The strength-review detail screen now permits an explicit, confirmed **Dismiss draft**
+or **Return draft to inbox** action. These events change only the visibility
+status of a stored **unapproved** workout candidate. A restored draft may
+still be **stale** because of changed symptoms, readiness, PT restrictions,
+source plans or completion records; restoration cannot mark it safe, change
+the original workout, modify the strength-choice journal or authorize exercise.
+
+The native mobile service keeps the athlete database activation lock while
+preparing and committing an event. It reads the bound preview, constructs an
+append-only event, and validates the athlete identity, exact binding, full
+history, allowable transition and **last-seen event ID** inside one dedicated
+`withExclusiveTransactionAsync` SQLite transaction. Missing exclusive
+transaction support fails closed; stale-screen actions are rejected even after
+an intervening dismiss/restore sequence returns to the same state.
+The native transaction handle is used for every read and write, avoiding
+interleaving through the ordinary connection-level async transaction API.
+
+Synthetic file-backed and mobile SQLite tests cover dismiss/restore, stale
+drafts remaining stale, optimistic concurrency mismatch, invalid ownership,
+restart recovery, injected write failure and rollback, and unchanged
+workout/completion journals. These are **not** physical-device UI acceptance
+or clinical clearance. No executable strength-confirmation endpoint or
+automatic training progression has been exposed.
 
 ## Current limitations
 
