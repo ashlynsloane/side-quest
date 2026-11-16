@@ -30,6 +30,7 @@ vi.mock('@circuit/planner', async () => {
   const inbox = await import('../src/strength-revision-review-inbox');
   const detail = await import('../src/strength-revision-review-detail');
   const evidence = await import('../src/strength-evidence-provenance-sqlite');
+  const safetyContext = await import('../src/training-safety-context-sqlite');
   return {
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
@@ -40,6 +41,10 @@ vi.mock('@circuit/planner', async () => {
     readUnapprovedStrengthReviewDetail: detail.readUnapprovedStrengthReviewDetail,
     STRENGTH_EVIDENCE_PROVENANCE_SQL: evidence.STRENGTH_EVIDENCE_PROVENANCE_SQL,
     appendStrengthEvidenceProvenance: evidence.appendStrengthEvidenceProvenance,
+    TRAINING_SAFETY_CONTEXT_SQL: safetyContext.TRAINING_SAFETY_CONTEXT_SQL,
+    readAthleteTrainingSafetyContext: safetyContext.readAthleteTrainingSafetyContext,
+    evaluateTrainingSafetyPolicy: safetyContext.evaluateTrainingSafetyPolicy,
+    appendTrainingSafetyContextEvent: safetyContext.appendTrainingSafetyContextEvent,
     readStrengthRevisionPreview: preview.readStrengthRevisionPreview,
     readStrengthChoiceAudit: strength.readStrengthChoiceAudit,
     PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
