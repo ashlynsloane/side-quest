@@ -1770,3 +1770,6 @@ export type { StoredStrengthRevisionPreview, StoredStrengthPreviewAssessment } f
 // Reversible preview-review disposition only; NEVER executable strength authorization.
 export { STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent } from './strength-preview-review-events-sqlite';
 export type { StrengthPreviewReviewEvent, StrengthPreviewReviewState } from './strength-preview-review-events-sqlite';
+
+export { listUnapprovedStrengthReviewInbox } from './strength-revision-review-inbox';
+export type { UnapprovedStrengthReviewInboxItem } from './strength-revision-review-inbox';
