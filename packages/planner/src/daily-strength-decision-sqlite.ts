@@ -36,6 +36,17 @@ CREATE INDEX IF NOT EXISTS idx_daily_strength_choice_source
   ON daily_strength_choice_events(athlete_id, block_id, session_id, created_at DESC);
 `;
 
+function validStrengthEventTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) {
+    return false;
+  }
+  const millis = Date.parse(value);
+  if (!Number.isFinite(millis)) return false;
+  const canonical = new Date(millis).toISOString();
+  return value === canonical || value === canonical.replace('.000Z', 'Z');
+}
+
 export function strengthSessionSignature(session: PlannedStrengthSession): string {
   // Include the full generated session: do not carry an old approval across a
   // regeneration that changes exercises, target region, date or status.
@@ -82,8 +93,7 @@ export async function readStrengthChoiceAudit(
   let pending: StrengthChoiceDecision | null = null;
   let lastTimestamp: number | null = null;
   for (const event of history) {
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(event.createdAt)
-      || !Number.isFinite(Date.parse(event.createdAt))) {
+    if (!validStrengthEventTimestamp(event.createdAt)) {
       throw new Error('Strength adjustment audit has an invalid event timestamp.');
     }
     const instant = Date.parse(event.createdAt);
@@ -129,7 +139,7 @@ export async function appendStrengthChoiceDecision(
     throw new Error('An exact athlete-local review date is required.');
   }
   if (!decision.id || !decision.athleteId || !decision.blockId || !decision.sessionId
-    || !decision.sourceSignature || !decision.createdAt
+    || !decision.sourceSignature || !validStrengthEventTimestamp(decision.createdAt)
     || !['accepted', 'restored'].includes(decision.decision)
     || !['reduce', 'defer'].includes(decision.action)) {
     throw new Error('Invalid strength decision.');
