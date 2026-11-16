@@ -167,6 +167,18 @@ The mobile local-data export/deletion registry now includes all relevant append-
 
 These safeguards improve local data durability and truthful error reporting, but neither CSV/JSON export nor test-driven rollback proves real-device backup/restore safety. Real athlete data migration and physical iPhone acceptance are separate release gates.
 
+## Stage 11: Append-only preview disposition and safe review inbox (backend/read-only mobile)
+
+Added `strength_revision_preview_review_events` as an independent athlete-owned SQLite journal of **dismiss** and **restore-to-pending** transitions for the *unapproved preview*, never the workout. The initial state is `pending_review`. Dismissal is permissible even after plan regeneration or new symptoms, because it authorizes no training. Restoration requires the most recent state to be `dismissed`, an exact candidate/source/evidence match, and a new SQLite read of current in-app PT, readiness, symptom and completion data. This does not convert a preview into an accepted training decision.
+
+Each event is bound to the exact serialized preview identity, row ID, athlete, timestamp and action. The reader validates every historical transition and fails closed for corrupted JSON, mismatched identity, overlapping dismissals or orphaned restorations. Failed writes roll back without editing the original preview or the training decision journal. File-backed synthetic SQLite tests cover restart, dismissal/restoration, active or changed restrictions, stale regenerated source, corrupt history, wrong owner and injected write failure.
+
+Added `listUnapprovedStrengthReviewInbox`, a bounded (1–50 records), owner-verified, newest-first, **read-only** query. Every preview and event history must be readable; the inbox never silently hides corrupted records. It reports `needs_review`, `dismissed` or `stale`, with explicit stale reasons and `executableWorkoutApproved: false` for every item. A dismissed preview can simultaneously be stale; both facts remain visible.
+
+The draft mobile database now creates and exports the new journal, includes it in critical audit deletion/backup failure handling, and exposes athlete-locked **read-only** retrieval and inbox functions. There is deliberately no UI button that invokes event writes or workout execution. Any 'needs_review' status is not exercise clearance or provider verification; the final confirmation transaction, trusted external medical information, full original-data recovery testing and physical iPhone acceptance are still missing.
+
+**Audit-chain defense:** The existing strength decision history reader now rejects impossible accepted/restored sequences, mismatched restoration payloads and malformed event timestamps, instead of treating individually well-formed rows as a valid audit history. Existing effective workout overrides remain planning metadata only.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
