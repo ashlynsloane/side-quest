@@ -24,6 +24,7 @@ const state = vi.hoisted(() => ({
 // Use their real implementations without loading unrelated React Native UI exports.
 vi.mock('@circuit/planner', async () => {
   const sql = await import('../src/training-adjustment-sqlite');
+  const dates = await import('../src/first-week-dates');
   const strength = await import('../src/daily-strength-decision-sqlite');
   const preview = await import('../src/strength-revision-preview-sqlite');
   const review = await import('../src/strength-preview-review-events-sqlite');
@@ -34,6 +35,7 @@ vi.mock('@circuit/planner', async () => {
   const safetyContext = await import('../src/training-safety-context-sqlite');
   const auth = await import('../src/strength-workout-authorization-sqlite');
   return {
+    localCalendarDate: dates.localCalendarDate,
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
     STRENGTH_PREVIEW_REVIEW_EVENTS_SQL: review.STRENGTH_PREVIEW_REVIEW_EVENTS_SQL,
