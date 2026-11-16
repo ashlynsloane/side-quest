@@ -320,6 +320,35 @@ injected transaction failure, critical data export and rollback. The original
 workout and completion journal remain unchanged. Native iPhone acceptance and
 real-data restoration are still pending.
 
+## Stage 17: Enforce protected-movement conflicts across draft review
+
+The movement tag diagnostic no longer lives only in a separate detail-screen
+section. A **thirteenth prerequisite**, `movement_compatibility`, is
+calculated from the exact stored candidate workout and the latest
+athlete-owned training-safety context in the same read snapshot.
+
+If active protected movements coincide with potentially conflicting exercises
+or candidates whose metadata is insufficient to assess those movements,
+**detail, paginated inbox, and the reconciliation checklist all show a safety
+hold**. Neither reducing minutes nor reducing repetitions automatically
+eliminates this hold. Where no catalog-tag conflict is found despite protected
+movements, compatibility remains **unverified** rather than clinically
+cleared. For uncomplicated routine training with interpretable annotations
+and no protected movements, the gate may be marked **not applicable**;
+this does not bypass athlete consent or executable-approval checks.
+
+The matcher now checks catalog tag vocabulary and joint/body-region load
+identifiers, and treats all-empty movement annotations as insufficient when
+movement protection is active. The mobile UI distinguishes a *not applicable*
+routine clinician-document requirement from an unimplemented feature.
+
+Synthetic tests cover tagged impact under a protected running restriction,
+missing or forged catalog metadata, unknown protected movement labels,
+routine training, conservative exercise holds, unchanged source workout,
+and the still-disabled executable decision. These checks use exercise
+annotations, not validated clinical contraindication measurements or
+physical device acceptance.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
