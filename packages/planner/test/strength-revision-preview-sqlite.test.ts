@@ -1139,3 +1139,127 @@ describe('consistent, read-only strength review database snapshots', () => {
     expect(snapshots).toBe(2);
   });
 });
+
+describe('non-executable strength approval prerequisite diagnostics', () => {
+  it('never treats caller-asserted verified provider data as authoritative approval', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(detail.preflight.schemaVersion).toBe(1);
+    expect(detail.preflight.gates).toHaveLength(12);
+    expect(detail.preflight.executableWorkoutApproved).toBe(false);
+    expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+    expect(detail.preflight.requiresIndependentProviderVerification).toBe(true);
+    expect(detail.preflight.requiresWriteTimeRevalidation).toBe(true);
+    expect(detail.preflight.gates.find(g => g.id === 'source_identity')?.status)
+      .toBe('local_check_passed');
+    expect(detail.preflight.gates.find(g => g.id === 'candidate_structure')?.status)
+      .toBe('local_check_passed');
+    expect(detail.preflight.gates.find(g => g.id === 'symptom_check_in')?.status)
+      .toBe('local_check_passed');
+    expect(detail.preflight.gates.find(g => g.id === 'local_pt_profile')?.status)
+      .toBe('local_check_passed');
+    expect(detail.preflight.gates.find(g => g.id === 'external_provider_restrictions')?.status)
+      .toBe('unverified');
+    expect(detail.preflight.gates.find(g => g.id === 'source_provenance')?.status)
+      .toBe('unverified');
+    expect(detail.preflight.gates.find(g => g.id === 'athlete_execution_confirmation')?.status)
+      .toBe('not_implemented');
+    expect(detail.preflight.gates.find(g => g.id === 'executable_write_authorization')?.status)
+      .toBe('not_implemented');
+    expect(detail.preflight.blockingGateCount).toBeGreaterThanOrEqual(4);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    expect(count(db, 'strength_revision_previews')).toBe(1);
+  });
+
+  it('diagnoses missing and changed local symptoms, readiness and PT independently', async () => {
+    for (const change of ['symptoms', 'readiness', 'pt'] as const) {
+      const { db, sql } = open();
+      await appendStrengthRevisionPreview(sql, input());
+      if (change === 'symptoms') {
+        db.prepare('DELETE FROM training_check_ins').run();
+      } else if (change === 'readiness') {
+        db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1,
+          }),
+        );
+      } else {
+        db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+      }
+      const detail = await readUnapprovedStrengthReviewDetail(
+        sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+      );
+      const id = change === 'symptoms' ? 'symptom_check_in'
+        : change === 'readiness' ? 'readiness_check_in' : 'local_pt_profile';
+      expect(detail.preflight.gates.find(g => g.id === id)?.status).toBe('blocked');
+      expect(detail.preflight.executableWorkoutApproved).toBe(false);
+      expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+      expect(detail.preflight.gates.find(
+        g => g.id === 'external_provider_restrictions',
+      )?.status).toBe('unverified');
+      expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    }
+  });
+
+  it('reports source regeneration, existing completion, conflicting decisions and dismissal', async () => {
+    const regenerated = open();
+    await appendStrengthRevisionPreview(regenerated.sql, input());
+    regenerated.saveBlock(block({ ...sourceSession(), title: 'A new source plan' }));
+    const stale = await readUnapprovedStrengthReviewDetail(
+      regenerated.sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(stale.preflight.gates.find(g => g.id === 'source_identity')?.status)
+      .toBe('blocked');
+    expect(stale.preflight.gates.find(g => g.id === 'candidate_structure')?.status)
+      .toBe('blocked');
+
+    const completed = open();
+    await appendStrengthRevisionPreview(completed.sql, input());
+    completed.db.prepare('INSERT INTO workout_ledger VALUES (?, ?)')
+      .run('finished-a', 'session-1');
+    const previouslyCompleted = await readUnapprovedStrengthReviewDetail(
+      completed.sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(previouslyCompleted.preflight.gates.find(
+      g => g.id === 'session_uncompleted',
+    )?.status).toBe('blocked');
+
+    const dismissed = open();
+    const preview = await appendStrengthRevisionPreview(dismissed.sql, input());
+    await appendStrengthPreviewReviewEvent(
+      dismissed.sql, reviewEvent(preview, 'dismiss'), null,
+    );
+    const hidden = await readUnapprovedStrengthReviewDetail(
+      dismissed.sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(hidden.preflight.gates.find(g => g.id === 'review_disposition')?.status)
+      .toBe('blocked');
+    expect(hidden.preflight.canConfirmExecutableWorkout).toBe(false);
+  });
+
+  it('always reports the missing executable write gate even with all available local checks', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const read = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    const returned = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', {
+        ...evidence(), todayLocalDate: '2026-11-16',
+        providerRestrictions: 'reviewed_applicable', sourceCoverage: 'complete',
+      },
+    );
+    for (const result of [read, returned]) {
+      expect(result.preflight.gates.find(
+        gate => gate.id === 'executable_write_authorization',
+      )?.status).toBe('not_implemented');
+      expect(result.preflight.executableWorkoutApproved).toBe(false);
+      expect(result.preflight.canConfirmExecutableWorkout).toBe(false);
+    }
+    expect(count(db, 'strength_revision_previews')).toBe(1);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+});
