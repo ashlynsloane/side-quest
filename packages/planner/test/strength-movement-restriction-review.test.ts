@@ -146,6 +146,17 @@ describe('conservative movement-specific restriction matching', () => {
       workout(), context(['shoulder_loading'], 'general_training'),
       policy('routine_training_review', 0),
     )).toThrow(/incomplete safety inputs/);
+    const falselyRoutine = context([], 'general_training');
+    falselyRoutine.legacyRestrictionReported = true;
+    expect(() => assessStrengthMovementRestrictions(
+      workout(), falselyRoutine, policy('routine_training_review', 0),
+    )).toThrow(/incomplete safety inputs/);
+    const unrecognizedMovement = context([
+      'unrecognized_pattern' as ProtectedMovement,
+    ]);
+    expect(() => assessStrengthMovementRestrictions(
+      workout(), unrecognizedMovement, policy('restriction_aware_review'),
+    )).toThrow(/incomplete safety inputs/);
     expect(() => assessStrengthMovementRestrictions(
       { stations: [] } as unknown as GeneratedWorkout,
       context([]), policy('routine_training_review', 0),
