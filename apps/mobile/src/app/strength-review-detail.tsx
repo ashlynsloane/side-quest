@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   getUnapprovedStrengthReviewDetail, setUnapprovedStrengthReviewDisposition,
+  flagUnverifiedStrengthReviewConcern,
 } from '@/services/database';
 import { useAuth } from '@/state/auth-context';
 
@@ -58,6 +59,8 @@ export default function StrengthReviewDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingDisposition, setSavingDisposition] = useState(false);
+  const [savingConcern, setSavingConcern] = useState(false);
+  const [concernError, setConcernError] = useState<string | null>(null);
   const [dispositionError, setDispositionError] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -66,6 +69,8 @@ export default function StrengthReviewDetailScreen() {
     setError(null);
     setDispositionError(null);
     setSavingDisposition(false);
+    setConcernError(null);
+    setSavingConcern(false);
     if (!athleteId || typeof previewId !== 'string' || !previewId.trim()) {
       setLoading(false);
       setError('A valid saved preview and athlete profile are required.');
@@ -86,6 +91,52 @@ export default function StrengthReviewDetailScreen() {
     });
     return () => { live = false; };
   }, [athleteId, previewId]));
+
+  const flagConcern = async (kind: 'provider_restriction' | 'training_coverage') => {
+    if (savingConcern || !detail || !athleteId || typeof previewId !== 'string'
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setSavingConcern(true);
+    setConcernError(null);
+    try {
+      await flagUnverifiedStrengthReviewConcern({
+        athleteId, previewId, kind,
+        expectedLastEventId: kind === 'provider_restriction'
+          ? detail.provenance.restriction.latestEventId
+          : detail.provenance.coverage.latestEventId,
+      });
+      const updated = await getUnapprovedStrengthReviewDetail(
+        athleteId, previewId, unknownEvidence(athleteId),
+      );
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setDetail(updated);
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setConcernError(
+          'The concern could not be verified as saved. Reopen this draft before trying again.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setSavingConcern(false);
+    }
+  };
+
+  const confirmConcern = (kind: 'provider_restriction' | 'training_coverage') => {
+    if (!detail || savingConcern || !athleteId) return;
+    const restriction = kind === 'provider_restriction';
+    Alert.alert(
+      restriction ? 'Flag an active exercise restriction?' : 'Flag incomplete training history?',
+      restriction
+        ? 'Record that a restriction may apply to this draft. This report is not clinician verification or medical advice.'
+        : 'Record that training, injury, or recovery information may be missing. This does not verify any outside source.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Record concern', onPress: () => { void flagConcern(kind); } },
+      ],
+    );
+  };
 
   const changeDisposition = async (action: 'dismiss' | 'restore') => {
     if (savingDisposition || !athleteId || !detail
@@ -237,6 +288,43 @@ export default function StrengthReviewDetailScreen() {
                 Dismissing or restoring the draft only organizes the review inbox.
               </Text>
             </View>
+            <Text style={styles.sectionTitle}>Report missing safety information</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Raise a concern</Text>
+              <Text style={styles.helper}>
+                Reports are recorded as unverified observations. They cannot
+                remove clinician restrictions or enable a workout.
+              </Text>
+              <Text style={styles.helper}>
+                Restriction reports: {detail.provenance.restriction.eventCount}.
+                Training-source reports: {detail.provenance.coverage.eventCount}.
+              </Text>
+              {concernError ? <Text style={styles.error}>{concernError}</Text> : null}
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Report an active strength exercise restriction"
+                disabled={savingConcern}
+                style={[styles.concernAction,
+                  savingConcern && styles.disabledAction]}
+                onPress={() => confirmConcern('provider_restriction')}>
+                <Text style={styles.concernText}>
+                  {savingConcern ? 'Saving concern…' : 'Flag an exercise restriction'}
+                </Text>
+              </Pressable>
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Report incomplete training or injury history"
+                disabled={savingConcern}
+                style={[styles.concernAction,
+                  savingConcern && styles.disabledAction]}
+                onPress={() => confirmConcern('training_coverage')}>
+                <Text style={styles.concernText}>
+                  {savingConcern ? 'Saving concern…' : 'Flag missing training history'}
+                </Text>
+              </Pressable>
+              <Text style={styles.helper}>
+                Concerns do not verify clinician documents. The draft stays
+                unapproved and recorded restrictions remain unresolved.
+              </Text>
+            </View>
             <Text style={styles.sectionTitle}>Review history</Text>
             <View style={styles.card}>
               <Text style={styles.helper}>
@@ -334,4 +422,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', paddingHorizontal: 15, paddingVertical: 11 },
   dispositionText: { fontSize: 14, fontWeight: '800', color: colors.paper },
   disabledAction: { opacity: 0.55 },
+  concernAction: { borderWidth: 1, borderColor: colors.warning,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  concernText: { fontSize: 13, fontWeight: '800', color: colors.warning },
 });
