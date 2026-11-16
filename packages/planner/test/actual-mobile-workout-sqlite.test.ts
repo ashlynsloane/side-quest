@@ -369,7 +369,48 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
         sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
       },
     )).rejects.toThrow();
+    // Athlete-organizational actions are journaled but NEVER exercise approval.
+    const dismissed = await service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      action: 'dismiss', expectedLastEventId: null,
+    });
+    expect(dismissed).toMatchObject({
+      status: 'dismissed', executableWorkoutApproved: false,
+    });
+    expect(dismissed.events).toHaveLength(1);
+    const afterDismissal = await service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    );
+    expect(afterDismissal.stale).toBe(true);
+    expect(afterDismissal.review.status).toBe('dismissed');
+    await expect(service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      action: 'restore', expectedLastEventId: null,
+    })).rejects.toThrow(/history changed/);
+    const returned = await service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      action: 'restore', expectedLastEventId: dismissed.latestEventId,
+    });
+    expect(returned.status).toBe('pending_review');
+    expect(returned.executableWorkoutApproved).toBe(false);
+    expect(returned.events.map(item => item.action)).toEqual(['dismiss', 'restore']);
+    const afterReopen = await service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    );
+    expect(afterReopen.stale).toBe(true);
+    expect(afterReopen.review.status).toBe('pending_review');
     const exported = await service.exportLocalData();
+    expect(exported.strength_revision_preview_review_events).toHaveLength(2);
     expect(exported.strength_revision_previews).toHaveLength(1);
     expect(exported.daily_strength_choice_events).toEqual([]);
     expect(exported.workout_ledger).toEqual([]);
@@ -380,6 +421,25 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
 });
 
 describe('actual mobile workout persistence with real disk SQLite', () => {
+  it('fails closed for missing draft, wrong owner and unavailable native exclusive write', async () => {
+    await expect(service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-one',
+      previewId: 'unknown-draft',
+      action: 'dismiss', expectedLastEventId: null,
+    })).rejects.toThrow(/missing/);
+    await expect(service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-two',
+      previewId: 'unknown-draft',
+      action: 'dismiss', expectedLastEventId: null,
+    })).rejects.toThrow(/Athlete profile changed/);
+    await expect(service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-one',
+      previewId: '', action: 'dismiss', expectedLastEventId: null,
+    })).rejects.toThrow(/Invalid athlete-owned/);
+    const exportBefore = await service.exportLocalData();
+    expect(exportBefore.strength_revision_preview_review_events).toEqual([]);
+  });
+
   it('initializes unapproved revision storage and exposes no execution approval', async () => {
     const snapshot = await service.exportLocalData();
     expect(snapshot).toHaveProperty('strength_revision_previews', []);
