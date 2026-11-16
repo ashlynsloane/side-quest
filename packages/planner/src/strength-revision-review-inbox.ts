@@ -31,12 +31,16 @@ export async function listUnapprovedStrengthReviewInbox(
   athleteId: string,
   evidence: CurrentStrengthReviewEvidence,
   pageSize = 20,
+  offset = 0,
 ): Promise<UnapprovedStrengthReviewInboxItem[]> {
   if (!athleteId.trim() || evidence.athleteId !== athleteId) {
     throw new Error('Strength preview inbox athlete evidence mismatch.');
   }
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50) {
     throw new Error('Strength preview inbox page size must be between 1 and 50.');
+  }
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error('Strength preview inbox offset must be a nonnegative safe integer.');
   }
   const owner = await sql.getFirst<{ user_id: string }>(
     'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1',
@@ -60,8 +64,8 @@ export async function listUnapprovedStrengthReviewInbox(
   }
   const rows = await sql.getAll<{ id: string }>(
     `SELECT id FROM strength_revision_previews
-     ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-    [pageSize],
+     ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`,
+    [pageSize, offset],
   );
   const items: UnapprovedStrengthReviewInboxItem[] = [];
   for (const row of rows) {
