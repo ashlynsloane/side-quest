@@ -78,6 +78,24 @@ vi.mock('expo-sqlite', async () => {
             throw error;
           }
         },
+        withExclusiveTransactionAsync: async (fn: (txn: {
+          getFirstAsync: <Row>(sql: string, ...args: unknown[]) => Promise<Row | null>;
+          getAllAsync: <Row>(sql: string, ...args: unknown[]) => Promise<Row[]>;
+        }) => Promise<void>) => {
+          database.exec('BEGIN IMMEDIATE');
+          try {
+            await fn({
+              getFirstAsync: async <Row>(query: string, ...args: unknown[]) =>
+                database.prepare(query).get(...(args as Array<string | number | null>)) as Row | null,
+              getAllAsync: async <Row>(query: string, ...args: unknown[]) =>
+                database.prepare(query).all(...(args as Array<string | number | null>)) as Row[],
+            });
+            database.exec('COMMIT');
+          } catch (error) {
+            database.exec('ROLLBACK');
+            throw error;
+          }
+        },
       };
     },
   };
