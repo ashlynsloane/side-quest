@@ -2214,3 +2214,258 @@ describe('exclusive SQLite strength authorization dry-run: NO executable approva
     expect(count(db, 'strength_revision_previews')).toBe(1);
   });
 });
+
+async function freshRoutineCandidate(
+  fixture = open(),
+) {
+  const { db, sql, saveBlock } = fixture;
+  const today = localCalendarDate(new Date());
+  const source = sourceSession();
+  source.date = addLocalCalendarDays(today, 1);
+  const exerciseMetadata = {
+    ...source.workout.stations[0]!.exercises[0]!.exerciseSnapshot,
+    movementPatterns: ['squat' as const], avoidanceTags: [],
+    jointLoads: [{ region: 'hip' as const, load: 1 }],
+    bodyRegions: [{ region: 'quadriceps' as const, load: 1, role: 'primary' as const }],
+    impactLevel: 0,
+  };
+  source.workout.stations[0]!.exercises[0]!.exerciseSnapshot = exerciseMetadata;
+  const proposed = candidate();
+  proposed.stations[0]!.exercises[0]!.exerciseSnapshot =
+    structuredClone(exerciseMetadata);
+  const proposedDecision = {
+    ...decision(), sourceSignature: strengthSessionSignature(source),
+    createdAt: new Date().toISOString(),
+  };
+  const currentEvidence = { ...evidence(), todayLocalDate: today };
+  const request = {
+    id: 'routine-preview', createdAt: new Date().toISOString(),
+    source, candidate: proposed, decision: proposedDecision,
+    evidence: currentEvidence,
+  };
+  saveBlock(block(source));
+  db.prepare('UPDATE readiness_check_ins SET date = ?').run(today);
+  await appendStrengthRevisionPreview(sql, request);
+  await appendTrainingSafetyContextEvent(sql,
+    safetyEvent('routine-authorization-intent', 'training_intent', 'general_training'),
+    null);
+  const detail = await readUnapprovedStrengthReviewDetail(
+    sql, 'synthetic-athlete-a', request.id, currentEvidence,
+  );
+  const auth: StrengthWorkoutAuthorizationRequest = {
+    athleteId: 'synthetic-athlete-a', previewId: request.id,
+    authorizationId: 'routine-auth-1',
+    expectedObservationToken: detail.observationToken,
+    evidence: currentEvidence,
+    confirmations: {
+      exactExercisesAndDoseReviewed: true,
+      recentTrainingHistoryReviewed: true,
+      noKnownUnreportedRestrictions: true,
+    },
+  };
+  return { ...fixture, request, detail, auth };
+}
+
+describe('athlete-confirmed routine workout authorization transaction', () => {
+  it('atomically records exact confirmed dose while preserving original plan and execution ledger', async () => {
+    const { db, sql, auth, request, detail } = await freshRoutineCandidate();
+    expect(detail.trainingPolicy.track).toBe('routine_training_review');
+    expect(detail.preflight.gates.find(g => g.id === 'external_provider_restrictions')?.status)
+      .toBe('not_applicable');
+    expect(detail.preflight.gates.find(g => g.id === 'movement_compatibility')?.status)
+      .toBe('not_applicable');
+    expect(detail.status).toBe('pending_review');
+    const originalBlock = (db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json;
+    const authorized = await authorizeRoutineStrengthWorkout(sql, auth);
+    expect(authorized.status).toBe('authorized_routine_workout');
+    expect(authorized.authorization.workout).toEqual(request.candidate);
+    expect(authorized.authorization.athleteConfirmed).toBe(true);
+    expect(authorized.authorization.executableWorkoutApproved).toBe(true);
+    expect(authorized.authorization.clinicianClearanceAttested).toBe(false);
+    expect(authorized.workoutStarted).toBe(false);
+    expect(authorized.originalPlanModified).toBe(false);
+    expect(authorized.requiresFreshStartRevalidation).toBe(true);
+    const record = await readAuthorizedRoutineWorkout(
+      sql, 'synthetic-athlete-a', request.source.id,
+    );
+    expect(record).toEqual(authorized.authorization);
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(originalBlock);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    const completions = db.prepare('SELECT COUNT(*) AS n FROM workout_ledger')
+      .get() as { n: number };
+    expect(completions.n).toBe(0);
+  });
+
+  it('rejects duplicate taps and overlapping authorization for one strength session', async () => {
+    const { db, sql, auth } = await freshRoutineCandidate();
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    await expect(authorizeRoutineStrengthWorkout(sql, auth))
+      .rejects.toThrow(/already been authorized/);
+    const row = db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number };
+    expect(row.n).toBe(1);
+  });
+
+  it('requires three explicit confirmations with no default values or partial substitutes', async () => {
+    const { db, sql, auth } = await freshRoutineCandidate();
+    for (const missing of [
+      { ...auth.confirmations, recentTrainingHistoryReviewed: false },
+      { ...auth.confirmations, exactExercisesAndDoseReviewed: false },
+      { ...auth.confirmations, noKnownUnreportedRestrictions: false },
+      { exactExercisesAndDoseReviewed: true, recentTrainingHistoryReviewed: true },
+    ]) {
+      await expect(authorizeRoutineStrengthWorkout(sql, {
+        ...auth, confirmations: missing as StrengthWorkoutAuthorizationRequest['confirmations'],
+      })).rejects.toThrow(/confirmation is incomplete/);
+    }
+    const row = db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number };
+    expect(row.n).toBe(0);
+  });
+
+  it('rejects changed readiness values, active PT restrictions, symptom alerts and regenerated workouts', async () => {
+    for (const variant of ['readiness', 'pt', 'symptoms', 'source'] as const) {
+      const fixture = await freshRoutineCandidate();
+      const { db, sql, auth, saveBlock, request } = fixture;
+      if (variant === 'readiness') {
+        db.prepare('UPDATE readiness_check_ins SET check_in_json = ?')
+          .run(JSON.stringify({
+            sleep: 5, energy: 4, muscleFreshness: 4, stress: 2, motivation: 4,
+          }));
+      } else if (variant === 'pt') {
+        db.prepare('UPDATE pt_profiles SET profile_json = ?')
+          .run('{"active":true}');
+      } else if (variant === 'symptoms') {
+        db.prepare('UPDATE training_check_ins SET check_in_json = ?')
+          .run(JSON.stringify({
+            status: 'tightness_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400_000).toISOString(),
+          }));
+      } else {
+        saveBlock(block({
+          ...request.source, title: 'Regenerated before confirmation',
+        }));
+      }
+      await expect(authorizeRoutineStrengthWorkout(sql, auth))
+        .rejects.toThrow(/changed since confirmation/);
+      const row = db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+        .get() as { n: number };
+      expect(row.n).toBe(0);
+    }
+  });
+
+  it('does not admit rehabilitation, return to sport, added protected movement or old restriction reports', async () => {
+    for (const variant of ['rehab', 'return', 'movement', 'concern'] as const) {
+      const { db, sql, auth, request } = await freshRoutineCandidate();
+      if (variant === 'rehab' || variant === 'return') {
+        await appendTrainingSafetyContextEvent(sql,
+          safetyEvent('intent-change-' + variant, 'training_intent',
+            variant === 'rehab' ? 'injury_rehabilitation' : 'return_to_sport',
+            new Date().toISOString()),
+          'routine-authorization-intent');
+      } else if (variant === 'movement') {
+        await appendTrainingSafetyContextEvent(sql,
+          safetyEvent('new-movement', 'protect_movement', 'deep_hip_flexion',
+            new Date().toISOString()),
+          'routine-authorization-intent');
+      } else {
+        const preview = await readStrengthRevisionPreview(
+          sql, 'synthetic-athlete-a', request.id,
+        );
+        await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+          preview!, 'provider_restriction', 'reported_present',
+          'older-restriction',
+        ), null);
+      }
+      await expect(authorizeRoutineStrengthWorkout(sql, auth))
+        .rejects.toThrow(/changed since confirmation/);
+      const count = db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+        .get() as { n: number };
+      expect(count.n).toBe(0);
+    }
+  });
+
+  it('never treats a newly viewed restricted or incomplete-history workout as routine-authorizable', async () => {
+    for (const variant of ['rehab', 'partial_history'] as const) {
+      const { db, sql, auth, request } = await freshRoutineCandidate();
+      if (variant === 'rehab') {
+        await appendTrainingSafetyContextEvent(sql,
+          safetyEvent('rehab-now', 'training_intent', 'injury_rehabilitation',
+            new Date().toISOString()),
+          'routine-authorization-intent');
+      } else {
+        const preview = await readStrengthRevisionPreview(
+          sql, 'synthetic-athlete-a', request.id,
+        );
+        await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+          preview!, 'training_coverage', 'partial', 'missing-workouts',
+        ), null);
+      }
+      const freshlyViewed = await readUnapprovedStrengthReviewDetail(
+        sql, 'synthetic-athlete-a', request.id, auth.evidence,
+      );
+      await expect(authorizeRoutineStrengthWorkout(sql, {
+        ...auth, expectedObservationToken: freshlyViewed.observationToken,
+      })).rejects.toThrow(/Routine workout authorization blocked/);
+      const count = db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+        .get() as { n: number };
+      expect(count.n).toBe(0);
+    }
+  });
+
+  it('fails closed on foreign athlete, corrupted authorization history and missing exclusivity', async () => {
+    const { db, sql, auth, request } = await freshRoutineCandidate();
+    await expect(authorizeRoutineStrengthWorkout(
+      { ...sql, exclusiveTransaction: undefined }, auth,
+    )).rejects.toThrow(/Exclusive routine workout authorization transaction is unavailable/);
+    await expect(authorizeRoutineStrengthWorkout(sql, {
+      ...auth, athleteId: 'foreign-owner',
+    })).rejects.toThrow(/confirmation is incomplete/);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    await expect(readAuthorizedRoutineWorkout(sql, 'foreign-owner', request.source.id))
+      .rejects.toThrow(/ownership mismatch/);
+    db.prepare('UPDATE strength_workout_authorizations SET authorization_json = ?')
+      .run('{"executableWorkoutApproved":true}');
+    await expect(readAuthorizedRoutineWorkout(sql, 'synthetic-athlete-a', request.source.id))
+      .rejects.toThrow(/authorization audit integrity mismatch/);
+  });
+
+  it('rolls back an interrupted append with no partially authorized workout', async () => {
+    const { db, sql, auth } = await freshRoutineCandidate();
+    const faulty: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Fixture lacks exclusivity.');
+        return sql.exclusiveTransaction(writer => fn({
+          ...writer,
+          run: async () => { throw new Error('Injected authorization insert failure.'); },
+        }));
+      },
+    };
+    await expect(authorizeRoutineStrengthWorkout(faulty, auth))
+      .rejects.toThrow(/Injected authorization insert failure/);
+    const row = db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number };
+    expect(row.n).toBe(0);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number }).n).toBe(1);
+  });
+
+  it('restores exact audit authorization after a synthetic SQLite cold restart', async () => {
+    const { db, sql, file, directory, auth, request } = await freshRoutineCandidate();
+    const created = await authorizeRoutineStrengthWorkout(sql, auth);
+    db.close();
+    const restarted = new DatabaseSync(file);
+    all.push({ db: restarted, directory });
+    const record = await readAuthorizedRoutineWorkout(
+      driver(restarted), 'synthetic-athlete-a', request.source.id,
+    );
+    expect(record).toEqual(created.authorization);
+    expect(record?.automaticallyStarted).toBe(false);
+  });
+});
