@@ -592,6 +592,32 @@ describe('bounded owner-scoped read-only strength preview inbox', () => {
     expect(inbox[0]?.reasons.join(' ')).toMatch(/cannot be reviewed/);
     expect(reviewEventCount(db)).toBe(1);
   });
+  it('never hides owner-tampered previews or review events from athlete history', async () => {
+    const alteredPreview = open();
+    await appendStrengthRevisionPreview(alteredPreview.sql, input());
+    alteredPreview.db.prepare('UPDATE strength_revision_previews SET athlete_id = ?')
+      .run('forged-athlete');
+    await expect(readStrengthRevisionPreview(
+      alteredPreview.sql, 'synthetic-athlete-a', 'preview-1',
+    )).rejects.toThrow(/ownership mismatch/);
+    await expect(listUnapprovedStrengthReviewInbox(
+      alteredPreview.sql, 'synthetic-athlete-a', evidence(),
+    )).rejects.toThrow(/wrong-owner audit record/);
+
+    const alteredEvent = open();
+    const stored = await appendStrengthRevisionPreview(alteredEvent.sql, input());
+    await appendStrengthPreviewReviewEvent(
+      alteredEvent.sql, reviewEvent(stored, 'dismiss'),
+    );
+    alteredEvent.db.prepare('UPDATE strength_revision_preview_review_events SET athlete_id = ?')
+      .run('forged-athlete');
+    await expect(readStrengthPreviewReviewState(
+      alteredEvent.sql, 'synthetic-athlete-a', 'preview-1',
+    )).rejects.toThrow(/invalid or altered event/);
+    await expect(listUnapprovedStrengthReviewInbox(
+      alteredEvent.sql, 'synthetic-athlete-a', evidence(),
+    )).rejects.toThrow(/wrong-owner audit record/);
+  });
   it('rejects wrong owner, invalid paging and corrupted history instead of omitting entries', async () => {
     const { db, sql } = open();
     await appendStrengthRevisionPreview(sql, input());
