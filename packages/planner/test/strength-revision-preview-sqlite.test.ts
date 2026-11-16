@@ -105,9 +105,9 @@ function driver(db: DatabaseSync): TrainingAdjustmentSqlDriver {
       db.exec('BEGIN IMMEDIATE');
       try {
         const reader: TrainingAdjustmentSqlDriver = {
-          getFirst: async <Row>(query, params) =>
+          getFirst: async <Row>(query: string, params: Array<string | number | null>) =>
             db.prepare(query).get(...params) as Row | null,
-          getAll: async <Row>(query, params) =>
+          getAll: async <Row>(query: string, params: Array<string | number | null>) =>
             db.prepare(query).all(...params) as Row[],
           run: async () => { throw new Error('Read-only snapshot cannot write.'); },
           transaction: async () => { throw new Error('Read-only snapshot cannot nest.'); },
@@ -934,7 +934,7 @@ describe('consistent, read-only strength review database snapshots', () => {
             let checked = false;
             const inspected: TrainingAdjustmentSqlDriver = {
               ...reader,
-              getFirst: async <Row>(query, params) => {
+              getFirst: async <Row>(query: string, params: Array<string | number | null>) => {
                 if (!checked && query.includes('FROM pt_profiles')) {
                   checked = true;
                   expect(() => outsider.prepare(
