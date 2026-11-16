@@ -84,6 +84,18 @@ that still requires a real athlete, provider source, or native device.
   verifies dismiss/restore, stale visibility remaining stale, injected SQL
   failure rollback, cold-start audit recovery and unchanged workout/ledger data.
   These are not workout confirmation, return-to-sport clearance, or release.
+- The read-only detail now includes a **12-gate pre-approval diagnostic**
+  that distinguishes local snapshot checks (source identity, exercise structure,
+  completion, planning choices, draft status, symptoms, readiness, in-app PT
+  profile) from unverified external clinician restrictions and training-source
+  completeness. It separately marks executable athlete confirmation and a
+  trusted write-time authorization transaction as **not implemented**.
+  The app displays each gate and its current evidence limitation; even when
+  all local checks pass, the returned `canConfirmExecutableWorkout` and
+  `executableWorkoutApproved` values are always false. Provider and source
+  claims saved with the original draft are caller assertions, **not**
+  independent attestations. All checks run inside the same owner-scoped
+  read-only SQLite snapshot as the historical review.
 - A full mobile-service SQLite test creates an isolated synthetic source block,
   saves a preview, then verifies retrieval, history, read-only inbox and
   preservation of the unchanged original block and empty completion journal.
