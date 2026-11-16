@@ -351,6 +351,15 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.summary.secondsReduced).toBe(480);
     expect(detail.review.status).toBe('pending_review');
     expect(detail.executableWorkoutApproved).toBe(false);
+    expect(detail.preflight.executableWorkoutApproved).toBe(false);
+    expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+    expect(detail.preflight.gates).toHaveLength(12);
+    expect(detail.preflight.gates.find(
+      gate => gate.id === 'external_provider_restrictions',
+    )?.status).toBe('unverified');
+    expect(detail.preflight.gates.find(
+      gate => gate.id === 'executable_write_authorization',
+    )?.status).toBe('not_implemented');
     expect(state.exclusiveSnapshotReads).toBeGreaterThanOrEqual(2);
     state.failExclusiveReview = true;
     await expect(service.getUnapprovedStrengthReviewDetail(
@@ -389,6 +398,9 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     );
     expect(afterDismissal.stale).toBe(true);
     expect(afterDismissal.review.status).toBe('dismissed');
+    expect(afterDismissal.preflight.gates.find(
+      gate => gate.id === 'review_disposition',
+    )?.status).toBe('blocked');
     await expect(service.setUnapprovedStrengthReviewDisposition({
       athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
       action: 'restore', expectedLastEventId: null,
@@ -410,6 +422,8 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     );
     expect(afterReopen.stale).toBe(true);
     expect(afterReopen.review.status).toBe('pending_review');
+    expect(afterReopen.preflight.executableWorkoutApproved).toBe(false);
+    expect(afterReopen.preflight.canConfirmExecutableWorkout).toBe(false);
     state.failNextContaining = 'INSERT INTO strength_revision_preview_review_events';
     await expect(service.setUnapprovedStrengthReviewDisposition({
       athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
