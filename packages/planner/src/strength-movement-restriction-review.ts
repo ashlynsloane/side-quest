@@ -153,20 +153,6 @@ function interpretExercise(
       explanation: 'Exercise catalog annotations or identity are incomplete; movement-specific restriction checks cannot be trusted.',
     };
   }
-  // An all-empty tag snapshot supplies no interpretable movement evidence.
-  // Even a nominal zero impact level cannot establish that a protected
-  // tissue or movement is unloaded.
-  if (restrictions.length > 0
-    && exercise.exerciseSnapshot.movementPatterns.length === 0
-    && exercise.exerciseSnapshot.avoidanceTags.length === 0
-    && exercise.exerciseSnapshot.jointLoads.length === 0
-    && exercise.exerciseSnapshot.bodyRegions.length === 0) {
-    return {
-      ...base, status: 'needs_individual_review',
-      associatedRestrictions: restrictions,
-      explanation: 'All exercise movement annotations are absent; a low impact or reduced dose estimate cannot establish restriction compatibility.',
-    };
-  }
   if (restrictions.length === 0) {
     return {
       ...base,
@@ -189,6 +175,19 @@ function interpretExercise(
     return {
       ...base, status: 'potential_conflict', associatedRestrictions: flagged,
       explanation: 'Catalog metadata indicates loading or movement that may conflict with a protected movement; do not infer clearance from reduced exercise dose.',
+    };
+  }
+  // Known hazards take precedence over missing metadata. If all movement
+  // annotations are empty and none establish a conflict, still require review:
+  // an impact rating alone cannot certify shoulder/spine/hip compatibility.
+  if (exercise.exerciseSnapshot.movementPatterns.length === 0
+    && exercise.exerciseSnapshot.avoidanceTags.length === 0
+    && exercise.exerciseSnapshot.jointLoads.length === 0
+    && exercise.exerciseSnapshot.bodyRegions.length === 0) {
+    return {
+      ...base, status: 'needs_individual_review',
+      associatedRestrictions: restrictions,
+      explanation: 'All exercise movement annotations are absent; a low impact or reduced dose estimate cannot establish restriction compatibility.',
     };
   }
   if (uncertain.length) {
