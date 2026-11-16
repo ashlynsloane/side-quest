@@ -300,9 +300,14 @@ export default function StrengthReviewDetailScreen() {
         <Text style={styles.eyebrow}>EXERCISE COMPARISON · READ ONLY DOSE</Text>
         <Text style={styles.title}>Before and after</Text>
         <View style={styles.notice}>
-          <Text style={styles.noticeTitle}>Not approved for training</Text>
+          <Text style={styles.noticeTitle}>
+            {authorized ? 'Routine version authorized — not started'
+              : 'Draft not yet authorized'}
+          </Text>
           <Text style={styles.noticeText}>
-            This is a historical proposed change. It has not been cleared against current external clinician restrictions and cannot be applied or started here.
+            {authorized
+              ? 'An exact athlete-confirmed routine workout version is saved. Current restrictions and recovery must be rechecked at the actual start. This draft screen does not launch workouts.'
+              : 'This is a proposed exercise change, not a medical clearance. It cannot be started from this review screen.'}
           </Text>
         </View>
         {loading ? (
@@ -422,6 +427,102 @@ export default function StrengthReviewDetailScreen() {
               {recheckError ? (
                 <Text style={styles.error}>{recheckError}</Text>
               ) : null}
+            </View>
+            <Text style={styles.sectionTitle}>Athlete-confirmed routine workout</Text>
+            <View style={styles.card}>
+              {authorized ? (
+                <>
+                  <Text style={styles.cardTitle}>Exact routine version authorized</Text>
+                  <Text style={styles.helper}>
+                    Authorization saved {authorized.createdAt.slice(0, 10)}.
+                    Only the recorded exercise prescription was authorized.
+                    Your original training plan is unchanged.
+                  </Text>
+                  <Text style={styles.noticeText}>
+                    Not started. This is not clinician clearance and cannot
+                    bypass a fresh safety check at session start.
+                  </Text>
+                </>
+              ) : getRoutineStrengthAuthorizationReadiness(detail)
+                .canRequestAuthorization ? (
+                <>
+                  <Text style={styles.cardTitle}>Confirm this exact workout</Text>
+                  <Text style={styles.helper}>
+                    Eligible only for uncomplicated routine training. Review
+                    the complete exercise list and current safety evidence
+                    before authorizing. No clinician paperwork is required
+                    merely because an athlete trains routinely.
+                  </Text>
+                  <Pressable accessibilityRole="checkbox"
+                    accessibilityState={{ checked: reviewedDose }}
+                    accessibilityLabel="I reviewed each exact exercise, dose, duration and resistance"
+                    disabled={savingAuthorization}
+                    onPress={() => setReviewedDose(value => !value)}
+                    style={styles.confirmRow}>
+                    <Text style={styles.confirmText}>
+                      {reviewedDose ? '☑' : '☐'} I reviewed every exercise,
+                      duration, target and load in this proposed workout.
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="checkbox"
+                    accessibilityState={{ checked: reviewedTraining }}
+                    accessibilityLabel="I reviewed my recent workout and recovery history"
+                    disabled={savingAuthorization}
+                    onPress={() => setReviewedTraining(value => !value)}
+                    style={styles.confirmRow}>
+                    <Text style={styles.confirmText}>
+                      {reviewedTraining ? '☑' : '☐'} I reviewed recent training,
+                      recovery and any unlogged sessions.
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="checkbox"
+                    accessibilityState={{ checked: reportedRestrictions }}
+                    accessibilityLabel="I have not omitted any known symptoms or movement restrictions"
+                    disabled={savingAuthorization}
+                    onPress={() => setReportedRestrictions(value => !value)}
+                    style={styles.confirmRow}>
+                    <Text style={styles.confirmText}>
+                      {reportedRestrictions ? '☑' : '☐'} I have not omitted any
+                      known symptoms, injuries or movement restrictions.
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button"
+                    accessibilityLabel="Authorize this exact routine workout without starting it"
+                    disabled={!reviewedDose || !reviewedTraining || !reportedRestrictions
+                      || savingAuthorization || savingConcern || savingDisposition || rechecking}
+                    onPress={confirmRoutineWorkout}
+                    style={[styles.dispositionAction,
+                      (!reviewedDose || !reviewedTraining || !reportedRestrictions
+                        || savingAuthorization || savingConcern || savingDisposition || rechecking)
+                      && styles.disabledAction]}>
+                    <Text style={styles.dispositionText}>
+                      {savingAuthorization ? 'Authorizing exact workout…'
+                        : 'Authorize this routine workout'}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.cardTitle}>Routine authorization not available</Text>
+                  <Text style={styles.helper}>
+                    This proposal is not eligible for athlete-only
+                    confirmation. The current holds must be resolved before
+                    a new version can be considered.
+                  </Text>
+                  {getRoutineStrengthAuthorizationReadiness(detail)
+                    .blockers.slice(0, 4).map((reason, index) => (
+                      <Text key={index} style={styles.helper}>{reason}</Text>
+                    ))}
+                </>
+              )}
+              {authorizationError ? (
+                <Text style={styles.error}>{authorizationError}</Text>
+              ) : null}
+              <Text style={styles.helper}>
+                A saved authorization is not an automatic workout start.
+                Rehabilitation and unresolved restrictions cannot use
+                this athlete-only pathway.
+              </Text>
             </View>
             <Text style={styles.sectionTitle}>What blocks workout approval?</Text>
             <View style={styles.card}>
@@ -674,4 +775,8 @@ const styles = StyleSheet.create({
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
     minHeight: 48, justifyContent: 'center', alignItems: 'center' },
   concernText: { fontSize: 13, fontWeight: '800', color: colors.warning },
+  confirmRow: { minHeight: 48, paddingVertical: 11,
+    paddingHorizontal: 10, borderWidth: 1,
+    borderColor: colors.border, borderRadius: 9 },
+  confirmText: { fontSize: 13, lineHeight: 20, color: colors.ink },
 });
