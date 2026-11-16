@@ -10,6 +10,7 @@ import type { StrengthPreviewReviewState } from './strength-preview-review-event
 import {
   readStrengthEvidenceProvenance,
 } from './strength-evidence-provenance-sqlite';
+import type { TrainingSafetyPolicy } from './training-safety-context-sqlite';
 
 /** Read-only, non-clinical diagnostics. No combination of gates confers clearance. */
 export type StrengthApprovalGateId =
@@ -22,7 +23,8 @@ export type StrengthApprovalGateId =
 export interface StrengthApprovalDiagnosticGate {
   id: StrengthApprovalGateId;
   title: string;
-  status: 'local_check_passed' | 'blocked' | 'unverified' | 'not_implemented';
+  status: 'local_check_passed' | 'blocked' | 'unverified'
+    | 'not_implemented' | 'not_applicable';
   detail: string;
 }
 
@@ -33,7 +35,7 @@ export interface StrengthApprovalPreflight {
   /** Explicitly false regardless of the status of any individual check. */
   executableWorkoutApproved: false;
   canConfirmExecutableWorkout: false;
-  requiresIndependentProviderVerification: true;
+  requiresIndependentProviderVerification: boolean;
   requiresWriteTimeRevalidation: true;
 }
 
@@ -61,6 +63,7 @@ export async function inspectStrengthApprovalPreflight(
   review: StrengthPreviewReviewState,
   evidence: CurrentStrengthReviewEvidence,
   nowMs = Date.now(),
+  trainingPolicy?: TrainingSafetyPolicy,
 ): Promise<StrengthApprovalPreflight> {
   if (!Number.isFinite(nowMs)
     || evidence.athleteId !== assessment.preview.binding.athleteId
@@ -195,9 +198,21 @@ export async function inspectStrengthApprovalPreflight(
   const r = provenance.restriction;
   const c = provenance.coverage;
   const restrictionBlocked = ['reported_restriction', 'conflicting', 'expired'].includes(r.status);
+  // An explicitly routine, unrestricted athlete does NOT require a clinician
+  // document merely to participate in ordinary training. The track is read
+  // from an athlete-owned history across all drafts, not from a caller's
+  // self-asserted 'verified_none' flag.
+  const ordinaryNoProviderRequirement =
+    trainingPolicy?.track === 'routine_training_review'
+    && trainingPolicy.knownRestrictionCount === 0
+    && trainingPolicy.requiresRestrictionAwareExerciseReview === false
+    && !restrictionBlocked;
   add('external_provider_restrictions', 'Independent provider restriction review',
-    restrictionBlocked ? 'blocked' : 'unverified',
-    r.status === 'reported_restriction'
+    ordinaryNoProviderRequirement ? 'not_applicable'
+      : restrictionBlocked ? 'blocked' : 'unverified',
+    ordinaryNoProviderRequirement
+      ? 'Clinician paperwork is not required for uncomplicated routine training. This particular exercise revision remains unapproved.'
+      : r.status === 'reported_restriction'
       ? 'A restriction has been reported; it remains unresolved until independently reviewed.'
       : r.status === 'conflicting'
         ? 'Conflicting restriction claims were recorded. Neither claim constitutes clearance.'
@@ -226,9 +241,10 @@ export async function inspectStrengthApprovalPreflight(
   return {
     schemaVersion: 1,
     gates,
-    blockingGateCount: gates.filter(gate => gate.status !== 'local_check_passed').length,
+    blockingGateCount: gates.filter(gate =>
+      gate.status !== 'local_check_passed' && gate.status !== 'not_applicable').length,
     executableWorkoutApproved: false, canConfirmExecutableWorkout: false,
-    requiresIndependentProviderVerification: true,
+    requiresIndependentProviderVerification: !ordinaryNoProviderRequirement,
     requiresWriteTimeRevalidation: true,
   };
 }
