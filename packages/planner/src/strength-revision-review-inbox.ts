@@ -65,6 +65,15 @@ export async function listUnapprovedStrengthReviewInbox(
   if (foreignPreview || foreignReview) {
     throw new Error('Strength preview inbox contains a wrong-owner audit record.');
   }
+  const orphanReview = await snapshot.getFirst<{ id: string }>(
+    `SELECT e.id FROM strength_revision_preview_review_events e
+     LEFT JOIN strength_revision_previews p ON p.id = e.preview_id
+     WHERE p.id IS NULL OR p.athlete_id <> e.athlete_id LIMIT 1`,
+    [],
+  );
+  if (orphanReview) {
+    throw new Error('Strength preview inbox contains an orphaned review event.');
+  }
   // Provenance is append-only safety history. Orphans and cross-athlete rows
   // must fail the entire inbox, even if the affected preview is off-page.
   const corruptedLineage = await snapshot.getFirst<{ id: string }>(
