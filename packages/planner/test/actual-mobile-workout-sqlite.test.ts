@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   directory: '',
   handles: [] as Array<{ close: () => void }>,
   failNextContaining: null as string | null,
+  exclusiveSnapshotReads: 0,
+  failExclusiveReview: false,
 }));
 // Mock only the planner SQL surfaces required by the mobile database service.
 // Use their real implementations without loading unrelated React Native UI exports.
@@ -82,6 +84,10 @@ vi.mock('expo-sqlite', async () => {
           getFirstAsync: <Row>(sql: string, ...args: unknown[]) => Promise<Row | null>;
           getAllAsync: <Row>(sql: string, ...args: unknown[]) => Promise<Row[]>;
         }) => Promise<void>) => {
+          state.exclusiveSnapshotReads += 1;
+          if (state.failExclusiveReview) {
+            throw new Error('Synthetic exclusive SQLite snapshot unavailable.');
+          }
           database.exec('BEGIN IMMEDIATE');
           try {
             await fn({
@@ -146,6 +152,8 @@ beforeEach(async () => {
   state.directory = scratch;
   state.handles = [];
   state.failNextContaining = null;
+  state.exclusiveSnapshotReads = 0;
+  state.failExclusiveReview = false;
   const stored = new Map<string, string>();
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true, writable: true,
@@ -328,6 +336,17 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.summary.secondsReduced).toBe(480);
     expect(detail.review.status).toBe('pending_review');
     expect(detail.executableWorkoutApproved).toBe(false);
+    expect(state.exclusiveSnapshotReads).toBeGreaterThanOrEqual(2);
+    state.failExclusiveReview = true;
+    await expect(service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    )).rejects.toThrow(/exclusive SQLite snapshot unavailable/);
+    state.failExclusiveReview = false;
     await expect(service.getUnapprovedStrengthReviewDetail(
       'different-athlete', 'qa-preview', {
         athleteId: 'different-athlete',
