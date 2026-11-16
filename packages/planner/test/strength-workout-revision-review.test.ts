@@ -3,7 +3,7 @@ import type { GeneratedWorkout } from '@circuit/domain';
 import { evaluateStrengthWorkoutRevision } from '../src/strength-workout-revision-review';
 
 const exercise = (id: string, target: number, load = 5) => ({
-  exerciseId: id, exerciseSnapshot: { id, name: id },
+  exerciseId: id, exerciseSnapshot: { id, name: id } as unknown as GeneratedWorkout['stations'][number]['exercises'][number]['exerciseSnapshot'],
   equipmentOptionId: 'equipment-a', prescriptionId: 'rx-a',
   target, unit: 'total' as const, order: id === 'e1' ? 0 : 1,
   userLoadValue: load, userLoadUnit: 'lb' as const,
