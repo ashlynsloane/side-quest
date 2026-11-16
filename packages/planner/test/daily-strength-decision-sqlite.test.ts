@@ -357,6 +357,24 @@ describe('real SQLite atomic strength approval and undo journal', () => {
         .get() as {n:number}).n).toBe(1);
     }
   });
+  it('rejects malformed or normalized calendar timestamps before audit insertion', async () => {
+    const { db, driver } = open();
+    for (const createdAt of [
+      'not-a-timestamp',
+      '2026-02-30T10:00:00Z',
+      '2026-11-14T10:00:00+00:00',
+      '2026-11-14T10:00:00.0Z',
+    ]) {
+      await expect(appendStrengthChoiceDecision(
+        driver, { ...decision('defer'), createdAt }, review,
+      )).rejects.toThrow(/Invalid strength decision/);
+    }
+    expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as { n: number }).n).toBe(0);
+    await appendStrengthChoiceDecision(driver, decision('defer'), review);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as { n: number }).n).toBe(1);
+  });
   it('rejects forged overlapping approvals and prevents subsequent writes', async () => {
     const { driver, db } = open();
     await appendStrengthChoiceDecision(driver, decision('defer'), review);
