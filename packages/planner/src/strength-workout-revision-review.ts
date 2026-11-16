@@ -37,6 +37,14 @@ export function evaluateStrengthWorkoutRevision(input: {
     return { structurallyValid: false, reasons: ['Missing workout identity or stations.'],
       requiresCurrentRestrictionReview: true, autoApproved: false };
   }
+  // Never relax the source workout's generator constraints or swap its
+  // equipment/region provenance in the guise of a time reduction.
+  if (JSON.stringify(proposed.request) !== JSON.stringify(original.request)
+    || JSON.stringify(proposed.requiredEquipment) !== JSON.stringify(original.requiredEquipment)
+    || JSON.stringify(proposed.targetRegions) !== JSON.stringify(original.targetRegions)
+    || proposed.source !== original.source) {
+    reject('Workout constraints or provenance changed; regenerate and review separately.');
+  }
   if (!finitePositive(original.estimatedElapsedSeconds)
     || !finitePositive(proposed.estimatedElapsedSeconds)
     || proposed.estimatedElapsedSeconds > original.estimatedElapsedSeconds
