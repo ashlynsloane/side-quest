@@ -139,6 +139,12 @@ The exported `reviewStrengthRevisionForDecision` composes the source-session sig
 
 This is deliberately a **read-only preflight**, not a trusted approval endpoint. Even `status: 'reviewable'` returns `executableWorkoutApproved: false`, `requiresAthleteApproval: true` and `requiresWriteTimeRevalidation: true`. The `CurrentStrengthReviewEvidence` arguments are caller-supplied and therefore **cannot establish actual source completeness or PT clearance**. The existing SQLite append does not yet invoke this helper, and an approval button must not be enabled on its basis. The next integration must resolve authoritative evidence from the athlete-owned database/providers and recheck the same constraints atomically with writing a versioned exercise-level proposal.
 
+## Stage 7: Transactional PT-profile restriction gate (backend only)
+
+The SQLite decision transaction now re-reads the most recently stored `pt_profiles` record before appending any reduced-dose acceptance or restoring a previous decision. An **absent, malformed, incomplete or active** PT profile blocks both paths, including when the caller supplies `safeToReview: true`. Append-only deferral remains available without suggesting exercise clearance. Synthetic file-backed SQLite tests verify denied writes, unchanged audit history, and deferral behavior for these four cases.
+
+A stored `active: false` profile means only that this particular in-app profile is inactive; it **does not independently prove the athlete has no external restrictions**. The helper does not yet reconcile clinician data or authorize an executable workout. The UI remains read-only, and physical-iPhone and original-data acceptance gates are still outstanding.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
