@@ -301,11 +301,11 @@ The new `training-safety-context` screen is accessible from Profile.
 Athletes can explicitly record a mode and add protected movements, with
 confirmation and a saved immutable audit trail. **Removing or clinically
 clearing a restriction is not offered in this phase.** Such a transition will
-need its own reviewed, validated workflow. Movement-to-exercise tagging and
-filtering are **not implemented**, so these records must not be interpreted
-as an automatically validated workout prescription.
+need its own reviewed, validated workflow. Catalog-tag movement screening is now available (Stage 17), but clinical
+validation and executable filtering are **not implemented**. The records
+must never be interpreted as an automatically validated prescription.
 
-The 12-gate draft review now marks provider paperwork
+The 13-gate draft review now marks provider paperwork
 `not_applicable` *only* for an explicit, uncomplicated routine-training
 context; otherwise it remains unverified/blocked. The clinician task is
 omitted from reconciliation when not applicable. Other requirements,
@@ -348,6 +348,44 @@ routine training, conservative exercise holds, unchanged source workout,
 and the still-disabled executable decision. These checks use exercise
 annotations, not validated clinical contraindication measurements or
 physical device acceptance.
+
+## Stage 18: Exclusive-transaction authorization dry run (NO approval)
+
+The mobile strength-review detail now supports **Recheck draft safety
+evidence**, a non-executable simulation that reloads the exact candidate,
+review history, training-context protection events, provenance, PT profile,
+symptom and readiness check-ins, current training block, completed-session
+records, and planning decisions **inside one athlete-owned exclusive SQLite
+transaction**. The read-only display and the dry run reuse the same
+`assessStrengthReviewWithinTransaction` evaluator to avoid divergent
+business rules.
+
+A local-only `observationToken` records the exact viewed inputs, including
+raw local check-in row revisions. The subsequent transaction compares the new
+observation to the prior one and reports when facts changed—even if a numeric
+readiness score moves within the same passing threshold. The token is
+**not cryptographic evidence, provider verification, or an approval
+credential**: it is user-controlled and contains sensitive local data. It
+must not be sent to external analytics, logged, or used for authorization.
+
+The transaction's evaluation handle explicitly rejects SQL writes and
+nested transactions. Missing native-exclusive transaction support, wrong
+athlete ownership, unreadable history, and unsuccessful revalidation fail
+closed. Every result has `workoutPersisted: false`,
+`athleteExecutionConsentCollected: false`,
+`canConfirmExecutableWorkout: false`, and
+`executableWorkoutApproved: false`, regardless of local pass statuses.
+
+Synthetic file-backed tests check unchanged rechecks, score changes that
+do not change thresholds, a newly active PT restriction, new symptom
+alerts, regenerated source workouts, added provider concerns, wrong
+ownership, unsupported exclusive transactions, and transaction cleanup
+after injected SQL failures. Mobile SQLite acceptance exercises the
+native-style exclusive transaction service before and after a restriction
+report. **This is NOT executable workout approval.** Independent source
+attestation, athlete consent, write-time exercise authorization, physical
+iPhone acceptance and original-athlete recovery remain unimplemented or
+unverified gates.
 
 ## Current limitations
 
