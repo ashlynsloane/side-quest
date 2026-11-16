@@ -1762,3 +1762,7 @@ export type { CurrentStrengthReviewEvidence, StrengthRevisionDecisionReview } fr
 
 export { createStrengthRevisionPreviewBinding, verifyStrengthRevisionPreviewBinding } from './strength-revision-preview-binding';
 export type { StrengthRevisionPreviewBinding, StrengthRevisionBindingResult } from './strength-revision-preview-binding';
+
+// Durable unapproved exercise-preview journal; never used to authorize a workout.
+export { STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview, readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview } from './strength-revision-preview-sqlite';
+export type { StoredStrengthRevisionPreview, StoredStrengthPreviewAssessment } from './strength-revision-preview-sqlite';
