@@ -6,6 +6,9 @@ import {
   assessStrengthReviewWithinTransaction, type UnapprovedStrengthReviewDetail,
 } from './strength-revision-review-detail';
 import { readStrengthRevisionPreview } from './strength-revision-preview-sqlite';
+import {
+  assessStrengthReviewWithinTransaction, type UnapprovedStrengthReviewDetail,
+} from './strength-revision-review-detail';
 
 /**
  * A distinct append-only AUTHORIZATION of an exact routine-training workout.
@@ -268,8 +271,6 @@ export async function authorizeRoutineStrengthWorkout(
   return sql.exclusiveTransaction(async txn => {
     // Same evaluator as read-only detail and dry run. Every read is made
     // through the transaction-scoped handle; no separate connection reads.
-    const { assessStrengthReviewWithinTransaction } =
-      await import('./strength-revision-review-detail');
     const readOnly: TrainingAdjustmentSqlDriver = {
       getFirst: (query, params) => txn.getFirst(query, params),
       getAll: (query, params) => txn.getAll(query, params),
