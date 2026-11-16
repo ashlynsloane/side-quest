@@ -156,6 +156,13 @@ export function createStrengthReconciliationChecklist(
           : NEXT_STEPS[gate.id],
       canResolveAutomatically: false as const,
     }));
+  // Show immediate safety holds before missing evidence, and missing
+  // evidence before feature-development gates. Preserve source order within
+  // each class so the list remains deterministic across app restarts.
+  const priority: Record<StrengthReconciliationTaskKind, number> = {
+    safety_hold: 0, evidence_gap: 1, feature_unavailable: 2,
+  };
+  tasks.sort((a, b) => priority[a.kind] - priority[b.kind]);
   return {
     schemaVersion: 1,
     tasks,
