@@ -321,6 +321,33 @@ export default function StrengthReviewDetailScreen() {
                 Dismissing or restoring the draft only organizes the review inbox.
               </Text>
             </View>
+            <Text style={styles.sectionTitle}>Protected-movement review</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Exercise-specific restriction flags</Text>
+              <Text style={styles.helper}>
+                Training track: {detail.movementRestrictions.track.replaceAll('_', ' ')}.
+                Potential conflicts: {detail.movementRestrictions.potentialConflictCount}.
+                Individual reviews needed: {detail.movementRestrictions.needsIndividualReviewCount}.
+              </Text>
+              {detail.movementRestrictions.findings.map((finding, index) => (
+                <View style={styles.gateRow}
+                  key={finding.stationId + ':' + finding.exerciseId + ':' + index}>
+                  <Text style={styles.gateTitle}>{finding.exerciseName}</Text>
+                  <Text style={styles.gateStatus}>
+                    {finding.status === 'potential_conflict' ? 'POTENTIAL CONFLICT'
+                      : finding.status === 'needs_individual_review' ? 'NEEDS REVIEW'
+                        : finding.status === 'routine_not_applicable'
+                          ? 'NO RESTRICTION RECORDED'
+                          : 'NO TAGGED CONFLICT DETECTED'}
+                  </Text>
+                  <Text style={styles.helper}>{finding.explanation}</Text>
+                </View>
+              ))}
+              <Text style={styles.noticeText}>
+                Catalog tags cannot establish movement safety or medical clearance.
+                No exercise here can be started or confirmed from this screen.
+              </Text>
+            </View>
             <Text style={styles.sectionTitle}>Evidence reconciliation</Text>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>What still needs to be resolved</Text>
