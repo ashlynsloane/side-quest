@@ -158,7 +158,7 @@ export default function StrengthReviewDetailScreen() {
                 Current state: {detail.review.status === 'dismissed'
                   ? 'Dismissed' : 'Pending review'}.
               </Text>
-              {detail.state.events.map(event => (
+              {detail.review.events.map(event => (
                 <Text key={event.id} style={styles.history}>
                   {event.action === 'dismiss' ? 'Dismissed' : 'Reopened as pending'}
                   {' · '}{event.createdAt.slice(0, 10)}
