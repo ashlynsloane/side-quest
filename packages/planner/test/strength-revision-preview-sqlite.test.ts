@@ -1898,6 +1898,10 @@ describe('conditional clinician documentation policy without approving workout r
       sql, 'synthetic-athlete-a', 'preview-1', evidence(),
     );
     expect(detail.trainingPolicy.track).toBe('routine_training_review');
+    expect(detail.movementRestrictions.findings).toHaveLength(1);
+    expect(detail.movementRestrictions.findings[0]?.status)
+      .toBe('needs_individual_review');
+    expect(detail.movementRestrictions.executableWorkoutApproved).toBe(false);
     expect(detail.trainingPolicy.clinicianDocumentRequiredForRoutineTraining).toBe(false);
     expect(detail.preflight.gates.find(g =>
       g.id === 'external_provider_restrictions')?.status).toBe('not_applicable');
@@ -1924,6 +1928,10 @@ describe('conditional clinician documentation policy without approving workout r
       sql, 'synthetic-athlete-a', 'preview-1', evidence(),
     );
     expect(detail.trainingPolicy.track).toBe('restriction_aware_review');
+    expect(detail.movementRestrictions.protectedMovements).toEqual(['impact_running']);
+    expect(detail.movementRestrictions.findings[0]?.status)
+      .toBe('needs_individual_review');
+    expect(detail.movementRestrictions.canApplyWorkout).toBe(false);
     expect(detail.preflight.requiresIndependentProviderVerification).toBe(true);
     expect(detail.preflight.gates.find(g =>
       g.id === 'external_provider_restrictions')?.status).toBe('unverified');
