@@ -15,6 +15,7 @@ import {
 import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
 import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
 import { readUnapprovedStrengthReviewDetail } from '../src/strength-revision-review-detail';
+import { inspectStrengthAuthorizationDryRun } from '../src/strength-authorization-dry-run';
 import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
 import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
 import {
@@ -2007,5 +2008,202 @@ describe('conditional clinician documentation policy without approving workout r
     expect(detail.preflight.gates.find(g =>
       g.id === 'external_provider_restrictions')?.status).toBe('blocked');
     expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+  });
+});
+
+describe('exclusive SQLite strength authorization dry-run: NO executable approval', () => {
+  const request = (observationToken: string) => ({
+    athleteId: 'synthetic-athlete-a',
+    previewId: 'preview-1',
+    evidence: evidence(),
+    expectedObservationToken: observationToken,
+  });
+
+  it('reuses the exact reviewed evidence without persisting or approving a workout', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const viewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    const before = db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string };
+    const dryRun = await inspectStrengthAuthorizationDryRun(
+      sql, request(viewed.observationToken),
+    );
+    expect(dryRun.schemaVersion).toBe(1);
+    expect(dryRun.kind).toBe('non_executable_authorization_dry_run');
+    expect(dryRun.changedSinceViewed).toBe(false);
+    expect(dryRun.current.observationToken).toBe(viewed.observationToken);
+    expect(dryRun.current.review.status).toBe('pending_review');
+    expect(dryRun.blockingGateIds).toContain('executable_write_authorization');
+    expect(dryRun.canConfirmExecutableWorkout).toBe(false);
+    expect(dryRun.athleteExecutionConsentCollected).toBe(false);
+    expect(dryRun.workoutPersisted).toBe(false);
+    expect(dryRun.executableWorkoutApproved).toBe(false);
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(before.block_json);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    const completed = db.prepare('SELECT COUNT(*) AS n FROM workout_ledger')
+      .get() as { n: number };
+    expect(completed.n).toBe(0);
+  });
+
+  it('detects an in-range readiness change even if the visible approval gate still passes', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const viewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    db.prepare('UPDATE readiness_check_ins SET check_in_json = ? WHERE date = ?')
+      .run(JSON.stringify({
+        sleep: 5, energy: 4, muscleFreshness: 4, stress: 2, motivation: 4,
+      }), '2026-11-15');
+    const dryRun = await inspectStrengthAuthorizationDryRun(
+      sql, request(viewed.observationToken),
+    );
+    expect(dryRun.changedSinceViewed).toBe(true);
+    expect(dryRun.current.preflight.gates.find(g =>
+      g.id === 'readiness_check_in')?.status).toBe('local_check_passed');
+    expect(dryRun.workoutPersisted).toBe(false);
+  });
+
+  it('detects active PT restrictions, deteriorated symptoms and source regeneration', async () => {
+    for (const scenario of ['pt', 'symptoms', 'source'] as const) {
+      const { db, sql, saveBlock } = open();
+      await appendStrengthRevisionPreview(sql, input());
+      const viewed = await readUnapprovedStrengthReviewDetail(
+        sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+      );
+      if (scenario === 'pt') {
+        db.prepare('UPDATE pt_profiles SET profile_json = ?')
+          .run('{"active":true}');
+      } else if (scenario === 'symptoms') {
+        db.prepare('UPDATE training_check_ins SET check_in_json = ?')
+          .run(JSON.stringify({
+            status: 'tightness_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400000).toISOString(),
+          }));
+      } else {
+        saveBlock(block({
+          ...sourceSession(), title: 'Regenerated session for a different goal',
+        }));
+      }
+      const dryRun = await inspectStrengthAuthorizationDryRun(
+        sql, request(viewed.observationToken),
+      );
+      expect(dryRun.changedSinceViewed).toBe(true);
+      expect(dryRun.current.stale).toBe(true);
+      expect(dryRun.current.preflight.canConfirmExecutableWorkout).toBe(false);
+      expect(dryRun.workoutPersisted).toBe(false);
+      expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    }
+  });
+
+  it('notices a new restriction even if the historical draft remains unchanged', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    const viewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'provider_restriction', 'reported_present',
+      'newer-safety-report',
+    ), null);
+    const run = await inspectStrengthAuthorizationDryRun(
+      sql, request(viewed.observationToken),
+    );
+    expect(run.changedSinceViewed).toBe(true);
+    expect(run.current.provenance.restriction.status).toBe('reported_restriction');
+    expect(run.blockingGateIds).toContain('external_provider_restrictions');
+    expect(run.current.stale).toBe(true);
+    expect(run.executableWorkoutApproved).toBe(false);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+
+  it('fails closed for wrong owner, bad evidence and unsupported exclusive transactions', async () => {
+    const { sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const viewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    await expect(inspectStrengthAuthorizationDryRun(
+      sql, { ...request(viewed.observationToken),
+        athleteId: 'synthetic-athlete-b',
+      },
+    )).rejects.toThrow(/Invalid unapproved strength authorization dry-run request/);
+    await expect(inspectStrengthAuthorizationDryRun(
+      sql, { ...request(viewed.observationToken), expectedObservationToken: '' },
+    )).rejects.toThrow(/Invalid unapproved strength authorization dry-run request/);
+    await expect(inspectStrengthAuthorizationDryRun(
+      { ...sql, exclusiveTransaction: undefined },
+      request(viewed.observationToken),
+    )).rejects.toThrow(/Exclusive SQLite evidence revalidation is unavailable/);
+    await expect(inspectStrengthAuthorizationDryRun(
+      sql, { ...request(viewed.observationToken),
+        previewId: 'missing-draft',
+      },
+    )).rejects.toThrow(/not found|missing|not verified/);
+  });
+
+  it('uses one exclusive read-only transaction handle, never the unprotected connection', async () => {
+    const { sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const viewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    let calls = 0;
+    const guarded: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      getFirst: async () => { throw new Error('Outer connection read attempted.'); },
+      getAll: async () => { throw new Error('Outer connection list attempted.'); },
+      run: async () => { throw new Error('Outer connection mutation attempted.'); },
+      exclusiveTransaction: async <T>(
+        evaluate: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        calls += 1;
+        if (!sql.exclusiveTransaction) throw new Error('Fixture missing exclusive transaction.');
+        return sql.exclusiveTransaction(evaluate);
+      },
+    };
+    const dry = await inspectStrengthAuthorizationDryRun(
+      guarded, request(viewed.observationToken),
+    );
+    expect(calls).toBe(1);
+    expect(dry.changedSinceViewed).toBe(false);
+  });
+
+  it('releases exclusive locks after a failed integrity check and leaves audit unchanged', async () => {
+    const { db, sql, file } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const viewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    const corrupted = { ...sql, exclusiveTransaction: async <T>(
+      work: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+    ): Promise<T> => {
+      if (!sql.exclusiveTransaction) throw new Error('Fixture missing exclusive transaction.');
+      return sql.exclusiveTransaction(writer => work({
+        ...writer, getFirst: async <Row>(
+          query: string, params: Array<string | number | null>,
+        ): Promise<Row | null> => {
+          if (query.includes('FROM strength_revision_previews')) {
+            throw new Error('Injected SQLite read failure.');
+          }
+          return writer.getFirst<Row>(query, params);
+        },
+      }));
+    } };
+    await expect(inspectStrengthAuthorizationDryRun(
+      corrupted, request(viewed.observationToken),
+    )).rejects.toThrow(/Injected SQLite read failure/);
+    const outsider = new DatabaseSync(file);
+    try {
+      outsider.prepare('UPDATE pt_profiles SET profile_json = ?')
+        .run('{"active":true}');
+    } finally {
+      outsider.close();
+    }
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    expect(count(db, 'strength_revision_previews')).toBe(1);
   });
 });
