@@ -33,8 +33,12 @@ that still requires a real athlete, provider source, or native device.
   audit rows are surfaced rather than omitted.
 - Critical audit-history export and fail-closed transaction rollback on deletion errors.
 - Read-only mobile screens at `strength-review-inbox` and `strength-review-detail`,
-  reachable through Profile and session adjustment. They label unverified provider
-  evidence as a hold, never as a clearance. No button in either screen writes
+  reachable through Profile and session adjustment. The inbox loads bounded,
+  owner-verified pages of historical drafts, while the detail screen uses one
+  owner-scoped service read that combines the exact dose comparison, append-only
+  review history and current stale-state assessment. It displays missing or
+  changed restrictions as a hold, not a clearance. Late inbox pages from a
+  different athlete profile are ignored. No button in either screen writes
   to the approval journal or launches the workout.
 - A planner-generated dose summary compares the exact serialized source
   to the full saved candidate. It shows unchanged units, lowered resistance,
