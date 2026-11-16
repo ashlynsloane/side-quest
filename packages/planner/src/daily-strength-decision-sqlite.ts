@@ -142,7 +142,7 @@ export async function appendStrengthChoiceDecision(
         throw new Error('An active symptom or soreness hold prevents increasing planned training.');
       }
       if (!symptomEvidenceExpiresAt
-        || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(symptomEvidenceExpiresAt)
+        || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(symptomEvidenceExpiresAt)
         || !Number.isFinite(Date.parse(symptomEvidenceExpiresAt))
         || Date.parse(symptomEvidenceExpiresAt) <= Date.now()) {
         throw new Error('Current symptom evidence has expired or lacks a valid expiry.');
