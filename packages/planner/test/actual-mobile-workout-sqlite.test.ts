@@ -34,6 +34,7 @@ vi.mock('@circuit/planner', async () => {
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
     STRENGTH_PREVIEW_REVIEW_EVENTS_SQL: review.STRENGTH_PREVIEW_REVIEW_EVENTS_SQL,
     readStrengthPreviewReviewState: review.readStrengthPreviewReviewState,
+    appendStrengthPreviewReviewEvent: review.appendStrengthPreviewReviewEvent,
     listUnapprovedStrengthReviewInbox: inbox.listUnapprovedStrengthReviewInbox,
     readUnapprovedStrengthReviewDetail: detail.readUnapprovedStrengthReviewDetail,
     readStrengthRevisionPreview: preview.readStrengthRevisionPreview,
