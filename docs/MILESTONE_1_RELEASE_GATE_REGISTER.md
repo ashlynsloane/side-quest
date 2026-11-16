@@ -48,6 +48,22 @@ that still requires a real athlete, provider source, or native device.
   to the full saved candidate. It shows unchanged units, lowered resistance,
   reduced exercise targets, and removed exercises/stations. Any altered
   candidate, modified instruction, or purported executable approval fails closed.
+- Native review detail and inbox now require one **consistent, read-only SQLite
+  transaction snapshot** for each complete assessment/page. Expo's ordinary
+  `withTransactionAsync` can interleave unrelated work, so the native service
+  uses `withExclusiveTransactionAsync` and passes its dedicated transaction
+  handle to every nested repository query. The callback reader rejects writes
+  and nested transactions; missing/unsupported snapshot support fails closed.
+  This is a review-display safety gate, **not** executable approval.
+- File-backed concurrency tests attempt a competing PT-profile write from a
+  second SQLite connection mid-review. The write is rejected while the
+  transaction is held; the subsequent fresh review sees the new restriction.
+  Tests also verify rollback/release of locks and that both inbox and detail
+  perform no unprotected queries outside the snapshot. Mobile SQLite acceptance
+  mocks native exclusive transactions and tests failure when they are unavailable.
+- The exclusive transaction API is native-only; the web review screen must
+  report unavailable evidence rather than silently falling back to weaker,
+  interleavable transactions. This API is not an iPhone launch test.
 - A full mobile-service SQLite test creates an isolated synthetic source block,
   saves a preview, then verifies retrieval, history, read-only inbox and
   preservation of the unchanged original block and empty completion journal.
