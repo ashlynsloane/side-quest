@@ -159,7 +159,7 @@ describe('conservative movement-specific restriction matching', () => {
     )).toThrow(/incomplete safety inputs/);
     expect(() => assessStrengthMovementRestrictions(
       { stations: [] } as unknown as GeneratedWorkout,
-      context([]), policy('routine_training_review', 0),
+      context([], 'general_training'), policy('routine_training_review', 0),
     )).toThrow(/empty workout/);
     expect(() => assessStrengthMovementRestrictions(
       { stations: [{ id: 'station-1', exercises: null }] } as unknown as GeneratedWorkout,
