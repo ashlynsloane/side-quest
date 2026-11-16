@@ -26,7 +26,7 @@ export interface StrengthReconciliationChecklist {
   schemaVersion: 1;
   tasks: StrengthReconciliationTask[];
   unresolvedCount: number;
-  clinicalSourceVerificationRequired: true;
+  clinicalSourceVerificationRequired: boolean;
   executableWorkoutApproved: false;
   canConfirmExecutableWorkout: false;
 }
@@ -103,7 +103,7 @@ export function createStrengthReconciliationChecklist(
   if (!preflight || preflight.schemaVersion !== 1
     || preflight.canConfirmExecutableWorkout !== false
     || preflight.executableWorkoutApproved !== false
-    || preflight.requiresIndependentProviderVerification !== true
+    || typeof preflight.requiresIndependentProviderVerification !== 'boolean'
     || preflight.requiresWriteTimeRevalidation !== true
     || !provenance || provenance.independentlyVerified !== false
     || provenance.executableWorkoutApproved !== false
@@ -119,13 +119,14 @@ export function createStrengthReconciliationChecklist(
   if (new Set(ids).size !== REQUIRED_GATES.length
     || REQUIRED_GATES.some(id => !ids.includes(id))
     || preflight.blockingGateCount !== preflight.gates.filter(
-      gate => gate.status !== 'local_check_passed',
+      gate => gate.status !== 'local_check_passed'
+        && gate.status !== 'not_applicable',
     ).length) {
     throw new Error('Strength evidence reconciliation gate integrity mismatch.');
   }
   if (preflight.gates.some(gate =>
-    !['local_check_passed', 'blocked', 'unverified', 'not_implemented']
-      .includes(gate.status)
+    !['local_check_passed', 'blocked', 'unverified', 'not_implemented',
+      'not_applicable'].includes(gate.status)
     || !gate.title?.trim() || !gate.detail?.trim())) {
     throw new Error('Strength evidence reconciliation has invalid gate metadata.');
   }
@@ -133,14 +134,22 @@ export function createStrengthReconciliationChecklist(
   const coverage = preflight.gates.find(g => g.id === 'source_provenance');
   const confirmation = preflight.gates.find(g => g.id === 'athlete_execution_confirmation');
   const approval = preflight.gates.find(g => g.id === 'executable_write_authorization');
+  const ordinaryExemption = external?.status === 'not_applicable';
   if (external?.status === 'local_check_passed'
     || coverage?.status === 'local_check_passed'
+    || (ordinaryExemption && (
+      preflight.requiresIndependentProviderVerification
+      || ['reported_restriction', 'conflicting', 'expired'].includes(
+        provenance.restriction.status,
+      )))
+    || (!ordinaryExemption && !preflight.requiresIndependentProviderVerification)
     || confirmation?.status !== 'not_implemented'
     || approval?.status !== 'not_implemented') {
     throw new Error('Strength evidence reconciliation cannot accept a clearance assertion.');
   }
   const tasks: StrengthReconciliationTask[] = preflight.gates
-    .filter(gate => gate.status !== 'local_check_passed')
+    .filter(gate => gate.status !== 'local_check_passed'
+      && gate.status !== 'not_applicable')
     .map(gate => ({
       id: gate.id,
       title: gate.title,
@@ -167,7 +176,8 @@ export function createStrengthReconciliationChecklist(
     schemaVersion: 1,
     tasks,
     unresolvedCount: tasks.length,
-    clinicalSourceVerificationRequired: true,
+    clinicalSourceVerificationRequired:
+      preflight.requiresIndependentProviderVerification,
     executableWorkoutApproved: false,
     canConfirmExecutableWorkout: false,
   };
