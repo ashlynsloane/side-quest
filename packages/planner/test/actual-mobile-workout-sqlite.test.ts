@@ -23,11 +23,13 @@ vi.mock('@circuit/planner', async () => {
   const strength = await import('../src/daily-strength-decision-sqlite');
   const preview = await import('../src/strength-revision-preview-sqlite');
   const review = await import('../src/strength-preview-review-events-sqlite');
+  const inbox = await import('../src/strength-revision-review-inbox');
   return {
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
     STRENGTH_PREVIEW_REVIEW_EVENTS_SQL: review.STRENGTH_PREVIEW_REVIEW_EVENTS_SQL,
     readStrengthPreviewReviewState: review.readStrengthPreviewReviewState,
+    listUnapprovedStrengthReviewInbox: inbox.listUnapprovedStrengthReviewInbox,
     readStrengthRevisionPreview: preview.readStrengthRevisionPreview,
     readStrengthChoiceAudit: strength.readStrengthChoiceAudit,
     PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
@@ -153,6 +155,16 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     const snapshot = await service.exportLocalData();
     expect(snapshot).toHaveProperty('strength_revision_previews', []);
     expect(snapshot).toHaveProperty('strength_revision_preview_review_events', []);
+    expect(await service.listUnapprovedStrengthReviewItems(
+      'synthetic-athlete-one', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16',
+        symptoms: 'unknown', readiness: 'unknown',
+        providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    )).toEqual([]);
+
     expect(snapshot).toHaveProperty('daily_strength_choice_events', []);
     expect(snapshot).toHaveProperty('training_plan_adjustment_events', []);
     expect(snapshot).toHaveProperty('training_baseline_review_events', []);
