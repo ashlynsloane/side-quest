@@ -213,6 +213,34 @@ workout/completion journals. These are **not** physical-device UI acceptance
 or clinical clearance. No executable strength-confirmation endpoint or
 automatic training progression has been exposed.
 
+## Stage 14: Structured approval-prerequisite report (diagnostic only)
+
+`inspectStrengthApprovalPreflight` now produces twelve stable, typed review
+gates from a single athlete-owned, read-only SQLite snapshot. These include
+exact source/version, structural exercise-dose comparison, linked completion,
+conflicting planning decision, dismiss/restore disposition, active symptoms,
+same-day readiness, and latest in-app PT-profile status. Every local check has
+a concrete evidence explanation, and failures remain visible even when a draft
+can be reopened for organizational purposes.
+
+Separate, permanently blocking gates represent **independent provider
+restriction verification**, **authoritative training-source coverage**,
+**explicit executable-workout consent**, and **atomic executable approval**.
+They are intentionally not inferred from caller-supplied `verified_none`,
+`sourceCoverage: complete`, or `pt.active: false`. This read-only diagnostic
+**always** returns `executableWorkoutApproved: false`,
+`canConfirmExecutableWorkout: false` and
+`requiresIndependentProviderVerification: true`.
+
+The mobile review-detail screen renders every gate and its explanation rather
+than a misleading generic "safe" label. Real file-backed SQLite tests cover
+local data gaps, active restrictions, lower readiness, source regeneration,
+completed-session conflict, dismissed drafts, and the unimplemented approval
+boundary. The mobile SQLite acceptance test verifies that a dismiss/restore
+cycle cannot unlock executable exercise. Neither the number of passing local
+checks nor the presence of a preview constitutes clearance; original-data
+migration and physical iPhone acceptance remain separate release gates.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
