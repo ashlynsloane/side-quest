@@ -29,6 +29,7 @@ vi.mock('@circuit/planner', async () => {
   const review = await import('../src/strength-preview-review-events-sqlite');
   const inbox = await import('../src/strength-revision-review-inbox');
   const detail = await import('../src/strength-revision-review-detail');
+  const dryRun = await import('../src/strength-authorization-dry-run');
   const evidence = await import('../src/strength-evidence-provenance-sqlite');
   const safetyContext = await import('../src/training-safety-context-sqlite');
   return {
@@ -39,6 +40,7 @@ vi.mock('@circuit/planner', async () => {
     appendStrengthPreviewReviewEvent: review.appendStrengthPreviewReviewEvent,
     listUnapprovedStrengthReviewInbox: inbox.listUnapprovedStrengthReviewInbox,
     readUnapprovedStrengthReviewDetail: detail.readUnapprovedStrengthReviewDetail,
+    inspectStrengthAuthorizationDryRun: dryRun.inspectStrengthAuthorizationDryRun,
     STRENGTH_EVIDENCE_PROVENANCE_SQL: evidence.STRENGTH_EVIDENCE_PROVENANCE_SQL,
     appendStrengthEvidenceProvenance: evidence.appendStrengthEvidenceProvenance,
     TRAINING_SAFETY_CONTEXT_SQL: safetyContext.TRAINING_SAFETY_CONTEXT_SQL,
@@ -361,6 +363,26 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
+    const dryRunInput = {
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      evidence: {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown' as const,
+        readiness: 'unknown' as const, providerRestrictions: 'unknown' as const,
+        sourceCoverage: 'unknown' as const, exerciseRestrictionsReviewed: false,
+      },
+      expectedObservationToken: detail.observationToken,
+    };
+    const dry = await service.recheckUnapprovedStrengthAuthorization(dryRunInput);
+    expect(dry.kind).toBe('non_executable_authorization_dry_run');
+    expect(dry.changedSinceViewed).toBe(false);
+    expect(dry.current.preflight.canConfirmExecutableWorkout).toBe(false);
+    expect(dry.workoutPersisted).toBe(false);
+    expect(dry.athleteExecutionConsentCollected).toBe(false);
+    expect(dry.blockingGateIds).toContain('executable_write_authorization');
+    await expect(service.recheckUnapprovedStrengthAuthorization({
+      ...dryRunInput, athleteId: 'synthetic-athlete-two',
+    })).rejects.toThrow(/Athlete profile changed|Invalid unapproved strength authorization dry-run request/);
     expect(detail.preflight.gates).toHaveLength(13);
     expect(detail.preflight.gates.find(g => g.id === 'movement_compatibility')?.status)
       .toBe('unverified');
@@ -419,6 +441,12 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
       gate => gate.id === 'source_provenance',
     )?.status).toBe('blocked');
     expect(withBoth.preflight.executableWorkoutApproved).toBe(false);
+    const recheckedAfterNewReport = await service.recheckUnapprovedStrengthAuthorization(
+      dryRunInput,
+    );
+    expect(recheckedAfterNewReport.changedSinceViewed).toBe(true);
+    expect(recheckedAfterNewReport.current.stale).toBe(true);
+    expect(recheckedAfterNewReport.executableWorkoutApproved).toBe(false);
     expect(withBoth.reconciliation.tasks[0]?.kind).toBe('safety_hold');
     expect(withBoth.reconciliation.tasks.find(task =>
       task.id === 'external_provider_restrictions')?.nextStep)
