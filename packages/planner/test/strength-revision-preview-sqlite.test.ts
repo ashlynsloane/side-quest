@@ -15,6 +15,7 @@ import {
 import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
 import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
 import { readUnapprovedStrengthReviewDetail } from '../src/strength-revision-review-detail';
+import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
 import { summarizeUnapprovedStrengthRevision } from '../src/strength-revision-review-summary';
 import {
   STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview,
@@ -902,5 +903,119 @@ describe('single owner-scoped read-only detail and fresh safety evidence', () =>
     await expect(readUnapprovedStrengthReviewDetail(
       sql, 'synthetic-athlete-a', 'preview-1', evidence(),
     )).rejects.toThrow(/unreadable/);
+  });
+});
+
+describe('consistent, read-only strength review database snapshots', () => {
+  it('fails closed without an exclusive snapshot reader', async () => {
+    const { sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const unsupported = { ...sql, readSnapshot: undefined };
+    await expect(readUnapprovedStrengthReviewDetail(
+      unsupported, 'synthetic-athlete-a', 'preview-1', evidence(),
+    )).rejects.toThrow(/Consistent strength review snapshot is unavailable/);
+    await expect(listUnapprovedStrengthReviewInbox(
+      unsupported, 'synthetic-athlete-a', evidence(),
+    )).rejects.toThrow(/Consistent strength review snapshot is unavailable/);
+  });
+
+  it('holds one SQLite snapshot while competing PT writes are rejected, then sees new restrictions', async () => {
+    const { db, sql, file } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const outsider = new DatabaseSync(file);
+    outsider.exec('PRAGMA busy_timeout=0');
+    let conflictObserved = false;
+    try {
+      const guarded: TrainingAdjustmentSqlDriver = {
+        ...sql,
+        readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>) => {
+          if (!sql.readSnapshot) throw new Error('Missing test snapshot reader.');
+          return sql.readSnapshot(async reader => {
+            let checked = false;
+            const inspected: TrainingAdjustmentSqlDriver = {
+              ...reader,
+              getFirst: async <Row>(query, params) => {
+                if (!checked && query.includes('FROM pt_profiles')) {
+                  checked = true;
+                  expect(() => outsider.prepare(
+                    'UPDATE pt_profiles SET profile_json = ?',
+                  ).run('{"active":true}')).toThrow(/locked|busy/i);
+                  conflictObserved = true;
+                }
+                return reader.getFirst<Row>(query, params);
+              },
+            };
+            return fn(inspected);
+          });
+        },
+      };
+      const initial = await readUnapprovedStrengthReviewDetail(
+        guarded, 'synthetic-athlete-a', 'preview-1', evidence(),
+      );
+      expect(conflictObserved).toBe(true);
+      expect(initial.status).toBe('pending_review');
+      outsider.prepare('UPDATE pt_profiles SET profile_json = ?')
+        .run('{"active":true}');
+      const changed = await readUnapprovedStrengthReviewDetail(
+        sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+      );
+      expect(changed.status).toBe('stale');
+      expect(changed.reasons.join(' ')).toMatch(/PT profile restrictions/);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+        .get() as { n: number }).n).toBe(0);
+    } finally {
+      outsider.close();
+    }
+  });
+
+  it('rejects SQL writes/nested transactions inside review snapshots and releases locks', async () => {
+    const { sql, file } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    await expect(withUnapprovedStrengthReadSnapshot(
+      sql, async snapshot => snapshot.run(
+        'DELETE FROM strength_revision_previews', [],
+      ),
+    )).rejects.toThrow(/Read-only snapshot cannot write/);
+    await expect(withUnapprovedStrengthReadSnapshot(
+      sql, async snapshot => snapshot.transaction(async () => {}),
+    )).rejects.toThrow(/Read-only snapshot cannot nest/);
+    const outsider = new DatabaseSync(file);
+    try {
+      // An aborted read must not leave a locked database or a hidden deletion.
+      expect(outsider.prepare('SELECT COUNT(*) AS n FROM strength_revision_previews')
+        .get()).toMatchObject({ n: 1 });
+      outsider.prepare('UPDATE pt_profiles SET profile_json = ?')
+        .run('{"active":true}');
+    } finally {
+      outsider.close();
+    }
+  });
+
+  it('inbox and detail each invoke exactly one snapshot, never a separate live read', async () => {
+    const { sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    let snapshots = 0;
+    const guarded: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      getFirst: async () => {
+        throw new Error('Unprotected read outside review snapshot.');
+      },
+      getAll: async () => {
+        throw new Error('Unprotected list outside review snapshot.');
+      },
+      readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>) => {
+        snapshots += 1;
+        if (!sql.readSnapshot) throw new Error('Missing test snapshot reader.');
+        return sql.readSnapshot(fn);
+      },
+    };
+    expect((await readUnapprovedStrengthReviewDetail(
+      guarded, 'synthetic-athlete-a', 'preview-1', evidence(),
+    )).status).toBe('pending_review');
+    expect(snapshots).toBe(1);
+    expect(await listUnapprovedStrengthReviewInbox(
+      guarded, 'synthetic-athlete-a', evidence(), 1,
+    )).toHaveLength(1);
+    expect(snapshots).toBe(2);
   });
 });
