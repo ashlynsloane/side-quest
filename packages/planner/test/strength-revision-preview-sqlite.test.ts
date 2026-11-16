@@ -1880,7 +1880,9 @@ describe('restriction-aware routine training versus rehabilitation policy', () =
     expect(state.events.map(event => event.id)).toEqual(['first', 'impact']);
     expect(state.activeProtectedMovements).toEqual(['impact_running']);
     expect(evaluateTrainingSafetyPolicy(state).track).toBe('rehabilitation_review');
-    expect((reopened.prepare('SELECT COUNT(*) AS n FROM workout_ledger').get()
-      as { n: number }).n).toBe(0);
+    const persistedCount = reopened.prepare(
+      'SELECT COUNT(*) AS n FROM workout_ledger',
+    ).get() as { n: number };
+    expect(persistedCount.n).toBe(0);
   });
 });
