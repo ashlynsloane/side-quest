@@ -284,8 +284,9 @@ export default function StrengthReviewDetailScreen() {
                 <Text style={styles.helper} key={index}>• {reason}</Text>
               ))}
               <Text style={styles.noticeText}>
-                Movement-specific restriction matching and exercise approval
-                are not enabled in this development build.
+                Catalog-tag matching is available as a conservative review
+                aid. Clinically validated restriction matching and executable
+                exercise approval are not enabled in this development build.
               </Text>
               <Pressable accessibilityRole="button"
                 accessibilityLabel="Review training context and protected movements"
