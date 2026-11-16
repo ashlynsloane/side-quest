@@ -147,6 +147,25 @@ export async function appendStrengthChoiceDecision(
         || Date.parse(symptomEvidenceExpiresAt) <= Date.now()) {
         throw new Error('Current symptom evidence has expired or lacks a valid expiry.');
       }
+      // The current PT profile is authoritative for this local database.
+      // A time-only reduction cannot prove that the source exercises respect
+      // active restrictions; do not treat a caller flag as provider clearance.
+      const ptRow = await sql.getFirst<{ profile_json: string }>(
+        'SELECT profile_json FROM pt_profiles ORDER BY updated_at DESC LIMIT 1',
+        [],
+      );
+      if (!ptRow) {
+        throw new Error('PT restriction coverage is unknown; dose approval is blocked.');
+      }
+      let pt: { active?: boolean };
+      try { pt = JSON.parse(ptRow.profile_json) as { active?: boolean }; }
+      catch { throw new Error('PT restriction profile is unreadable.'); }
+      if (!pt || typeof pt.active !== 'boolean') {
+        throw new Error('PT restriction profile is invalid.');
+      }
+      if (pt.active) {
+        throw new Error('Active PT restrictions require independent exercise-level review.');
+      }
       const readinessRow = await sql.getFirst<{ check_in_json: string }>(
         'SELECT check_in_json FROM readiness_check_ins WHERE date = ? LIMIT 1',
         [input.todayLocalDate],
