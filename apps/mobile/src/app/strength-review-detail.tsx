@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   getUnapprovedStrengthReviewDetail, setUnapprovedStrengthReviewDisposition,
-  flagUnverifiedStrengthReviewConcern,
+  flagUnverifiedStrengthReviewConcern, recheckUnapprovedStrengthAuthorization,
 } from '@/services/database';
 import { useAuth } from '@/state/auth-context';
 
@@ -62,6 +62,9 @@ export default function StrengthReviewDetailScreen() {
   const [savingConcern, setSavingConcern] = useState(false);
   const [concernError, setConcernError] = useState<string | null>(null);
   const [dispositionError, setDispositionError] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckStatus, setRecheckStatus] = useState<string | null>(null);
+  const [recheckError, setRecheckError] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     let live = true;
@@ -71,6 +74,9 @@ export default function StrengthReviewDetailScreen() {
     setSavingDisposition(false);
     setConcernError(null);
     setSavingConcern(false);
+    setRechecking(false);
+    setRecheckStatus(null);
+    setRecheckError(null);
     if (!athleteId || typeof previewId !== 'string' || !previewId.trim()) {
       setLoading(false);
       setError('A valid saved preview and athlete profile are required.');
@@ -92,8 +98,41 @@ export default function StrengthReviewDetailScreen() {
     return () => { live = false; };
   }, [athleteId, previewId]));
 
+  const recheckCurrentEvidence = async () => {
+    if (!athleteId || typeof previewId !== 'string' || !detail
+      || rechecking || savingConcern || savingDisposition
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setRechecking(true);
+    setRecheckError(null);
+    setRecheckStatus(null);
+    try {
+      const rechecked = await recheckUnapprovedStrengthAuthorization({
+        athleteId, previewId, evidence: unknownEvidence(athleteId),
+        expectedObservationToken: detail.observationToken,
+      });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setDetail(rechecked.current);
+        setRecheckStatus(rechecked.changedSinceViewed
+          ? 'Local evidence has changed since this draft was opened. Review the updated holds below. The workout remains unapproved.'
+          : 'Current local evidence matches the last view. This does not verify external restrictions or approve exercise.');
+      }
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setRecheckError(
+          'The exclusive safety recheck could not be verified. No workout changes are available.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setRechecking(false);
+    }
+  };
+
   const flagConcern = async (kind: 'provider_restriction' | 'training_coverage') => {
-    if (savingConcern || savingDisposition || !detail || !athleteId
+    if (savingConcern || savingDisposition || rechecking || !detail || !athleteId
       || typeof previewId !== 'string'
       || currentAthlete.current !== athleteId
       || currentPreview.current !== previewId) return;
@@ -125,7 +164,7 @@ export default function StrengthReviewDetailScreen() {
   };
 
   const confirmConcern = (kind: 'provider_restriction' | 'training_coverage') => {
-    if (!detail || savingConcern || savingDisposition || !athleteId) return;
+    if (!detail || savingConcern || savingDisposition || rechecking || !athleteId) return;
     const restriction = kind === 'provider_restriction';
     Alert.alert(
       restriction ? 'Flag an active exercise restriction?' : 'Flag incomplete training history?',
@@ -140,7 +179,7 @@ export default function StrengthReviewDetailScreen() {
   };
 
   const changeDisposition = async (action: 'dismiss' | 'restore') => {
-    if (savingDisposition || savingConcern || !athleteId || !detail
+    if (savingDisposition || savingConcern || rechecking || !athleteId || !detail
       || typeof previewId !== 'string'
       || currentAthlete.current !== athleteId
       || currentPreview.current !== previewId) return;
@@ -170,7 +209,7 @@ export default function StrengthReviewDetailScreen() {
   };
 
   const confirmDisposition = (action: 'dismiss' | 'restore') => {
-    if (!detail || savingDisposition || savingConcern || !athleteId) return;
+    if (!detail || savingDisposition || savingConcern || rechecking || !athleteId) return;
     const dismiss = action === 'dismiss';
     Alert.alert(
       dismiss ? 'Dismiss this draft?' : 'Return draft to inbox?',
@@ -297,6 +336,31 @@ export default function StrengthReviewDetailScreen() {
                 </Text>
               </Pressable>
             </View>
+            <Text style={styles.sectionTitle}>Fresh local safety recheck</Text>
+            <View style={styles.card}>
+              <Text style={styles.helper}>
+                Re-read this exact draft, current recovery check-ins, protected
+                movements and audit history together inside an exclusive
+                database transaction. This is not workout authorization.
+              </Text>
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Recheck draft evidence without approving workout"
+                disabled={rechecking || savingConcern || savingDisposition}
+                onPress={() => { void recheckCurrentEvidence(); }}
+                style={[styles.contextAction,
+                  rechecking && styles.disabledAction]}>
+                <Text style={styles.contextActionText}>
+                  {rechecking ? 'Rechecking local evidence…'
+                    : 'Recheck draft safety evidence'}
+                </Text>
+              </Pressable>
+              {recheckStatus ? (
+                <Text style={styles.helper}>{recheckStatus}</Text>
+              ) : null}
+              {recheckError ? (
+                <Text style={styles.error}>{recheckError}</Text>
+              ) : null}
+            </View>
             <Text style={styles.sectionTitle}>What blocks workout approval?</Text>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Not cleared for exercise</Text>
@@ -419,7 +483,7 @@ export default function StrengthReviewDetailScreen() {
               {concernError ? <Text style={styles.error}>{concernError}</Text> : null}
               <Pressable accessibilityRole="button"
                 accessibilityLabel="Report an active strength exercise restriction"
-                disabled={savingConcern || savingDisposition}
+                disabled={savingConcern || savingDisposition || rechecking}
                 style={[styles.concernAction,
                   savingConcern && styles.disabledAction]}
                 onPress={() => confirmConcern('provider_restriction')}>
@@ -429,7 +493,7 @@ export default function StrengthReviewDetailScreen() {
               </Pressable>
               <Pressable accessibilityRole="button"
                 accessibilityLabel="Report incomplete training or injury history"
-                disabled={savingConcern || savingDisposition}
+                disabled={savingConcern || savingDisposition || rechecking}
                 style={[styles.concernAction,
                   savingConcern && styles.disabledAction]}
                 onPress={() => confirmConcern('training_coverage')}>
@@ -465,7 +529,7 @@ export default function StrengthReviewDetailScreen() {
                 accessibilityLabel={detail.review.status === 'dismissed'
                   ? 'Return unapproved draft to review inbox'
                   : 'Dismiss unapproved draft from review inbox'}
-                disabled={savingDisposition || savingConcern}
+                disabled={savingDisposition || savingConcern || rechecking}
                 onPress={() => confirmDisposition(
                   detail.review.status === 'dismissed' ? 'restore' : 'dismiss',
                 )}
