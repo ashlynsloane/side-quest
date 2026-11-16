@@ -151,6 +151,14 @@ Added `createStrengthRevisionPreviewBinding` and `verifyStrengthRevisionPreviewB
 
 These JSON identities are **exact-match stale-detection values, not cryptographic signatures or independently authenticated evidence**. This module **does not save a revision, update SQLite, confer provider clearance, start a workout or create a user-facing approval button**. The actual persist-and-execute flow still requires durable candidate storage, authoritative source reconciliation and atomic write-time revalidation before release.
 
+## Stage 9: Durable unapproved exercise revision previews (SQLite, draft only)
+
+Added `strength_revision_previews` as a separate append-only athlete-scoped SQLite table. It stores a full candidate workout, the exact source/decision/evidence preview binding, and an explicit `status: 'unapproved'` / `executableWorkoutApproved: false` marker. `appendStrengthRevisionPreview` verifies embedded athlete owner, latest source block/session/signature, source session status, no linked completed workout, the bounded exercise-level proposal and **current persisted** symptom, readiness and latest PT-profile evidence inside one SQLite transaction. Missing or invalid in-app evidence, active symptoms, recover readiness and active PT restrictions block creation. The table has no link to workout execution or the accepted strength decision journal.
+
+`readStrengthRevisionPreview` checks the SQLite row metadata against its JSON identity and fails closed on corruption. `reassessStoredStrengthRevisionPreview` re-reads current source/workout completion and persisted symptoms, readiness and PT status, marking stale or changed candidates unavailable for further review. Neither function claims an independently verified outside-provider record: the original review's source coverage and clinician assertions are still caller-supplied, and an inactive in-app PT profile alone is **not** a medical clearance.
+
+The draft mobile database initializes this table, includes it in local data export/deletion, and exposes only an athlete-locked **read-only** preview fetch; there is no UI creation/approval or workout modification. Synthetic tests use an actual file-backed SQLite database to cover writes, restart/reopen, owner isolation, stale plan, completion collision, missing/changed health evidence, malformed payloads, duplicates and rollback. Integration tests exercise the mobile database table and absence of accepted strength decisions. Physical device verification, provider/source completeness, an independent write-time executable approval gate, and recovery of any legacy athlete data remain unresolved. **Do not treat saved previews as accepted strength plans or workout prescriptions.**
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
