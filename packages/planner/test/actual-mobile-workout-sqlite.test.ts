@@ -85,6 +85,7 @@ vi.mock('expo-sqlite', async () => {
         withExclusiveTransactionAsync: async (fn: (txn: {
           getFirstAsync: <Row>(sql: string, ...args: unknown[]) => Promise<Row | null>;
           getAllAsync: <Row>(sql: string, ...args: unknown[]) => Promise<Row[]>;
+          runAsync: (sql: string, ...args: unknown[]) => Promise<void>;
         }) => Promise<void>) => {
           state.exclusiveSnapshotReads += 1;
           if (state.failExclusiveReview) {
@@ -99,6 +100,13 @@ vi.mock('expo-sqlite', async () => {
                 database.prepare(query).get(...(args as Array<string | number | null>)) as Row | null,
               getAllAsync: async <Row>(query: string, ...args: unknown[]) =>
                 database.prepare(query).all(...(args as Array<string | number | null>)) as Row[],
+              runAsync: async (query: string, ...args: unknown[]) => {
+                if (state.failNextContaining && query.includes(state.failNextContaining)) {
+                  state.failNextContaining = null;
+                  throw new Error('synthetic SQLite write interruption');
+                }
+                database.prepare(query).run(...(args as Array<string | number | null>));
+              },
             });
             database.exec('COMMIT');
           } catch (error) {
