@@ -32,6 +32,7 @@ vi.mock('@circuit/planner', async () => {
   const dryRun = await import('../src/strength-authorization-dry-run');
   const evidence = await import('../src/strength-evidence-provenance-sqlite');
   const safetyContext = await import('../src/training-safety-context-sqlite');
+  const auth = await import('../src/strength-workout-authorization-sqlite');
   return {
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
@@ -44,6 +45,9 @@ vi.mock('@circuit/planner', async () => {
     STRENGTH_EVIDENCE_PROVENANCE_SQL: evidence.STRENGTH_EVIDENCE_PROVENANCE_SQL,
     appendStrengthEvidenceProvenance: evidence.appendStrengthEvidenceProvenance,
     TRAINING_SAFETY_CONTEXT_SQL: safetyContext.TRAINING_SAFETY_CONTEXT_SQL,
+    STRENGTH_WORKOUT_AUTHORIZATION_SQL: auth.STRENGTH_WORKOUT_AUTHORIZATION_SQL,
+    authorizeRoutineStrengthWorkout: auth.authorizeRoutineStrengthWorkout,
+    readAuthorizedRoutineWorkout: auth.readAuthorizedRoutineWorkout,
     readAthleteTrainingSafetyContext: safetyContext.readAthleteTrainingSafetyContext,
     evaluateTrainingSafetyPolicy: safetyContext.evaluateTrainingSafetyPolicy,
     appendTrainingSafetyContextEvent: safetyContext.appendTrainingSafetyContextEvent,
