@@ -122,6 +122,26 @@ describe('conservative movement-specific restriction matching', () => {
       id: 'different-id',
     }).status).toBe('needs_individual_review');
   });
+  it('treats empty or unrecognized exercise annotations as unresolved protections', () => {
+    expect(first('impact_running', {
+      movementPatterns: [], avoidanceTags: [], jointLoads: [],
+      bodyRegions: [], impactLevel: 0,
+    }).status).toBe('needs_individual_review');
+    expect(first('impact_running', {
+      movementPatterns: ['not_a_catalog_pattern' as 'locomotion'],
+    }).status).toBe('needs_individual_review');
+    expect(first('shoulder_loading', {
+      avoidanceTags: ['not_a_catalog_tag' as 'overhead'],
+    }).status).toBe('needs_individual_review');
+    expect(first('shoulder_loading', {
+      jointLoads: [{ region: 'unknown_joint' as 'shoulder', load: 1 }],
+    }).status).toBe('needs_individual_review');
+    expect(first('shoulder_loading', {
+      bodyRegions: [{ region: 'unknown_region' as 'shoulders',
+        role: 'primary', load: 1 }],
+    }).status).toBe('needs_individual_review');
+  });
+
   it('unqualified other-movement restriction requires review of every candidate exercise', () => {
     expect(first('other_movement', {}).status).toBe('needs_individual_review');
   });
