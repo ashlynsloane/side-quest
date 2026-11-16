@@ -179,6 +179,14 @@ The draft mobile database now creates and exports the new journal, includes it i
 
 **Audit-chain defense:** The existing strength decision history reader now rejects impossible accepted/restored sequences, mismatched restoration payloads and malformed event timestamps, instead of treating individually well-formed rows as a valid audit history. Existing effective workout overrides remain planning metadata only.
 
+## Stage 12: Conflicting decisions and canonical audit timestamps
+
+Preview creation and read-only reassessment now consult the existing **validated** strength planning-decision journal. A currently accepted planning choice for the same athlete, block and session blocks a competing new exercise preview and marks an older preview stale. Corrupted planning history is not treated as empty; read failure blocks preview creation. Real SQLite tests cover conflicts both before and after preview creation, and an unreadable existing audit.
+
+Strength decision writes now require a canonical, valid UTC event timestamp before inserting any audit row. The history reader uses the same validation, including rejecting impossible calendar dates that native date parsers would normalize. Synthetic tests cover malformed dates, noncanonical offsets and event histories.
+
+These checks prevent misleading parallel review states; they **do not** merge a planning-minute choice with an executable revised workout or certify clinical clearance. Real write-time exercise approval remains a separate, intentionally disabled release gate.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
