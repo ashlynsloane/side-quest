@@ -64,6 +64,9 @@ that still requires a real athlete, provider source, or native device.
   synthetic immediate transaction. Tests also verify rollback/release of locks
   and that inbox/detail never issue unprotected queries outside the snapshot.
   Mobile SQLite acceptance mocks the native API and rejects unavailable support.
+  It also holds an exclusive review read open while requesting an athlete profile
+  switch, then verifies the original read finishes before activation of the
+  second athlete and that the old athlete cannot be read afterward.
 - The exclusive transaction API is native-only; the web review screen must
   report unavailable evidence rather than silently falling back to weaker,
   interleavable transactions. This API is not an iPhone launch test.
