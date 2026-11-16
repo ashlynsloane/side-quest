@@ -119,15 +119,17 @@ export async function appendStrengthChoiceDecision(
       [],
     );
     let symptomHold = false;
+    let symptomEvidenceExpiresAt: string | null = null;
     if (activeCheckIn) {
-      let check: { status?: string };
-      try { check = JSON.parse(activeCheckIn.check_in_json) as { status?: string }; }
+      let check: { status?: string; activeUntil?: string };
+      try { check = JSON.parse(activeCheckIn.check_in_json) as { status?: string; activeUntil?: string }; }
       catch { throw new Error('Active symptom check-in is unreadable.'); }
       if (!['normal', 'muscle_soreness', 'tightness_pain', 'unable_to_train']
         .includes(check.status ?? '')) {
         throw new Error('Active symptom check-in status is unknown.');
       }
       symptomHold = check.status !== 'normal';
+      symptomEvidenceExpiresAt = check.activeUntil ?? null;
     }
     if ((decision.action === 'reduce' && decision.decision === 'accepted')
       || decision.decision === 'restored') {
@@ -138,6 +140,12 @@ export async function appendStrengthChoiceDecision(
       }
       if (symptomHold) {
         throw new Error('An active symptom or soreness hold prevents increasing planned training.');
+      }
+      if (!symptomEvidenceExpiresAt
+        || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(symptomEvidenceExpiresAt)
+        || !Number.isFinite(Date.parse(symptomEvidenceExpiresAt))
+        || Date.parse(symptomEvidenceExpiresAt) <= Date.now()) {
+        throw new Error('Current symptom evidence has expired or lacks a valid expiry.');
       }
       const readinessRow = await sql.getFirst<{ check_in_json: string }>(
         'SELECT check_in_json FROM readiness_check_ins WHERE date = ? LIMIT 1',
