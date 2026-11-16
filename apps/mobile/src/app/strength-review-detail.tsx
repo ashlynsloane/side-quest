@@ -4,7 +4,7 @@ import {
   type UnapprovedStrengthReviewDetail,
   type CurrentStrengthReviewEvidence,
 } from '@circuit/planner';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -264,6 +264,38 @@ export default function StrengthReviewDetailScreen() {
                 </Text>
               </View>
             ))}
+            <Text style={styles.sectionTitle}>Your training context</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                {detail.trainingPolicy.track === 'routine_training_review'
+                  ? 'Ordinary training does not require clinical paperwork'
+                  : detail.trainingPolicy.track === 'restriction_aware_review'
+                    ? 'Training restrictions still need to be respected'
+                    : detail.trainingPolicy.track === 'rehabilitation_review'
+                      ? 'Rehabilitation needs injury-specific safeguards'
+                      : 'Training context has not been selected'}
+              </Text>
+              <Text style={styles.helper}>
+                {detail.trainingPolicy.track === 'routine_training_review'
+                  ? 'A healthy athlete can review routine training without a clinician sign-off. This specific exercise-revision draft is still not executable.'
+                  : 'Earlier reported limitations remain active even if you select general training. A good readiness score never clears a protected movement.'}
+              </Text>
+              {detail.trainingPolicy.reasons.slice(0, 4).map((reason, index) => (
+                <Text style={styles.helper} key={index}>• {reason}</Text>
+              ))}
+              <Text style={styles.noticeText}>
+                Movement-specific restriction matching and exercise approval
+                are not enabled in this development build.
+              </Text>
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Review training context and protected movements"
+                style={styles.contextAction}
+                onPress={() => router.push('/training-safety-context' as Href)}>
+                <Text style={styles.contextActionText}>
+                  Review training context and protected movements
+                </Text>
+              </Pressable>
+            </View>
             <Text style={styles.sectionTitle}>What blocks workout approval?</Text>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Not cleared for exercise</Text>
@@ -466,6 +498,10 @@ const styles = StyleSheet.create({
   doseText: { fontSize: 15, color: colors.ink, fontWeight: '800' },
   history: { fontSize: 13, color: colors.ink, lineHeight: 20 },
   evidenceHistory: { gap: 6, paddingVertical: 5 },
+  contextAction: { borderWidth: 1, borderColor: colors.accent,
+    borderRadius: 12, minHeight: 48, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10 },
+  contextActionText: { fontSize: 13, fontWeight: '800', color: colors.accent },
   gateRow: { gap: 4, paddingVertical: 9, borderTopWidth: 1,
     borderTopColor: colors.border },
   gateTitle: { fontSize: 14, color: colors.ink, fontWeight: '800' },
