@@ -1680,3 +1680,207 @@ describe('fail-closed evidence reconciliation and source integrity', () => {
     }
   });
 });
+
+function safetyEvent(
+  id: string,
+  kind: 'training_intent' | 'protect_movement',
+  payload: 'general_training' | 'injury_rehabilitation' | 'return_to_sport'
+    | ProtectedMovement,
+  createdAt = '2026-11-15T12:00:00Z',
+): TrainingSafetyContextEvent {
+  return {
+    schemaVersion: 1, id, athleteId: 'synthetic-athlete-a', kind,
+    intent: kind === 'training_intent'
+      ? payload as 'general_training' | 'injury_rehabilitation' | 'return_to_sport'
+      : null,
+    protectedMovement: kind === 'protect_movement'
+      ? payload as ProtectedMovement : null,
+    source: 'athlete_self_report', createdAt, executableWorkoutApproved: false,
+  };
+}
+
+describe('restriction-aware routine training versus rehabilitation policy', () => {
+  it('does not require clinician paperwork for an explicitly routine athlete with no known restrictions', async () => {
+    const { db, sql } = open();
+    const before = await readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a');
+    expect(evaluateTrainingSafetyPolicy(before).track).toBe('training_context_needed');
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('intent-1', 'training_intent', 'general_training'), null,
+    );
+    const state = await readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a');
+    const policy = evaluateTrainingSafetyPolicy(state);
+    expect(state.intent).toBe('general_training');
+    expect(state.activeProtectedMovements).toEqual([]);
+    expect(policy.track).toBe('routine_training_review');
+    expect(policy.clinicianDocumentRequiredForRoutineTraining).toBe(false);
+    expect(policy.requiresRestrictionAwareExerciseReview).toBe(false);
+    expect(policy.executableWorkoutApproved).toBe(false);
+    expect(policy.canApproveExerciseRevision).toBe(false);
+    expect(policy.restrictionMatchingImplemented).toBe(false);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+    expect(count(db, 'training_safety_context_events')).toBe(1);
+  });
+
+  it('keeps reported protected movements in force after switching back to general training', async () => {
+    const { db, sql } = open();
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('rehab', 'training_intent', 'injury_rehabilitation'), null,
+    );
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('spine', 'protect_movement', 'loaded_spinal_rotation',
+        '2026-11-15T12:01:00Z'), 'rehab',
+    );
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('general-again', 'training_intent', 'general_training',
+        '2026-11-15T12:02:00Z'), 'spine',
+    );
+    const state = await readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a');
+    const policy = evaluateTrainingSafetyPolicy(state);
+    expect(state.intent).toBe('general_training');
+    expect(state.activeProtectedMovements).toContain('loaded_spinal_rotation');
+    expect(policy.track).toBe('restriction_aware_review');
+    expect(policy.knownRestrictionCount).toBe(1);
+    expect(policy.requiresRestrictionAwareExerciseReview).toBe(true);
+    expect(policy.executableWorkoutApproved).toBe(false);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+
+  it('treats a return-to-sport selection as rehabilitation review even without clinician documents', async () => {
+    const { sql } = open();
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('sport-1', 'training_intent', 'return_to_sport'), null,
+    );
+    const policy = evaluateTrainingSafetyPolicy(
+      await readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a'),
+    );
+    expect(policy.track).toBe('rehabilitation_review');
+    expect(policy.clinicianDocumentRequiredForRoutineTraining).toBe(false);
+    expect(policy.requiresRestrictionAwareExerciseReview).toBe(true);
+    expect(policy.canApproveExerciseRevision).toBe(false);
+  });
+
+  it('never lets a healthy training selection override an existing active PT profile or symptom alert', async () => {
+    for (const caseName of ['active_pt', 'active_symptoms', 'malformed_pt'] as const) {
+      const { db, sql } = open();
+      await appendTrainingSafetyContextEvent(
+        sql, safetyEvent('general', 'training_intent', 'general_training'), null,
+      );
+      if (caseName === 'active_pt') {
+        db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+      } else if (caseName === 'active_symptoms') {
+        db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            status: 'new_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400000).toISOString(),
+          }),
+        );
+      } else {
+        db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{broken');
+      }
+      const policy = evaluateTrainingSafetyPolicy(
+        await readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a'),
+      );
+      expect(policy.track).toBe('restriction_aware_review');
+      expect(policy.canApproveExerciseRevision).toBe(false);
+    }
+  });
+
+  it('carries forward earlier workout-specific restriction reports even if no new profile restriction is entered', async () => {
+    const { sql, db } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'provider_restriction', 'reported_present', 'old-achilles-flag',
+    ), null);
+    await appendStrengthEvidenceProvenance(sql, reportedEvidence(
+      preview, 'provider_restriction', 'reported_none', 'later-self-clearance',
+      '2026-11-15T12:01:00Z',
+    ), 'old-achilles-flag');
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('routine', 'training_intent', 'general_training',
+        '2026-11-15T12:04:00Z'), null,
+    );
+    const state = await readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a');
+    expect(state.legacyRestrictionReported).toBe(true);
+    expect(evaluateTrainingSafetyPolicy(state).track).toBe('restriction_aware_review');
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+
+  it('fails closed on stale writers, wrong-owner history and injected transaction failure', async () => {
+    const { db, sql } = open();
+    await appendTrainingSafetyContextEvent(sql,
+      safetyEvent('first', 'training_intent', 'general_training'), null);
+    await expect(appendTrainingSafetyContextEvent(sql,
+      safetyEvent('stale', 'protect_movement', 'impact_running',
+        '2026-11-15T12:01:00Z'), null)).rejects.toThrow(/history changed/);
+    await expect(readAthleteTrainingSafetyContext(sql, 'other-athlete'))
+      .rejects.toThrow(/ownership mismatch/);
+    const broken: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ) => {
+        if (!sql.exclusiveTransaction) throw new Error('No transaction fixture.');
+        return sql.exclusiveTransaction(writer => fn({
+          ...writer, run: async () => { throw new Error('injected safety write interruption'); },
+        }));
+      },
+    };
+    await expect(appendTrainingSafetyContextEvent(broken,
+      safetyEvent('interrupted', 'protect_movement', 'impact_running',
+        '2026-11-15T12:02:00Z'), 'first'))
+      .rejects.toThrow(/injected safety write interruption/);
+    expect(count(db, 'training_safety_context_events')).toBe(1);
+    await expect(appendTrainingSafetyContextEvent({
+      ...sql, exclusiveTransaction: undefined,
+    }, safetyEvent('unsafe', 'protect_movement', 'impact_running',
+      '2026-11-15T12:03:00Z'), 'first'))
+      .rejects.toThrow(/Exclusive athlete training safety writes are unavailable/);
+  });
+
+  it('rejects forged clearance fields, calendar normalization, unsupported movements and corrupted historical rows', async () => {
+    const { db, sql } = open();
+    for (const mutate of [
+      (e: TrainingSafetyContextEvent) => { e.executableWorkoutApproved = true as false; },
+      (e: TrainingSafetyContextEvent) => { e.createdAt = '2026-02-30T12:00:00Z'; },
+      (e: TrainingSafetyContextEvent) => { e.protectedMovement = 'unknown_move' as ProtectedMovement; },
+      (e: TrainingSafetyContextEvent) => {
+        (e as TrainingSafetyContextEvent & { clinicianApproved?: boolean }).clinicianApproved = true;
+      },
+    ]) {
+      const event = safetyEvent('bad', 'protect_movement', 'impact_running');
+      mutate(event);
+      await expect(appendTrainingSafetyContextEvent(sql, event, null))
+        .rejects.toThrow(/Invalid athlete training safety event/);
+    }
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('valid', 'protect_movement', 'impact_running'), null,
+    );
+    db.prepare('UPDATE training_safety_context_events SET event_json = ?')
+      .run('{"clinicianApproved":true}');
+    await expect(readAthleteTrainingSafetyContext(sql, 'synthetic-athlete-a'))
+      .rejects.toThrow(/invalid ownership or metadata/);
+    expect(count(db, 'training_safety_context_events')).toBe(1);
+  });
+
+  it('survives disk restart with protected movements and immutable intent history', async () => {
+    const { db, sql, file, directory } = open();
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('first', 'training_intent', 'injury_rehabilitation'), null,
+    );
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('impact', 'protect_movement', 'impact_running',
+        '2026-11-15T12:01:00Z'), 'first',
+    );
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    const state = await readAthleteTrainingSafetyContext(
+      driver(reopened), 'synthetic-athlete-a',
+    );
+    expect(state.events.map(event => event.id)).toEqual(['first', 'impact']);
+    expect(state.activeProtectedMovements).toEqual(['impact_running']);
+    expect(evaluateTrainingSafetyPolicy(state).track).toBe('rehabilitation_review');
+    expect((reopened.prepare('SELECT COUNT(*) AS n FROM workout_ledger').get()
+      as { n: number }).n).toBe(0);
+  });
+});
