@@ -476,7 +476,7 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     all.push({ db: reopened, directory });
     const freshDriver = driver(reopened);
     await appendStrengthPreviewReviewEvent(
-      freshDriver, reviewEvent(stored, 'restore'), evidence(),
+      freshDriver, reviewEvent(stored, 'restore'), 'dismiss-1',
     );
     const restored = await readStrengthPreviewReviewState(
       freshDriver, 'synthetic-athlete-a', stored.id,
@@ -495,7 +495,7 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     const { db, sql } = open();
     const stored = await appendStrengthRevisionPreview(sql, input());
     await expect(appendStrengthPreviewReviewEvent(
-      sql, reviewEvent(stored, 'restore'), evidence(),
+      sql, reviewEvent(stored, 'restore'), undefined,
     )).rejects.toThrow(/Only a dismissed/);
     await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
     await expect(appendStrengthPreviewReviewEvent(
@@ -506,20 +506,31 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     )).rejects.toThrow(/ownership mismatch/);
     expect(reviewEventCount(db)).toBe(1);
   });
-  it('permits dismissal of stale source but refuses reopening without fresh review', async () => {
+  it('reopens a stale draft for visibility without making it reviewable or executable', async () => {
     const { db, sql, saveBlock } = open();
     const stored = await appendStrengthRevisionPreview(sql, input());
     saveBlock(block({ ...sourceSession(), title: 'Rebuilt source' }));
-    await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'));
-    await expect(appendStrengthPreviewReviewEvent(
-      sql, reviewEvent(stored, 'restore'), evidence(),
-    )).rejects.toThrow(/stale/);
-    expect((await readStrengthPreviewReviewState(
+    await appendStrengthPreviewReviewEvent(sql, reviewEvent(stored, 'dismiss'), null);
+    await appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'restore'), 'dismiss-1',
+    );
+    const state = await readStrengthPreviewReviewState(
       sql, 'synthetic-athlete-a', stored.id,
-    )).status).toBe('dismissed');
-    expect(reviewEventCount(db)).toBe(1);
+    );
+    expect(state.status).toBe('pending_review');
+    const reassessed = await reassessStoredStrengthRevisionPreview(
+      sql, 'synthetic-athlete-a', stored.id, evidence(),
+    );
+    expect(reassessed.status).toBe('stale');
+    const inbox = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(inbox[0]?.status).toBe('stale');
+    expect(inbox[0]?.executableWorkoutApproved).toBe(false);
+    expect(reviewEventCount(db)).toBe(2);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
   });
-  it('refuses reopening on changed PT, symptoms, readiness, or incomplete coverage', async () => {
+  it('reopens organizational visibility despite changed PT, symptoms and readiness, but preserves stale evidence', async () => {
     for (const change of ['pt', 'symptoms', 'readiness', 'evidence'] as const) {
       const { db, sql } = open();
       const stored = await appendStrengthRevisionPreview(sql, input());
@@ -540,11 +551,40 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
       }
       const current = change === 'evidence'
         ? { ...evidence(), sourceCoverage: 'incomplete' as const } : evidence();
-      await expect(appendStrengthPreviewReviewEvent(
-        sql, reviewEvent(stored, 'restore'), current,
-      )).rejects.toThrow(/stale/);
-      expect(reviewEventCount(db)).toBe(1);
+      await appendStrengthPreviewReviewEvent(
+        sql, reviewEvent(stored, 'restore'), 'dismiss-1',
+      );
+      const inbox = await listUnapprovedStrengthReviewInbox(
+        sql, 'synthetic-athlete-a', current,
+      );
+      expect(inbox[0]?.status).toBe('stale');
+      expect(inbox[0]?.executableWorkoutApproved).toBe(false);
+      expect(reviewEventCount(db)).toBe(2);
+      expect(count(db, 'daily_strength_choice_events')).toBe(0);
     }
+  });
+  it('rejects outdated review actions even after a dismiss-restore cycle', async () => {
+    const { db, sql } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'dismiss'), null,
+    );
+    await appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'restore'), 'dismiss-1',
+    );
+    await expect(appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'dismiss', 'stale-again', '2026-11-15T11:40:00Z'),
+      null,
+    )).rejects.toThrow(/history changed/);
+    expect(reviewEventCount(db)).toBe(2);
+    await appendStrengthPreviewReviewEvent(
+      sql, reviewEvent(stored, 'dismiss', 'fresh-again', '2026-11-15T11:50:00Z'),
+      'restore-1',
+    );
+    expect((await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    )).status).toBe('dismissed');
+    expect(reviewEventCount(db)).toBe(3);
   });
   it('rejects malformed review event timestamps including normalized dates', async () => {
     const { db, sql } = open();
@@ -579,7 +619,7 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
         sql, 'synthetic-athlete-a', stored.id,
       )).rejects.toThrow(/repeated dismissal|invalid or altered|unreadable/);
       await expect(appendStrengthPreviewReviewEvent(
-        sql, reviewEvent(stored, 'restore'), evidence(),
+        sql, reviewEvent(stored, 'restore'), undefined,
       )).rejects.toThrow();
       expect(reviewEventCount(db)).toBe(2);
     }
