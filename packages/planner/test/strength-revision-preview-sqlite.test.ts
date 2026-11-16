@@ -1346,7 +1346,7 @@ describe('durable unverified restriction and training provenance', () => {
       reader, 'synthetic-athlete-a', preview.id, evidence(),
     );
     expect(detail.provenance.coverage.status).toBe('partial');
-    expect(detail.provenance.coverage.events).toBeUndefined();
+    expect(detail.provenance.coverage.eventCount).toBe(1);
     expect(detail.preflight.gates.find(g => g.id === 'source_provenance')?.status)
       .toBe('blocked');
     expect(detail.provenance.events.map(e => e.id)).toEqual(['partial-coverage']);
