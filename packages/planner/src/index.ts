@@ -1811,3 +1811,9 @@ export type {
   AthleteTrainingIntent, ProtectedMovement, TrainingSafetyContextEvent,
   AthleteTrainingSafetyContext, TrainingSafetyPolicy,
 } from './training-safety-context-sqlite';
+
+export { assessStrengthMovementRestrictions } from './strength-movement-restriction-review';
+export type {
+  RestrictedExerciseStatus, RestrictedExerciseFinding,
+  StrengthMovementRestrictionAssessment,
+} from './strength-movement-restriction-review';
