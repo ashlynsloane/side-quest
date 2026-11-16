@@ -12,6 +12,9 @@ import {
   summarizeUnapprovedStrengthRevision,
   type StrengthRevisionReadOnlySummary,
 } from './strength-revision-review-summary';
+import {
+  inspectStrengthApprovalPreflight, type StrengthApprovalPreflight,
+} from './strength-approval-preflight';
 
 /**
  * One read-only athlete-owned detail assessment. The source, saved candidate,
@@ -24,6 +27,7 @@ export interface UnapprovedStrengthReviewDetail {
   status: 'pending_review' | 'dismissed' | 'stale';
   stale: boolean;
   reasons: string[];
+  preflight: StrengthApprovalPreflight;
   executableWorkoutApproved: false;
   requiresWriteTimeRevalidation: true;
 }
@@ -53,6 +57,9 @@ export async function readUnapprovedStrengthReviewDetail(
     snapshot, athleteId, previewId,
   );
   const summary = summarizeUnapprovedStrengthRevision(assessment.preview);
+  const preflight = await inspectStrengthApprovalPreflight(
+    snapshot, assessment, review, evidence,
+  );
   const stale = assessment.status === 'stale';
   return {
     summary,
@@ -60,6 +67,7 @@ export async function readUnapprovedStrengthReviewDetail(
     status: stale ? 'stale' : review.status,
     stale,
     reasons: assessment.reasons,
+    preflight,
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
