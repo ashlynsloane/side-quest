@@ -106,6 +106,10 @@ export default function SessionAdjustmentScreen() {
               </View>
             ))}
             <Text style={styles.footer}>All options are previews and require explicit athlete approval. This screen does not apply or save a change. Missed work is never automatically compressed into later days.</Text>
+            <Pressable accessibilityRole="button" style={styles.reviewLink}
+              onPress={() => router.push('/strength-review-inbox')}>
+              <Text style={styles.reviewLinkText}>View saved exercise-revision drafts ›</Text>
+            </Pressable>
           </View>
         ) : <Text style={styles.helper}>No adjustable planned strength session was found for today.</Text>}
       </ScrollView>
@@ -123,5 +127,8 @@ const styles = StyleSheet.create({
   reasonList: { gap: 8 }, reasonCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, gap: 3 }, selectedCard: { backgroundColor: colors.soft, borderColor: colors.accent }, reasonTitle: { color: colors.ink, fontSize: 16, fontWeight: '700' },
   sessionCard: { backgroundColor: colors.accent, borderRadius: 18, padding: 17, gap: 4 }, cardEyebrow: { color: '#C7D9CE', fontSize: 10, fontWeight: '800', letterSpacing: 1 }, sessionTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
   optionsSection: { gap: 10 }, sectionTitle: { color: colors.ink, fontSize: 22, fontWeight: '700' }, safety: { color: colors.warning, fontWeight: '700', lineHeight: 20 },
+  reviewLink: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 14, padding: 14, marginTop: 8 },
+  reviewLinkText: { color: colors.accent, fontSize: 14, fontWeight: '800' },
   optionCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: 16, gap: 6 }, recommendedCard: { backgroundColor: colors.soft, borderColor: colors.accent, borderWidth: 2 }, optionLabel: { color: colors.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, optionTitle: { color: colors.ink, fontSize: 18, fontWeight: '700' }, bullet: { color: colors.muted, fontSize: 13, lineHeight: 19 }, consequenceTitle: { color: colors.ink, fontSize: 13, fontWeight: '800', marginTop: 4 }, footer: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
 });
