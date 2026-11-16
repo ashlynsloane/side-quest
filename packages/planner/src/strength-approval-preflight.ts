@@ -7,6 +7,9 @@ import { readStrengthChoiceAudit } from './daily-strength-decision-sqlite';
 import type { CurrentStrengthReviewEvidence } from './strength-revision-decision-review';
 import type { StoredStrengthPreviewAssessment } from './strength-revision-preview-sqlite';
 import type { StrengthPreviewReviewState } from './strength-preview-review-events-sqlite';
+import {
+  readStrengthEvidenceProvenance,
+} from './strength-evidence-provenance-sqlite';
 
 /** Read-only, non-clinical diagnostics. No combination of gates confers clearance. */
 export type StrengthApprovalGateId =
@@ -184,14 +187,35 @@ export async function inspectStrengthApprovalPreflight(
       ? 'The latest in-app profile is marked inactive. This does not verify the absence of outside restrictions.'
       : 'The in-app PT profile is missing, unreadable, or has active/unknown restrictions.');
 
-  // Neither caller-provided review flags nor a local profile prove clinician
-  // provenance, reconciled movement restrictions, or complete activity sources.
+  // Unverified source references can reveal extra blockers or contradictions;
+  // they can NEVER satisfy an independent clinician/provenance requirement.
+  const provenance = await readStrengthEvidenceProvenance(
+    sql, preview.binding.athleteId, preview.id, nowMs,
+  );
+  const r = provenance.restriction;
+  const c = provenance.coverage;
+  const restrictionBlocked = ['reported_restriction', 'conflicting', 'expired'].includes(r.status);
   add('external_provider_restrictions', 'Independent provider restriction review',
-    'unverified',
-    'No authenticated clinician restriction source or exercise-specific clearance is connected.');
+    restrictionBlocked ? 'blocked' : 'unverified',
+    r.status === 'reported_restriction'
+      ? 'A restriction has been reported; it remains unresolved until independently reviewed.'
+      : r.status === 'conflicting'
+        ? 'Conflicting restriction claims were recorded. Neither claim constitutes clearance.'
+        : r.status === 'expired'
+          ? 'The last restriction observation is stale or expired. Obtain current verified restrictions.'
+          : r.eventCount
+            ? 'Restriction information is self-reported or only referenced; no authenticated provider review exists.'
+            : 'No authenticated clinician restriction source or exercise-specific clearance is connected.');
+  const coverageBlocked = ['partial', 'conflicting', 'expired'].includes(c.status);
   add('source_provenance', 'Training and injury evidence coverage',
-    'unverified',
-    'The saved coverage flag is caller-supplied; complete authoritative source coverage is unverified.');
+    coverageBlocked ? 'blocked' : 'unverified',
+    c.status === 'partial'
+      ? 'An incomplete training or injury source was reported; missing activity may change the dose.'
+      : c.status === 'expired'
+        ? 'The source observation is stale or expired; current training coverage is unknown.'
+        : c.eventCount
+          ? 'A training source was described, but its completeness is not independently verified.'
+          : 'The saved coverage flag is caller-supplied; authoritative source coverage is unverified.');
   add('athlete_execution_confirmation', 'Explicit executable-workout confirmation',
     'not_implemented',
     'This screen offers draft organization only; no exercise-execution consent is collected.');
