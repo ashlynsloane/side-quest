@@ -387,6 +387,66 @@ attestation, athlete consent, write-time exercise authorization, physical
 iPhone acceptance and original-athlete recovery remain unimplemented or
 unverified gates.
 
+## Stage 19: Explicit athlete-confirmed routine workout authorization
+
+A new `strength_workout_authorizations` table stores **one immutable,
+version-bound routine workout authorization per planned session**. It is
+created only inside `authorizeRoutineStrengthWorkout`, an athlete-owned
+**exclusive SQLite transaction**. A saved draft or planning-minute cap alone
+does not constitute consent. A successful transaction persists the exact
+exercise prescription and signed-by-athlete-*action* confirmation metadata
+(the data is **not cryptographically signed**, clinician-authenticated, or a
+medical clearance).
+
+Authorization is available **only for uncomplicated routine training**:
+a current, explicit general-training intent; no previously reported protected
+movement, unresolved clinician restriction or active PT constraint; normal
+unexpired symptoms; locally reviewed adequate recovery; no completion
+record or competing accepted planning choice; a current unmodified source
+session and exact reduced candidate; interpretable exercise tags; an
+undismissed, non-stale draft; and an exact observation-token match. The
+athlete must individually check three opt-in acknowledgments: review of
+the exact exercise targets/loads, review of recent training and missing
+activities, and confirmation of no omitted known restrictions or symptoms.
+A second explicit modal confirms the exact duration and station count.
+
+**Uncomplicated routine athletes are not required to provide clinician
+documentation** merely to authorize a routine training reduction, but the
+local PT profile and recovery checks remain controlling. Historical
+self-reported restriction concerns, missing source history, rehabilitation,
+return-to-sport, or stale/unknown evidence make this path unavailable.
+The transaction recomputes the entire 13-gate review and verifies the exact
+source and candidate before writing; caller-provided historical
+`verified_none` and `sourceCoverage: complete` flags **never count as
+authenticated provider data**.
+
+Each authorization records its original preview binding, full immutable
+candidate snapshot, consent statements and transaction timestamp. The
+original generated training block, existing workout ledger, planning
+decision journal, and completion history remain unchanged. One-session
+uniqueness blocks duplicate taps. The mobile screen shows a saved
+authorization receipt but **does not start a workout automatically**. Every
+record has `requiresFreshStartRevalidation: true`; a new restriction or
+worsening readiness after authorization must be checked at actual session
+start. The athlete-confirmation receipt is not an enduring medical clearance.
+
+A separate historical read validates athlete ownership, exact preview
+binding, candidate JSON signature and authorization journal integrity;
+it is **not** itself a start permission. The new authorization table is
+included in critical export/deletion history. Synthetic file-backed and
+actual mobile SQLite acceptance tests cover healthy routine success,
+explicit opt-in, failed writes and rollback, stale check-ins, changed
+source versions, rehabilitation restrictions, duplicate authorizations,
+restart recovery and preservation of the unchanged original workout.
+
+**Unfinished release-critical gates:** A new start-time revalidation and
+workout-player consumer must be implemented before an authorization can
+launch a session; a reversible withdrawal/revocation workflow is not yet
+implemented. Independent provider verification for restricted
+rehabilitation, native physical-iPhone tests and original athlete-data
+migration/recovery also remain unverified. None of this has been merged
+into or deployed to the installed beta.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
