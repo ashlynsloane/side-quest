@@ -21,6 +21,10 @@ import {
 import {
   createStrengthReconciliationChecklist, type StrengthReconciliationChecklist,
 } from './strength-evidence-reconciliation';
+import {
+  readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy,
+  type TrainingSafetyPolicy,
+} from './training-safety-context-sqlite';
 
 /**
  * One read-only athlete-owned detail assessment. The source, saved candidate,
@@ -36,6 +40,7 @@ export interface UnapprovedStrengthReviewDetail {
   preflight: StrengthApprovalPreflight;
   provenance: StrengthEvidenceProvenanceLedger;
   reconciliation: StrengthReconciliationChecklist;
+  trainingPolicy: TrainingSafetyPolicy;
   executableWorkoutApproved: false;
   requiresWriteTimeRevalidation: true;
 }
@@ -77,6 +82,11 @@ export async function readUnapprovedStrengthReviewDetail(
   const reconciliation = createStrengthReconciliationChecklist(
     preflight, provenance,
   );
+  // Routine training and rehabilitation are separate from this unfinished
+  // executable workout-revision approval path. Historical restrictions in
+  // other drafts still constrain the athlete-wide review classification.
+  const trainingContext = await readAthleteTrainingSafetyContext(snapshot, athleteId);
+  const trainingPolicy = evaluateTrainingSafetyPolicy(trainingContext);
   const provenanceBlockers = preflight.gates.filter(gate =>
     (gate.id === 'external_provider_restrictions' || gate.id === 'source_provenance')
     && gate.status === 'blocked').map(gate => gate.detail);
@@ -90,6 +100,7 @@ export async function readUnapprovedStrengthReviewDetail(
     preflight,
     provenance,
     reconciliation,
+    trainingPolicy,
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
