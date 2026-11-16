@@ -1796,3 +1796,9 @@ export type {
   StrengthEvidenceProvenanceEvent, StrengthEvidenceProvenanceLedger,
   StrengthEvidenceProvenanceStatus,
 } from './strength-evidence-provenance-sqlite';
+
+export { createStrengthReconciliationChecklist } from './strength-evidence-reconciliation';
+export type {
+  StrengthReconciliationTask, StrengthReconciliationTaskKind,
+  StrengthReconciliationChecklist,
+} from './strength-evidence-reconciliation';
