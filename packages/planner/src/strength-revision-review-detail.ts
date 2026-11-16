@@ -29,6 +29,7 @@ import {
   assessStrengthMovementRestrictions,
   type StrengthMovementRestrictionAssessment,
 } from './strength-movement-restriction-review';
+import { createStrengthReviewObservationToken } from './strength-review-observation-token';
 
 /**
  * One read-only athlete-owned detail assessment. The source, saved candidate,
@@ -48,6 +49,8 @@ export interface UnapprovedStrengthReviewDetail {
   movementRestrictions: StrengthMovementRestrictionAssessment;
   executableWorkoutApproved: false;
   requiresWriteTimeRevalidation: true;
+  /** Local-only exact evidence version; not a source attestation or permission. */
+  observationToken: string;
 }
 
 /**
@@ -103,7 +106,7 @@ export async function assessStrengthReviewWithinTransaction(
       || gate.id === 'movement_compatibility')
     && gate.status === 'blocked').map(gate => gate.detail);
   const stale = assessment.status === 'stale' || provenanceBlockers.length > 0;
-  return {
+  const viewed: Omit<UnapprovedStrengthReviewDetail, 'observationToken'> = {
     summary,
     review,
     status: stale ? 'stale' : review.status,
@@ -117,6 +120,10 @@ export async function assessStrengthReviewWithinTransaction(
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
+  const observationToken = await createStrengthReviewObservationToken(
+    snapshot, athleteId, assessment.preview, evidence, viewed,
+  );
+  return { ...viewed, observationToken };
 }
 
 /**
