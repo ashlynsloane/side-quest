@@ -50,17 +50,21 @@ export interface UnapprovedStrengthReviewDetail {
   requiresWriteTimeRevalidation: true;
 }
 
-export async function readUnapprovedStrengthReviewDetail(
-  sql: TrainingAdjustmentSqlDriver,
+/**
+ * Internal shared evaluator for a handle ALREADY guarded by an exclusive
+ * SQLite transaction. Callers must not pass an ordinary mutable connection.
+ * The public read method below always obtains a read snapshot first.
+ */
+export async function assessStrengthReviewWithinTransaction(
+  snapshot: TrainingAdjustmentSqlDriver,
   athleteId: string,
   previewId: string,
   evidence: CurrentStrengthReviewEvidence,
 ): Promise<UnapprovedStrengthReviewDetail> {
-  if (!athleteId.trim() || !previewId.trim()
-    || evidence.athleteId !== athleteId) {
+  if (!athleteId?.trim() || !previewId?.trim()
+    || evidence?.athleteId !== athleteId) {
     throw new Error('Review detail athlete or preview identity mismatch.');
   }
-  return withUnapprovedStrengthReadSnapshot(sql, async (snapshot) => {
   const owner = await snapshot.getFirst<{ user_id: string }>(
     'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1',
     [],
@@ -113,5 +117,19 @@ export async function readUnapprovedStrengthReviewDetail(
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
-  });
+}
+
+/**
+ * Read-only historical detail. Every nested query is performed through
+ * the same native-exclusive SQLite read snapshot, not the outer connection.
+ */
+export async function readUnapprovedStrengthReviewDetail(
+  sql: TrainingAdjustmentSqlDriver,
+  athleteId: string,
+  previewId: string,
+  evidence: CurrentStrengthReviewEvidence,
+): Promise<UnapprovedStrengthReviewDetail> {
+  return withUnapprovedStrengthReadSnapshot(sql, snapshot =>
+    assessStrengthReviewWithinTransaction(snapshot, athleteId, previewId, evidence),
+  );
 }
