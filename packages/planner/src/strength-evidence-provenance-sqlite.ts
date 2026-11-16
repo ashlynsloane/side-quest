@@ -69,7 +69,17 @@ function utc(value: unknown): value is string {
   return value === canonical || value === canonical.replace('.000Z', 'Z');
 }
 
+const EVIDENCE_EVENT_FIELDS = [
+  'schemaVersion', 'id', 'athleteId', 'previewId', 'bindingSignature',
+  'kind', 'source', 'claim', 'sourceReference', 'observedAt',
+  'recordedAt', 'expiresAt', 'verification', 'executableWorkoutApproved',
+].sort();
+
 function validEvent(event: StrengthEvidenceProvenanceEvent): boolean {
+  if (!event || typeof event !== 'object'
+    || Object.keys(event).sort().join('|') !== EVIDENCE_EVENT_FIELDS.join('|')) {
+    return false;
+  }
   if (!event || typeof event !== 'object' || event.schemaVersion !== 1
     || typeof event.id !== 'string' || event.id.length < 1 || event.id.length > 160
     || typeof event.athleteId !== 'string' || !event.athleteId.trim()
