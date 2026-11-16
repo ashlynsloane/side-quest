@@ -159,6 +159,14 @@ Added `strength_revision_previews` as a separate append-only athlete-scoped SQLi
 
 The draft mobile database initializes this table, includes it in local data export/deletion, and exposes only an athlete-locked **read-only** preview fetch; there is no UI creation/approval or workout modification. Synthetic tests use an actual file-backed SQLite database to cover writes, restart/reopen, owner isolation, stale plan, completion collision, missing/changed health evidence, malformed payloads, duplicates and rollback. Integration tests exercise the mobile database table and absence of accepted strength decisions. Physical device verification, provider/source completeness, an independent write-time executable approval gate, and recovery of any legacy athlete data remain unresolved. **Do not treat saved previews as accepted strength plans or workout prescriptions.**
 
+## Stage 10: Immutable snapshots and audit-safe export (draft only)
+
+The preview append now makes a JSON-value snapshot **before** any asynchronous SQLite access. The exact binding is recalculated and compared after copying; the resulting frozen-by-value payload is serialized once, so mutations to caller-owned UI objects while writes are in flight cannot silently change the stored candidate, decision or review evidence. A synthetic transaction-interleaving test confirms that a late, unsafe caller edit does not alter the persisted review snapshot.
+
+The mobile local-data export/deletion registry now includes all relevant append-only journals: `training_plan_adjustment_events`, `daily_strength_choice_events`, `training_baseline_review_events`, and `strength_revision_previews` (plus the existing training adjustment history). Critical journal export errors now **abort the export**, instead of substituting an empty list; critical journal deletion errors **abort and roll back** the database transaction rather than reporting success with undisclosed records. A synthetic mobile SQLite test intentionally drops a journal table and verifies export failure and deletion rollback without losing the preexisting generated training block.
+
+These safeguards improve local data durability and truthful error reporting, but neither CSV/JSON export nor test-driven rollback proves real-device backup/restore safety. Real athlete data migration and physical iPhone acceptance are separate release gates.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
