@@ -357,6 +357,69 @@ describe('real SQLite atomic strength approval and undo journal', () => {
         .get() as {n:number}).n).toBe(1);
     }
   });
+  it('rejects forged overlapping approvals and prevents subsequent writes', async () => {
+    const { driver, db } = open();
+    await appendStrengthChoiceDecision(driver, decision('defer'), review);
+    const forged = {
+      ...decision('defer', 'accepted', 'forged-second'),
+      createdAt: '2026-11-14T10:01:00Z',
+    };
+    db.prepare(`INSERT INTO daily_strength_choice_events
+      (id, athlete_id, block_id, session_id, event_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      forged.id, forged.athleteId, forged.blockId,
+      forged.sessionId, JSON.stringify(forged), forged.createdAt,
+    );
+    await expect(readStrengthChoiceAudit(
+      driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+    )).rejects.toThrow(/overlapping accepted/);
+    await expect(appendStrengthChoiceDecision(
+      driver, decision('defer', 'restored', 'undo-forged'), review,
+    )).rejects.toThrow(/overlapping accepted/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
+      .get() as { n: number }).n).toBe(2);
+  });
+  it('rejects impossible orphaned or mismatched restore transitions', async () => {
+    for (const kind of ['orphan', 'different-dose', 'changed-source'] as const) {
+      const { driver, db } = open();
+      if (kind !== 'orphan') {
+        await appendStrengthChoiceDecision(driver, decision('reduce'), review);
+      }
+      const forged = {
+        ...decision('reduce', 'restored', 'forged-restoration'),
+        createdAt: '2026-11-14T10:01:00Z',
+        proposedMinutes: kind === 'different-dose' ? 31 : 32,
+        sourceSignature: kind === 'changed-source' ? 'modified-source' :
+          decision('reduce').sourceSignature,
+      };
+      db.prepare(`INSERT INTO daily_strength_choice_events
+        (id, athlete_id, block_id, session_id, event_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(
+        forged.id, forged.athleteId, forged.blockId,
+        forged.sessionId, JSON.stringify(forged), forged.createdAt,
+      );
+      await expect(readStrengthChoiceAudit(
+        driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+      )).rejects.toThrow(/orphan or mismatched restoration/);
+    }
+  });
+  it('rejects malformed historical event timestamps instead of silently reordering audit', async () => {
+    const { driver, db } = open();
+    await appendStrengthChoiceDecision(driver, decision('defer'), review);
+    const forged = {
+      ...decision('defer', 'restored', 'invalid-time'),
+      createdAt: 'not-a-real-timestamp',
+    };
+    db.prepare(`INSERT INTO daily_strength_choice_events
+      (id, athlete_id, block_id, session_id, event_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      forged.id, forged.athleteId, forged.blockId,
+      forged.sessionId, JSON.stringify(forged), forged.createdAt,
+    );
+    await expect(readStrengthChoiceAudit(
+      driver, 'synthetic-athlete-a', 'block-1', 'strength-1',
+    )).rejects.toThrow(/invalid event timestamp/);
+  });
   it('invalid JSON in the audit fails closed and prevents another approval', async () => {
     const { driver, db } = open();
     await appendStrengthChoiceDecision(driver, decision('defer'), review);
