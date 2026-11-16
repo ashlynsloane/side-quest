@@ -1777,3 +1777,7 @@ export type { UnapprovedStrengthReviewInboxItem } from './strength-revision-revi
 // Exact before/after workout visualization only; cannot authorize or start exercise.
 export { summarizeUnapprovedStrengthRevision } from './strength-revision-review-summary';
 export type { StrengthReviewDoseChange, StrengthRevisionReadOnlySummary } from './strength-revision-review-summary';
+
+// One owner-locked, read-only detail snapshot with current stale-state assessment.
+export { readUnapprovedStrengthReviewDetail } from './strength-revision-review-detail';
+export type { UnapprovedStrengthReviewDetail } from './strength-revision-review-detail';
