@@ -44,6 +44,9 @@ function open(athlete = 'synthetic-athlete-a') {
     CREATE TABLE readiness_check_ins(
       date TEXT PRIMARY KEY, check_in_json TEXT NOT NULL
     );
+    INSERT INTO training_check_ins VALUES (
+      'normal-checkin', '{"status":"normal"}', 1, '2026-11-14T08:00:00Z'
+    );
     INSERT INTO readiness_check_ins VALUES (
       '2026-11-14',
       '{"sleep":4,"energy":4,"muscleFreshness":4,"stress":2,"motivation":4}'
@@ -174,7 +177,7 @@ describe('real SQLite atomic strength approval and undo journal', () => {
     for (const status of ['tightness_pain', 'unable_to_train', 'muscle_soreness']) {
       const { driver, db } = open();
       db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)')
-        .run('symptoms', JSON.stringify({ status }), 1, '2026-11-14T08:00:00Z');
+        .run('symptoms', JSON.stringify({ status }), 1, '2026-11-14T09:00:00Z');
       await expect(appendStrengthChoiceDecision(
         driver, decision('reduce'), review,
       )).rejects.toThrow(/symptom or soreness hold/);
@@ -186,6 +189,20 @@ describe('real SQLite atomic strength approval and undo journal', () => {
         driver, decision('defer', 'restored', 'undo'), review,
       )).rejects.toThrow(/symptom or soreness hold/);
     }
+  });
+  it('missing current symptom evidence blocks a reduction but permits deferral', async () => {
+    const { driver, db } = open();
+    db.prepare('UPDATE training_check_ins SET active = 0').run();
+    await expect(appendStrengthChoiceDecision(driver, decision('reduce'), review))
+      .rejects.toThrow(/symptom status is unknown/);
+    expect(await readStrengthChoiceAudit(driver,
+      'synthetic-athlete-a', 'block-1', 'strength-1')).toEqual([]);
+    await appendStrengthChoiceDecision(driver, decision('defer'), review);
+    await expect(appendStrengthChoiceDecision(
+      driver, decision('defer', 'restored', 'undo'), review,
+    )).rejects.toThrow(/symptom status is unknown/);
+    expect(await readStrengthChoiceAudit(driver,
+      'synthetic-athlete-a', 'block-1', 'strength-1')).toHaveLength(1);
   });
   it('a recover-level readiness check-in blocks reduction and restoration', async () => {
     const { driver, db } = open();
