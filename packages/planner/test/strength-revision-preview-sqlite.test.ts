@@ -1523,8 +1523,9 @@ describe('fail-closed evidence reconciliation and source integrity', () => {
     expect(detail.reconciliation.tasks.every(task =>
       task.canResolveAutomatically === false && task.nextStep.length > 25,
     )).toBe(true);
-    expect((db.prepare('SELECT COUNT(*) AS n FROM workout_ledger').get()
-      as { n: number }).n).toBe(0);
+    const ledgerCount = db.prepare('SELECT COUNT(*) AS n FROM workout_ledger')
+      .get() as { n: number };
+    expect(ledgerCount.n).toBe(0);
   });
 
   it('prioritizes reported restrictions and missing source coverage without allowing a clearing self-report', async () => {
