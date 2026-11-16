@@ -289,9 +289,12 @@ export async function readStrengthRevisionPreview(
     session_id: string; created_at: string; preview_json: string;
   }>(
     `SELECT id, athlete_id, block_id, session_id, created_at, preview_json
-     FROM strength_revision_previews WHERE id = ? AND athlete_id = ? LIMIT 1`,
-    [id, athleteId],
+     FROM strength_revision_previews WHERE id = ? LIMIT 1`,
+    [id],
   );
+  if (row?.athlete_id !== undefined && row.athlete_id !== athleteId) {
+    throw new Error('Stored strength preview row ownership mismatch.');
+  }
   return row ? parsePreview(row) : null;
 }
 
