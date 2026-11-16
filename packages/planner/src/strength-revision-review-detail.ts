@@ -18,6 +18,9 @@ import {
 import {
   readStrengthEvidenceProvenance, type StrengthEvidenceProvenanceLedger,
 } from './strength-evidence-provenance-sqlite';
+import {
+  createStrengthReconciliationChecklist, type StrengthReconciliationChecklist,
+} from './strength-evidence-reconciliation';
 
 /**
  * One read-only athlete-owned detail assessment. The source, saved candidate,
@@ -32,6 +35,7 @@ export interface UnapprovedStrengthReviewDetail {
   reasons: string[];
   preflight: StrengthApprovalPreflight;
   provenance: StrengthEvidenceProvenanceLedger;
+  reconciliation: StrengthReconciliationChecklist;
   executableWorkoutApproved: false;
   requiresWriteTimeRevalidation: true;
 }
@@ -61,11 +65,17 @@ export async function readUnapprovedStrengthReviewDetail(
     snapshot, athleteId, previewId,
   );
   const summary = summarizeUnapprovedStrengthRevision(assessment.preview);
+  // One evaluation instant prevents the preflight and provenance summaries
+  // from disagreeing if an observation expires mid-read.
+  const evaluatedAtMs = Date.now();
   const preflight = await inspectStrengthApprovalPreflight(
-    snapshot, assessment, review, evidence,
+    snapshot, assessment, review, evidence, evaluatedAtMs,
   );
   const provenance = await readStrengthEvidenceProvenance(
-    snapshot, athleteId, previewId,
+    snapshot, athleteId, previewId, evaluatedAtMs,
+  );
+  const reconciliation = createStrengthReconciliationChecklist(
+    preflight, provenance,
   );
   const provenanceBlockers = preflight.gates.filter(gate =>
     (gate.id === 'external_provider_restrictions' || gate.id === 'source_provenance')
@@ -79,6 +89,7 @@ export async function readUnapprovedStrengthReviewDetail(
     reasons: [...assessment.reasons, ...provenanceBlockers],
     preflight,
     provenance,
+    reconciliation,
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
