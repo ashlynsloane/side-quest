@@ -123,6 +123,8 @@ modified exercise program or clinical prescription. In particular, do not
 claim that reducing `estimatedElapsedSeconds` alone scales station
 durations, sets, repetitions, exercise loading, or tissue stress.
 
+**Audit and execution provenance hardening:** Read-back now verifies that each event JSON's ID and timestamp match the corresponding persisted SQLite row. A mismatch is treated as corrupted audit history, blocking a subsequent append. The read-only effective-choice result explicitly declares `executableWorkoutModified: false` and `requiresExerciseLevelReview: true`, including when a valid 20% planning-time limit is present. These fields must not be interpreted as completion of exercise-level review or clinical clearance. Synthetic file-backed SQLite tests cover row tampering and the unchanged workout payload.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
