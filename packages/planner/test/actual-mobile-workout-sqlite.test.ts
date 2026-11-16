@@ -24,12 +24,14 @@ vi.mock('@circuit/planner', async () => {
   const preview = await import('../src/strength-revision-preview-sqlite');
   const review = await import('../src/strength-preview-review-events-sqlite');
   const inbox = await import('../src/strength-revision-review-inbox');
+  const detail = await import('../src/strength-revision-review-detail');
   return {
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
     STRENGTH_PREVIEW_REVIEW_EVENTS_SQL: review.STRENGTH_PREVIEW_REVIEW_EVENTS_SQL,
     readStrengthPreviewReviewState: review.readStrengthPreviewReviewState,
     listUnapprovedStrengthReviewInbox: inbox.listUnapprovedStrengthReviewInbox,
+    readUnapprovedStrengthReviewDetail: detail.readUnapprovedStrengthReviewDetail,
     readStrengthRevisionPreview: preview.readStrengthRevisionPreview,
     readStrengthChoiceAudit: strength.readStrengthChoiceAudit,
     PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
