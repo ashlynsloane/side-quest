@@ -1785,3 +1785,14 @@ export type { UnapprovedStrengthReviewDetail } from './strength-revision-review-
 // Structured, non-executable approval readiness diagnostics only.
 export { inspectStrengthApprovalPreflight } from './strength-approval-preflight';
 export type { StrengthApprovalPreflight, StrengthApprovalDiagnosticGate, StrengthApprovalGateId } from './strength-approval-preflight';
+
+export {
+  STRENGTH_EVIDENCE_PROVENANCE_SQL,
+  readStrengthEvidenceProvenance,
+  appendStrengthEvidenceProvenance,
+} from './strength-evidence-provenance-sqlite';
+export type {
+  StrengthEvidenceClaimKind, StrengthEvidenceSource, StrengthEvidenceClaim,
+  StrengthEvidenceProvenanceEvent, StrengthEvidenceProvenanceLedger,
+  StrengthEvidenceProvenanceStatus,
+} from './strength-evidence-provenance-sqlite';
