@@ -357,6 +357,11 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.preflight.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
     expect(detail.preflight.gates).toHaveLength(12);
+    expect(detail.reconciliation.canConfirmExecutableWorkout).toBe(false);
+    expect(detail.reconciliation.executableWorkoutApproved).toBe(false);
+    expect(detail.reconciliation.tasks).toHaveLength(
+      detail.preflight.blockingGateCount,
+    );
     expect(detail.preflight.gates.find(
       gate => gate.id === 'external_provider_restrictions',
     )?.status).toBe('unverified');
@@ -402,6 +407,15 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
       gate => gate.id === 'source_provenance',
     )?.status).toBe('blocked');
     expect(withBoth.preflight.executableWorkoutApproved).toBe(false);
+    expect(withBoth.reconciliation.tasks[0]?.kind).toBe('safety_hold');
+    expect(withBoth.reconciliation.tasks.find(task =>
+      task.id === 'external_provider_restrictions')?.nextStep)
+      .toMatch(/possible active restriction|current clinician guidance/);
+    expect(withBoth.reconciliation.tasks.find(task =>
+      task.id === 'source_provenance')?.nextStep).toMatch(/missing workouts/);
+    expect(withBoth.reconciliation.tasks.every(task =>
+      task.canResolveAutomatically === false,
+    )).toBe(true);
     expect((await service.exportLocalData()).strength_evidence_provenance_events)
       .toHaveLength(2);
     expect(state.exclusiveSnapshotReads).toBeGreaterThanOrEqual(2);
