@@ -39,22 +39,52 @@ export interface StrengthMovementRestrictionAssessment {
 }
 
 type ExerciseMetadata = WorkoutExercisePrescription['exerciseSnapshot'];
-function knownArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(v => typeof v === 'string');
-}
-function knownLoads(value: unknown): value is Array<{ region: string; load: number }> {
+const MOVEMENTS = new Set([
+  'squat', 'lunge', 'hinge', 'horizontal_push', 'vertical_push',
+  'horizontal_pull', 'vertical_pull', 'carry', 'rotation', 'anti_rotation',
+  'trunk_flexion', 'anti_extension', 'lateral_flexion', 'jump_hop',
+  'balance', 'locomotion', 'mobility',
+]);
+const AVOIDANCE_TAGS = new Set([
+  'overhead', 'shoulder_weight_bearing', 'wrist_weight_bearing',
+  'hanging', 'deep_knee_flexion', 'single_leg_loading', 'jumping',
+  'high_impact', 'rotation', 'spinal_flexion', 'kneeling',
+  'floor_required', 'unstable_surface', 'high_balance_demand',
+  'complex_coordination',
+]);
+const BODY_REGIONS = new Set([
+  'chest', 'shoulders', 'upper_back', 'lats', 'biceps', 'triceps',
+  'forearms_grip', 'core_anterior', 'core_lateral', 'core_rotation',
+  'lower_back', 'glutes', 'hamstrings', 'quadriceps',
+  'hip_abductors', 'hip_adductors', 'hip_flexors', 'gastrocnemius',
+  'soleus', 'tibialis_anterior', 'feet_ankles',
+]);
+const JOINT_REGIONS = new Set([
+  'neck', 'shoulder', 'elbow', 'wrist_hand', 'thoracic_spine',
+  'lumbar_spine', 'hip', 'knee', 'ankle', 'foot',
+]);
+function knownArray(value: unknown, allowed: Set<string>): value is string[] {
   return Array.isArray(value) && value.every(v =>
-    v !== null && typeof v === 'object' && typeof v.region === 'string'
+    typeof v === 'string' && allowed.has(v));
+}
+function knownLoads(
+  value: unknown,
+  allowed: Set<string>,
+): value is Array<{ region: string; load: number }> {
+  return Array.isArray(value) && value.every(v =>
+    v !== null && typeof v === 'object'
+    && typeof v.region === 'string' && allowed.has(v.region)
     && typeof v.load === 'number' && Number.isFinite(v.load)
-    && v.load >= 0 && v.load <= 4,
+    && v.load >= 0 && v.load <= 4
+    && Number.isInteger(v.load),
   );
 }
 function validMetadata(value: ExerciseMetadata): boolean {
   return !!value && typeof value.id === 'string'
-    && knownArray(value.avoidanceTags)
-    && knownArray(value.movementPatterns)
-    && knownLoads(value.jointLoads)
-    && knownLoads(value.bodyRegions)
+    && knownArray(value.avoidanceTags, AVOIDANCE_TAGS)
+    && knownArray(value.movementPatterns, MOVEMENTS)
+    && knownLoads(value.jointLoads, JOINT_REGIONS)
+    && knownLoads(value.bodyRegions, BODY_REGIONS)
     && typeof value.impactLevel === 'number'
     && Number.isInteger(value.impactLevel)
     && value.impactLevel >= 0 && value.impactLevel <= 4;
@@ -121,6 +151,20 @@ function interpretExercise(
       ...base, status: 'needs_individual_review',
       associatedRestrictions: restrictions,
       explanation: 'Exercise catalog annotations or identity are incomplete; movement-specific restriction checks cannot be trusted.',
+    };
+  }
+  // An all-empty tag snapshot supplies no interpretable movement evidence.
+  // Even a nominal zero impact level cannot establish that a protected
+  // tissue or movement is unloaded.
+  if (restrictions.length > 0
+    && exercise.exerciseSnapshot.movementPatterns.length === 0
+    && exercise.exerciseSnapshot.avoidanceTags.length === 0
+    && exercise.exerciseSnapshot.jointLoads.length === 0
+    && exercise.exerciseSnapshot.bodyRegions.length === 0) {
+    return {
+      ...base, status: 'needs_individual_review',
+      associatedRestrictions: restrictions,
+      explanation: 'All exercise movement annotations are absent; a low impact or reduced dose estimate cannot establish restriction compatibility.',
     };
   }
   if (restrictions.length === 0) {
