@@ -23,7 +23,7 @@ function workout(): GeneratedWorkout {
     totalWorkSeconds: 1800, totalRestSeconds: 600, estimatedElapsedSeconds: 2400,
     requiredEquipment: [], targetRegions: [], recentLoadAdjustments: [],
     source: 'generated',
-  } as GeneratedWorkout;
+  } as unknown as GeneratedWorkout;
 }
 function source(): PlannedStrengthSession {
   return {
