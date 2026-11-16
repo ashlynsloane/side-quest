@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -1414,6 +1414,18 @@ export async function listDailyStrengthChoiceDecisions(
   return withVerifiedAthleteDatabase(athleteId, async () => {
     await initializeDatabase();
     return readStrengthChoiceAudit(trainingAdjustmentDriver, athleteId, blockId, sessionId);
+  });
+}
+
+/** Read-only per-athlete unapproved exercise-level preview.
+ * No executable authorization or approval UI is exposed by this function.
+ */
+export async function getUnapprovedStrengthRevisionPreview(
+  athleteId: string, previewId: string,
+): Promise<StoredStrengthRevisionPreview | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readStrengthRevisionPreview(trainingAdjustmentDriver, athleteId, previewId);
   });
 }
 
