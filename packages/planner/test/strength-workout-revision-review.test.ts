@@ -79,6 +79,17 @@ describe('strength workout revision is structural only, never clinical authoriza
     missingStation.stations[0]!.id = 'different';
     expect(review(missingStation).structurallyValid).toBe(false);
   });
+  it('rejects hidden changes to generator restrictions or workout provenance', () => {
+    const changed = shortened();
+    changed.request = { ...changed.request, recoveryAware: false };
+    expect(review(changed).structurallyValid).toBe(false);
+    const equipment = shortened();
+    equipment.requiredEquipment = ['other-equipment' as GeneratedWorkout['requiredEquipment'][number]];
+    expect(review(equipment).structurallyValid).toBe(false);
+    const provenance = shortened();
+    provenance.source = 'manual';
+    expect(review(provenance).structurallyValid).toBe(false);
+  });
   it('fails closed on malformed time and incomplete workout structures', () => {
     const invalid = shortened();
     invalid.totalRestSeconds = Number.NaN;
