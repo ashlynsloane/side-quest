@@ -1,8 +1,8 @@
 import {
-  localCalendarDate,
+  getRoutineStrengthAuthorizationReadiness,
+  type AuthorizedStrengthWorkoutRecord,
   type StrengthReviewDoseChange,
   type UnapprovedStrengthReviewDetail,
-  type CurrentStrengthReviewEvidence,
 } from '@circuit/planner';
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
@@ -10,8 +10,10 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  getUnapprovedStrengthReviewDetail, setUnapprovedStrengthReviewDisposition,
-  flagUnverifiedStrengthReviewConcern, recheckUnapprovedStrengthAuthorization,
+  getCurrentStrengthReviewForConfirmation,
+  getRecordedAuthorizationForStrengthPreview,
+  confirmRoutineStrengthWorkout, setUnapprovedStrengthReviewDisposition,
+  flagUnverifiedStrengthReviewConcern, recheckCurrentStrengthConfirmation,
 } from '@/services/database';
 import { useAuth } from '@/state/auth-context';
 
@@ -35,17 +37,6 @@ function changeHeadline(change: StrengthReviewDoseChange): string {
   }
 }
 
-/** Historical dose is read-only. Dismiss/restore only changes the
- * unapproved draft's inbox visibility; exercise approval is not exposed.
- */
-function unknownEvidence(athleteId: string): CurrentStrengthReviewEvidence {
-  return {
-    athleteId, todayLocalDate: localCalendarDate(new Date()),
-    symptoms: 'unknown', readiness: 'unknown',
-    providerRestrictions: 'unknown', sourceCoverage: 'unknown',
-    exerciseRestrictionsReviewed: false,
-  };
-}
 export default function StrengthReviewDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -56,6 +47,12 @@ export default function StrengthReviewDetailScreen() {
   currentAthlete.current = athleteId;
   currentPreview.current = previewId;
   const [detail, setDetail] = useState<UnapprovedStrengthReviewDetail | null>(null);
+  const [authorized, setAuthorized] = useState<AuthorizedStrengthWorkoutRecord | null>(null);
+  const [reviewedDose, setReviewedDose] = useState(false);
+  const [reviewedTraining, setReviewedTraining] = useState(false);
+  const [reportedRestrictions, setReportedRestrictions] = useState(false);
+  const [savingAuthorization, setSavingAuthorization] = useState(false);
+  const [authorizationError, setAuthorizationError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingDisposition, setSavingDisposition] = useState(false);
@@ -69,6 +66,12 @@ export default function StrengthReviewDetailScreen() {
   useFocusEffect(useCallback(() => {
     let live = true;
     setDetail(null);
+    setAuthorized(null);
+    setReviewedDose(false);
+    setReviewedTraining(false);
+    setReportedRestrictions(false);
+    setSavingAuthorization(false);
+    setAuthorizationError(null);
     setError(null);
     setDispositionError(null);
     setSavingDisposition(false);
@@ -83,10 +86,14 @@ export default function StrengthReviewDetailScreen() {
       return () => { live = false; };
     }
     setLoading(true);
-    void getUnapprovedStrengthReviewDetail(
-      athleteId, previewId, unknownEvidence(athleteId),
-    ).then(result => {
-      if (live) setDetail(result);
+    void Promise.all([
+      getCurrentStrengthReviewForConfirmation(athleteId, previewId),
+      getRecordedAuthorizationForStrengthPreview(athleteId, previewId),
+    ]).then(([result, receipt]) => {
+      if (live) {
+        setDetail(result);
+        setAuthorized(receipt);
+      }
     }).catch(() => {
       if (live) {
         setDetail(null);
@@ -107,9 +114,8 @@ export default function StrengthReviewDetailScreen() {
     setRecheckError(null);
     setRecheckStatus(null);
     try {
-      const rechecked = await recheckUnapprovedStrengthAuthorization({
-        athleteId, previewId, evidence: unknownEvidence(athleteId),
-        expectedObservationToken: detail.observationToken,
+      const rechecked = await recheckCurrentStrengthConfirmation({
+        athleteId, previewId, expectedObservationToken: detail.observationToken,
       });
       if (currentAthlete.current === athleteId
         && currentPreview.current === previewId) {
@@ -131,6 +137,62 @@ export default function StrengthReviewDetailScreen() {
     }
   };
 
+  const authorizeConfirmedRoutineWorkout = async () => {
+    if (!athleteId || typeof previewId !== 'string' || !detail || authorized
+      || savingAuthorization || savingConcern || savingDisposition || rechecking
+      || !reviewedDose || !reviewedTraining || !reportedRestrictions
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId
+      || !getRoutineStrengthAuthorizationReadiness(detail).canRequestAuthorization) return;
+    setSavingAuthorization(true);
+    setAuthorizationError(null);
+    try {
+      const result = await confirmRoutineStrengthWorkout({
+        athleteId, previewId,
+        authorizationId: `strength-athlete-confirm-${new Date().toISOString()}-${Math.random().toString(36).slice(2, 12)}`,
+        expectedObservationToken: detail.observationToken,
+        confirmations: {
+          exactExercisesAndDoseReviewed: true,
+          recentTrainingHistoryReviewed: true,
+          noKnownUnreportedRestrictions: true,
+        },
+      });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setAuthorized(result.authorization);
+        setReviewedDose(false);
+        setReviewedTraining(false);
+        setReportedRestrictions(false);
+      }
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setAuthorizationError(
+          'Authorization could not be verified. The draft, restrictions or training history may have changed. Reopen this screen, review the updated evidence and confirm again.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setSavingAuthorization(false);
+    }
+  };
+
+  const confirmRoutineWorkout = () => {
+    if (!detail || authorized || savingAuthorization
+      || !reviewedDose || !reviewedTraining || !reportedRestrictions
+      || !getRoutineStrengthAuthorizationReadiness(detail).canRequestAuthorization) return;
+    Alert.alert(
+      'Authorize exact routine workout?',
+      `Confirm ${detail.summary.stationCountAfter} stations and ${duration(detail.summary.proposedSeconds)}. This saves one athlete-approved routine workout version. It will NOT start a workout. Current symptoms and restrictions must be rechecked before starting.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Authorize this workout', onPress: () => {
+          void authorizeConfirmedRoutineWorkout();
+        } },
+      ],
+    );
+  };
+
   const flagConcern = async (kind: 'provider_restriction' | 'training_coverage') => {
     if (savingConcern || savingDisposition || rechecking || !detail || !athleteId
       || typeof previewId !== 'string'
@@ -145,8 +207,8 @@ export default function StrengthReviewDetailScreen() {
           ? detail.provenance.restriction.latestEventId
           : detail.provenance.coverage.latestEventId,
       });
-      const updated = await getUnapprovedStrengthReviewDetail(
-        athleteId, previewId, unknownEvidence(athleteId),
+      const updated = await getCurrentStrengthReviewForConfirmation(
+        athleteId, previewId,
       );
       if (currentAthlete.current === athleteId
         && currentPreview.current === previewId) setDetail(updated);
@@ -190,8 +252,8 @@ export default function StrengthReviewDetailScreen() {
         athleteId, previewId, action,
         expectedLastEventId: detail.review.latestEventId,
       });
-      const updated = await getUnapprovedStrengthReviewDetail(
-        athleteId, previewId, unknownEvidence(athleteId),
+      const updated = await getCurrentStrengthReviewForConfirmation(
+        athleteId, previewId,
       );
       if (currentAthlete.current === athleteId
         && currentPreview.current === previewId) setDetail(updated);
