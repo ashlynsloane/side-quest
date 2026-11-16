@@ -1951,6 +1951,47 @@ describe('conditional clinician documentation policy without approving workout r
     expect(detail.preflight.executableWorkoutApproved).toBe(false);
   });
 
+  it('holds a tagged high-impact exercise across detail, inbox and reconciliation without changing prescription', async () => {
+    const { db, sql, saveBlock } = open();
+    const proposal = input();
+    const sourceExercise = proposal.source.workout.stations[0]!.exercises[0]!;
+    sourceExercise.exerciseSnapshot = {
+      ...sourceExercise.exerciseSnapshot,
+      movementPatterns: ['jump_hop'], avoidanceTags: ['jumping'],
+      bodyRegions: [], jointLoads: [], impactLevel: 4,
+    };
+    proposal.candidate.stations[0]!.exercises[0]!.exerciseSnapshot =
+      structuredClone(sourceExercise.exerciseSnapshot);
+    proposal.decision.sourceSignature = strengthSessionSignature(proposal.source);
+    saveBlock(block(proposal.source));
+    await appendStrengthRevisionPreview(sql, proposal);
+    await appendTrainingSafetyContextEvent(
+      sql, safetyEvent('protect-impact', 'protect_movement', 'impact_running'), null,
+    );
+    const before = db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string };
+    const reviewed = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', proposal.id, evidence(),
+    );
+    expect(reviewed.movementRestrictions.findings[0]?.status)
+      .toBe('potential_conflict');
+    expect(reviewed.movementRestrictions.potentialConflictCount).toBe(1);
+    expect(reviewed.preflight.gates.find(g =>
+      g.id === 'movement_compatibility')?.status).toBe('blocked');
+    expect(reviewed.reconciliation.tasks.find(t =>
+      t.id === 'movement_compatibility')?.kind).toBe('safety_hold');
+    expect(reviewed.status).toBe('stale');
+    expect(reviewed.preflight.canConfirmExecutableWorkout).toBe(false);
+    const inbox = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(),
+    );
+    expect(inbox[0]?.status).toBe('stale');
+    expect(inbox[0]?.reasons.join(' ')).toMatch(/Protected movement/);
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(before.block_json);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+
   it('does not remove the clinical requirement for routine mode when earlier drafts reported restrictions', async () => {
     const { sql } = open();
     const oldDraft = await appendStrengthRevisionPreview(sql, input());
