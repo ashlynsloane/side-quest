@@ -241,6 +241,41 @@ cycle cannot unlock executable exercise. Neither the number of passing local
 checks nor the presence of a preview constitutes clearance; original-data
 migration and physical iPhone acceptance remain separate release gates.
 
+## Stage 15: Unverified restriction and training-source provenance (risk-only intake)
+
+Added `strength_evidence_provenance_events`, an independent athlete-owned
+append-only SQLite journal for **unverified source claims** attached to an
+exact saved strength-revision preview. Records distinguish possible
+provider/exercise restrictions from incomplete training/injury data.
+A source may be a self-report or a document/integration **reference**;
+neither the presence of a reference nor a saved `reported_none` statement
+authenticates a clinician, completes a training-data sync, or clears exercise.
+
+New events carry source/type, observed and recorded UTC dates, optional
+expiry, fixed `verification: 'unverified'`, fixed
+`executableWorkoutApproved: false`, exact preview binding, athlete identity,
+and a last-seen-event optimistic concurrency check. All readbacks enforce
+row-to-JSON identity, valid timestamps, exact allowed schema, and source
+ownership. Contradictory restriction reports remain unresolved even if a later
+unverified `reported_none` claim appears; old or missing observations never
+constitute independently verified evidence.
+
+The mobile review-detail page now offers only two additional **confirmed
+risk-reporting actions**: *Flag an exercise restriction* and
+*Flag missing training history*. Neither action records no-restriction,
+confirms coverage, changes training, or unlocks workouts. Each writes through
+the athlete-locked exclusive SQLite journal, then refreshes the read-only
+review. Draft detail, inbox and 12-gate preflight all mark these concerns as
+blocking or stale while continuing to report independent clinician/source
+verification as absent.
+
+Synthetic file-backed and mobile SQLite tests cover self-reports,
+contradictory claims, obsolete references, owner mismatch, forged verification
+metadata, missed/duplicate updates, restart recovery, transaction rollback,
+critical export/deletion failure, and unchanged exercise/decision journals.
+These tests do not establish medical authority or real-device readiness.
+The executable approval transaction remains intentionally unimplemented.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
