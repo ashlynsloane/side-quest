@@ -131,6 +131,12 @@ Added `evaluateStrengthWorkoutRevision` as an isolated, read-only guard for a *s
 
 A `structurallyValid: true` result means only that this limited data-structure comparison passed; it does **not** mean the exercise is safe or medically appropriate. Every result includes `requiresCurrentRestrictionReview: true` and `autoApproved: false`. This is **not connected to the mobile approval UI or the SQLite decision append**. There is no executable exercise-level approval, automatic training change, provider restriction reconciliation, or release authorization. Those require independent validation of current injury/rehab restrictions and explicit athlete review at write time.
 
+## Stage 6: Cross-check preview decision against exercise and evidence (read-only)
+
+The exported `reviewStrengthRevisionForDecision` composes the source-session signature, proposed action and bounded duration, independent exercise-structure review, athlete identity, session date/status, and explicit completeness of symptom, readiness, provider-restriction and training-history inputs. Missing, incomplete, stale or active restriction evidence blocks the *reviewable* designation. The regression suite covers ownership mismatch, regeneration, malformed dates, missing candidate, invalid dose, symptoms, low readiness, incomplete coverage and exercise escalation.
+
+This is deliberately a **read-only preflight**, not a trusted approval endpoint. Even `status: 'reviewable'` returns `executableWorkoutApproved: false`, `requiresAthleteApproval: true` and `requiresWriteTimeRevalidation: true`. The `CurrentStrengthReviewEvidence` arguments are caller-supplied and therefore **cannot establish actual source completeness or PT clearance**. The existing SQLite append does not yet invoke this helper, and an approval button must not be enabled on its basis. The next integration must resolve authoritative evidence from the athlete-owned database/providers and recheck the same constraints atomically with writing a versioned exercise-level proposal.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
