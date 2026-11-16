@@ -86,6 +86,7 @@ export async function readUnapprovedStrengthReviewDetail(
   const evaluatedAtMs = Date.now();
   const preflight = await inspectStrengthApprovalPreflight(
     snapshot, assessment, review, evidence, evaluatedAtMs, trainingPolicy,
+    movementRestrictions,
   );
   const provenance = await readStrengthEvidenceProvenance(
     snapshot, athleteId, previewId, evaluatedAtMs,
@@ -94,7 +95,8 @@ export async function readUnapprovedStrengthReviewDetail(
     preflight, provenance,
   );
   const provenanceBlockers = preflight.gates.filter(gate =>
-    (gate.id === 'external_provider_restrictions' || gate.id === 'source_provenance')
+    (gate.id === 'external_provider_restrictions' || gate.id === 'source_provenance'
+      || gate.id === 'movement_compatibility')
     && gate.status === 'blocked').map(gate => gate.detail);
   const stale = assessment.status === 'stale' || provenanceBlockers.length > 0;
   return {
