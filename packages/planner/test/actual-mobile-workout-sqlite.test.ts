@@ -146,6 +146,17 @@ afterEach(() => {
 });
 
 describe('actual mobile workout persistence with real disk SQLite', () => {
+  it('initializes unapproved revision storage and exposes no execution approval', async () => {
+    const snapshot = await service.exportLocalData();
+    expect(snapshot).toHaveProperty('strength_revision_previews', []);
+    expect(await service.getUnapprovedStrengthRevisionPreview(
+      'synthetic-athlete-one', 'missing-preview',
+    )).toBeNull();
+    expect(await service.listDailyStrengthChoiceDecisions(
+      'synthetic-athlete-one', 'unknown-block', 'unknown-session',
+    )).toEqual([]);
+  });
+
   it('finishes a planned workout and writes one canonical linked ledger record', async () => {
     await service.saveTrainingBlock(weeklyBlock());
     expect(await sessionStatus()).toBe('planned');
