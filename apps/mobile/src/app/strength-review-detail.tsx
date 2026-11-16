@@ -212,6 +212,31 @@ export default function StrengthReviewDetailScreen() {
                 </Text>
               </View>
             ))}
+            <Text style={styles.sectionTitle}>What blocks workout approval?</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Not cleared for exercise</Text>
+              <Text style={styles.helper}>
+                {detail.preflight.blockingGateCount} prerequisites remain blocked,
+                unverified, or unavailable. Passing a local check does not mean
+                a clinician has approved the exercise.
+              </Text>
+              {detail.preflight.gates.map(gate => (
+                <View key={gate.id} style={styles.gateRow}>
+                  <Text style={styles.gateTitle}>{gate.title}</Text>
+                  <Text style={styles.gateStatus}>
+                    {gate.status === 'local_check_passed' ? 'LOCAL CHECK ONLY'
+                      : gate.status === 'blocked' ? 'BLOCKED'
+                        : gate.status === 'unverified' ? 'NOT VERIFIED'
+                          : 'NOT IMPLEMENTED'}
+                  </Text>
+                  <Text style={styles.helper}>{gate.detail}</Text>
+                </View>
+              ))}
+              <Text style={styles.noticeText}>
+                Side Quest cannot currently save or start this proposed workout.
+                Dismissing or restoring the draft only organizes the review inbox.
+              </Text>
+            </View>
             <Text style={styles.sectionTitle}>Review history</Text>
             <View style={styles.card}>
               <Text style={styles.helper}>
@@ -297,6 +322,11 @@ const styles = StyleSheet.create({
   durationArrow: { paddingHorizontal: 10, fontSize: 20, color: colors.accent },
   doseText: { fontSize: 15, color: colors.ink, fontWeight: '800' },
   history: { fontSize: 13, color: colors.ink, lineHeight: 20 },
+  gateRow: { gap: 4, paddingVertical: 9, borderTopWidth: 1,
+    borderTopColor: colors.border },
+  gateTitle: { fontSize: 14, color: colors.ink, fontWeight: '800' },
+  gateStatus: { fontSize: 11, color: colors.warning, letterSpacing: 0.6,
+    fontWeight: '800' },
   center: { padding: 32, gap: 12, alignItems: 'center' },
   footer: { fontSize: 12, lineHeight: 19, color: colors.muted },
   dispositionAction: { borderRadius: 12, minHeight: 48,
