@@ -1405,6 +1405,34 @@ const trainingAdjustmentDriver: TrainingAdjustmentSqlDriver = {
   transaction: async (fn: () => Promise<void>) => {
     await db.withTransactionAsync(fn);
   },
+  exclusiveTransaction: async <T>(
+    fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+  ): Promise<T> => {
+    const active = db;
+    if (typeof active.withExclusiveTransactionAsync !== 'function') {
+      throw new Error('Exclusive strength review writes require native SQLite.');
+    }
+    let result!: T;
+    let complete = false;
+    await active.withExclusiveTransactionAsync(async (txn) => {
+      const writer: TrainingAdjustmentSqlDriver = {
+        getFirst: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getFirstAsync<Row>(query, ...params)) as Row | null,
+        getAll: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getAllAsync<Row>(query, ...params)) as Row[],
+        run: async (query: string, params: Array<string | number | null>) => {
+          await txn.runAsync(query, ...params);
+        },
+        transaction: async () => {
+          throw new Error('Nested strength review transactions are not allowed.');
+        },
+      };
+      result = await fn(writer);
+      complete = true;
+    });
+    if (!complete) throw new Error('Strength review event transaction did not complete.');
+    return result;
+  },
   readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T> => {
     // Expo's ordinary withTransactionAsync can interleave unrelated queries.
     // Only the native exclusive transaction provides a dedicated txn handle.
