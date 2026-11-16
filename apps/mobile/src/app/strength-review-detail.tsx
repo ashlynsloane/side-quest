@@ -288,6 +288,29 @@ export default function StrengthReviewDetailScreen() {
                 Dismissing or restoring the draft only organizes the review inbox.
               </Text>
             </View>
+            <Text style={styles.sectionTitle}>Evidence reconciliation</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>What still needs to be resolved</Text>
+              <Text style={styles.helper}>
+                {detail.reconciliation.unresolvedCount} unresolved checks.
+                These are review steps, not workout instructions or medical clearance.
+              </Text>
+              {detail.reconciliation.tasks.map(task => (
+                <View key={task.id} style={styles.gateRow}>
+                  <Text style={styles.gateTitle}>{task.title}</Text>
+                  <Text style={styles.gateStatus}>
+                    {task.kind === 'safety_hold' ? 'SAFETY HOLD'
+                      : task.kind === 'feature_unavailable'
+                        ? 'NOT AVAILABLE' : 'SOURCE NOT VERIFIED'}
+                  </Text>
+                  <Text style={styles.helper}>{task.nextStep}</Text>
+                </View>
+              ))}
+              <Text style={styles.noticeText}>
+                A local check-in cannot replace an authenticated provider
+                source. No task on this list automatically unlocks exercise.
+              </Text>
+            </View>
             <Text style={styles.sectionTitle}>Report missing safety information</Text>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Raise a concern</Text>
