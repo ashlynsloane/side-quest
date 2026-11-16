@@ -2,13 +2,16 @@ import {
   localCalendarDate,
   type StrengthReviewDoseChange,
   type UnapprovedStrengthReviewDetail,
+  type CurrentStrengthReviewEvidence,
 } from '@circuit/planner';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getUnapprovedStrengthReviewDetail } from '@/services/database';
+import {
+  getUnapprovedStrengthReviewDetail, setUnapprovedStrengthReviewDisposition,
+} from '@/services/database';
 import { useAuth } from '@/state/auth-context';
 
 function duration(seconds: number): string {
@@ -31,38 +34,44 @@ function changeHeadline(change: StrengthReviewDoseChange): string {
   }
 }
 
-/**
- * Read-only details of an immutable saved draft. No start, accept, or approval
- * callbacks are present. Source comparison is validated by the planner.
+/** Historical dose is read-only. Dismiss/restore only changes the
+ * unapproved draft's inbox visibility; exercise approval is not exposed.
  */
+function unknownEvidence(athleteId: string): CurrentStrengthReviewEvidence {
+  return {
+    athleteId, todayLocalDate: localCalendarDate(new Date()),
+    symptoms: 'unknown', readiness: 'unknown',
+    providerRestrictions: 'unknown', sourceCoverage: 'unknown',
+    exerciseRestrictionsReviewed: false,
+  };
+}
 export default function StrengthReviewDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { previewId } = useLocalSearchParams<{ previewId?: string }>();
   const athleteId = user?.id;
+  const currentAthlete = useRef(athleteId);
+  currentAthlete.current = athleteId;
   const [detail, setDetail] = useState<UnapprovedStrengthReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [savingDisposition, setSavingDisposition] = useState(false);
+  const [dispositionError, setDispositionError] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     let live = true;
     setDetail(null);
     setError(null);
+    setDispositionError(null);
     if (!athleteId || typeof previewId !== 'string' || !previewId.trim()) {
       setLoading(false);
       setError('A valid saved preview and athlete profile are required.');
       return () => { live = false; };
     }
     setLoading(true);
-    void getUnapprovedStrengthReviewDetail(athleteId, previewId, {
-      athleteId,
-      todayLocalDate: localCalendarDate(new Date()),
-      symptoms: 'unknown',
-      readiness: 'unknown',
-      providerRestrictions: 'unknown',
-      sourceCoverage: 'unknown',
-      exerciseRestrictionsReviewed: false,
-    }).then(result => {
+    void getUnapprovedStrengthReviewDetail(
+      athleteId, previewId, unknownEvidence(athleteId),
+    ).then(result => {
       if (live) setDetail(result);
     }).catch(() => {
       if (live) {
@@ -75,6 +84,51 @@ export default function StrengthReviewDetailScreen() {
     return () => { live = false; };
   }, [athleteId, previewId]));
 
+  const changeDisposition = async (action: 'dismiss' | 'restore') => {
+    if (savingDisposition || !athleteId || !detail
+      || typeof previewId !== 'string'
+      || currentAthlete.current !== athleteId) return;
+    setSavingDisposition(true);
+    setDispositionError(null);
+    try {
+      await setUnapprovedStrengthReviewDisposition({
+        athleteId, previewId, action,
+        expectedLastEventId: detail.review.latestEventId,
+      });
+      const updated = await getUnapprovedStrengthReviewDetail(
+        athleteId, previewId, unknownEvidence(athleteId),
+      );
+      if (currentAthlete.current === athleteId) setDetail(updated);
+    } catch {
+      if (currentAthlete.current === athleteId) {
+        setDispositionError(
+          'The draft update could not be verified. Reopen this screen to refresh before trying again.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId) setSavingDisposition(false);
+    }
+  };
+
+  const confirmDisposition = (action: 'dismiss' | 'restore') => {
+    if (!detail || savingDisposition || !athleteId) return;
+    const dismiss = action === 'dismiss';
+    Alert.alert(
+      dismiss ? 'Dismiss this draft?' : 'Return draft to inbox?',
+      dismiss
+        ? 'This only changes the draft\'s review-list status. It does not modify your workouts.'
+        : 'The draft will become visible for review again. Stale evidence and all exercise restrictions remain in effect.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: dismiss ? 'Dismiss draft' : 'Return to inbox',
+          style: dismiss ? 'destructive' : 'default',
+          onPress: () => { void changeDisposition(action); },
+        },
+      ],
+    );
+  };
+
   return (
     <SafeAreaView style={styles.screen} edges={['left', 'right']}>
       <View style={styles.header}>
@@ -83,7 +137,7 @@ export default function StrengthReviewDetailScreen() {
         <Text style={styles.headerText}>Unapproved draft</Text>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.eyebrow}>EXACT EXERCISE COMPARISON · READ ONLY</Text>
+        <Text style={styles.eyebrow}>EXERCISE COMPARISON · READ ONLY DOSE</Text>
         <Text style={styles.title}>Before and after</Text>
         <View style={styles.notice}>
           <Text style={styles.noticeTitle}>Not approved for training</Text>
@@ -167,6 +221,29 @@ export default function StrengthReviewDetailScreen() {
               <Text style={styles.helper}>
                 A restored draft is still unapproved. No exercises or scheduled sessions were changed.
               </Text>
+              {dispositionError ? (
+                <Text style={styles.error}>{dispositionError}</Text>
+              ) : null}
+              <Pressable accessibilityRole="button"
+                accessibilityLabel={detail.review.status === 'dismissed'
+                  ? 'Return unapproved draft to review inbox'
+                  : 'Dismiss unapproved draft from review inbox'}
+                disabled={savingDisposition}
+                onPress={() => confirmDisposition(
+                  detail.review.status === 'dismissed' ? 'restore' : 'dismiss',
+                )}
+                style={[styles.dispositionAction,
+                  savingDisposition && styles.disabledAction]}>
+                <Text style={styles.dispositionText}>
+                  {savingDisposition ? 'Saving review status…'
+                    : detail.review.status === 'dismissed'
+                      ? 'Return draft to inbox' : 'Dismiss draft'}
+                </Text>
+              </Pressable>
+              <Text style={styles.helper}>
+                These controls organize saved drafts only. They cannot approve, start,
+                or modify a strength session. A stale draft remains stale after restoration.
+              </Text>
             </View>
             <Text style={styles.footer}>
               Stored snapshots are not independent verification of current symptoms, readiness, or outside PT restrictions. Exercise-level approval and automatic progression remain disabled.
@@ -215,4 +292,9 @@ const styles = StyleSheet.create({
   history: { fontSize: 13, color: colors.ink, lineHeight: 20 },
   center: { padding: 32, gap: 12, alignItems: 'center' },
   footer: { fontSize: 12, lineHeight: 19, color: colors.muted },
+  dispositionAction: { borderRadius: 12, minHeight: 48,
+    backgroundColor: colors.accent, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 15, paddingVertical: 11 },
+  dispositionText: { fontSize: 14, fontWeight: '800', color: colors.paper },
+  disabledAction: { opacity: 0.55 },
 });
