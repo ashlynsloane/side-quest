@@ -205,6 +205,20 @@ describe('immutable unapproved strength revision preview: actual SQLite file', (
       .rejects.toThrow(/completion record/);
     expect(count(completed.db, 'strength_revision_previews')).toBe(0);
   });
+  it('rejects impossible or noncanonical preview timestamps before persistence', async () => {
+    const { sql, db } = open();
+    for (const createdAt of [
+      '2026-02-30T11:00:00Z',
+      '2026-11-15T25:00:00Z',
+      '2026-11-15T11:00:00+00:00',
+      '2026-11-15T11:00:00.0Z',
+    ]) {
+      const malformed = { ...input(), createdAt };
+      await expect(appendStrengthRevisionPreview(sql, malformed))
+        .rejects.toThrow(/valid timestamp/);
+    }
+    expect(count(db, 'strength_revision_previews')).toBe(0);
+  });
   it('rejects invalid dose, changed exercises, and incomplete review evidence', async () => {
     const { db, sql } = open();
     const increased = input();
@@ -511,6 +525,20 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
       )).rejects.toThrow(/stale/);
       expect(reviewEventCount(db)).toBe(1);
     }
+  });
+  it('rejects malformed review event timestamps including normalized dates', async () => {
+    const { db, sql } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    for (const createdAt of [
+      '2026-02-30T11:20:00Z',
+      '2026-11-15T11:20:00+00:00',
+      '2026-11-15T11:20:00.0Z',
+    ]) {
+      await expect(appendStrengthPreviewReviewEvent(
+        sql, reviewEvent(stored, 'dismiss', 'bad-date', createdAt),
+      )).rejects.toThrow(/Invalid unapproved preview review event/);
+    }
+    expect(reviewEventCount(db)).toBe(0);
   });
   it('detects forged impossible transitions, changed binding, and invalid JSON', async () => {
     for (const tamper of ['repeated', 'source', 'json'] as const) {
