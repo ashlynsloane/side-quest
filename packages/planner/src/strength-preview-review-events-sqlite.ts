@@ -1,8 +1,5 @@
 import type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
-import type { CurrentStrengthReviewEvidence } from './strength-revision-decision-review';
-import {
-  readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview,
-} from './strength-revision-preview-sqlite';
+import { readStrengthRevisionPreview } from './strength-revision-preview-sqlite';
 
 /**
  * Only dismisses and reopens a previously saved UNAPPROVED review preview.
@@ -118,14 +115,16 @@ export async function readStrengthPreviewReviewState(
 /**
  * Atomically append a non-executable review-state change.
  * - Dismissal is allowed even after a preview becomes stale.
- * - Reopening requires an exact-match fresh reassessment, but still cannot
- *   authorize training, persist a workout, or convert a choice to accepted.
- * This is intentionally not exposed as a mobile action in Milestone 1.
+ * - Reopening restores ONLY inbox visibility. It does NOT reclassify a stale
+ *   proposal as safe, authorize training, persist a workout or accept a choice.
+ *   Any later exercise review still rechecks current evidence independently.
+ * - A supplied expectedLastEventId guards against stale screens (including
+ *   an intervening dismiss/restore sequence that returned to the same state).
  */
 export async function appendStrengthPreviewReviewEvent(
   sql: TrainingAdjustmentSqlDriver,
   event: StrengthPreviewReviewEvent,
-  currentEvidence?: CurrentStrengthReviewEvidence,
+  expectedLastEventId?: string | null,
 ): Promise<void> {
   if (!event || event.schemaVersion !== 1 || !event.id?.trim()
     || !event.athleteId?.trim() || !event.previewId?.trim()
@@ -138,6 +137,10 @@ export async function appendStrengthPreviewReviewEvent(
     const state = await readStrengthPreviewReviewState(
       sql, event.athleteId, event.previewId,
     );
+    if (expectedLastEventId !== undefined
+      && state.latestEventId !== expectedLastEventId) {
+      throw new Error('Unapproved preview review history changed; refresh before editing.');
+    }
     const preview = await readStrengthRevisionPreview(
       sql, event.athleteId, event.previewId,
     );
@@ -155,15 +158,6 @@ export async function appendStrengthPreviewReviewEvent(
     } else {
       if (state.status !== 'dismissed') {
         throw new Error('Only a dismissed unapproved preview may be reopened.');
-      }
-      if (!currentEvidence || currentEvidence.athleteId !== event.athleteId) {
-        throw new Error('Fresh athlete-owned review evidence is required to reopen.');
-      }
-      const reassessment = await reassessStoredStrengthRevisionPreview(
-        sql, event.athleteId, event.previewId, currentEvidence,
-      );
-      if (reassessment.status !== 'reviewable_preview') {
-        throw new Error('Unapproved preview is stale and cannot be reopened.');
       }
     }
     await sql.run(
