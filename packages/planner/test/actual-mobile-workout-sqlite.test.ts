@@ -499,7 +499,21 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(recovered.status).toBe('pending_review');
     expect(recovered.events.map(item => item.action)).toEqual(['dismiss', 'restore']);
     expect(recovered.executableWorkoutApproved).toBe(false);
-    expect((await service.exportLocalData()).workout_ledger).toEqual([]);
+    const savedAfterRestart = await service.exportLocalData();
+    expect(savedAfterRestart.strength_evidence_provenance_events).toHaveLength(2);
+    const reviewedAfterRestart = await service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    );
+    expect(reviewedAfterRestart.provenance.restriction.status)
+      .toBe('reported_restriction');
+    expect(reviewedAfterRestart.provenance.coverage.status).toBe('partial');
+    expect(reviewedAfterRestart.preflight.executableWorkoutApproved).toBe(false);
+    expect(savedAfterRestart.workout_ledger).toEqual([]);
     expect((await service.getLatestTrainingBlock())?.block.weeks[0]?.sessions[0]?.workout)
       .toEqual(originalWorkout);
   });
@@ -586,6 +600,19 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     await expect(service.listUnapprovedStrengthReviewItems(
       'synthetic-athlete-one', evidence,
     )).rejects.toThrow(/Athlete profile changed/);
+  });
+
+  it('refuses export and rolls back destructive operations on lost provenance history', async () => {
+    await service.saveTrainingBlock(weeklyBlock());
+    const { DatabaseSync } = await import('node:sqlite');
+    const isolated = new DatabaseSync(join(state.directory, service.getActiveDatabaseName()));
+    isolated.exec('DROP TABLE strength_evidence_provenance_events');
+    isolated.close();
+    await expect(service.exportLocalData())
+      .rejects.toThrow(/Cannot export critical audit history: strength_evidence_provenance_events/);
+    await expect(service.deleteAllLocalData())
+      .rejects.toThrow(/Cannot safely delete critical audit history/);
+    expect(await service.getLatestTrainingBlock()).not.toBeNull();
   });
 
   it('fails export and rolls back deletion if a critical revision journal is unreadable', async () => {
