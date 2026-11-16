@@ -5,6 +5,11 @@ import {
   reviewStrengthRevisionForDecision, type CurrentStrengthReviewEvidence,
 } from '../src/strength-revision-decision-review';
 
+import {
+  createStrengthRevisionPreviewBinding,
+  verifyStrengthRevisionPreviewBinding,
+} from '../src/strength-revision-preview-binding';
+
 const exercise = (target: number) => ({
   exerciseId: 'calf-raise',
   exerciseSnapshot: { id: 'calf-raise', name: 'Synthetic calf raise' },
@@ -122,5 +127,77 @@ describe('pre-approval strength decision reconciliation is never an authorizatio
     const result = review({ proposed: increased });
     expect(result.status).toBe('blocked');
     expect(result.structuralReviewPassed).toBe(false);
+  });
+});
+
+describe('exact proposal preview binding cannot silently outlive its inputs', () => {
+  const inputs = () => ({
+    source: source(), candidate: candidate(),
+    decision: decision(), evidence: evidence(),
+  });
+  it('binds a valid preview without enabling execution or persistence', () => {
+    const original = inputs();
+    const preview = createStrengthRevisionPreviewBinding(original);
+    expect(preview).toMatchObject({
+      schemaVersion: 1, kind: 'strength_revision_preview',
+      athleteId: original.decision.athleteId,
+      sessionId: original.source.id,
+      executableWorkoutApproved: false,
+      requiresWriteTimeRevalidation: true,
+    });
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview, ...inputs(),
+    })).toMatchObject({
+      valid: true, executableWorkoutApproved: false,
+      requiresWriteTimeRevalidation: true,
+    });
+  });
+  it('invalidates review when the source workout, candidate or decision changes', () => {
+    const baseline = inputs();
+    const preview = createStrengthRevisionPreviewBinding(baseline);
+    expect(preview).not.toBeNull();
+    const updatedSource = inputs();
+    updatedSource.source.title = 'Regenerated plan';
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview, ...updatedSource,
+    }).valid).toBe(false);
+    const modifiedExercise = inputs();
+    modifiedExercise.candidate.stations[0]!.exercises[0]!.target = 9;
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview, ...modifiedExercise,
+    }).valid).toBe(false);
+    const modifiedDecision = inputs();
+    modifiedDecision.decision.id = 'different-acceptance';
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview, ...modifiedDecision,
+    }).valid).toBe(false);
+  });
+  it('invalidates evidence changes, unavailable PT review, and tampered bindings', () => {
+    const baseline = inputs();
+    const preview = createStrengthRevisionPreviewBinding(baseline);
+    const changed = inputs();
+    changed.evidence.sourceCoverage = 'incomplete';
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview, ...changed,
+    }).valid).toBe(false);
+    const reclassified = inputs();
+    reclassified.evidence.providerRestrictions = 'reviewed_applicable';
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview, ...reclassified,
+    }).valid).toBe(false);
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: preview ? { ...preview, decisionId: 'other' } : null,
+      ...inputs(),
+    }).valid).toBe(false);
+    expect(verifyStrengthRevisionPreviewBinding({
+      binding: null, ...inputs(),
+    }).valid).toBe(false);
+  });
+  it('cannot manufacture a preview for an increased dose or missing candidate', () => {
+    const invalid = inputs();
+    invalid.candidate.stations[0]!.exercises[0]!.target = 100;
+    expect(createStrengthRevisionPreviewBinding(invalid)).toBeNull();
+    const missing = { ...inputs(), candidate: null };
+    expect(createStrengthRevisionPreviewBinding(missing)).toBeNull();
   });
 });
