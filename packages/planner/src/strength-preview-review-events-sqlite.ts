@@ -133,10 +133,15 @@ export async function appendStrengthPreviewReviewEvent(
     || event.executableWorkoutApproved !== false) {
     throw new Error('Invalid unapproved preview review event.');
   }
+  // Copy by value before the first asynchronous database read. A caller
+  // mutating a shared UI event after this point must not alter the audit row.
+  const serializedEvent = JSON.stringify(event);
+  const immutableEvent = JSON.parse(serializedEvent) as StrengthPreviewReviewEvent;
   if (typeof sql.exclusiveTransaction !== 'function') {
     throw new Error('Exclusive strength review writes are unavailable on this platform.');
   }
   await sql.exclusiveTransaction(async (writer) => {
+    const event = immutableEvent;
     const state = await readStrengthPreviewReviewState(
       writer, event.athleteId, event.previewId,
     );
@@ -168,7 +173,7 @@ export async function appendStrengthPreviewReviewEvent(
        (id, athlete_id, preview_id, event_json, created_at)
        VALUES (?, ?, ?, ?, ?)`,
       [event.id, event.athleteId, event.previewId,
-        JSON.stringify(event), event.createdAt],
+        serializedEvent, event.createdAt],
     );
   });
 }
