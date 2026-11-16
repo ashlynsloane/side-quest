@@ -77,6 +77,12 @@ that still requires a real athlete, provider source, or native device.
   event even if a dismiss-and-restore sequence returned the draft to the same
   apparent status. File-backed/mobile tests cover failed writes and rollback.
   The UI requires direct athlete confirmation for both visibility actions.
+  Before the exclusive write, each event is copied to an immutable serialized
+  value so a late caller mutation cannot change the persisted audit entry.
+  The mobile detail screen also ignores delayed mutations after switching
+  athlete profiles or opening another preview. Synthetic mobile acceptance
+  verifies dismiss/restore, stale visibility remaining stale, injected SQL
+  failure rollback, cold-start audit recovery and unchanged workout/ledger data.
   These are not workout confirmation, return-to-sport clearance, or release.
 - A full mobile-service SQLite test creates an isolated synthetic source block,
   saves a preview, then verifies retrieval, history, read-only inbox and
