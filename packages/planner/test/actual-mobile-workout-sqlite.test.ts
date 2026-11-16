@@ -22,9 +22,12 @@ vi.mock('@circuit/planner', async () => {
   const sql = await import('../src/training-adjustment-sqlite');
   const strength = await import('../src/daily-strength-decision-sqlite');
   const preview = await import('../src/strength-revision-preview-sqlite');
+  const review = await import('../src/strength-preview-review-events-sqlite');
   return {
     STRENGTH_CHOICE_AUDIT_SQL: strength.STRENGTH_CHOICE_AUDIT_SQL,
     STRENGTH_REVISION_PREVIEW_SQL: preview.STRENGTH_REVISION_PREVIEW_SQL,
+    STRENGTH_PREVIEW_REVIEW_EVENTS_SQL: review.STRENGTH_PREVIEW_REVIEW_EVENTS_SQL,
+    readStrengthPreviewReviewState: review.readStrengthPreviewReviewState,
     readStrengthRevisionPreview: preview.readStrengthRevisionPreview,
     readStrengthChoiceAudit: strength.readStrengthChoiceAudit,
     PLAN_ADJUSTMENT_TABLE_SQL: sql.PLAN_ADJUSTMENT_TABLE_SQL,
@@ -149,6 +152,7 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
   it('initializes unapproved revision storage and exposes no execution approval', async () => {
     const snapshot = await service.exportLocalData();
     expect(snapshot).toHaveProperty('strength_revision_previews', []);
+    expect(snapshot).toHaveProperty('strength_revision_preview_review_events', []);
     expect(snapshot).toHaveProperty('daily_strength_choice_events', []);
     expect(snapshot).toHaveProperty('training_plan_adjustment_events', []);
     expect(snapshot).toHaveProperty('training_baseline_review_events', []);
