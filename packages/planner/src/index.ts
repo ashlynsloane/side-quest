@@ -1753,3 +1753,9 @@ export type { DailySessionChoice, DailySessionChoices } from './daily-session-ch
 
 export { STRENGTH_CHOICE_AUDIT_SQL, appendStrengthChoiceDecision, readStrengthChoiceAudit, strengthSessionSignature, effectiveStrengthChoice } from './daily-strength-decision-sqlite';
 export type { StrengthChoiceDecision, EffectiveStrengthChoice } from './daily-strength-decision-sqlite';
+
+// Milestone 1: read-only exercise revision and evidence gates; no mobile approval action.
+export { evaluateStrengthWorkoutRevision } from './strength-workout-revision-review';
+export type { StrengthRevisionReview } from './strength-workout-revision-review';
+export { reviewStrengthRevisionForDecision } from './strength-revision-decision-review';
+export type { CurrentStrengthReviewEvidence, StrengthRevisionDecisionReview } from './strength-revision-decision-review';
