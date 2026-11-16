@@ -298,6 +298,26 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
       previewId: 'qa-preview', status: 'stale',
       executableWorkoutApproved: false,
     });
+    const detail = await service.getUnapprovedStrengthReviewDetail(
+      'synthetic-athlete-one', 'qa-preview', {
+        athleteId: 'synthetic-athlete-one',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    );
+    expect(detail.status).toBe('stale');
+    expect(detail.summary.secondsReduced).toBe(480);
+    expect(detail.review.status).toBe('pending_review');
+    expect(detail.executableWorkoutApproved).toBe(false);
+    await expect(service.getUnapprovedStrengthReviewDetail(
+      'different-athlete', 'qa-preview', {
+        athleteId: 'different-athlete',
+        todayLocalDate: '2026-11-16', symptoms: 'unknown',
+        readiness: 'unknown', providerRestrictions: 'unknown',
+        sourceCoverage: 'unknown', exerciseRestrictionsReviewed: false,
+      },
+    )).rejects.toThrow();
     const exported = await service.exportLocalData();
     expect(exported.strength_revision_previews).toHaveLength(1);
     expect(exported.daily_strength_choice_events).toEqual([]);
