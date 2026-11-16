@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -1525,6 +1525,47 @@ export async function getUnapprovedStrengthReviewDetail(
     await initializeDatabase();
     return readUnapprovedStrengthReviewDetail(
       trainingAdjustmentDriver, athleteId, previewId, evidence,
+    );
+  });
+}
+
+/**
+ * Persist ONLY a reversible review-list disposition, never a workout dose
+ * decision. expectedLastEventId comes from the athlete's last viewed history;
+ * the backend compares it under an exclusive SQLite transaction.
+ */
+export async function setUnapprovedStrengthReviewDisposition(input: {
+  athleteId: string;
+  previewId: string;
+  action: 'dismiss' | 'restore';
+  expectedLastEventId: string | null;
+}): Promise<StrengthPreviewReviewState> {
+  const { athleteId, previewId, action, expectedLastEventId } = input;
+  if (!athleteId?.trim() || !previewId?.trim()
+    || !['dismiss', 'restore'].includes(action)
+    || (expectedLastEventId !== null
+      && (typeof expectedLastEventId !== 'string' || !expectedLastEventId.trim()))) {
+    throw new Error('Invalid athlete-owned strength review disposition request.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+    if (!preview) throw new Error('Unapproved strength review preview is missing.');
+    const createdAt = new Date().toISOString();
+    const event: StrengthPreviewReviewEvent = {
+      schemaVersion: 1,
+      id: `preview-review-${createdAt}-${Math.random().toString(36).slice(2, 13)}`,
+      athleteId, previewId, action, createdAt,
+      bindingSignature: JSON.stringify(preview.binding),
+      executableWorkoutApproved: false,
+    };
+    await appendStrengthPreviewReviewEvent(
+      trainingAdjustmentDriver, event, expectedLastEventId,
+    );
+    return readStrengthPreviewReviewState(
+      trainingAdjustmentDriver, athleteId, previewId,
     );
   });
 }
