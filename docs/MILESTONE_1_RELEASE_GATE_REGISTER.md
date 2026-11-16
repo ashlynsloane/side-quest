@@ -249,6 +249,45 @@ claims, wrong-owner requests, unprotected connection access attempts,
 unsupported exclusivity and failed transaction cleanup. This is synthetic
 atomic-check evidence, not an installed iPhone interaction or approval.
 
+## Athlete-confirmed routine version authorization — Stage 19
+
+A new explicit athlete-only **routine workout authorization transaction** is
+implemented and exercised on the development branch. It does **not** remove
+the existing restriction, provenance, or write-time evidence gates; it
+applies a separate, conservative eligibility policy to explicitly
+uncomplicated routine training only. Rehabilitation/return-to-sport,
+previously protected movements, unresolved self-reported restrictions,
+incomplete injury/training history and stale evidence fail closed.
+
+The transaction:
+- Runs the same exact 13-gate review as the read-only UI through one
+  exclusive SQLite transaction handle; no external reads can interleave
+- Requires a matching version token from the athlete's most recent review
+  plus three independently selected athlete confirmation statements
+- Checks today's date, the exact source and candidate snapshots, current
+  normal symptoms, readiness, PT status, routine training intent, recorded
+  restrictions, completion history and prior planning choices
+- Records one immutable, athlete-owned authorization per planned session,
+  storing the precise candidate exercise prescription, preview binding and
+  explicit confirmation, and refusing a duplicate attempt
+- Preserves the original generated plan, completion ledger and planning
+  decision journal; **does not start or silently progress the workout**
+
+The mobile review screen exposes the checkbox-and-final-confirmation
+workflow and a stored receipt. Authorizations are included in critical
+audit export and fail-closed deletion checks. Both file-backed planner
+and native-style mobile SQLite tests check exact identity, restart
+recovery, failed inserts, duplicate prevention and later restriction
+alerts.
+
+**Important limits:** A historical authorization has
+`requiresFreshStartRevalidation: true`. The actual workout start/player
+integration, authorization withdrawal/revocation, physical-iPhone
+acceptance and restoration of the original real athlete database are
+still **NOT VERIFIED or NOT IMPLEMENTED**. No authorization may be treated
+as a clinician's clearance, and no saved event by itself launches exercise.
+Do not merge or deploy before those safety-critical gates pass.
+
 ## Definition of the next implementation gate
 
 A future candidate approval must validate, **inside one athlete-owned
