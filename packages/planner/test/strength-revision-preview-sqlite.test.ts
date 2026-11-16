@@ -2227,7 +2227,7 @@ async function freshRoutineCandidate(
     movementPatterns: ['squat' as const], avoidanceTags: [],
     jointLoads: [{ region: 'hip' as const, load: 1 as const }],
     bodyRegions: [{ region: 'quadriceps' as const, load: 1 as const, role: 'primary' as const }],
-    impactLevel: 0,
+    impactLevel: 0 as const,
   };
   source.workout.stations[0]!.exercises[0]!.exerciseSnapshot = exerciseMetadata;
   const proposed = candidate();
