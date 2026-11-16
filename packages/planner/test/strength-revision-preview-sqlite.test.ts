@@ -274,6 +274,41 @@ describe('immutable unapproved strength revision preview: actual SQLite file', (
     expect(after).toEqual(before);
     expect(count(db, 'strength_revision_previews')).toBe(1);
   });
+  it('blocks conflicting accepted planning decisions at save and after reopen', async () => {
+    const record = decision();
+    const insert = (db: DatabaseSync) => db.prepare(`INSERT INTO daily_strength_choice_events
+      (id, athlete_id, block_id, session_id, event_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      record.id, record.athleteId, record.blockId, record.sessionId,
+      JSON.stringify(record), record.createdAt,
+    );
+    const existing = open();
+    insert(existing.db);
+    await expect(appendStrengthRevisionPreview(existing.sql, input()))
+      .rejects.toThrow(/unresolved strength planning decision/);
+    expect(count(existing.db, 'strength_revision_previews')).toBe(0);
+    const newlyAccepted = open();
+    const preview = await appendStrengthRevisionPreview(newlyAccepted.sql, input());
+    insert(newlyAccepted.db);
+    const rechecked = await reassessStoredStrengthRevisionPreview(
+      newlyAccepted.sql, 'synthetic-athlete-a', preview.id, evidence(),
+    );
+    expect(rechecked.status).toBe('stale');
+    expect(rechecked.reasons.join(' ')).toMatch(/planning decision supersedes/);
+  });
+  it('does not interpret a corrupt planning journal as no competing approval', async () => {
+    const { db, sql } = open();
+    const record = decision();
+    db.prepare(`INSERT INTO daily_strength_choice_events
+      (id, athlete_id, block_id, session_id, event_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      record.id, record.athleteId, record.blockId, record.sessionId,
+      '{corrupt', record.createdAt,
+    );
+    await expect(appendStrengthRevisionPreview(sql, input()))
+      .rejects.toThrow(/audit is unreadable/);
+    expect(count(db, 'strength_revision_previews')).toBe(0);
+  });
   it('refuses preview persistence when active PT restrictions or unknown symptoms exist', async () => {
     const activePT = open();
     activePT.db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
