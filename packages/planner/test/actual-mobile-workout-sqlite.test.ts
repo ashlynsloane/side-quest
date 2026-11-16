@@ -277,10 +277,10 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(summary.changes.map(item => item.kind)).toEqual([
       'station_duration', 'exercise_target',
     ]);
-    const state = await service.getUnapprovedStrengthRevisionReviewState(
+    const reviewState = await service.getUnapprovedStrengthRevisionReviewState(
       'synthetic-athlete-one', 'qa-preview',
     );
-    expect(state).toMatchObject({
+    expect(reviewState).toMatchObject({
       status: 'pending_review', executableWorkoutApproved: false,
     });
     const inbox = await service.listUnapprovedStrengthReviewItems(
