@@ -1,7 +1,7 @@
 import { localCalendarDate, type CurrentStrengthReviewEvidence,
   type UnapprovedStrengthReviewInboxItem } from '@circuit/planner';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,6 +17,8 @@ export default function StrengthReviewInboxScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const athleteId = user?.id;
+  const currentAthlete = useRef(athleteId);
+  currentAthlete.current = athleteId;
   const [items, setItems] = useState<UnapprovedStrengthReviewInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,12 +72,16 @@ export default function StrengthReviewInboxScreen() {
     void listUnapprovedStrengthReviewItems(
       athleteId, evidenceFor(athleteId), pageSize, items.length,
     ).then(result => {
+      if (currentAthlete.current !== athleteId) return;
       setItems(previous => [...previous, ...result]);
       setHasMore(result.length === pageSize);
     }).catch(() => {
+      if (currentAthlete.current !== athleteId) return;
       setHasMore(false);
       setError('Additional saved drafts could not be verified. Review history is incomplete.');
-    }).finally(() => setLoadingMore(false));
+    }).finally(() => {
+      if (currentAthlete.current === athleteId) setLoadingMore(false);
+    });
   };
 
   return (
