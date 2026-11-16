@@ -102,10 +102,33 @@ function open(owner = 'synthetic-athlete-a') {
     CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT NOT NULL);
     CREATE TABLE training_blocks(id TEXT PRIMARY KEY, block_json TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE workout_ledger(id TEXT PRIMARY KEY, planned_session_id TEXT);
+    CREATE TABLE training_check_ins(
+      id TEXT PRIMARY KEY, check_in_json TEXT NOT NULL,
+      active INTEGER NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE readiness_check_ins(
+      date TEXT PRIMARY KEY, check_in_json TEXT NOT NULL
+    );
+    CREATE TABLE pt_profiles(
+      id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
     ${STRENGTH_REVISION_PREVIEW_SQL}
     ${STRENGTH_CHOICE_AUDIT_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
+  db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)').run(
+    'checkin-1', JSON.stringify({
+      status: 'normal', active: true,
+      activeUntil: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    }), 1, '2026-11-15T09:00:00Z',
+  );
+  db.prepare('INSERT INTO readiness_check_ins VALUES (?, ?)').run(
+    '2026-11-15',
+    JSON.stringify({ sleep: 4, energy: 4, muscleFreshness: 4, stress: 2, motivation: 4 }),
+  );
+  db.prepare('INSERT INTO pt_profiles VALUES (?, ?, ?)').run(
+    'pt-1', JSON.stringify({ active: false }), '2026-11-15T09:00:00Z',
+  );
   const saveBlock = (b: TrainingBlockPlan, updated = '2026-11-14T00:00:00Z') => {
     db.prepare('INSERT OR REPLACE INTO training_blocks VALUES (?, ?, ?)')
       .run(b.id, JSON.stringify(b), updated);
@@ -242,6 +265,65 @@ describe('immutable unapproved strength revision preview: actual SQLite file', (
     const after = await readStrengthRevisionPreview(sql, 'synthetic-athlete-a', 'preview-1');
     expect(after).toEqual(before);
     expect(count(db, 'strength_revision_previews')).toBe(1);
+  });
+  it('refuses preview persistence when active PT restrictions or unknown symptoms exist', async () => {
+    const activePT = open();
+    activePT.db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+    await expect(appendStrengthRevisionPreview(activePT.sql, input()))
+      .rejects.toThrow(/PT profile restrictions/);
+    expect(count(activePT.db, 'strength_revision_previews')).toBe(0);
+    const noSymptoms = open();
+    noSymptoms.db.prepare('DELETE FROM training_check_ins').run();
+    await expect(appendStrengthRevisionPreview(noSymptoms.sql, input()))
+      .rejects.toThrow(/Current symptom check-in is missing/);
+    expect(count(noSymptoms.db, 'strength_revision_previews')).toBe(0);
+    const noReadiness = open();
+    noReadiness.db.prepare('DELETE FROM readiness_check_ins').run();
+    await expect(appendStrengthRevisionPreview(noReadiness.sql, input()))
+      .rejects.toThrow(/Same-day readiness is missing/);
+    expect(count(noReadiness.db, 'strength_revision_previews')).toBe(0);
+  });
+  it('reopening re-reads the current PT, symptom and readiness records', async () => {
+    const changedPT = open();
+    await appendStrengthRevisionPreview(changedPT.sql, input());
+    changedPT.db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+    const ptResult = await reassessStoredStrengthRevisionPreview(
+      changedPT.sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(ptResult.status).toBe('stale');
+    expect(ptResult.reasons.join(' ')).toMatch(/PT profile restrictions/);
+    const changedSymptoms = open();
+    await appendStrengthRevisionPreview(changedSymptoms.sql, input());
+    changedSymptoms.db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(
+      JSON.stringify({
+        status: 'tightness_pain', active: true,
+        activeUntil: new Date(Date.now() + 86400000).toISOString(),
+      }),
+    );
+    expect((await reassessStoredStrengthRevisionPreview(
+      changedSymptoms.sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    )).status).toBe('stale');
+    const lowReadiness = open();
+    await appendStrengthRevisionPreview(lowReadiness.sql, input());
+    lowReadiness.db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(
+      JSON.stringify({ sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1 }),
+    );
+    expect((await reassessStoredStrengthRevisionPreview(
+      lowReadiness.sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    )).status).toBe('stale');
+  });
+  it('expired or corrupt symptom records fail closed for new previews', async () => {
+    for (const check of [
+      { status: 'normal', active: true, activeUntil: '2020-01-01T00:00:00Z' },
+      { status: 'normal', active: true },
+      { status: 'normal', active: false, activeUntil: new Date(Date.now() + 86400000).toISOString() },
+    ]) {
+      const { db, sql } = open();
+      db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(JSON.stringify(check));
+      await expect(appendStrengthRevisionPreview(sql, input()))
+        .rejects.toThrow(/persisted safety evidence/);
+      expect(count(db, 'strength_revision_previews')).toBe(0);
+    }
   });
   it('wrong owner cannot read persisted previews', async () => {
     const { sql } = open();
