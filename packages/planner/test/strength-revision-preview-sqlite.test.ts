@@ -101,6 +101,29 @@ function driver(db: DatabaseSync): TrainingAdjustmentSqlDriver {
       try { await fn(); db.exec('COMMIT'); }
       catch (error) { db.exec('ROLLBACK'); throw error; }
     },
+    exclusiveTransaction: async <T>(
+      fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+    ): Promise<T> => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const writer: TrainingAdjustmentSqlDriver = {
+          getFirst: async <Row>(query: string, params: Array<string | number | null>) =>
+            db.prepare(query).get(...params) as Row | null,
+          getAll: async <Row>(query: string, params: Array<string | number | null>) =>
+            db.prepare(query).all(...params) as Row[],
+          run: async (query: string, params: Array<string | number | null>) => {
+            db.prepare(query).run(...params);
+          },
+          transaction: async () => { throw new Error('Exclusive writer cannot nest.'); },
+        };
+        const result = await fn(writer);
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T> => {
       db.exec('BEGIN IMMEDIATE');
       try {
