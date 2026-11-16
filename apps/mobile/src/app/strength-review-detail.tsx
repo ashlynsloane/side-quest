@@ -1,24 +1,16 @@
 import {
-  summarizeUnapprovedStrengthRevision,
+  localCalendarDate,
   type StrengthReviewDoseChange,
-  type StrengthRevisionReadOnlySummary,
-  type StrengthPreviewReviewState,
+  type UnapprovedStrengthReviewDetail,
 } from '@circuit/planner';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  getUnapprovedStrengthRevisionPreview,
-  getUnapprovedStrengthRevisionReviewState,
-} from '@/services/database';
+import { getUnapprovedStrengthReviewDetail } from '@/services/database';
 import { useAuth } from '@/state/auth-context';
 
-interface ReadOnlyDetail {
-  summary: StrengthRevisionReadOnlySummary;
-  state: StrengthPreviewReviewState;
-}
 function duration(seconds: number): string {
   const rounded = seconds / 60;
   return Number.isInteger(rounded)
@@ -48,7 +40,7 @@ export default function StrengthReviewDetailScreen() {
   const { user } = useAuth();
   const { previewId } = useLocalSearchParams<{ previewId?: string }>();
   const athleteId = user?.id;
-  const [detail, setDetail] = useState<ReadOnlyDetail | null>(null);
+  const [detail, setDetail] = useState<UnapprovedStrengthReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -62,17 +54,16 @@ export default function StrengthReviewDetailScreen() {
       return () => { live = false; };
     }
     setLoading(true);
-    void Promise.all([
-      getUnapprovedStrengthRevisionPreview(athleteId, previewId),
-      getUnapprovedStrengthRevisionReviewState(athleteId, previewId),
-    ]).then(([preview, state]) => {
-      if (!live) return;
-      if (!preview) {
-        setError('The saved preview no longer exists.');
-        return;
-      }
-      const summary = summarizeUnapprovedStrengthRevision(preview);
-      setDetail({ summary, state });
+    void getUnapprovedStrengthReviewDetail(athleteId, previewId, {
+      athleteId,
+      todayLocalDate: localCalendarDate(new Date()),
+      symptoms: 'unknown',
+      readiness: 'unknown',
+      providerRestrictions: 'unknown',
+      sourceCoverage: 'unknown',
+      exerciseRestrictionsReviewed: false,
+    }).then(result => {
+      if (live) setDetail(result);
     }).catch(() => {
       if (live) {
         setDetail(null);
@@ -109,9 +100,21 @@ export default function StrengthReviewDetailScreen() {
           <View style={styles.card}><Text style={styles.error}>{error}</Text></View>
         ) : detail ? (
           <>
+            {detail.stale ? (
+              <View style={styles.notice}>
+                <Text style={styles.noticeTitle}>Current review is blocked</Text>
+                <Text style={styles.noticeText}>
+                  This comparison is historical. The original source or current
+                  safety evidence is missing, changed, or unverified.
+                </Text>
+                {detail.reasons.slice(0, 5).map((reason, index) => (
+                  <Text key={index} style={styles.noticeText}>• {reason}</Text>
+                ))}
+              </View>
+            ) : null}
             <View style={styles.card}>
               <Text style={styles.cardEyebrow}>
-                {detail.state.status === 'dismissed' ? 'DISMISSED DRAFT' : 'PENDING REVIEW'}
+                {detail.status === 'stale' ? 'STALE / UNVERIFIED DRAFT' : detail.status === 'dismissed' ? 'DISMISSED DRAFT' : 'PENDING REVIEW'}
               </Text>
               <Text style={styles.cardTitle}>{detail.summary.sourceTitle}</Text>
               <Text style={styles.helper}>Original session: {detail.summary.sourceDate}</Text>
@@ -151,8 +154,8 @@ export default function StrengthReviewDetailScreen() {
             <Text style={styles.sectionTitle}>Review history</Text>
             <View style={styles.card}>
               <Text style={styles.helper}>
-                {detail.state.events.length} recorded review event(s).
-                Current state: {detail.state.status === 'dismissed'
+                {detail.review.events.length} recorded review event(s).
+                Current state: {detail.review.status === 'dismissed'
                   ? 'Dismissed' : 'Pending review'}.
               </Text>
               {detail.state.events.map(event => (
