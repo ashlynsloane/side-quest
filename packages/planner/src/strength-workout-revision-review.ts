@@ -16,6 +16,26 @@ function finitePositive(value: unknown): value is number {
   return finiteNonnegative(value) && value > 0;
 }
 
+
+/** Reject any unreviewed property changes, including added or removed keys. */
+function sameOutsideAllowed(
+  source: Record<string, unknown>,
+  proposed: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  const allowedKeys = new Set(allowed);
+  const keys = new Set([...Object.keys(source), ...Object.keys(proposed)]);
+  for (const key of keys) {
+    if (allowedKeys.has(key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(source, key)
+      || !Object.prototype.hasOwnProperty.call(proposed, key)
+      || JSON.stringify(source[key]) !== JSON.stringify(proposed[key])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Conservative structural check for an athlete-reviewed shorter workout.
  * Does NOT check pain response, tissue load, PT rules, equipment safety,
@@ -36,6 +56,13 @@ export function evaluateStrengthWorkoutRevision(input: {
     || original.stations.length === 0 || proposed.stations.length === 0) {
     return { structurallyValid: false, reasons: ['Missing workout identity or stations.'],
       requiresCurrentRestrictionReview: true, autoApproved: false };
+  }
+  if (!sameOutsideAllowed(
+    original as unknown as Record<string, unknown>,
+    proposed as unknown as Record<string, unknown>,
+    ['stations', 'totalWorkSeconds', 'totalRestSeconds', 'estimatedElapsedSeconds'],
+  )) {
+    reject('Unreviewed workout metadata or source provenance changed.');
   }
   if (proposed.id !== original.id || proposed.name !== original.name
     || proposed.variantLevel !== original.variantLevel
@@ -83,6 +110,13 @@ export function evaluateStrengthWorkoutRevision(input: {
       reject('Unrecognized, empty, increased, or structurally modified station.');
       continue;
     }
+    if (!sameOutsideAllowed(
+      source as unknown as Record<string, unknown>,
+      station as unknown as Record<string, unknown>,
+      ['durationSeconds', 'exercises'],
+    )) {
+      reject('Unreviewed station metadata changed.');
+    }
     if (station.exercises.length > source.exercises.length) {
       reject('A revision cannot add exercises.');
     }
@@ -99,6 +133,13 @@ export function evaluateStrengthWorkoutRevision(input: {
         continue;
       }
       usedExercises.add(station.id + ':' + exercise.exerciseId);
+      if (!sameOutsideAllowed(
+        previous as unknown as Record<string, unknown>,
+        exercise as unknown as Record<string, unknown>,
+        ['target', 'userLoadValue'],
+      )) {
+        reject('Unreviewed exercise instructions or metadata changed.');
+      }
       if (!finitePositive(previous.target) || !finitePositive(exercise.target)
         || exercise.target > previous.target
         || exercise.unit !== previous.unit || exercise.order !== previous.order
