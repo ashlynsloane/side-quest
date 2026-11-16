@@ -223,6 +223,32 @@ Returning a stale draft to the inbox does not make it clinically reviewable.
 No preview status, including `needs_review`, `pending_review` or
 `reviewable_preview`, permits exercise execution or claims clinician clearance.
 
+## Atomic non-executable authorization recheck (Stage 18)
+
+A new `inspectStrengthAuthorizationDryRun` executes the **same** 13-gate
+assessment used by the draft detail screen through one new native-exclusive
+SQLite transaction. The passed handle only exposes SQL reads; writes and
+nested transactions throw. It compares an exact local `observationToken`
+captured by the displayed review with freshly read PT/recovery/symptom rows,
+plan version, completion ledger, planning decisions and safety audit history.
+A changed readiness value can be detected even when both values fall within
+a "passing" threshold. The mobile detail screen offers a user-initiated
+**Recheck draft safety evidence** control to refresh the displayed holds.
+
+The `observationToken` includes sensitive local inputs and is an ephemeral
+equality check, **not a signed attestation or authorization capability**.
+Never send it to external analytics or use it to infer medical clearance.
+The dry run returns no executable candidate, no consent, and no mutation:
+`canConfirmExecutableWorkout`, `workoutPersisted` and
+`executableWorkoutApproved` remain false. The actual authorization/consent
+transaction is still **not implemented**.
+
+Real-file and mobile SQLite tests examine same-input stability, PT/symptom
+changes, in-range readiness drift, changed source workouts, new restriction
+claims, wrong-owner requests, unprotected connection access attempts,
+unsupported exclusivity and failed transaction cleanup. This is synthetic
+atomic-check evidence, not an installed iPhone interaction or approval.
+
 ## Definition of the next implementation gate
 
 A future candidate approval must validate, **inside one athlete-owned
