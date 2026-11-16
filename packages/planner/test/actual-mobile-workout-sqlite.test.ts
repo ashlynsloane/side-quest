@@ -428,6 +428,21 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     const savedBlock = await service.getLatestTrainingBlock();
     expect(savedBlock?.block.weeks[0]?.sessions[0]?.workout)
       .toEqual(originalWorkout);
+
+    // A simulated cold restart must preserve the complete disposition trail.
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const recovered = await service.getUnapprovedStrengthRevisionReviewState(
+      'synthetic-athlete-one', 'qa-preview',
+    );
+    expect(recovered.status).toBe('pending_review');
+    expect(recovered.events.map(item => item.action)).toEqual(['dismiss', 'restore']);
+    expect(recovered.executableWorkoutApproved).toBe(false);
+    expect((await service.exportLocalData()).workout_ledger).toEqual([]);
+    expect((await service.getLatestTrainingBlock())?.block.weeks[0]?.sessions[0]?.workout)
+      .toEqual(originalWorkout);
   });
 });
 
