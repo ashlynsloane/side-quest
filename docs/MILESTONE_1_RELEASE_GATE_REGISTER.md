@@ -115,6 +115,21 @@ that still requires a real athlete, provider source, or native device.
   contradictions, stale reports, invalid metadata, failed transactions,
   changed preflight status and an unchanged workout ledger. This is a
   **provenance scaffold**, not independently authenticated provider evidence.
+- The review detail now exposes a deterministic **evidence reconciliation
+  checklist** derived from all twelve approval gates. Active safety holds
+  appear before missing-source reviews, followed by intentionally unavailable
+  executable-approval features. Every task explains its next investigative
+  step and explicitly marks `canResolveAutomatically: false`. Even a perfect
+  set of local check-ins cannot clear the four permanent external/authorization
+  gates. Missing/duplicate gates and forged local provider clearances fail
+  checklist validation rather than hiding requirements.
+- The read-only inbox verifies all provenance rows for foreign ownership or
+  missing parent previews *before* applying pagination. An orphaned or
+  cross-athlete safety report off the visible page fails the whole history
+  instead of disappearing from the athlete's review. The detail screen shows
+  a bounded unverified report history and prevents simultaneous concern and
+  draft-disposition writes. Preflight and provenance expiration assessments
+  use the same evaluation instant within a single database snapshot.
 - A full mobile-service SQLite test creates an isolated synthetic source block,
   saves a preview, then verifies retrieval, history, read-only inbox and
   preservation of the unchanged original block and empty completion journal.
