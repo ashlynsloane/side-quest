@@ -114,6 +114,78 @@ async function sourceInCurrentBlock(
 }
 
 /**
+ * Re-read only local database safety evidence. Missing provider data outside
+ * this SQLite profile is still UNKNOWN; passing this check cannot clear it.
+ */
+async function persistedReviewBlockers(
+  sql: TrainingAdjustmentSqlDriver, todayLocalDate: string,
+): Promise<string[]> {
+  const blockers: string[] = [];
+  const symptomRow = await sql.getFirst<{ check_in_json: string }>(
+    'SELECT check_in_json FROM training_check_ins WHERE active = 1 ORDER BY updated_at DESC LIMIT 1',
+    [],
+  );
+  if (!symptomRow) {
+    blockers.push('Current symptom check-in is missing.');
+  } else {
+    try {
+      const check = JSON.parse(symptomRow.check_in_json) as {
+        status?: string; active?: boolean; activeUntil?: string;
+      };
+      if (!check || check.status !== 'normal' || check.active !== true) {
+        blockers.push('Current symptoms or incomplete symptom status prevent dose review.');
+      }
+      if (!isTimestamp(check.activeUntil) || Date.parse(check.activeUntil) <= Date.now()) {
+        blockers.push('Current symptom evidence is expired or invalid.');
+      }
+    } catch {
+      blockers.push('Current symptom check-in is unreadable.');
+    }
+  }
+  const ptRow = await sql.getFirst<{ profile_json: string }>(
+    'SELECT profile_json FROM pt_profiles ORDER BY updated_at DESC LIMIT 1',
+    [],
+  );
+  if (!ptRow) {
+    blockers.push('PT profile coverage is missing.');
+  } else {
+    try {
+      const pt = JSON.parse(ptRow.profile_json) as { active?: boolean };
+      if (!pt || typeof pt.active !== 'boolean' || pt.active) {
+        blockers.push('PT profile restrictions are active or unknown.');
+      }
+    } catch {
+      blockers.push('PT profile is unreadable.');
+    }
+  }
+  const readinessRow = await sql.getFirst<{ check_in_json: string }>(
+    'SELECT check_in_json FROM readiness_check_ins WHERE date = ? LIMIT 1',
+    [todayLocalDate],
+  );
+  if (!readinessRow) {
+    blockers.push('Same-day readiness is missing.');
+  } else {
+    try {
+      const readiness = JSON.parse(readinessRow.check_in_json) as Record<string, unknown>;
+      const fields = ['sleep', 'energy', 'muscleFreshness', 'stress', 'motivation'];
+      if (!readiness || fields.some(field => typeof readiness[field] !== 'number'
+        || !Number.isFinite(readiness[field]) || Number(readiness[field]) < 1
+        || Number(readiness[field]) > 5)) {
+        blockers.push('Same-day readiness values are invalid.');
+      } else {
+        const score = (Number(readiness.sleep) + Number(readiness.energy)
+          + Number(readiness.muscleFreshness) + 6 - Number(readiness.stress)
+          + Number(readiness.motivation)) / 5;
+        if (score < 2.4) blockers.push('Recovery readiness prohibits dose review.');
+      }
+    } catch {
+      blockers.push('Same-day readiness is unreadable.');
+    }
+  }
+  return blockers;
+}
+
+/**
  * Atomically store an immutable candidate for later REVIEW ONLY.
  * The clinical sourceCoverage and provider evidence flags are caller-supplied,
  * NOT authenticated by this operation; no athlete-facing approval is enabled.
@@ -159,6 +231,10 @@ export async function appendStrengthRevisionPreview(
       [binding.sessionId],
     );
     if (completed) throw new Error('The strength session already has a completion record.');
+    const blockers = await persistedReviewBlockers(sql, preview.evidence.todayLocalDate);
+    if (blockers.length) {
+      throw new Error('Current persisted safety evidence blocks preview: ' + blockers.join(' '));
+    }
     await sql.run(
       `INSERT INTO strength_revision_previews
        (id, athlete_id, block_id, session_id, preview_json, created_at)
@@ -218,6 +294,7 @@ export async function reassessStoredStrengthRevisionPreview(
     [preview.binding.sessionId],
   );
   if (completed) reasons.push('Workout already has a completion record.');
+  reasons.push(...await persistedReviewBlockers(sql, evidence.todayLocalDate));
   return {
     status: reasons.length === 0 ? 'reviewable_preview' : 'stale',
     reasons, sourceSession, preview, executableWorkoutApproved: false,
