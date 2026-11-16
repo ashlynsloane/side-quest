@@ -18,6 +18,11 @@ import { readUnapprovedStrengthReviewDetail } from '../src/strength-revision-rev
 import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
 import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
 import {
+  TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext,
+  appendTrainingSafetyContextEvent, evaluateTrainingSafetyPolicy,
+  type TrainingSafetyContextEvent, type ProtectedMovement,
+} from '../src/training-safety-context-sqlite';
+import {
   STRENGTH_EVIDENCE_PROVENANCE_SQL,
   readStrengthEvidenceProvenance, appendStrengthEvidenceProvenance,
   type StrengthEvidenceProvenanceEvent,
@@ -173,6 +178,7 @@ function open(owner = 'synthetic-athlete-a') {
     ${STRENGTH_REVISION_PREVIEW_SQL}
     ${STRENGTH_PREVIEW_REVIEW_EVENTS_SQL}
     ${STRENGTH_EVIDENCE_PROVENANCE_SQL}
+    ${TRAINING_SAFETY_CONTEXT_SQL}
     ${STRENGTH_CHOICE_AUDIT_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
