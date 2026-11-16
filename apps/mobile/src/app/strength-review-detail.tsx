@@ -51,7 +51,9 @@ export default function StrengthReviewDetailScreen() {
   const { previewId } = useLocalSearchParams<{ previewId?: string }>();
   const athleteId = user?.id;
   const currentAthlete = useRef(athleteId);
+  const currentPreview = useRef(previewId);
   currentAthlete.current = athleteId;
+  currentPreview.current = previewId;
   const [detail, setDetail] = useState<UnapprovedStrengthReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +65,7 @@ export default function StrengthReviewDetailScreen() {
     setDetail(null);
     setError(null);
     setDispositionError(null);
+    setSavingDisposition(false);
     if (!athleteId || typeof previewId !== 'string' || !previewId.trim()) {
       setLoading(false);
       setError('A valid saved preview and athlete profile are required.');
@@ -87,7 +90,8 @@ export default function StrengthReviewDetailScreen() {
   const changeDisposition = async (action: 'dismiss' | 'restore') => {
     if (savingDisposition || !athleteId || !detail
       || typeof previewId !== 'string'
-      || currentAthlete.current !== athleteId) return;
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
     setSavingDisposition(true);
     setDispositionError(null);
     try {
@@ -98,15 +102,18 @@ export default function StrengthReviewDetailScreen() {
       const updated = await getUnapprovedStrengthReviewDetail(
         athleteId, previewId, unknownEvidence(athleteId),
       );
-      if (currentAthlete.current === athleteId) setDetail(updated);
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setDetail(updated);
     } catch {
-      if (currentAthlete.current === athleteId) {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
         setDispositionError(
           'The draft update could not be verified. Reopen this screen to refresh before trying again.',
         );
       }
     } finally {
-      if (currentAthlete.current === athleteId) setSavingDisposition(false);
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setSavingDisposition(false);
     }
   };
 
