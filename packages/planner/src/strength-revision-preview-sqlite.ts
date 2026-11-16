@@ -204,13 +204,27 @@ export async function appendStrengthRevisionPreview(
   if (!input.id?.trim() || !isTimestamp(input.createdAt)) {
     throw new Error('A distinct preview identity and valid timestamp are required.');
   }
-  const binding = createStrengthRevisionPreviewBinding(input);
-  if (!binding) throw new Error('Strength revision is not reviewable; no preview stored.');
+  const initiallyReviewed = createStrengthRevisionPreviewBinding(input);
+  if (!initiallyReviewed) throw new Error('Strength revision is not reviewable; no preview stored.');
+  // Freeze the proposal's value before the first asynchronous database read.
+  // Callers might mutate a shared UI object while SQLite is processing.
+  const snapshot = JSON.parse(JSON.stringify({
+    source: input.source, candidate: input.candidate,
+    decision: input.decision, evidence: input.evidence,
+  })) as {
+    source: PlannedStrengthSession; candidate: GeneratedWorkout;
+    decision: StrengthChoiceDecision; evidence: CurrentStrengthReviewEvidence;
+  };
+  const binding = createStrengthRevisionPreviewBinding(snapshot);
+  if (!binding || JSON.stringify(binding) !== JSON.stringify(initiallyReviewed)) {
+    throw new Error('Strength proposal changed while preparing the durable preview.');
+  }
   const preview: StoredStrengthRevisionPreview = {
     id: input.id, createdAt: input.createdAt, status: 'unapproved',
-    binding, candidate: input.candidate, decision: input.decision,
-    evidence: input.evidence, executableWorkoutApproved: false,
+    binding, candidate: snapshot.candidate, decision: snapshot.decision,
+    evidence: snapshot.evidence, executableWorkoutApproved: false,
   };
+  const serializedPreview = JSON.stringify(preview);
   await sql.transaction(async () => {
     const owner = await sql.getFirst<{ user_id: string }>(
       'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1', [],
@@ -240,7 +254,7 @@ export async function appendStrengthRevisionPreview(
        (id, athlete_id, block_id, session_id, preview_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [preview.id, binding.athleteId, binding.blockId, binding.sessionId,
-        JSON.stringify(preview), preview.createdAt],
+        serializedPreview, preview.createdAt],
     );
   });
   return preview;
