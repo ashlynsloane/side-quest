@@ -66,9 +66,9 @@ export async function readStrengthPreviewReviewState(
   }>(
     `SELECT id, athlete_id, preview_id, event_json, created_at
      FROM strength_revision_preview_review_events
-     WHERE athlete_id = ? AND preview_id = ?
+     WHERE preview_id = ?
      ORDER BY created_at ASC, rowid ASC`,
-    [athleteId, previewId],
+    [previewId],
   );
   const events: StrengthPreviewReviewEvent[] = [];
   let status: StrengthPreviewReviewState['status'] = 'pending_review';
