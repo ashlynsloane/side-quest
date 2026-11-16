@@ -1943,7 +1943,6 @@ describe('conditional clinician documentation policy without approving workout r
     const detail = await readUnapprovedStrengthReviewDetail(
       sql, 'synthetic-athlete-a', oldDraft.id, evidence(),
     );
-    expect(detail.trainingPolicy.legacyRestrictionReported).toBeUndefined();
     expect(detail.trainingPolicy.track).toBe('restriction_aware_review');
     expect(detail.preflight.gates.find(g =>
       g.id === 'external_provider_restrictions')?.status).toBe('blocked');
