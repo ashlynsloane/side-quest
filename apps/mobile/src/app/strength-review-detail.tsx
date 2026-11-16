@@ -312,7 +312,9 @@ export default function StrengthReviewDetailScreen() {
                     {gate.status === 'local_check_passed' ? 'LOCAL CHECK ONLY'
                       : gate.status === 'blocked' ? 'BLOCKED'
                         : gate.status === 'unverified' ? 'NOT VERIFIED'
-                          : 'NOT IMPLEMENTED'}
+                          : gate.status === 'not_applicable'
+                            ? 'NOT REQUIRED FOR ROUTINE TRAINING'
+                            : 'NOT IMPLEMENTED'}
                   </Text>
                   <Text style={styles.helper}>{gate.detail}</Text>
                 </View>
