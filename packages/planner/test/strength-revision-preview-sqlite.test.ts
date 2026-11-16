@@ -325,6 +325,33 @@ describe('immutable unapproved strength revision preview: actual SQLite file', (
       expect(count(db, 'strength_revision_previews')).toBe(0);
     }
   });
+  it('copies the complete reviewed proposal before asynchronous caller mutations', async () => {
+    const { sql } = open();
+    const passed = input();
+    let mutated = false;
+    const changingDriver: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      getFirst: async <T>(statement: string, params: Array<string | number | null>) => {
+        if (!mutated && statement.includes('sidequest_athlete_database_owner')) {
+          mutated = true;
+          passed.candidate.stations[0]!.exercises[0]!.target = 900;
+          passed.decision.proposedMinutes = 100;
+          passed.evidence.symptoms = 'active';
+        }
+        return sql.getFirst<T>(statement, params);
+      },
+    };
+    const stored = await appendStrengthRevisionPreview(changingDriver, passed);
+    expect(mutated).toBe(true);
+    expect(stored.candidate.stations[0]!.exercises[0]!.target).toBe(8);
+    expect(stored.decision.proposedMinutes).toBe(32);
+    expect(stored.evidence.symptoms).toBe('clear');
+    const recovered = await readStrengthRevisionPreview(
+      sql, 'synthetic-athlete-a', 'preview-1',
+    );
+    expect(recovered).toEqual(stored);
+    expect(recovered?.executableWorkoutApproved).toBe(false);
+  });
   it('wrong owner cannot read persisted previews', async () => {
     const { sql } = open();
     await appendStrengthRevisionPreview(sql, input());
