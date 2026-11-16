@@ -131,6 +131,11 @@ export async function appendStrengthChoiceDecision(
     }
     if ((decision.action === 'reduce' && decision.decision === 'accepted')
       || decision.decision === 'restored') {
+      // No active check-in does not prove that symptoms have resolved.
+      // Fail closed before considering any non-deferral dose decision.
+      if (!activeCheckIn) {
+        throw new Error('Current symptom status is unknown; review a current check-in.');
+      }
       if (symptomHold) {
         throw new Error('An active symptom or soreness hold prevents increasing planned training.');
       }
