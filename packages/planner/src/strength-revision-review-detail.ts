@@ -15,6 +15,9 @@ import {
 import {
   inspectStrengthApprovalPreflight, type StrengthApprovalPreflight,
 } from './strength-approval-preflight';
+import {
+  readStrengthEvidenceProvenance, type StrengthEvidenceProvenanceLedger,
+} from './strength-evidence-provenance-sqlite';
 
 /**
  * One read-only athlete-owned detail assessment. The source, saved candidate,
@@ -28,6 +31,7 @@ export interface UnapprovedStrengthReviewDetail {
   stale: boolean;
   reasons: string[];
   preflight: StrengthApprovalPreflight;
+  provenance: StrengthEvidenceProvenanceLedger;
   executableWorkoutApproved: false;
   requiresWriteTimeRevalidation: true;
 }
@@ -60,14 +64,21 @@ export async function readUnapprovedStrengthReviewDetail(
   const preflight = await inspectStrengthApprovalPreflight(
     snapshot, assessment, review, evidence,
   );
-  const stale = assessment.status === 'stale';
+  const provenance = await readStrengthEvidenceProvenance(
+    snapshot, athleteId, previewId,
+  );
+  const provenanceBlockers = preflight.gates.filter(gate =>
+    (gate.id === 'external_provider_restrictions' || gate.id === 'source_provenance')
+    && gate.status === 'blocked').map(gate => gate.detail);
+  const stale = assessment.status === 'stale' || provenanceBlockers.length > 0;
   return {
     summary,
     review,
     status: stale ? 'stale' : review.status,
     stale,
-    reasons: assessment.reasons,
+    reasons: [...assessment.reasons, ...provenanceBlockers],
     preflight,
+    provenance,
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
