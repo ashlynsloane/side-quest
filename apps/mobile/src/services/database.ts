@@ -1611,6 +1611,47 @@ export async function getRecordedAuthorizedStrengthWorkout(
 }
 
 /**
+ * The same dry-run evaluator, but using the exact stored proposal evidence
+ * for identity matching rather than accepting a UI statement of clearance.
+ * Provider claims inside that historical snapshot are still unverified.
+ */
+export async function recheckCurrentStrengthConfirmation(input: {
+  athleteId: string;
+  previewId: string;
+  expectedObservationToken: string;
+}): Promise<StrengthAuthorizationDryRunResult> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, input.previewId,
+    );
+    if (!preview) throw new Error('Strength workout draft is missing.');
+    return inspectStrengthAuthorizationDryRun(trainingAdjustmentDriver, {
+      ...input,
+      evidence: preview.evidence.todayLocalDate === localCalendarDate(new Date())
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: localCalendarDate(new Date()) },
+    });
+  });
+}
+
+export async function getRecordedAuthorizationForStrengthPreview(
+  athleteId: string, previewId: string,
+): Promise<AuthorizedStrengthWorkoutRecord | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+    if (!preview) throw new Error('Strength workout draft is missing.');
+    const record = await readAuthorizedRoutineWorkout(
+      trainingAdjustmentDriver, athleteId, preview.binding.sessionId,
+    );
+    return record?.previewId === previewId ? record : null;
+  });
+}
+
+/**
  * Persist ONLY a reversible review-list disposition, never a workout dose
  * decision. expectedLastEventId comes from the athlete's last viewed history;
  * the backend compares it under an exclusive SQLite transaction.
