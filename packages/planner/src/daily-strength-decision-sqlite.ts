@@ -60,7 +60,7 @@ export async function readStrengthChoiceAudit(
      ORDER BY created_at ASC, rowid ASC`,
     [athleteId, blockId, sessionId],
   );
-  return rows.map(row => {
+  const history = rows.map(row => {
     let d: StrengthChoiceDecision;
     try { d = JSON.parse(row.event_json) as StrengthChoiceDecision; }
     catch { throw new Error('Strength adjustment audit is unreadable.'); }
@@ -76,6 +76,36 @@ export async function readStrengthChoiceAudit(
     }
     return d;
   });
+  // Every historical transition must be possible under the same rules
+  // enforced for a newly appended event. Independent row validity is not
+  // enough: a forged second acceptance or orphaned restoration is unsafe.
+  let pending: StrengthChoiceDecision | null = null;
+  let lastTimestamp: number | null = null;
+  for (const event of history) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(event.createdAt)
+      || !Number.isFinite(Date.parse(event.createdAt))) {
+      throw new Error('Strength adjustment audit has an invalid event timestamp.');
+    }
+    const instant = Date.parse(event.createdAt);
+    if (lastTimestamp !== null && instant < lastTimestamp) {
+      throw new Error('Strength adjustment audit history has a backwards clock.');
+    }
+    lastTimestamp = instant;
+    if (event.decision === 'accepted') {
+      if (pending) {
+        throw new Error('Strength adjustment audit has overlapping accepted decisions.');
+      }
+      pending = event;
+    } else {
+      if (!pending || pending.action !== event.action
+        || pending.sourceSignature !== event.sourceSignature
+        || pending.proposedMinutes !== event.proposedMinutes) {
+        throw new Error('Strength adjustment audit contains an orphan or mismatched restoration.');
+      }
+      pending = null;
+    }
+  }
+  return history;
 }
 
 /**
