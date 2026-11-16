@@ -18,6 +18,9 @@ export interface EffectiveStrengthChoice {
   source: PlannedStrengthSession;
   effectivePlanningMinutes: number | null;
   stale: boolean;
+  /** A planning cap never modifies sets, reps, loading or station duration. */
+  executableWorkoutModified: false;
+  requiresExerciseLevelReview: true;
 }
 
 export const STRENGTH_CHOICE_AUDIT_SQL = `
@@ -51,8 +54,8 @@ export async function readStrengthChoiceAudit(
   blockId: string,
   sessionId: string,
 ): Promise<StrengthChoiceDecision[]> {
-  const rows = await sql.getAll<{ event_json: string }>(
-    `SELECT event_json FROM daily_strength_choice_events
+  const rows = await sql.getAll<{ id: string; created_at: string; event_json: string }>(
+    `SELECT id, created_at, event_json FROM daily_strength_choice_events
      WHERE athlete_id = ? AND block_id = ? AND session_id = ?
      ORDER BY created_at ASC, rowid ASC`,
     [athleteId, blockId, sessionId],
@@ -61,7 +64,8 @@ export async function readStrengthChoiceAudit(
     let d: StrengthChoiceDecision;
     try { d = JSON.parse(row.event_json) as StrengthChoiceDecision; }
     catch { throw new Error('Strength adjustment audit is unreadable.'); }
-    if (!d || !d.id || d.athleteId !== athleteId || d.blockId !== blockId
+    if (!d || !d.id || d.id !== row.id || d.createdAt !== row.created_at
+      || d.athleteId !== athleteId || d.blockId !== blockId
       || d.sessionId !== sessionId || !d.sourceSignature || !d.createdAt
       || !['accepted', 'restored'].includes(d.decision)
       || !['reduce', 'defer'].includes(d.action)
@@ -227,17 +231,17 @@ export function effectiveStrengthChoice(
   const original = Number.isFinite(session.workout.estimatedElapsedSeconds)
     ? session.workout.estimatedElapsedSeconds / 60 : null;
   if (!latest || latest.decision === 'restored') {
-    return { source: session, action: 'keep', effectivePlanningMinutes: original, stale: false };
+    return { source: session, action: 'keep', effectivePlanningMinutes: original, stale: false, executableWorkoutModified: false, requiresExerciseLevelReview: true };
   }
   if (latest.sourceSignature !== strengthSessionSignature(session)
     || (latest.action === 'reduce' && (original === null || original < 20
       || latest.proposedMinutes !== Math.floor(original * 0.8)))
     || (latest.action === 'defer' && latest.proposedMinutes !== null)) {
-    return { source: session, action: 'keep', effectivePlanningMinutes: original, stale: true };
+    return { source: session, action: 'keep', effectivePlanningMinutes: original, stale: true, executableWorkoutModified: false, requiresExerciseLevelReview: true };
   }
   return {
     source: session, action: latest.action,
     effectivePlanningMinutes: latest.action === 'defer' ? null : latest.proposedMinutes,
-    stale: false,
+    stale: false, executableWorkoutModified: false, requiresExerciseLevelReview: true,
   };
 }
