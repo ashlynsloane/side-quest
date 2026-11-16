@@ -48,6 +48,12 @@ function snapshotLabel(
 export function summarizeUnapprovedStrengthRevision(
   preview: StoredStrengthRevisionPreview,
 ): StrengthRevisionReadOnlySummary {
+  if (!preview || preview.status !== 'unapproved'
+    || preview.executableWorkoutApproved !== false
+    || preview.binding?.executableWorkoutApproved !== false
+    || preview.binding?.requiresWriteTimeRevalidation !== true) {
+    throw new Error('Only a verified, unapproved strength preview can be displayed.');
+  }
   let source: PlannedStrengthSession;
   try {
     source = JSON.parse(preview.binding.sourceSignature) as PlannedStrengthSession;
