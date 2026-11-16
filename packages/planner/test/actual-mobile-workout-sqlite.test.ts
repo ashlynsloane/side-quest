@@ -577,6 +577,177 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
   });
 });
 
+describe('actual mobile athlete-confirmed routine workout authorization', () => {
+  it('saves one exact version through native-style exclusive SQL, exports and restores it without starting', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const { appendStrengthRevisionPreview } = await import('../src/strength-revision-preview-sqlite');
+    const { strengthSessionSignature } = await import('../src/daily-strength-decision-sqlite');
+    const { localCalendarDate, addLocalCalendarDays } = await import('../src/first-week-dates');
+    const today = localCalendarDate(new Date());
+    const sourceWorkout = {
+      id: 'routine-workout', name: 'QA routine revision', createdAt: startedAt,
+      randomSeed: 'routine-seed', request: {},
+      stations: [{
+        id: 'routine-station', order: 0, durationSeconds: 1800,
+        format: 'amrap', purpose: 'routine exercise',
+        exercises: [{
+          exerciseId: 'routine-squat',
+          exerciseSnapshot: {
+            id: 'routine-squat', name: 'Routine bodyweight squat',
+            movementPatterns: ['squat'], avoidanceTags: [], impactLevel: 0,
+            jointLoads: [{ region: 'hip', load: 1 }],
+            bodyRegions: [{ region: 'quadriceps', load: 1, role: 'primary' }],
+          },
+          equipmentOptionId: 'bodyweight', prescriptionId: 'routine-rx',
+          target: 10, unit: 'total', order: 0,
+        }],
+      }],
+      totalWorkSeconds: 1800, totalRestSeconds: 600,
+      estimatedElapsedSeconds: 2400, requiredEquipment: [],
+      targetRegions: [], recentLoadAdjustments: [], source: 'generated',
+    };
+    const session = {
+      id: 'routine-session', date: addLocalCalendarDays(today, 1),
+      order: 0, title: 'Routine session', purpose: 'maintenance',
+      intendedLoad: 'light', focusTargets: [], workout: sourceWorkout,
+      rationale: 'routine QA', completionStatus: 'planned',
+    };
+    const newBlock = {
+      id: 'routine-block', goal: { id: 'routine-goal' },
+      createdAt: startedAt,
+      weeks: [{ id: 'routine-week', goal: { id: 'routine-goal' },
+        weekStartDate: today, createdAt: startedAt, sessions: [session] }],
+    };
+    await service.saveTrainingBlock(newBlock as unknown as
+      Parameters<MobileDb['saveTrainingBlock']>[0]);
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'general_training',
+      expectedLastEventId: null,
+    });
+    const database = new DatabaseSync(
+      join(state.directory, service.getActiveDatabaseName()),
+    );
+    try {
+      const time = new Date().toISOString();
+      database.prepare(`INSERT INTO training_check_ins
+        (id, check_in_json, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)`).run(
+        'routine-checkin',
+        JSON.stringify({ status: 'normal', active: true,
+          activeUntil: new Date(Date.now() + 86400_000).toISOString() }),
+        1, time, time,
+      );
+      database.prepare(`INSERT INTO readiness_check_ins
+        (date, check_in_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?)`).run(today,
+        JSON.stringify({
+          sleep: 4, energy: 4, muscleFreshness: 4, stress: 2, motivation: 4,
+        }), time, time,
+      );
+      database.prepare(`INSERT INTO pt_profiles
+        (id, profile_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?)`).run('routine-pt', '{"active":false}', time, time);
+      const driver = {
+        getFirst: async <T>(query: string, args: Array<string | number | null>) =>
+          database.prepare(query).get(...args) as T | null,
+        getAll: async <T>(query: string, args: Array<string | number | null>) =>
+          database.prepare(query).all(...args) as T[],
+        run: async (query: string, args: Array<string | number | null>) => {
+          database.prepare(query).run(...args);
+        },
+        transaction: async (fn: () => Promise<void>) => {
+          database.exec('BEGIN IMMEDIATE');
+          try { await fn(); database.exec('COMMIT'); }
+          catch (error) { database.exec('ROLLBACK'); throw error; }
+        },
+      };
+      const candidate = {
+        ...sourceWorkout, estimatedElapsedSeconds: 1920,
+        totalWorkSeconds: 1500, totalRestSeconds: 420,
+        stations: [{
+          ...sourceWorkout.stations[0]!, durationSeconds: 1500,
+          exercises: [{ ...sourceWorkout.stations[0]!.exercises[0]!, target: 8 }],
+        }],
+      };
+      await appendStrengthRevisionPreview(driver, {
+        id: 'routine-preview', createdAt: time,
+        source: session as unknown as Parameters<typeof appendStrengthRevisionPreview>[1]['source'],
+        candidate: candidate as unknown as Parameters<typeof appendStrengthRevisionPreview>[1]['candidate'],
+        decision: {
+          id: 'routine-proposal', athleteId: 'synthetic-athlete-one',
+          blockId: 'routine-block', sessionId: 'routine-session',
+          sourceSignature: strengthSessionSignature(session as unknown as
+            Parameters<typeof strengthSessionSignature>[0]),
+          action: 'reduce', decision: 'accepted',
+          proposedMinutes: 32, createdAt: time,
+        },
+        evidence: {
+          athleteId: 'synthetic-athlete-one', todayLocalDate: today,
+          symptoms: 'clear', readiness: 'reviewed_adequate',
+          providerRestrictions: 'verified_none', sourceCoverage: 'complete',
+          exerciseRestrictionsReviewed: true,
+        },
+      });
+    } finally {
+      database.close();
+    }
+    const detail = await service.getCurrentStrengthReviewForConfirmation(
+      'synthetic-athlete-one', 'routine-preview',
+    );
+    expect(detail.status).toBe('pending_review');
+    expect(detail.trainingPolicy.track).toBe('routine_training_review');
+    const confirmations = {
+      exactExercisesAndDoseReviewed: true as const,
+      recentTrainingHistoryReviewed: true as const,
+      noKnownUnreportedRestrictions: true as const,
+    };
+    const input = {
+      athleteId: 'synthetic-athlete-one', previewId: 'routine-preview',
+      authorizationId: 'routine-mobile-auth',
+      expectedObservationToken: detail.observationToken, confirmations,
+    };
+    state.failNextContaining = 'INSERT INTO strength_workout_authorizations';
+    await expect(service.confirmRoutineStrengthWorkout(input))
+      .rejects.toThrow(/synthetic SQLite write interruption/);
+    expect((await service.exportLocalData()).strength_workout_authorizations)
+      .toHaveLength(0);
+    const saved = await service.confirmRoutineStrengthWorkout(input);
+    expect(saved.status).toBe('authorized_routine_workout');
+    expect(saved.workoutStarted).toBe(false);
+    expect(saved.authorization.executableWorkoutApproved).toBe(true);
+    expect(saved.authorization.requiresFreshStartRevalidation).toBe(true);
+    await expect(service.confirmRoutineStrengthWorkout(input))
+      .rejects.toThrow(/already been authorized/);
+    expect((await service.exportLocalData()).strength_workout_authorizations)
+      .toHaveLength(1);
+    expect((await service.exportLocalData()).workout_ledger).toEqual([]);
+    expect((await service.getLatestTrainingBlock())?.block.weeks[0]
+      ?.sessions[0]?.workout).toEqual(sourceWorkout);
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const recovered = await service.getRecordedAuthorizationForStrengthPreview(
+      'synthetic-athlete-one', 'routine-preview',
+    );
+    expect(recovered).toEqual(saved.authorization);
+    expect(recovered?.automaticallyStarted).toBe(false);
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one',
+      protectedMovement: 'deep_hip_flexion',
+      expectedLastEventId: (await service.getAthleteTrainingSafetyPolicy(
+        'synthetic-athlete-one',
+      )).context.latestEventId,
+    });
+    const afterRisk = await service.getCurrentStrengthReviewForConfirmation(
+      'synthetic-athlete-one', 'routine-preview',
+    );
+    expect(afterRisk.stale).toBe(true);
+    expect(afterRisk.trainingPolicy.track).toBe('restriction_aware_review');
+    expect((await service.exportLocalData()).workout_ledger).toEqual([]);
+  });
+});
+
 describe('native athlete training safety context and sticky restrictions', () => {
   it('starts unknown, then accepts ordinary training without clinician paperwork or workout authorization', async () => {
     const unknown = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
