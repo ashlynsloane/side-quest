@@ -1802,3 +1802,12 @@ export type {
   StrengthReconciliationTask, StrengthReconciliationTaskKind,
   StrengthReconciliationChecklist,
 } from './strength-evidence-reconciliation';
+
+export {
+  TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext,
+  appendTrainingSafetyContextEvent, evaluateTrainingSafetyPolicy,
+} from './training-safety-context-sqlite';
+export type {
+  AthleteTrainingIntent, ProtectedMovement, TrainingSafetyContextEvent,
+  AthleteTrainingSafetyContext, TrainingSafetyPolicy,
+} from './training-safety-context-sqlite';
