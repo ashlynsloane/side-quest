@@ -276,6 +276,50 @@ critical export/deletion failure, and unchanged exercise/decision journals.
 These tests do not establish medical authority or real-device readiness.
 The executable approval transaction remains intentionally unimplemented.
 
+## Stage 16: Restriction-aware general training versus rehabilitation
+
+**Ordinary training is not dependent on a clinician-issued document.** The
+athlete explicitly selects a training context: `general_training`,
+`injury_rehabilitation`, or `return_to_sport`. The first permits routine
+planning review without universal provider sign-off **only when no prior
+applicable restriction, active PT hold, or unresolved symptom warning is
+known**. An unknown profile remains unknown rather than inferred healthy.
+No training context, including general training, authorizes an executable
+revised workout in this milestone.
+
+Added an **athlete-wide** append-only SQLite journal
+(`training_safety_context_events`) for declared intent and protected
+movements (`impact_running`, `loaded_spinal_rotation`,
+`shoulder_loading`, `deep_hip_flexion`, `other_movement`). These are
+athlete-reported safeguards, not diagnoses or independently authenticated
+clinician instructions. They remain in force across training-mode switches,
+app restarts and different workout drafts. Old preview-specific restriction
+reports and active PT profiles are read across the athlete database so a later
+general-training declaration cannot silently erase them.
+
+The new `training-safety-context` screen is accessible from Profile.
+Athletes can explicitly record a mode and add protected movements, with
+confirmation and a saved immutable audit trail. **Removing or clinically
+clearing a restriction is not offered in this phase.** Such a transition will
+need its own reviewed, validated workflow. Movement-to-exercise tagging and
+filtering are **not implemented**, so these records must not be interpreted
+as an automatically validated workout prescription.
+
+The 12-gate draft review now marks provider paperwork
+`not_applicable` *only* for an explicit, uncomplicated routine-training
+context; otherwise it remains unverified/blocked. The clinician task is
+omitted from reconciliation when not applicable. Other requirements,
+including exact-workout confirmation and atomic executable authorization,
+remain disabled. This separates app usability from clinical clearance.
+
+Real file-backed and mobile SQLite tests cover routine use without clinician
+paperwork, rehabilitation/return-to-sport classification, sticky restrictions,
+active PT and symptom alerts, older preview concern history, wrong ownership,
+concurrent/stale screens, malformed audit metadata, simulated cold restart,
+injected transaction failure, critical data export and rollback. The original
+workout and completion journal remain unchanged. Native iPhone acceptance and
+real-data restoration are still pending.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
