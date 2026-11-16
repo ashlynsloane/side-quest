@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, inspectStrengthAuthorizationDryRun, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthAuthorizationDryRunResult, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -1528,6 +1528,24 @@ export async function getUnapprovedStrengthReviewDetail(
     return readUnapprovedStrengthReviewDetail(
       trainingAdjustmentDriver, athleteId, previewId, evidence,
     );
+  });
+}
+
+/**
+ * Re-reads the exact unapproved candidate, local safety history, readiness
+ * and restrictions within one athlete-owned exclusive SQLite transaction.
+ * It cannot approve or start a workout. The previous on-screen observation
+ * is compared for drift, not treated as a trusted authorization token.
+ */
+export async function recheckUnapprovedStrengthAuthorization(input: {
+  athleteId: string;
+  previewId: string;
+  evidence: CurrentStrengthReviewEvidence;
+  expectedObservationToken: string;
+}): Promise<StrengthAuthorizationDryRunResult> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    return inspectStrengthAuthorizationDryRun(trainingAdjustmentDriver, input);
   });
 }
 
