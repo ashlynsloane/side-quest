@@ -1821,3 +1821,15 @@ export type {
 // Explicit non-executable write-time evidence revalidation; no workout approval.
 export { inspectStrengthAuthorizationDryRun } from './strength-authorization-dry-run';
 export type { StrengthAuthorizationDryRunResult } from './strength-authorization-dry-run';
+
+export {
+  STRENGTH_WORKOUT_AUTHORIZATION_SQL,
+  authorizeRoutineStrengthWorkout,
+  readAuthorizedRoutineWorkout,
+} from './strength-workout-authorization-sqlite';
+export type {
+  AthleteStrengthAuthorizationConfirmations,
+  AuthorizedStrengthWorkoutRecord,
+  StrengthWorkoutAuthorizationRequest,
+  StrengthWorkoutAuthorizationResult,
+} from './strength-workout-authorization-sqlite';
