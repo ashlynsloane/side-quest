@@ -13,6 +13,8 @@ that still requires a real athlete, provider source, or native device.
 | Deterministic planner / synthetic athlete QA | Exact-head TypeScript + full planner test run; reject invalid dose and stale histories | Implemented and exercised in GitHub Actions; re-run on final head |
 | SQLite persistence / recovery | Real file-backed preview and decision history, restart, tampering, injected rollback, wrong-owner rejection | Implemented and covered by synthetic tests; not a substitute for real athlete database recovery |
 | Read-only review lifecycle | Pending / dismiss / restore, immutable candidate, stale-source detection, bounded inbox, no implicit approval | Implemented in planner and owner-scoped read-only mobile APIs |
+| Read-only native navigation and exact exercise diff | Profile/adjustment links to inbox; detail view shows exact station, target and resistance changes and audit history; zero confirm/start actions | Implemented on development branch; mobile TypeScript + iOS JS export verified, physical rendering/interaction **NOT VERIFIED** |
+| Mobile SQLite draft integration | Seed a real file-backed synthetic athlete DB and verify mobile read, preview diff, inbox, and no approved workout/decision | Implemented in automated mobile SQLite acceptance; never uses real athlete records |
 | Trusted restrictions and exercise execution | Provider/injury restrictions verified from authoritative sources; exact candidate validated in the *same write transaction* that would authorize executable exercise | **NOT IMPLEMENTED.** In-app profile flags and caller-declared coverage are insufficient |
 | Real athlete data backup / restore | Explicit export, restore, migration, historical workout reconciliation, cross-profile isolation and rollback on an isolated original-data copy | **NOT VERIFIED.** Synthetic SQLite tests cannot establish this |
 | Native device acceptance | Physical iPhone P01–P15, correct isolated app identity, install/launch, cold restart, permissions and UI interactions, crash/recovery behavior | **NOT VERIFIED.** An iOS JavaScript export is not a native launch |
@@ -30,6 +32,17 @@ that still requires a real athlete, provider source, or native device.
 - Owner-scoped review inbox with stale, dismissed and pending states. Corrupt
   audit rows are surfaced rather than omitted.
 - Critical audit-history export and fail-closed transaction rollback on deletion errors.
+- Read-only mobile screens at `strength-review-inbox` and `strength-review-detail`,
+  reachable through Profile and session adjustment. They label unverified provider
+  evidence as a hold, never as a clearance. No button in either screen writes
+  to the approval journal or launches the workout.
+- A planner-generated dose summary compares the exact serialized source
+  to the full saved candidate. It shows unchanged units, lowered resistance,
+  reduced exercise targets, and removed exercises/stations. Any altered
+  candidate, modified instruction, or purported executable approval fails closed.
+- A full mobile-service SQLite test creates an isolated synthetic source block,
+  saves a preview, then verifies retrieval, history, read-only inbox and
+  preservation of the unchanged original block and empty completion journal.
 
 The only mobile endpoints added for review previews are read-only. The
 preview event append methods remain backend-only. No preview status, including
