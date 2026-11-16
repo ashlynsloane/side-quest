@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -531,6 +531,7 @@ export async function initializeDatabase(): Promise<void> {
     -- a later revocation or new approval is an additional event.
     ${PLAN_ADJUSTMENT_TABLE_SQL}
     ${STRENGTH_CHOICE_AUDIT_SQL}
+    ${STRENGTH_REVISION_PREVIEW_SQL}
 
     CREATE TABLE IF NOT EXISTS training_baseline_review_events (
       id TEXT PRIMARY KEY NOT NULL,
@@ -3160,7 +3161,7 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue'] as const;
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','strength_revision_previews','cloud_operation_queue'] as const;
 export async function exportLocalData():Promise<Record<string,unknown[]>>{await initializeDatabase();const output:Record<string,unknown[]>={};for(const table of EXPORT_TABLES){try{output[table]=await db.getAllAsync<Record<string,unknown>>(`SELECT * FROM ${table}`)}catch{output[table]=[]}}return output;}
 export async function deleteAllLocalData():Promise<void>{await initializeDatabase();await db.withTransactionAsync(async()=>{for(const table of EXPORT_TABLES){try{await db.runAsync(`DELETE FROM ${table}`)}catch{}}});}
 export async function countCompletedWorkouts():Promise<number>{await initializeDatabase();const row=await db.getFirstAsync<{total:number}>('SELECT COUNT(*) AS total FROM workout_ledger');return row?.total??0;}
