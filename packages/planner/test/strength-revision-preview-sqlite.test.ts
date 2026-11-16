@@ -15,6 +15,7 @@ import {
 import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
 import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
 import { readUnapprovedStrengthReviewDetail } from '../src/strength-revision-review-detail';
+import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
 import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
 import {
   STRENGTH_EVIDENCE_PROVENANCE_SQL,
@@ -1498,5 +1499,148 @@ describe('durable unverified restriction and training provenance', () => {
       null,
     )).rejects.toThrow(/Exclusive evidence provenance writes are unavailable/);
     expect(provenanceRows(db)).toBe(0);
+  });
+});
+
+describe('fail-closed evidence reconciliation and source integrity', () => {
+  it('provides a concrete checklist without treating local checks as clinical clearance', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(detail.reconciliation.schemaVersion).toBe(1);
+    expect(detail.reconciliation.executableWorkoutApproved).toBe(false);
+    expect(detail.reconciliation.canConfirmExecutableWorkout).toBe(false);
+    expect(detail.reconciliation.clinicalSourceVerificationRequired).toBe(true);
+    expect(detail.reconciliation.unresolvedCount).toBe(
+      detail.preflight.blockingGateCount,
+    );
+    expect(detail.reconciliation.tasks.map(task => task.id)).toEqual([
+      'external_provider_restrictions', 'source_provenance',
+      'athlete_execution_confirmation', 'executable_write_authorization',
+    ]);
+    expect(detail.reconciliation.tasks.every(task =>
+      task.canResolveAutomatically === false && task.nextStep.length > 25,
+    )).toBe(true);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM workout_ledger').get()
+      as { n: number }).n).toBe(0);
+  });
+
+  it('prioritizes reported restrictions and missing source coverage without allowing a clearing self-report', async () => {
+    const { sql } = open();
+    const preview = await appendStrengthRevisionPreview(sql, input());
+    await appendStrengthEvidenceProvenance(
+      sql, reportedEvidence(
+        preview, 'provider_restriction', 'reported_present', 'restriction1',
+      ), null,
+    );
+    await appendStrengthEvidenceProvenance(
+      sql, reportedEvidence(
+        preview, 'provider_restriction', 'reported_none',
+        'no-restrictions', '2026-11-15T12:01:00Z',
+      ), 'restriction1',
+    );
+    await appendStrengthEvidenceProvenance(
+      sql, reportedEvidence(
+        preview, 'training_coverage', 'partial', 'missing-history',
+        '2026-11-15T12:02:00Z',
+      ), null,
+    );
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(detail.provenance.restriction.status).toBe('conflicting');
+    const clinician = detail.reconciliation.tasks.find(task =>
+      task.id === 'external_provider_restrictions');
+    expect(clinician?.kind).toBe('safety_hold');
+    expect(clinician?.nextStep).toMatch(/Resolve contradictory restriction reports/);
+    const coverage = detail.reconciliation.tasks.find(task =>
+      task.id === 'source_provenance');
+    expect(coverage?.kind).toBe('safety_hold');
+    expect(coverage?.nextStep).toMatch(/missing workouts/);
+    expect(detail.reconciliation.canConfirmExecutableWorkout).toBe(false);
+  });
+
+  it('highlights missing current check-ins without misclassifying them as external verification', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    db.prepare('DELETE FROM training_check_ins').run();
+    db.prepare('DELETE FROM readiness_check_ins').run();
+    db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    for (const id of ['symptom_check_in', 'readiness_check_in',
+      'local_pt_profile']) {
+      const task = detail.reconciliation.tasks.find(item => item.id === id);
+      expect(task?.kind).toBe('safety_hold');
+      expect(task?.canResolveAutomatically).toBe(false);
+    }
+    expect(detail.reconciliation.tasks.find(item =>
+      item.id === 'external_provider_restrictions')?.kind).toBe('evidence_gap');
+    expect(detail.reconciliation.executableWorkoutApproved).toBe(false);
+  });
+
+  it('rejects omissions, duplicated gates and forged local provider verification in the checklist', async () => {
+    const { sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const { preflight, provenance } = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    const missing = {
+      ...preflight, gates: preflight.gates.slice(1),
+      blockingGateCount: preflight.blockingGateCount,
+    };
+    expect(() => createStrengthReconciliationChecklist(missing, provenance))
+      .toThrow(/incomplete safety assessment/);
+    const duplicated = {
+      ...preflight,
+      gates: preflight.gates.map((gate, index) =>
+        index === 1 ? { ...preflight.gates[0]! } : gate),
+    };
+    expect(() => createStrengthReconciliationChecklist(duplicated, provenance))
+      .toThrow(/gate integrity mismatch/);
+    const forged = {
+      ...preflight,
+      gates: preflight.gates.map(gate =>
+        gate.id === 'external_provider_restrictions'
+          ? { ...gate, status: 'local_check_passed' as const } : gate),
+      blockingGateCount: preflight.blockingGateCount - 1,
+    };
+    expect(() => createStrengthReconciliationChecklist(forged, provenance))
+      .toThrow(/cannot accept a clearance assertion/);
+    const missingProof = { ...provenance, independentlyVerified: true as false };
+    expect(() => createStrengthReconciliationChecklist(preflight, missingProof))
+      .toThrow(/incomplete safety assessment/);
+  });
+
+  it('refuses orphan or cross-owner provenance even when no affected preview appears in the page', async () => {
+    for (const kind of ['orphan', 'wrong_owner'] as const) {
+      const { db, sql } = open();
+      const original = await appendStrengthRevisionPreview(sql, input());
+      const newer = input();
+      newer.id = 'preview-newest';
+      newer.decision.id = 'decision-newest';
+      newer.createdAt = '2026-11-15T12:10:00Z';
+      await appendStrengthRevisionPreview(sql, newer);
+      const forged = reportedEvidence(
+        original, 'provider_restriction', 'reported_present',
+        'forged-evidence',
+      );
+      const foreignPreview = kind === 'orphan' ? 'unmatched-preview' : original.id;
+      db.prepare(`INSERT INTO strength_evidence_provenance_events
+        (id, athlete_id, preview_id, event_json, created_at)
+        VALUES (?, ?, ?, ?, ?)`).run(
+        forged.id,
+        kind === 'wrong_owner' ? 'foreign-athlete' : forged.athleteId,
+        foreignPreview, JSON.stringify(forged), forged.recordedAt,
+      );
+      await expect(listUnapprovedStrengthReviewInbox(
+        sql, 'synthetic-athlete-a', evidence(), 1, 0,
+      )).rejects.toThrow(/orphaned or wrong-owner evidence record/);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM strength_revision_previews')
+        .get() as { n: number }).n).toBe(2);
+    }
   });
 });
