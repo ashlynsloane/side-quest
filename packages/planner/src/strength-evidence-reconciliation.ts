@@ -32,7 +32,8 @@ export interface StrengthReconciliationChecklist {
 }
 
 const REQUIRED_GATES: StrengthApprovalGateId[] = [
-  'source_identity', 'candidate_structure', 'session_uncompleted',
+  'source_identity', 'candidate_structure', 'movement_compatibility',
+  'session_uncompleted',
   'no_conflicting_decision', 'review_disposition', 'symptom_check_in',
   'readiness_check_in', 'local_pt_profile', 'external_provider_restrictions',
   'source_provenance', 'athlete_execution_confirmation',
@@ -44,6 +45,8 @@ const NEXT_STEPS: Record<StrengthApprovalGateId, string> = {
     'Create a new draft against the currently stored training plan. This historical proposal cannot be applied.',
   candidate_structure:
     'Recheck each proposed station, exercise target and resistance against the current source workout.',
+  movement_compatibility:
+    'Review each potentially conflicting exercise against active movement protections. A shorter workout and catalog tags are not clinical clearance.',
   session_uncompleted:
     'Reconcile the existing completion record before considering another session adjustment.',
   no_conflicting_decision:
@@ -93,7 +96,7 @@ function coverageStep(provenance: StrengthEvidenceProvenanceLedger): string {
 }
 
 /**
- * Validate the complete 12-gate diagnostic. Missing, repeated or forged
+ * Validate the complete 13-gate diagnostic. Missing, repeated or forged
  * "locally passed" gates must not be hidden by an apparently short checklist.
  */
 export function createStrengthReconciliationChecklist(
