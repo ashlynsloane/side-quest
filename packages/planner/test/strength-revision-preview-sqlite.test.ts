@@ -16,6 +16,12 @@ import type { StoredStrengthRevisionPreview } from '../src/strength-revision-pre
 import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
 import { readUnapprovedStrengthReviewDetail } from '../src/strength-revision-review-detail';
 import { inspectStrengthAuthorizationDryRun } from '../src/strength-authorization-dry-run';
+import {
+  STRENGTH_WORKOUT_AUTHORIZATION_SQL, authorizeRoutineStrengthWorkout,
+  readAuthorizedRoutineWorkout,
+  type StrengthWorkoutAuthorizationRequest,
+} from '../src/strength-workout-authorization-sqlite';
+import { localCalendarDate, addLocalCalendarDays } from '../src/first-week-dates';
 import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
 import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
 import {
@@ -181,6 +187,7 @@ function open(owner = 'synthetic-athlete-a') {
     ${STRENGTH_EVIDENCE_PROVENANCE_SQL}
     ${TRAINING_SAFETY_CONTEXT_SQL}
     ${STRENGTH_CHOICE_AUDIT_SQL}
+    ${STRENGTH_WORKOUT_AUTHORIZATION_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
   db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)').run(
