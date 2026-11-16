@@ -21,6 +21,15 @@ export interface TrainingAdjustmentSqlDriver {
    * must fail. Read-only review callers reject drivers without this capability.
    */
   readSnapshot?<T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T>;
+  /**
+   * A write transaction that routes every query AND write through one dedicated
+   * native SQLite transaction handle. Unlike ordinary async transactions,
+   * external database queries cannot interleave the state validation and insert.
+   * Missing support must fail closed for preview disposition mutations.
+   */
+  exclusiveTransaction?<T>(
+    fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+  ): Promise<T>;
 }
 export const PLAN_ADJUSTMENT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS training_plan_adjustment_events (
