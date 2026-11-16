@@ -1817,3 +1817,7 @@ export type {
   RestrictedExerciseStatus, RestrictedExerciseFinding,
   StrengthMovementRestrictionAssessment,
 } from './strength-movement-restriction-review';
+
+// Explicit non-executable write-time evidence revalidation; no workout approval.
+export { inspectStrengthAuthorizationDryRun } from './strength-authorization-dry-run';
+export type { StrengthAuthorizationDryRunResult } from './strength-authorization-dry-run';
