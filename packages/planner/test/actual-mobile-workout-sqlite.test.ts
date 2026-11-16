@@ -538,6 +538,93 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
   });
 });
 
+describe('native athlete training safety context and sticky restrictions', () => {
+  it('starts unknown, then accepts ordinary training without clinician paperwork or workout authorization', async () => {
+    const unknown = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
+    expect(unknown.context.intent).toBe('unknown');
+    expect(unknown.policy.track).toBe('training_context_needed');
+    expect(unknown.policy.executableWorkoutApproved).toBe(false);
+    const routine = await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one',
+      intent: 'general_training',
+      expectedLastEventId: null,
+    });
+    expect(routine.context.intent).toBe('general_training');
+    expect(routine.policy.track).toBe('routine_training_review');
+    expect(routine.policy.clinicianDocumentRequiredForRoutineTraining).toBe(false);
+    expect(routine.policy.canApproveExerciseRevision).toBe(false);
+    expect(routine.policy.restrictionMatchingImplemented).toBe(false);
+    expect((await service.exportLocalData()).training_safety_context_events).toHaveLength(1);
+    expect(await ledger()).toEqual([]);
+  });
+
+  it('never lets a routine-training change erase a protected movement', async () => {
+    const initial = await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'injury_rehabilitation',
+      expectedLastEventId: null,
+    });
+    const restricted = await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one',
+      protectedMovement: 'loaded_spinal_rotation',
+      expectedLastEventId: initial.context.latestEventId,
+    });
+    const returned = await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'general_training',
+      expectedLastEventId: restricted.context.latestEventId,
+    });
+    expect(returned.context.intent).toBe('general_training');
+    expect(returned.context.activeProtectedMovements).toContain('loaded_spinal_rotation');
+    expect(returned.policy.track).toBe('restriction_aware_review');
+    expect(returned.policy.requiresRestrictionAwareExerciseReview).toBe(true);
+    expect(returned.policy.executableWorkoutApproved).toBe(false);
+    await expect(service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', protectedMovement: 'impact_running',
+      expectedLastEventId: initial.context.latestEventId,
+    })).rejects.toThrow(/history changed/);
+    expect((await service.exportLocalData()).training_safety_context_events).toHaveLength(3);
+    expect(await ledger()).toEqual([]);
+  });
+
+  it('preserves safety context through a simulated cold restart and refuses wrong-athlete reads', async () => {
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', protectedMovement: 'impact_running',
+      expectedLastEventId: null,
+    });
+    for (const handle of state.handles.splice(0)) handle.close();
+    vi.resetModules();
+    service = await import('../../../apps/mobile/src/services/database');
+    await service.activateUserDatabase('synthetic-athlete-one');
+    const recovered = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
+    expect(recovered.context.activeProtectedMovements).toEqual(['impact_running']);
+    expect(recovered.policy.track).toBe('restriction_aware_review');
+    expect((await service.exportLocalData()).training_safety_context_events).toHaveLength(1);
+    await expect(service.getAthleteTrainingSafetyPolicy('different-athlete'))
+      .rejects.toThrow(/Athlete profile changed/);
+  });
+
+  it('rolls back failed writes and critical history export/deletion without damaging workouts', async () => {
+    await service.saveTrainingBlock(weeklyBlock());
+    state.failNextContaining = 'INSERT INTO training_safety_context_events';
+    await expect(service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'general_training',
+      expectedLastEventId: null,
+    })).rejects.toThrow(/synthetic SQLite write interruption/);
+    expect((await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one')
+    ).context.events).toHaveLength(0);
+    const { DatabaseSync } = await import('node:sqlite');
+    const isolated = new DatabaseSync(join(state.directory, service.getActiveDatabaseName()));
+    isolated.exec('DROP TABLE training_safety_context_events');
+    isolated.close();
+    await expect(service.exportLocalData()).rejects.toThrow(
+      /Cannot export critical audit history: training_safety_context_events/,
+    );
+    await expect(service.deleteAllLocalData()).rejects.toThrow(
+      /Cannot safely delete critical audit history/,
+    );
+    expect(await service.getLatestTrainingBlock()).not.toBeNull();
+  });
+});
+
 describe('actual mobile workout persistence with real disk SQLite', () => {
   it('fails closed for missing draft, wrong owner and unavailable native exclusive write', async () => {
     await expect(service.setUnapprovedStrengthReviewDisposition({
