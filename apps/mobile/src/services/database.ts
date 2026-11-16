@@ -1405,6 +1405,36 @@ const trainingAdjustmentDriver: TrainingAdjustmentSqlDriver = {
   transaction: async (fn: () => Promise<void>) => {
     await db.withTransactionAsync(fn);
   },
+  readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T> => {
+    // Expo's ordinary withTransactionAsync can interleave unrelated queries.
+    // Only the native exclusive transaction provides a dedicated txn handle.
+    const active = db;
+    if (typeof active.withExclusiveTransactionAsync !== 'function') {
+      throw new Error('Consistent strength review snapshots require native exclusive SQLite.');
+    }
+    let result!: T;
+    let complete = false;
+    await active.withExclusiveTransactionAsync(async (txn) => {
+      const reader: TrainingAdjustmentSqlDriver = {
+        getFirst: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getFirstAsync<Row>(query, ...params)) as Row | null,
+        getAll: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getAllAsync<Row>(query, ...params)) as Row[],
+        run: async () => {
+          throw new Error('Strength review snapshot does not permit SQL writes.');
+        },
+        transaction: async () => {
+          throw new Error('Strength review snapshot does not permit nested transactions.');
+        },
+      };
+      result = await fn(reader);
+      complete = true;
+    });
+    if (!complete) {
+      throw new Error('Consistent strength review snapshot was not committed.');
+    }
+    return result;
+  },
 };
 /** Read-only per-athlete strength decision history. This does not enable
  * approval in the UI; the fresh-safety approval workflow remains gated.
