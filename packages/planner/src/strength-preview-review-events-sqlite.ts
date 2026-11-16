@@ -133,16 +133,19 @@ export async function appendStrengthPreviewReviewEvent(
     || event.executableWorkoutApproved !== false) {
     throw new Error('Invalid unapproved preview review event.');
   }
-  await sql.transaction(async () => {
+  if (typeof sql.exclusiveTransaction !== 'function') {
+    throw new Error('Exclusive strength review writes are unavailable on this platform.');
+  }
+  await sql.exclusiveTransaction(async (writer) => {
     const state = await readStrengthPreviewReviewState(
-      sql, event.athleteId, event.previewId,
+      writer, event.athleteId, event.previewId,
     );
     if (expectedLastEventId !== undefined
       && state.latestEventId !== expectedLastEventId) {
       throw new Error('Unapproved preview review history changed; refresh before editing.');
     }
     const preview = await readStrengthRevisionPreview(
-      sql, event.athleteId, event.previewId,
+      writer, event.athleteId, event.previewId,
     );
     if (!preview || event.bindingSignature !== JSON.stringify(preview.binding)) {
       throw new Error('Reviewed preview has changed or is absent.');
@@ -160,7 +163,7 @@ export async function appendStrengthPreviewReviewEvent(
         throw new Error('Only a dismissed unapproved preview may be reopened.');
       }
     }
-    await sql.run(
+    await writer.run(
       `INSERT INTO strength_revision_preview_review_events
        (id, athlete_id, preview_id, event_json, created_at)
        VALUES (?, ?, ?, ?, ?)`,
