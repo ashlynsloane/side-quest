@@ -1444,12 +1444,13 @@ export async function getUnapprovedStrengthRevisionReviewState(
 
 /** Athlete-scoped, read-only review queue. All entries remain unapproved. */
 export async function listUnapprovedStrengthReviewItems(
-  athleteId: string, evidence: CurrentStrengthReviewEvidence, pageSize = 20,
+  athleteId: string, evidence: CurrentStrengthReviewEvidence,
+  pageSize = 20, offset = 0,
 ): Promise<UnapprovedStrengthReviewInboxItem[]> {
   return withVerifiedAthleteDatabase(athleteId, async () => {
     await initializeDatabase();
     return listUnapprovedStrengthReviewInbox(
-      trainingAdjustmentDriver, athleteId, evidence, pageSize,
+      trainingAdjustmentDriver, athleteId, evidence, pageSize, offset,
     );
   });
 }
