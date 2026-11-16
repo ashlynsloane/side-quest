@@ -20,29 +20,37 @@ export default function StrengthReviewInboxScreen() {
   const [items, setItems] = useState<UnapprovedStrengthReviewInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const pageSize = 20;
+  const evidenceFor = (id: string): CurrentStrengthReviewEvidence => ({
+    athleteId: id,
+    todayLocalDate: localCalendarDate(new Date()),
+    symptoms: 'unknown',
+    readiness: 'unknown',
+    providerRestrictions: 'unknown',
+    sourceCoverage: 'unknown',
+    exerciseRestrictionsReviewed: false,
+  });
+
 
   useFocusEffect(useCallback(() => {
     let live = true;
     setItems([]);
     setError(null);
+    setHasMore(false);
     if (!athleteId) {
       setLoading(false);
       setError('An athlete profile is required to view saved proposals.');
       return () => { live = false; };
     }
     setLoading(true);
-    const evidence: CurrentStrengthReviewEvidence = {
-      athleteId,
-      todayLocalDate: localCalendarDate(new Date()),
-      symptoms: 'unknown',
-      readiness: 'unknown',
-      providerRestrictions: 'unknown',
-      sourceCoverage: 'unknown',
-      exerciseRestrictionsReviewed: false,
-    };
-    void listUnapprovedStrengthReviewItems(athleteId, evidence)
+    void listUnapprovedStrengthReviewItems(athleteId, evidenceFor(athleteId), pageSize, 0)
       .then(result => {
-        if (live) setItems(result);
+        if (live) {
+          setItems(result);
+          setHasMore(result.length === pageSize);
+        }
       })
       .catch(() => {
         if (live) {
@@ -55,6 +63,20 @@ export default function StrengthReviewInboxScreen() {
       });
     return () => { live = false; };
   }, [athleteId]));
+
+  const loadNextPage = () => {
+    if (!athleteId || !hasMore || loadingMore || loading || error) return;
+    setLoadingMore(true);
+    void listUnapprovedStrengthReviewItems(
+      athleteId, evidenceFor(athleteId), pageSize, items.length,
+    ).then(result => {
+      setItems(previous => [...previous, ...result]);
+      setHasMore(result.length === pageSize);
+    }).catch(() => {
+      setHasMore(false);
+      setError('Additional saved drafts could not be verified. Review history is incomplete.');
+    }).finally(() => setLoadingMore(false));
+  };
 
   return (
     <SafeAreaView style={styles.screen} edges={['left', 'right']}>
@@ -109,6 +131,16 @@ export default function StrengthReviewInboxScreen() {
             <Text style={styles.helper}>Inspect exact before-and-after exercise changes.</Text>
           </Pressable>
         ))}
+        {hasMore && !loading && !error ? (
+          <Pressable accessibilityRole="button"
+            accessibilityLabel="Load more unapproved strength drafts"
+            disabled={loadingMore} onPress={loadNextPage}
+            style={styles.loadMore}>
+            <Text style={styles.loadMoreLabel}>
+              {loadingMore ? 'Checking older drafts…' : 'Load older drafts'}
+            </Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.footer}>
           A stored preview is never an approved workout. Stale or unavailable evidence means the app must stop, not infer clearance.
         </Text>
@@ -151,4 +183,8 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', gap: 12, padding: 32 },
   pressed: { opacity: 0.75 },
   footer: { fontSize: 12, lineHeight: 18, color: colors.muted },
+  loadMore: { borderWidth: 1, borderColor: colors.border, borderRadius: 14,
+    backgroundColor: colors.paper, minHeight: 48, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 16 },
+  loadMoreLabel: { fontSize: 14, color: colors.accent, fontWeight: '800' },
 });
