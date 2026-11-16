@@ -715,6 +715,36 @@ describe('read-only exact exercise dose change summary', () => {
     expect(summary.secondsReduced).toBe(600);
     expect(summary.executableWorkoutApproved).toBe(false);
   });
+  it('shows reduced resistance with unchanged units and fails on increases', async () => {
+    const { sql, saveBlock } = open();
+    const original = sourceSession();
+    const resistance = original.workout.stations[0]!.exercises[0]!;
+    resistance.userLoadValue = 30;
+    resistance.userLoadUnit = 'lb';
+    saveBlock(block(original));
+    const revised = structuredClone(original.workout);
+    revised.stations[0]!.durationSeconds = 1500;
+    revised.stations[0]!.exercises[0]!.target = 8;
+    revised.stations[0]!.exercises[0]!.userLoadValue = 25;
+    revised.estimatedElapsedSeconds = 1920;
+    revised.totalWorkSeconds = 1500;
+    revised.totalRestSeconds = 420;
+    const record = decision();
+    record.sourceSignature = strengthSessionSignature(original);
+    const stored = await appendStrengthRevisionPreview(sql, {
+      ...input(), source: original, candidate: revised, decision: record,
+    });
+    const summary = summarizeUnapprovedStrengthRevision(stored);
+    expect(summary.changes).toContainEqual({
+      kind: 'exercise_resistance', stationId: 'station-1',
+      exerciseId: 'exercise-1', label: 'Synthetic movement',
+      before: 30, after: 25, unit: 'lb',
+    });
+    const increased = structuredClone(stored);
+    increased.candidate.stations[0]!.exercises[0]!.userLoadValue = 35;
+    expect(() => summarizeUnapprovedStrengthRevision(increased))
+      .toThrow(/does not match|unsafe/);
+  });
   it('refuses to display a draft that claims execution was approved', async () => {
     const { sql } = open();
     const saved = await appendStrengthRevisionPreview(sql, input());
