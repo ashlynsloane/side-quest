@@ -577,6 +577,32 @@ describe('bounded owner-scoped read-only strength preview inbox', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM daily_strength_choice_events')
       .get() as { n: number }).n).toBe(0);
   });
+  it('paginates older drafts deterministically and rejects invalid offsets', async () => {
+    const { sql } = open();
+    for (let i = 0; i < 5; i += 1) {
+      const proposal = input();
+      proposal.id = 'paged-' + i;
+      proposal.decision.id = 'decision-' + i;
+      proposal.createdAt = '2026-11-15T11:0' + i + ':00Z';
+      await appendStrengthRevisionPreview(sql, proposal);
+    }
+    const first = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(), 2, 0,
+    );
+    const second = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(), 2, 2,
+    );
+    const third = await listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(), 2, 4,
+    );
+    expect([...first, ...second, ...third].map(item => item.previewId))
+      .toEqual(['paged-4', 'paged-3', 'paged-2', 'paged-1', 'paged-0']);
+    for (const offset of [-1, 0.5, Infinity, Number.NaN]) {
+      await expect(listUnapprovedStrengthReviewInbox(
+        sql, 'synthetic-athlete-a', evidence(), 2, offset,
+      )).rejects.toThrow(/offset/);
+    }
+  });
   it('marks superseded plans stale without hiding dismissed items or mutating records', async () => {
     const { db, sql, saveBlock } = open();
     const stored = await appendStrengthRevisionPreview(sql, input());
