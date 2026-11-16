@@ -1616,6 +1616,33 @@ describe('fail-closed evidence reconciliation and source integrity', () => {
       .toThrow(/incomplete safety assessment/);
   });
 
+  it('fails closed on orphaned review history outside the first inbox page', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    const next = input();
+    next.id = 'newest-preview';
+    next.decision.id = 'newest-decision';
+    next.createdAt = '2026-11-15T12:15:00Z';
+    await appendStrengthRevisionPreview(sql, next);
+    const forged = {
+      schemaVersion: 1, id: 'orphan-review-1',
+      athleteId: 'synthetic-athlete-a',
+      previewId: 'missing-historical-preview',
+      bindingSignature: 'unknown-old-binding',
+      action: 'dismiss', createdAt: '2026-11-15T12:18:00Z',
+      executableWorkoutApproved: false,
+    };
+    db.prepare(`INSERT INTO strength_revision_preview_review_events
+      (id, athlete_id, preview_id, event_json, created_at)
+      VALUES (?, ?, ?, ?, ?)`).run(
+      forged.id, forged.athleteId, forged.previewId,
+      JSON.stringify(forged), forged.createdAt,
+    );
+    await expect(listUnapprovedStrengthReviewInbox(
+      sql, 'synthetic-athlete-a', evidence(), 1, 0,
+    )).rejects.toThrow(/orphaned review event/);
+  });
+
   it('refuses orphan or cross-owner provenance even when no affected preview appears in the page', async () => {
     for (const kind of ['orphan', 'wrong_owner'] as const) {
       const { db, sql } = open();
