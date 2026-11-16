@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   failNextContaining: null as string | null,
   exclusiveSnapshotReads: 0,
   failExclusiveReview: false,
+  holdExclusiveReview: null as Promise<void> | null,
+  signalExclusiveStarted: null as (() => void) | null,
 }));
 // Mock only the planner SQL surfaces required by the mobile database service.
 // Use their real implementations without loading unrelated React Native UI exports.
@@ -90,6 +92,8 @@ vi.mock('expo-sqlite', async () => {
           }
           database.exec('BEGIN IMMEDIATE');
           try {
+            state.signalExclusiveStarted?.();
+            if (state.holdExclusiveReview) await state.holdExclusiveReview;
             await fn({
               getFirstAsync: async <Row>(query: string, ...args: unknown[]) =>
                 database.prepare(query).get(...(args as Array<string | number | null>)) as Row | null,
@@ -154,6 +158,8 @@ beforeEach(async () => {
   state.failNextContaining = null;
   state.exclusiveSnapshotReads = 0;
   state.failExclusiveReview = false;
+  state.holdExclusiveReview = null;
+  state.signalExclusiveStarted = null;
   const stored = new Map<string, string>();
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true, writable: true,
@@ -389,6 +395,44 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await service.listDailyStrengthChoiceDecisions(
       'synthetic-athlete-one', 'unknown-block', 'unknown-session',
     )).toEqual([]);
+  });
+
+  it('serializes athlete profile activation behind an in-flight exclusive review snapshot', async () => {
+    let started!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    state.holdExclusiveReview = new Promise<void>(resolve => { release = resolve; });
+    state.signalExclusiveStarted = started;
+    const evidence = {
+      athleteId: 'synthetic-athlete-one',
+      todayLocalDate: '2026-11-16', symptoms: 'unknown' as const,
+      readiness: 'unknown' as const, providerRestrictions: 'unknown' as const,
+      sourceCoverage: 'unknown' as const, exerciseRestrictionsReviewed: false,
+    };
+    const pendingRead = service.listUnapprovedStrengthReviewItems(
+      'synthetic-athlete-one', evidence,
+    );
+    await entered;
+    let switched = false;
+    const switchProfile = service.activateUserDatabase('synthetic-athlete-two')
+      .then(() => { switched = true; });
+    try {
+      await Promise.resolve();
+      expect(switched).toBe(false);
+    } finally {
+      state.holdExclusiveReview = null;
+      state.signalExclusiveStarted = null;
+      release();
+    }
+    await expect(pendingRead).resolves.toEqual([]);
+    await switchProfile;
+    expect(switched).toBe(true);
+    expect(await service.listUnapprovedStrengthReviewItems(
+      'synthetic-athlete-two', { ...evidence, athleteId: 'synthetic-athlete-two' },
+    )).toEqual([]);
+    await expect(service.listUnapprovedStrengthReviewItems(
+      'synthetic-athlete-one', evidence,
+    )).rejects.toThrow(/Athlete profile changed/);
   });
 
   it('fails export and rolls back deletion if a critical revision journal is unreadable', async () => {
