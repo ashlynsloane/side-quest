@@ -647,6 +647,43 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
       expect(reviewEventCount(db)).toBe(2);
     }
   });
+  it('freezes the review audit payload before asynchronous caller mutation', async () => {
+    const { db, sql } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    const requested = reviewEvent(stored, 'dismiss', 'immutable-event');
+    const originallySubmitted = JSON.stringify(requested);
+    let mutated = false;
+    const driver: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        operation: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Missing exclusive fixture.');
+        return sql.exclusiveTransaction(writer => operation({
+          ...writer,
+          getFirst: async <Row>(
+            query: string, params: Array<string | number | null>,
+          ) => {
+            if (!mutated) {
+              mutated = true;
+              requested.action = 'restore';
+              requested.id = 'mutated-after-submit';
+              requested.bindingSignature = 'forged-binding';
+            }
+            return writer.getFirst<Row>(query, params);
+          },
+        }));
+      },
+    };
+    await appendStrengthPreviewReviewEvent(driver, requested, null);
+    expect(mutated).toBe(true);
+    expect((db.prepare('SELECT event_json FROM strength_revision_preview_review_events')
+      .get() as { event_json: string }).event_json).toBe(originallySubmitted);
+    expect((await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    )).status).toBe('dismissed');
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
   it('injected SQL failure rolls back without changing preview or training history', async () => {
     const { db, sql } = open();
     const stored = await appendStrengthRevisionPreview(sql, input());
