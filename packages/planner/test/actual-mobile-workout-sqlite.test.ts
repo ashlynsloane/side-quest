@@ -410,6 +410,16 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     );
     expect(afterReopen.stale).toBe(true);
     expect(afterReopen.review.status).toBe('pending_review');
+    state.failNextContaining = 'INSERT INTO strength_revision_preview_review_events';
+    await expect(service.setUnapprovedStrengthReviewDisposition({
+      athleteId: 'synthetic-athlete-one', previewId: 'qa-preview',
+      action: 'dismiss', expectedLastEventId: returned.latestEventId,
+    })).rejects.toThrow(/synthetic SQLite write interruption/);
+    const unchanged = await service.getUnapprovedStrengthRevisionReviewState(
+      'synthetic-athlete-one', 'qa-preview',
+    );
+    expect(unchanged.status).toBe('pending_review');
+    expect(unchanged.events).toHaveLength(2);
     const exported = await service.exportLocalData();
     expect(exported.strength_revision_preview_review_events).toHaveLength(2);
     expect(exported.strength_revision_previews).toHaveLength(1);
