@@ -1,6 +1,6 @@
 import type { GeneratedWorkout, PlannedStrengthSession, TrainingBlockPlan } from '@circuit/domain';
 import type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
-import { strengthSessionSignature, type StrengthChoiceDecision } from './daily-strength-decision-sqlite';
+import { strengthSessionSignature, readStrengthChoiceAudit, type StrengthChoiceDecision } from './daily-strength-decision-sqlite';
 import {
   createStrengthRevisionPreviewBinding, verifyStrengthRevisionPreviewBinding,
   type StrengthRevisionPreviewBinding,
@@ -111,6 +111,18 @@ async function sourceInCurrentBlock(
   catch { throw new Error('Source training block is unreadable.'); }
   if (!block || block.id !== blockId) throw new Error('Source training block identity mismatch.');
   return getSession(block, sessionId);
+}
+
+/** Validate the existing planning journal before introducing a competing
+ * exercise preview. An unreadable history throws; it must not look empty. */
+async function acceptedPlanningChoiceExists(
+  sql: TrainingAdjustmentSqlDriver,
+  athleteId: string,
+  blockId: string,
+  sessionId: string,
+): Promise<boolean> {
+  const journal = await readStrengthChoiceAudit(sql, athleteId, blockId, sessionId);
+  return journal.at(-1)?.decision === 'accepted';
 }
 
 /**
@@ -245,6 +257,11 @@ export async function appendStrengthRevisionPreview(
       [binding.sessionId],
     );
     if (completed) throw new Error('The strength session already has a completion record.');
+    if (await acceptedPlanningChoiceExists(
+      sql, binding.athleteId, binding.blockId, binding.sessionId,
+    )) {
+      throw new Error('An unresolved strength planning decision already exists.');
+    }
     const blockers = await persistedReviewBlockers(sql, preview.evidence.todayLocalDate);
     if (blockers.length) {
       throw new Error('Current persisted safety evidence blocks preview: ' + blockers.join(' '));
@@ -308,6 +325,11 @@ export async function reassessStoredStrengthRevisionPreview(
     [preview.binding.sessionId],
   );
   if (completed) reasons.push('Workout already has a completion record.');
+  if (await acceptedPlanningChoiceExists(
+    sql, athleteId, preview.binding.blockId, preview.binding.sessionId,
+  )) {
+    reasons.push('An unresolved strength planning decision supersedes this preview.');
+  }
   reasons.push(...await persistedReviewBlockers(sql, evidence.todayLocalDate));
   return {
     status: reasons.length === 0 ? 'reviewable_preview' : 'stale',
