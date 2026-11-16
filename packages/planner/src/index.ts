@@ -1825,6 +1825,7 @@ export type { StrengthAuthorizationDryRunResult } from './strength-authorization
 export {
   STRENGTH_WORKOUT_AUTHORIZATION_SQL,
   authorizeRoutineStrengthWorkout,
+  getRoutineStrengthAuthorizationReadiness,
   readAuthorizedRoutineWorkout,
 } from './strength-workout-authorization-sqlite';
 export type {
