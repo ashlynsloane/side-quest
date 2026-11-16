@@ -100,6 +100,25 @@ function driver(db: DatabaseSync): TrainingAdjustmentSqlDriver {
       try { await fn(); db.exec('COMMIT'); }
       catch (error) { db.exec('ROLLBACK'); throw error; }
     },
+    readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T> => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const reader: TrainingAdjustmentSqlDriver = {
+          getFirst: async <Row>(query, params) =>
+            db.prepare(query).get(...params) as Row | null,
+          getAll: async <Row>(query, params) =>
+            db.prepare(query).all(...params) as Row[],
+          run: async () => { throw new Error('Read-only snapshot cannot write.'); },
+          transaction: async () => { throw new Error('Read-only snapshot cannot nest.'); },
+        };
+        const result = await fn(reader);
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
   };
 }
 function open(owner = 'synthetic-athlete-a') {
