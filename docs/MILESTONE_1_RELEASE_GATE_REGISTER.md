@@ -32,6 +32,10 @@ that still requires a real athlete, provider source, or native device.
 - Owner-scoped review inbox with stale, dismissed and pending states. Corrupt
   audit rows are surfaced rather than omitted.
 - Critical audit-history export and fail-closed transaction rollback on deletion errors.
+- Preview creation and review disposition reject impossible calendar dates
+  and noncanonical UTC timestamps rather than allowing JavaScript date
+  normalization to create misleading audit order. File-backed SQLite tests
+  verify those invalid records leave history unchanged.
 - Read-only mobile screens at `strength-review-inbox` and `strength-review-detail`,
   reachable through Profile and session adjustment. The inbox loads bounded,
   owner-verified pages of historical drafts, while the detail screen uses one
