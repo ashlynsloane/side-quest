@@ -93,7 +93,8 @@ export default function StrengthReviewDetailScreen() {
   }, [athleteId, previewId]));
 
   const flagConcern = async (kind: 'provider_restriction' | 'training_coverage') => {
-    if (savingConcern || !detail || !athleteId || typeof previewId !== 'string'
+    if (savingConcern || savingDisposition || !detail || !athleteId
+      || typeof previewId !== 'string'
       || currentAthlete.current !== athleteId
       || currentPreview.current !== previewId) return;
     setSavingConcern(true);
@@ -124,7 +125,7 @@ export default function StrengthReviewDetailScreen() {
   };
 
   const confirmConcern = (kind: 'provider_restriction' | 'training_coverage') => {
-    if (!detail || savingConcern || !athleteId) return;
+    if (!detail || savingConcern || savingDisposition || !athleteId) return;
     const restriction = kind === 'provider_restriction';
     Alert.alert(
       restriction ? 'Flag an active exercise restriction?' : 'Flag incomplete training history?',
@@ -139,7 +140,7 @@ export default function StrengthReviewDetailScreen() {
   };
 
   const changeDisposition = async (action: 'dismiss' | 'restore') => {
-    if (savingDisposition || !athleteId || !detail
+    if (savingDisposition || savingConcern || !athleteId || !detail
       || typeof previewId !== 'string'
       || currentAthlete.current !== athleteId
       || currentPreview.current !== previewId) return;
@@ -169,7 +170,7 @@ export default function StrengthReviewDetailScreen() {
   };
 
   const confirmDisposition = (action: 'dismiss' | 'restore') => {
-    if (!detail || savingDisposition || !athleteId) return;
+    if (!detail || savingDisposition || savingConcern || !athleteId) return;
     const dismiss = action === 'dismiss';
     Alert.alert(
       dismiss ? 'Dismiss this draft?' : 'Return draft to inbox?',
@@ -322,10 +323,41 @@ export default function StrengthReviewDetailScreen() {
                 Restriction reports: {detail.provenance.restriction.eventCount}.
                 Training-source reports: {detail.provenance.coverage.eventCount}.
               </Text>
+              {detail.provenance.events.length ? (
+                <View style={styles.evidenceHistory}>
+                  <Text style={styles.gateTitle}>Unverified report history</Text>
+                  {detail.provenance.events.slice(-10).map(event => (
+                    <View key={event.id} style={styles.gateRow}>
+                      <Text style={styles.history}>
+                        {event.kind === 'provider_restriction'
+                          ? 'Exercise restriction' : 'Training-source coverage'}
+                        {' · '}{event.observedAt.slice(0, 10)}
+                      </Text>
+                      <Text style={styles.helper}>
+                        {event.claim === 'reported_present'
+                          ? 'Possible restriction reported'
+                          : event.claim === 'reported_none'
+                            ? 'No restriction claimed — not authenticated'
+                            : event.claim === 'partial'
+                              ? 'Incomplete history reported'
+                              : event.claim === 'claimed_complete'
+                                ? 'Complete history claimed — not authenticated'
+                                : 'Information unknown'}
+                        {' · Unverified'}
+                      </Text>
+                    </View>
+                  ))}
+                  {detail.provenance.events.length > 10 ? (
+                    <Text style={styles.helper}>
+                      Earlier reports remain preserved in the audit journal.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
               {concernError ? <Text style={styles.error}>{concernError}</Text> : null}
               <Pressable accessibilityRole="button"
                 accessibilityLabel="Report an active strength exercise restriction"
-                disabled={savingConcern}
+                disabled={savingConcern || savingDisposition}
                 style={[styles.concernAction,
                   savingConcern && styles.disabledAction]}
                 onPress={() => confirmConcern('provider_restriction')}>
@@ -335,7 +367,7 @@ export default function StrengthReviewDetailScreen() {
               </Pressable>
               <Pressable accessibilityRole="button"
                 accessibilityLabel="Report incomplete training or injury history"
-                disabled={savingConcern}
+                disabled={savingConcern || savingDisposition}
                 style={[styles.concernAction,
                   savingConcern && styles.disabledAction]}
                 onPress={() => confirmConcern('training_coverage')}>
@@ -371,7 +403,7 @@ export default function StrengthReviewDetailScreen() {
                 accessibilityLabel={detail.review.status === 'dismissed'
                   ? 'Return unapproved draft to review inbox'
                   : 'Dismiss unapproved draft from review inbox'}
-                disabled={savingDisposition}
+                disabled={savingDisposition || savingConcern}
                 onPress={() => confirmDisposition(
                   detail.review.status === 'dismissed' ? 'restore' : 'dismiss',
                 )}
@@ -433,6 +465,7 @@ const styles = StyleSheet.create({
   durationArrow: { paddingHorizontal: 10, fontSize: 20, color: colors.accent },
   doseText: { fontSize: 15, color: colors.ink, fontWeight: '800' },
   history: { fontSize: 13, color: colors.ink, lineHeight: 20 },
+  evidenceHistory: { gap: 6, paddingVertical: 5 },
   gateRow: { gap: 4, paddingVertical: 9, borderTopWidth: 1,
     borderTopColor: colors.border },
   gateTitle: { fontSize: 14, color: colors.ink, fontWeight: '800' },
