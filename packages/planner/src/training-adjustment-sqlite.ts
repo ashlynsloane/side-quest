@@ -14,6 +14,13 @@ export interface TrainingAdjustmentSqlDriver {
   getAll<T>(sql: string, params: Array<string | number | null>): Promise<T[]>;
   run(sql: string, params: Array<string | number | null>): Promise<void>;
   transaction(fn: () => Promise<void>): Promise<void>;
+  /**
+   * OPTIONAL until the native-only review gate is enabled. Implementations
+   * must obtain one consistent SQLite snapshot and route ALL callback queries
+   * through its transaction handle. Any write attempt on the callback handle
+   * must fail. Read-only review callers reject drivers without this capability.
+   */
+  readSnapshot?<T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T>;
 }
 export const PLAN_ADJUSTMENT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS training_plan_adjustment_events (
