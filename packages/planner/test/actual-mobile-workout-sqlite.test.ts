@@ -362,6 +362,11 @@ describe('unapproved strength draft end-to-end through mobile SQLite service', (
     expect(detail.preflight.executableWorkoutApproved).toBe(false);
     expect(detail.preflight.canConfirmExecutableWorkout).toBe(false);
     expect(detail.preflight.gates).toHaveLength(12);
+    expect(detail.movementRestrictions.canApplyWorkout).toBe(false);
+    expect(detail.movementRestrictions.matchingIsClinicalClearance).toBe(false);
+    expect(detail.movementRestrictions.findings).toHaveLength(1);
+    expect(detail.movementRestrictions.findings[0]?.status)
+      .toBe('needs_individual_review');
     expect(detail.reconciliation.canConfirmExecutableWorkout).toBe(false);
     expect(detail.reconciliation.executableWorkoutApproved).toBe(false);
     expect(detail.reconciliation.tasks).toHaveLength(
