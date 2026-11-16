@@ -2225,8 +2225,8 @@ async function freshRoutineCandidate(
   const exerciseMetadata = {
     ...source.workout.stations[0]!.exercises[0]!.exerciseSnapshot,
     movementPatterns: ['squat' as const], avoidanceTags: [],
-    jointLoads: [{ region: 'hip' as const, load: 1 }],
-    bodyRegions: [{ region: 'quadriceps' as const, load: 1, role: 'primary' as const }],
+    jointLoads: [{ region: 'hip' as const, load: 1 as const }],
+    bodyRegions: [{ region: 'quadriceps' as const, load: 1 as const, role: 'primary' as const }],
     impactLevel: 0,
   };
   source.workout.stations[0]!.exercises[0]!.exerciseSnapshot = exerciseMetadata;
