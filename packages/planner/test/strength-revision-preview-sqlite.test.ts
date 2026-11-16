@@ -14,6 +14,7 @@ import {
 } from '../src/strength-preview-review-events-sqlite';
 import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
 import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
+import { summarizeUnapprovedStrengthRevision } from '../src/strength-revision-review-summary';
 import {
   STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview,
   readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview,
@@ -640,5 +641,49 @@ describe('bounded owner-scoped read-only strength preview inbox', () => {
     await expect(listUnapprovedStrengthReviewInbox(
       sql, 'synthetic-athlete-a', evidence(),
     )).rejects.toThrow(/unreadable/);
+  });
+});
+
+describe('read-only exact exercise dose change summary', () => {
+  it('shows precise duration and repetitions differences but never clearance', async () => {
+    const { sql } = open();
+    const saved = await appendStrengthRevisionPreview(sql, input());
+    const summary = summarizeUnapprovedStrengthRevision(saved);
+    expect(summary).toMatchObject({
+      previewId: 'preview-1', sourceTitle: 'Synthetic strength',
+      originalSeconds: 2400, proposedSeconds: 1920,
+      secondsReduced: 480, stationCountBefore: 1, stationCountAfter: 1,
+      status: 'unapproved', executableWorkoutApproved: false,
+      currentRestrictionsNotVerified: true,
+      requiresWriteTimeRevalidation: true,
+    });
+    expect(summary.changes).toEqual([
+      {
+        kind: 'station_duration', stationId: 'station-1',
+        exerciseId: null, label: 'controlled movement',
+        before: 1800, after: 1500, unit: 'seconds',
+      },
+      {
+        kind: 'exercise_target', stationId: 'station-1',
+        exerciseId: 'exercise-1', label: 'Synthetic movement',
+        before: 12, after: 8, unit: 'total',
+      },
+    ]);
+  });
+  it('never renders a tampered candidate or mismatched historical source', async () => {
+    const { sql } = open();
+    const saved = await appendStrengthRevisionPreview(sql, input());
+    const alteredCandidate = structuredClone(saved);
+    alteredCandidate.candidate.stations[0]!.exercises[0]!.target = 99;
+    expect(() => summarizeUnapprovedStrengthRevision(alteredCandidate))
+      .toThrow(/does not match|unsafe/);
+    const alteredBinding = structuredClone(saved);
+    alteredBinding.binding.sourceSignature = '{"unrelated":true}';
+    expect(() => summarizeUnapprovedStrengthRevision(alteredBinding))
+      .toThrow(/invalid|does not match/);
+    const unreadableSource = structuredClone(saved);
+    unreadableSource.binding.sourceSignature = '{broken';
+    expect(() => summarizeUnapprovedStrengthRevision(unreadableSource))
+      .toThrow(/unreadable/);
   });
 });
