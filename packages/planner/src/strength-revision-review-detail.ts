@@ -1,4 +1,5 @@
 import type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
+import { withUnapprovedStrengthReadSnapshot } from './strength-review-read-snapshot';
 import type { CurrentStrengthReviewEvidence } from './strength-revision-decision-review';
 import {
   reassessStoredStrengthRevisionPreview,
@@ -37,7 +38,8 @@ export async function readUnapprovedStrengthReviewDetail(
     || evidence.athleteId !== athleteId) {
     throw new Error('Review detail athlete or preview identity mismatch.');
   }
-  const owner = await sql.getFirst<{ user_id: string }>(
+  return withUnapprovedStrengthReadSnapshot(sql, async (snapshot) => {
+  const owner = await snapshot.getFirst<{ user_id: string }>(
     'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1',
     [],
   );
@@ -45,10 +47,10 @@ export async function readUnapprovedStrengthReviewDetail(
     throw new Error('Review detail database ownership mismatch.');
   }
   const assessment = await reassessStoredStrengthRevisionPreview(
-    sql, athleteId, previewId, evidence,
+    snapshot, athleteId, previewId, evidence,
   );
   const review = await readStrengthPreviewReviewState(
-    sql, athleteId, previewId,
+    snapshot, athleteId, previewId,
   );
   const summary = summarizeUnapprovedStrengthRevision(assessment.preview);
   const stale = assessment.status === 'stale';
@@ -61,4 +63,5 @@ export async function readUnapprovedStrengthReviewDetail(
     executableWorkoutApproved: false,
     requiresWriteTimeRevalidation: true,
   };
+  });
 }
