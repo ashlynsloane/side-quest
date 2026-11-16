@@ -653,7 +653,15 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     const original = JSON.stringify(stored);
     await expect(appendStrengthPreviewReviewEvent({
       ...sql,
-      run: async () => { throw new Error('injected SQLite write failure'); },
+      exclusiveTransaction: async <T>(
+        operation: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Missing exclusive fixture.');
+        return sql.exclusiveTransaction(writer => operation({
+          ...writer,
+          run: async () => { throw new Error('injected SQLite write failure'); },
+        }));
+      },
     }, reviewEvent(stored, 'dismiss'))).rejects.toThrow(/injected SQLite/);
     expect(reviewEventCount(db)).toBe(0);
     expect((await readStrengthRevisionPreview(
