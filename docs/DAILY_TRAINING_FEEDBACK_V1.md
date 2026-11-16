@@ -125,6 +125,12 @@ durations, sets, repetitions, exercise loading, or tissue stress.
 
 **Audit and execution provenance hardening:** Read-back now verifies that each event JSON's ID and timestamp match the corresponding persisted SQLite row. A mismatch is treated as corrupted audit history, blocking a subsequent append. The read-only effective-choice result explicitly declares `executableWorkoutModified: false` and `requiresExerciseLevelReview: true`, including when a valid 20% planning-time limit is present. These fields must not be interpreted as completion of exercise-level review or clinical clearance. Synthetic file-backed SQLite tests cover row tampering and the unchanged workout payload.
 
+## Stage 5: Exercise-level structural revision review (backend only)
+
+Added `evaluateStrengthWorkoutRevision` as an isolated, read-only guard for a *separately constructed* candidate strength workout. It compares actual proposed station durations and exercise targets/loads against an original source workout and rejects increased duration, additional stations/exercises, changed prescriptions, equipment, exercise snapshots, changed generator constraints, invalid durations and missing/duplicated identities. It also checks a proposed elapsed-time cap against the candidate's actual station and rest-time accounting. Synthetic regression tests cover reductions, hidden dose increases, substitutions, tampered constraints and malformed structures.
+
+A `structurallyValid: true` result means only that this limited data-structure comparison passed; it does **not** mean the exercise is safe or medically appropriate. Every result includes `requiresCurrentRestrictionReview: true` and `autoApproved: false`. This is **not connected to the mobile approval UI or the SQLite decision append**. There is no executable exercise-level approval, automatic training change, provider restriction reconciliation, or release authorization. Those require independent validation of current injury/rehab restrictions and explicit athlete review at write time.
+
 ## Current limitations
 
 A missing link may reflect a missed workout, an offline workout, a late import,
