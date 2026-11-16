@@ -47,6 +47,34 @@ not evidence that the ordinary workout generator has been connected to
 protected-movement matching yet. That integration and native acceptance
 remain blocking tasks.
 
+## Exercise-level restriction-tag diagnostics (non-clinical)
+
+Added an exact-candidate, exercise-by-exercise **catalog-tag diagnostic**.
+It uses preserved exercise snapshot movement patterns, avoidance tags, joint
+loads, muscle-region loads, and impact levels to flag potentially conflicting
+exercises against active athlete-protected movements. It does **not** claim to
+infer all tissue loads, range of motion, or medical safety. High-impact and
+jumping tags flag impact restrictions; loaded rotation flags spinal rotation
+restrictions; shoulder-region/joint loading flags shoulder restrictions.
+Potential deep hip-flexion exposure is marked **needs individual review**,
+since squat/lunge tags do not establish joint angles. Missing metadata and
+unqualified movement restrictions also trigger review, never a safe default.
+
+The matcher is read-only, runs inside the existing owner-locked review snapshot,
+and reports `canApplyWorkout: false`,
+`matchingIsClinicalClearance: false`, and
+`executableWorkoutApproved: false`. A result of "no tagged conflict
+detected" means exactly that—not that an exercise is permitted. An
+uncomplicated routine athlete without protected movements is not required
+to obtain clinician documentation merely for ordinary training, but the
+unimplemented executable-revision transaction remains a separate gate.
+
+Synthetic tests cover high-impact, loaded rotation, shoulder loading,
+potential hip flexion, unknown metadata, unrestricted routine training,
+rehabilitation with no mapped restriction, empty workouts and inconsistent
+routine policy. This is an annotation-based analysis, **not** a validated
+rehabilitation exercise contraindication engine or native device acceptance.
+
 ## What is implemented (not executable approval)
 
 - Read-only daily training reconciliation, readiness and feedback guidance, and bounded next-session choices.
