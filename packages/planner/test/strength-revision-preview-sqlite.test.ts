@@ -1640,8 +1640,10 @@ describe('fail-closed evidence reconciliation and source integrity', () => {
       await expect(listUnapprovedStrengthReviewInbox(
         sql, 'synthetic-athlete-a', evidence(), 1, 0,
       )).rejects.toThrow(/orphaned or wrong-owner evidence record/);
-      expect((db.prepare('SELECT COUNT(*) AS n FROM strength_revision_previews')
-        .get() as { n: number }).n).toBe(2);
+      const savedCount = db.prepare(
+        'SELECT COUNT(*) AS n FROM strength_revision_previews',
+      ).get() as { n: number };
+      expect(savedCount.n).toBe(2);
     }
   });
 });
