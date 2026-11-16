@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthEvidenceProvenanceEvent, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -534,6 +534,7 @@ export async function initializeDatabase(): Promise<void> {
     ${STRENGTH_REVISION_PREVIEW_SQL}
     ${STRENGTH_PREVIEW_REVIEW_EVENTS_SQL}
     ${STRENGTH_EVIDENCE_PROVENANCE_SQL}
+    ${TRAINING_SAFETY_CONTEXT_SQL}
 
     CREATE TABLE IF NOT EXISTS training_baseline_review_events (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1575,6 +1576,66 @@ export async function setUnapprovedStrengthReviewDisposition(input: {
  * Athlete-entered concern, not a verified medical source. Only risk-increasing
  * observations can be recorded through this mobile endpoint.
  */
+/**
+ * Read-only athlete-wide training mode. This never approves an exercise dose,
+ * and a routine-training intent cannot erase historical injury restrictions.
+ */
+export async function getAthleteTrainingSafetyPolicy(
+  athleteId: string,
+): Promise<{ context: AthleteTrainingSafetyContext; policy: TrainingSafetyPolicy }> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    if (!trainingAdjustmentDriver.readSnapshot) {
+      throw new Error('Consistent training safety snapshot is unavailable.');
+    }
+    return trainingAdjustmentDriver.readSnapshot(async reader => {
+      const context = await readAthleteTrainingSafetyContext(reader, athleteId);
+      return { context, policy: evaluateTrainingSafetyPolicy(context) };
+    });
+  });
+}
+
+/**
+ * Explicitly record an athlete intent or a protected movement. This API
+ * cannot revoke protections, record clinician approval, or modify workouts.
+ */
+export async function recordAthleteTrainingSafetyContext(input: {
+  athleteId: string;
+  intent?: AthleteTrainingIntent;
+  protectedMovement?: ProtectedMovement;
+  expectedLastEventId: string | null;
+}): Promise<{ context: AthleteTrainingSafetyContext; policy: TrainingSafetyPolicy }> {
+  const { athleteId, intent, protectedMovement, expectedLastEventId } = input;
+  if (!athleteId?.trim()
+    || Boolean(intent) === Boolean(protectedMovement)
+    || (expectedLastEventId !== null
+      && (typeof expectedLastEventId !== 'string' || !expectedLastEventId.trim()))) {
+    throw new Error('Invalid athlete training safety update.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const timestamp = new Date().toISOString();
+    const event: TrainingSafetyContextEvent = {
+      schemaVersion: 1, athleteId,
+      id: `training-safety-${timestamp}-${Math.random().toString(36).slice(2, 13)}`,
+      kind: intent ? 'training_intent' : 'protect_movement',
+      intent: intent ?? null, protectedMovement: protectedMovement ?? null,
+      source: 'athlete_self_report', createdAt: timestamp,
+      executableWorkoutApproved: false,
+    };
+    await appendTrainingSafetyContextEvent(
+      trainingAdjustmentDriver, event, expectedLastEventId,
+    );
+    if (!trainingAdjustmentDriver.readSnapshot) {
+      throw new Error('Consistent training safety snapshot is unavailable.');
+    }
+    return trainingAdjustmentDriver.readSnapshot(async reader => {
+      const context = await readAthleteTrainingSafetyContext(reader, athleteId);
+      return { context, policy: evaluateTrainingSafetyPolicy(context) };
+    });
+  });
+}
+
 export async function flagUnverifiedStrengthReviewConcern(input: {
   athleteId: string;
   previewId: string;
@@ -3355,7 +3416,7 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','training_plan_adjustment_events','daily_strength_choice_events','training_baseline_review_events','strength_revision_previews','strength_revision_preview_review_events','strength_evidence_provenance_events','cloud_operation_queue'] as const;
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','training_plan_adjustment_events','daily_strength_choice_events','training_baseline_review_events','strength_revision_previews','strength_revision_preview_review_events','strength_evidence_provenance_events','training_safety_context_events','cloud_operation_queue'] as const;
 // Losing an immutable decision or preview journal during export/deletion is
 // never equivalent to having an empty history. The transaction must abort.
 const CRITICAL_AUDIT_EXPORT_TABLES = new Set<string>([
@@ -3366,6 +3427,7 @@ const CRITICAL_AUDIT_EXPORT_TABLES = new Set<string>([
   'strength_revision_previews',
   'strength_revision_preview_review_events',
   'strength_evidence_provenance_events',
+  'training_safety_context_events',
 ]);
 export async function exportLocalData(): Promise<Record<string, unknown[]>> {
   await initializeDatabase();
