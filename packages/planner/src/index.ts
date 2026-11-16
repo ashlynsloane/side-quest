@@ -1759,3 +1759,6 @@ export { evaluateStrengthWorkoutRevision } from './strength-workout-revision-rev
 export type { StrengthRevisionReview } from './strength-workout-revision-review';
 export { reviewStrengthRevisionForDecision } from './strength-revision-decision-review';
 export type { CurrentStrengthReviewEvidence, StrengthRevisionDecisionReview } from './strength-revision-decision-review';
+
+export { createStrengthRevisionPreviewBinding, verifyStrengthRevisionPreviewBinding } from './strength-revision-preview-binding';
+export type { StrengthRevisionPreviewBinding, StrengthRevisionBindingResult } from './strength-revision-preview-binding';
