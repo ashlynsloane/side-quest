@@ -14,6 +14,7 @@ import {
 } from '../src/strength-preview-review-events-sqlite';
 import type { StoredStrengthRevisionPreview } from '../src/strength-revision-preview-sqlite';
 import { listUnapprovedStrengthReviewInbox } from '../src/strength-revision-review-inbox';
+import { readUnapprovedStrengthReviewDetail } from '../src/strength-revision-review-detail';
 import { summarizeUnapprovedStrengthRevision } from '../src/strength-revision-review-summary';
 import {
   STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview,
@@ -768,5 +769,65 @@ describe('read-only exact exercise dose change summary', () => {
     unreadableSource.binding.sourceSignature = '{broken';
     expect(() => summarizeUnapprovedStrengthRevision(unreadableSource))
       .toThrow(/unreadable/);
+  });
+});
+
+describe('single owner-scoped read-only detail and fresh safety evidence', () => {
+  it('shows exact saved dose and pending review without changing training data', async () => {
+    const { db, sql } = open();
+    const before = (db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json;
+    await appendStrengthRevisionPreview(sql, input());
+    const detail = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(detail.status).toBe('pending_review');
+    expect(detail.stale).toBe(false);
+    expect(detail.summary.originalSeconds).toBe(2400);
+    expect(detail.summary.proposedSeconds).toBe(1920);
+    expect(detail.summary.changes.some(change => change.kind === 'exercise_target'))
+      .toBe(true);
+    expect(detail.executableWorkoutApproved).toBe(false);
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(before);
+    expect(count(db, 'daily_strength_choice_events')).toBe(0);
+  });
+  it('retains historical exact comparison but reports changed PT/unknown evidence as stale', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    db.prepare('UPDATE pt_profiles SET profile_json = ?').run('{"active":true}');
+    const result = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    );
+    expect(result.status).toBe('stale');
+    expect(result.reasons.join(' ')).toMatch(/PT profile restrictions/);
+    expect(result.summary.proposedSeconds).toBe(1920);
+    expect(result.executableWorkoutApproved).toBe(false);
+
+    const unknown = await readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', {
+        ...evidence(), providerRestrictions: 'unknown',
+      },
+    );
+    expect(unknown.status).toBe('stale');
+  });
+  it('rejects wrong athlete, invalid preview identity and corrupt candidate', async () => {
+    const { db, sql } = open();
+    await appendStrengthRevisionPreview(sql, input());
+    await expect(readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', {
+        ...evidence(), athleteId: 'different-athlete',
+      },
+    )).rejects.toThrow(/identity mismatch/);
+    await expect(readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-b', 'preview-1', {
+        ...evidence(), athleteId: 'synthetic-athlete-b',
+      },
+    )).rejects.toThrow(/ownership mismatch/);
+    db.prepare('UPDATE strength_revision_previews SET preview_json = ?')
+      .run('{invalid');
+    await expect(readUnapprovedStrengthReviewDetail(
+      sql, 'synthetic-athlete-a', 'preview-1', evidence(),
+    )).rejects.toThrow(/unreadable/);
   });
 });
