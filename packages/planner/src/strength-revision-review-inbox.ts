@@ -1,4 +1,5 @@
 import type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
+import { withUnapprovedStrengthReadSnapshot } from './strength-review-read-snapshot';
 import type { CurrentStrengthReviewEvidence } from './strength-revision-decision-review';
 import { reassessStoredStrengthRevisionPreview } from './strength-revision-preview-sqlite';
 import { readStrengthPreviewReviewState } from './strength-preview-review-events-sqlite';
@@ -42,7 +43,8 @@ export async function listUnapprovedStrengthReviewInbox(
   if (!Number.isSafeInteger(offset) || offset < 0) {
     throw new Error('Strength preview inbox offset must be a nonnegative safe integer.');
   }
-  const owner = await sql.getFirst<{ user_id: string }>(
+  return withUnapprovedStrengthReadSnapshot(sql, async (snapshot) => {
+  const owner = await snapshot.getFirst<{ user_id: string }>(
     'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton = 1',
     [],
   );
@@ -51,27 +53,27 @@ export async function listUnapprovedStrengthReviewInbox(
   }
   // The database is already locked to this athlete. A foreign-owned
   // preview or lifecycle event inside it is corrupt, not an item to hide.
-  const foreignPreview = await sql.getFirst<{ id: string }>(
+  const foreignPreview = await snapshot.getFirst<{ id: string }>(
     'SELECT id FROM strength_revision_previews WHERE athlete_id <> ? LIMIT 1',
     [athleteId],
   );
-  const foreignReview = await sql.getFirst<{ id: string }>(
+  const foreignReview = await snapshot.getFirst<{ id: string }>(
     'SELECT id FROM strength_revision_preview_review_events WHERE athlete_id <> ? LIMIT 1',
     [athleteId],
   );
   if (foreignPreview || foreignReview) {
     throw new Error('Strength preview inbox contains a wrong-owner audit record.');
   }
-  const rows = await sql.getAll<{ id: string }>(
+  const rows = await snapshot.getAll<{ id: string }>(
     `SELECT id FROM strength_revision_previews
      ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`,
     [pageSize, offset],
   );
   const items: UnapprovedStrengthReviewInboxItem[] = [];
   for (const row of rows) {
-    const review = await readStrengthPreviewReviewState(sql, athleteId, row.id);
+    const review = await readStrengthPreviewReviewState(snapshot, athleteId, row.id);
     const assessment = await reassessStoredStrengthRevisionPreview(
-      sql, athleteId, row.id, evidence,
+      snapshot, athleteId, row.id, evidence,
     );
     const preview = assessment.preview;
     const stale = assessment.status === 'stale';
@@ -92,4 +94,5 @@ export async function listUnapprovedStrengthReviewInbox(
     });
   }
   return items;
+  });
 }
