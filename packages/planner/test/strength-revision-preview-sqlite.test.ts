@@ -208,7 +208,8 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
-const count = (db: DatabaseSync, table: 'strength_revision_previews' | 'daily_strength_choice_events') =>
+const count = (db: DatabaseSync, table: 'strength_revision_previews' | 'daily_strength_choice_events'
+  | 'training_safety_context_events') =>
   (db.prepare('SELECT COUNT(*) AS n FROM ' + table).get() as { n: number }).n;
 
 describe('immutable unapproved strength revision preview: actual SQLite file', () => {
