@@ -514,6 +514,18 @@ describe('reversible UNAPPROVED preview review lifecycle with SQLite', () => {
     ).get() as { block_json: string };
     expect(persistedBlock.block_json).toBe(JSON.stringify(block()));
   });
+  it('never falls back to an interleavable transaction when exclusive write support is absent', async () => {
+    const { db, sql } = open();
+    const stored = await appendStrengthRevisionPreview(sql, input());
+    await expect(appendStrengthPreviewReviewEvent(
+      { ...sql, exclusiveTransaction: undefined },
+      reviewEvent(stored, 'dismiss'), null,
+    )).rejects.toThrow(/Exclusive strength review writes are unavailable/);
+    expect(reviewEventCount(db)).toBe(0);
+    expect((await readStrengthPreviewReviewState(
+      sql, 'synthetic-athlete-a', stored.id,
+    )).status).toBe('pending_review');
+  });
   it('rejects duplicate dismissal, orphan restoration and wrong athlete owner', async () => {
     const { db, sql } = open();
     const stored = await appendStrengthRevisionPreview(sql, input());
