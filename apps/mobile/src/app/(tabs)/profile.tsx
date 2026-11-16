@@ -28,6 +28,7 @@ export default function ProfileTab() {
       <V23Row title="Goals and capacity" detail="Goal, availability, experience, and sport profile" onPress={() => router.push('/goal-catalog' as Href)} />
       <V23Row title="Training spaces" detail="Home, gym, and the equipment you actually have access to" onPress={() => router.push('/training-spaces' as Href)} />
       <V23Row title="Restrictions and symptoms" detail="PT context and training safeguards" onPress={() => router.push('/pt-profile' as Href)} />
+      <V23Row title="Training safety context" detail="Routine training, injury rehab, and protected movements" onPress={() => router.push('/training-safety-context' as Href)} />
       <V23Row title="Unapproved strength drafts" detail="Read-only dose comparisons and review history; no workout changes" onPress={() => router.push('/strength-review-inbox' as Href)} last />
     </V23GroupedList>
 
