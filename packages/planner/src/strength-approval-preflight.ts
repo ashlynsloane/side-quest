@@ -11,10 +11,12 @@ import {
   readStrengthEvidenceProvenance,
 } from './strength-evidence-provenance-sqlite';
 import type { TrainingSafetyPolicy } from './training-safety-context-sqlite';
+import type { StrengthMovementRestrictionAssessment } from './strength-movement-restriction-review';
 
 /** Read-only, non-clinical diagnostics. No combination of gates confers clearance. */
 export type StrengthApprovalGateId =
-  | 'source_identity' | 'candidate_structure' | 'session_uncompleted'
+  | 'source_identity' | 'candidate_structure' | 'movement_compatibility'
+  | 'session_uncompleted'
   | 'no_conflicting_decision' | 'review_disposition'
   | 'symptom_check_in' | 'readiness_check_in' | 'local_pt_profile'
   | 'external_provider_restrictions' | 'source_provenance'
@@ -64,6 +66,7 @@ export async function inspectStrengthApprovalPreflight(
   evidence: CurrentStrengthReviewEvidence,
   nowMs = Date.now(),
   trainingPolicy?: TrainingSafetyPolicy,
+  movementAssessment?: StrengthMovementRestrictionAssessment,
 ): Promise<StrengthApprovalPreflight> {
   if (!Number.isFinite(nowMs)
     || evidence.athleteId !== assessment.preview.binding.athleteId
@@ -102,6 +105,43 @@ export async function inspectStrengthApprovalPreflight(
     structural?.structurallyValid
       ? 'No unreviewed increase was detected by the structural validator; clinical restrictions remain unverified.'
       : 'The proposed exercise dose could not be safely compared to the current source.');
+
+  // Physical movement compatibility is a separate gate from structural
+  // reductions: fewer reps/seconds cannot resolve a contraindicated exercise.
+  // These are catalog-tag warnings, never verified clinical clearance.
+  if (movementAssessment && (
+    movementAssessment.executableWorkoutApproved !== false
+    || movementAssessment.canApplyWorkout !== false
+    || movementAssessment.matchingIsClinicalClearance !== false
+    || !Array.isArray(movementAssessment.findings)
+    || !Number.isSafeInteger(movementAssessment.potentialConflictCount)
+    || !Number.isSafeInteger(movementAssessment.needsIndividualReviewCount)
+    || movementAssessment.potentialConflictCount !==
+      movementAssessment.findings.filter(f => f.status === 'potential_conflict').length
+    || movementAssessment.needsIndividualReviewCount !==
+      movementAssessment.findings.filter(f => f.status === 'needs_individual_review').length
+    || movementAssessment.track !== trainingPolicy?.track
+  )) {
+    throw new Error('Movement restriction diagnostic integrity mismatch.');
+  }
+  const movementConflicts = movementAssessment?.potentialConflictCount ?? 0;
+  const movementNeedsReview = movementAssessment?.needsIndividualReviewCount ?? 0;
+  const protectedCount = movementAssessment?.protectedMovements.length ?? 0;
+  const movementBlocked = protectedCount > 0
+    && (movementConflicts > 0 || movementNeedsReview > 0);
+  const movementNotApplicable = movementAssessment?.track === 'routine_training_review'
+    && protectedCount === 0 && movementNeedsReview === 0
+    && movementConflicts === 0;
+  add('movement_compatibility', 'Protected-movement exercise compatibility',
+    movementBlocked ? 'blocked'
+      : movementNotApplicable ? 'not_applicable' : 'unverified',
+    movementBlocked
+      ? `The candidate has ${movementConflicts} potential exercise conflict(s) and ${movementNeedsReview} exercise(s) requiring individual review. Reducing dose does not remove a restriction.`
+      : movementNotApplicable
+        ? 'No protected movement was recorded for ordinary training; this does not establish exercise safety.'
+        : protectedCount > 0
+          ? 'No tagged conflict detected, but this does not verify clinical compatibility with protected movements.'
+          : 'Movement-specific compatibility needs individual context or complete exercise annotations; clinical clearance is not established.');
 
   const completed = await sql.getFirst<{ id: string }>(
     'SELECT id FROM workout_ledger WHERE planned_session_id = ? LIMIT 1',
