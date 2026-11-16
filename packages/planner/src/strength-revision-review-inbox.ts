@@ -45,11 +45,23 @@ export async function listUnapprovedStrengthReviewInbox(
   if (owner?.user_id !== athleteId) {
     throw new Error('Strength preview inbox database ownership mismatch.');
   }
+  // The database is already locked to this athlete. A foreign-owned
+  // preview or lifecycle event inside it is corrupt, not an item to hide.
+  const foreignPreview = await sql.getFirst<{ id: string }>(
+    'SELECT id FROM strength_revision_previews WHERE athlete_id <> ? LIMIT 1',
+    [athleteId],
+  );
+  const foreignReview = await sql.getFirst<{ id: string }>(
+    'SELECT id FROM strength_revision_preview_review_events WHERE athlete_id <> ? LIMIT 1',
+    [athleteId],
+  );
+  if (foreignPreview || foreignReview) {
+    throw new Error('Strength preview inbox contains a wrong-owner audit record.');
+  }
   const rows = await sql.getAll<{ id: string }>(
     `SELECT id FROM strength_revision_previews
-     WHERE athlete_id = ?
      ORDER BY created_at DESC, rowid DESC LIMIT ?`,
-    [athleteId, pageSize],
+    [pageSize],
   );
   const items: UnapprovedStrengthReviewInboxItem[] = [];
   for (const row of rows) {
