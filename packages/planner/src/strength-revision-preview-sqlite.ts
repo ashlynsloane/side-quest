@@ -48,7 +48,8 @@ function isTimestamp(value: unknown): value is string {
   return typeof value === 'string'
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
     && Number.isFinite(Date.parse(value))
-    && new Date(value).toISOString() === new Date(Date.parse(value)).toISOString();
+    && (value === new Date(Date.parse(value)).toISOString()
+      || value === new Date(Date.parse(value)).toISOString().replace('.000Z', 'Z'));
 }
 
 function getSession(block: TrainingBlockPlan, sessionId: string): PlannedStrengthSession {
