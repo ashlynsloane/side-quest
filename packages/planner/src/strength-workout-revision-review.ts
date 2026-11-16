@@ -37,6 +37,11 @@ export function evaluateStrengthWorkoutRevision(input: {
     return { structurallyValid: false, reasons: ['Missing workout identity or stations.'],
       requiresCurrentRestrictionReview: true, autoApproved: false };
   }
+  if (proposed.id !== original.id || proposed.name !== original.name
+    || proposed.variantLevel !== original.variantLevel
+    || proposed.variantOfWorkoutId !== original.variantOfWorkoutId) {
+    reject('Workout identity or variant provenance changed.');
+  }
   // Never relax the source workout's generator constraints or swap its
   // equipment/region provenance in the guise of a time reduction.
   if (JSON.stringify(proposed.request) !== JSON.stringify(original.request)
@@ -72,6 +77,7 @@ export function evaluateStrengthWorkoutRevision(input: {
       || !finitePositive(source.durationSeconds)
       || station.durationSeconds > source.durationSeconds
       || station.order !== source.order || station.format !== source.format
+      || station.purpose !== source.purpose
       || !Array.isArray(station.exercises) || station.exercises.length === 0
       || !Array.isArray(source.exercises) || source.exercises.length === 0) {
       reject('Unrecognized, empty, increased, or structurally modified station.');
@@ -98,6 +104,7 @@ export function evaluateStrengthWorkoutRevision(input: {
         || exercise.unit !== previous.unit || exercise.order !== previous.order
         || exercise.prescriptionId !== previous.prescriptionId
         || exercise.equipmentOptionId !== previous.equipmentOptionId
+        || exercise.adaptationNote !== previous.adaptationNote
         || JSON.stringify(exercise.exerciseSnapshot) !== JSON.stringify(previous.exerciseSnapshot)) {
         reject('Exercise target, prescription, equipment or snapshot changed unsafely.');
       }
