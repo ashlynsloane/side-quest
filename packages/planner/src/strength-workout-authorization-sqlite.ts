@@ -290,6 +290,13 @@ export async function authorizeRoutineStrengthWorkout(
       !== preview.binding.candidateSignature) {
       throw new Error('Authorized candidate workout source is missing or changed.');
     }
+    const orphanWithdrawal = await txn.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_authorization_withdrawals WHERE session_id = ? LIMIT 1',
+      [preview.binding.sessionId],
+    );
+    if (orphanWithdrawal) {
+      throw new Error('Unreconciled prior withdrawal blocks fresh authorization.');
+    }
     const existing = await txn.getAll<{ id: string; athlete_id: string }>(
       `SELECT id, athlete_id FROM strength_workout_authorizations
        WHERE session_id = ? OR preview_id = ? LIMIT 2`,
