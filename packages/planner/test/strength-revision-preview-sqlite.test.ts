@@ -2572,9 +2572,10 @@ describe('routine authorization withdrawal and fresh pre-start safety screen', (
           }),
         );
       } else if (variant === 'rehab') {
+        const safetyContext = await readAthleteTrainingSafetyContext(sql, auth.athleteId);
         await appendTrainingSafetyContextEvent(sql,
           safetyEvent('start-time-rehab', 'training_intent', 'injury_rehabilitation'),
-          null);
+          safetyContext.latestEventId);
       } else {
         saveBlock(block({ ...request.source, title: 'Changed after consent' }));
       }
