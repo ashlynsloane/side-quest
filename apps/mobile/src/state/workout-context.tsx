@@ -17,9 +17,11 @@ import {
   clearLiveWorkoutSession,
   createInitialLiveWorkoutSession,
   loadLiveWorkoutSession,
+  persistFirstRoutineNativeCheckpoint,
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
+import { prepareRoutineNativeWorkoutCheckpoint } from '@/services/database';
 import {
   generateWorkoutForAssignedTrainingSpace,
   trainingSpaceAssignmentForPlannedSession,
@@ -44,6 +46,11 @@ type WorkoutContextValue = {
   updatePreviewWorkout: (workout: GeneratedWorkout) => void;
   openPlannedWorkoutPreview: (session: PlannedStrengthSession, context?: RecommendationExplanationContext) => void;
   beginWorkout: (workout: GeneratedWorkout) => Promise<void>;
+  beginAuthorizedRoutineWorkout: (input: {
+    sessionId: string;
+    expectedAuthorizationId: string;
+    expectedObservationToken: string;
+  }) => Promise<void>;
   updateActiveWorkout: (workout: GeneratedWorkout) => void;
   clearActiveWorkout: () => void;
 };
@@ -167,6 +174,68 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
         setActiveWorkout(workout);
         setActivePlanLink(planLink);
         setRestoredActiveWorkout(false);
+      } finally {
+        startInFlight.current = false;
+      }
+    },
+    async beginAuthorizedRoutineWorkout(input) {
+      // This is the ONLY guarded React entry for an approved revision. It
+      // consumes the exact immutable SQLite workout, never the preview draft.
+      if (startInFlight.current) {
+        throw new Error('A workout start is already in progress.');
+      }
+      const athleteAtStart = user?.id ?? null;
+      if (!athleteAtStart || !workoutSessionReady || activeWorkout) {
+        throw new Error('Finish or recover the existing workout before starting an authorized routine.');
+      }
+      startInFlight.current = true;
+      try {
+        const earlier = await loadLiveWorkoutSession(athleteAtStart);
+        if (earlier) {
+          throw new Error('An earlier workout checkpoint exists. Finish or recover it first.');
+        }
+        if (liveAthleteId.current !== athleteAtStart) {
+          throw new Error('Athlete profile changed before routine workout start.');
+        }
+        const idSuffix = new Date().toISOString() +
+          '-' + Math.random().toString(36).slice(2, 12);
+        const prepared = await prepareRoutineNativeWorkoutCheckpoint({
+          athleteId: athleteAtStart,
+          sessionId: input.sessionId,
+          expectedAuthorizationId: input.expectedAuthorizationId,
+          expectedObservationToken: input.expectedObservationToken,
+          intentId: 'athlete-native-start-' + idSuffix,
+          checkpointId: 'athlete-native-checkpoint-' + idSuffix,
+          athleteExplicitlyRequestedStart: true,
+        });
+        if (prepared.athleteId !== athleteAtStart
+          || prepared.authorizationId !== input.expectedAuthorizationId
+          || prepared.sessionId !== input.sessionId
+          || prepared.playerPlaybackStarted !== false
+          || prepared.initialLiveSession.running !== false
+          || prepared.initialLiveSession.planLink.sessionId !== input.sessionId) {
+          throw new Error('Native routine recovery checkpoint identity mismatch.');
+        }
+        if (liveAthleteId.current !== athleteAtStart) {
+          throw new Error('Athlete profile changed before workout hydration. Start audit retained.');
+        }
+        // SQLite intent AND paused source checkpoint have already committed.
+        // A localStorage failure does NOT modify React or navigate the player.
+        // On failure, keep both immutable SQLite records for reconciliation.
+        await persistFirstRoutineNativeCheckpoint(
+          prepared.initialLiveSession, athleteAtStart,
+        );
+        if (liveAthleteId.current !== athleteAtStart) {
+          throw new Error('Athlete profile changed after checkpoint save. Checkpoint retained.');
+        }
+        const restored = await loadLiveWorkoutSession(athleteAtStart);
+        if (JSON.stringify(restored) !== JSON.stringify(prepared.initialLiveSession)) {
+          throw new Error('The saved native routine checkpoint could not be verified.');
+        }
+        setActiveWorkout(prepared.initialLiveSession.workout);
+        setActivePlanLink(prepared.initialLiveSession.planLink);
+        // Paused native checkpoint: no timer or playback starts automatically.
+        setRestoredActiveWorkout(true);
       } finally {
         startInFlight.current = false;
       }
