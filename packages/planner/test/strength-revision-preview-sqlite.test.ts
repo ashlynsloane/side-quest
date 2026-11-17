@@ -232,7 +232,8 @@ afterEach(() => {
   }
 });
 const count = (db: DatabaseSync, table: 'strength_revision_previews' | 'daily_strength_choice_events'
-  | 'training_safety_context_events') =>
+  | 'training_safety_context_events' | 'strength_workout_start_intents'
+  | 'strength_workout_native_start_checkpoints' | 'workout_ledger') =>
   (db.prepare('SELECT COUNT(*) AS n FROM ' + table).get() as { n: number }).n;
 
 describe('immutable unapproved strength revision preview: actual SQLite file', () => {
