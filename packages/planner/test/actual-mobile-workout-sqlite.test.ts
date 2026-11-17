@@ -1436,6 +1436,27 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect((await store.loadLiveWorkoutSession('synthetic-athlete-one'))?.running).toBe(false);
   });
 
+  it('a failed checkpoint removal retains the original workout until a verified retry', async () => {
+    const store = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const original = store.createInitialLiveWorkoutSession(workout, startedAt);
+    await store.saveLiveWorkoutSession(original, 'synthetic-athlete-one');
+    const originalRemover = globalThis.localStorage.removeItem;
+    try {
+      globalThis.localStorage.removeItem = () => {
+        throw new Error('Injected checkpoint cleanup failure.');
+      };
+      await expect(store.clearLiveWorkoutSession('synthetic-athlete-one'))
+        .rejects.toThrow(/Injected checkpoint cleanup failure/);
+      expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toEqual(original);
+    } finally {
+      globalThis.localStorage.removeItem = originalRemover;
+    }
+    await store.clearLiveWorkoutSession('synthetic-athlete-one');
+    expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+    await expect(store.clearLiveWorkoutSession(null))
+      .rejects.toThrow(/verified athlete profile/);
+  });
+
   it('does not overwrite an unresolved completion with a new workout or corrupt stored checkpoint', async () => {
     const checkpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
     const sessionA = checkpoint.createInitialLiveWorkoutSession(workout, startedAt);
