@@ -1453,8 +1453,9 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     }
     await store.clearLiveWorkoutSession('synthetic-athlete-one');
     expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
-    await expect(store.clearLiveWorkoutSession(null))
-      .rejects.toThrow(/verified athlete profile/);
+    // An explicit signed-out identity is a safe no-op, never a previous-owner delete.
+    await store.clearLiveWorkoutSession(null);
+    expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
   });
 
   it('does not overwrite an unresolved completion with a new workout or corrupt stored checkpoint', async () => {
