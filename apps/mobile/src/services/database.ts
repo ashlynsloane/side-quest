@@ -28,7 +28,11 @@ import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
 import type { DailyReadinessCheckIn } from './readiness';
-import { ACTIVE_WORKOUT_PROFILE_KEY } from './active-workout-persistence';
+import {
+  ACTIVE_WORKOUT_PROFILE_KEY,
+  loadLiveWorkoutSession,
+  persistFirstRoutineNativeCheckpoint,
+} from './active-workout-persistence';
 
 let db = SQLite.openDatabaseSync('circuit-generator.db');
 let activeDatabaseName = 'circuit-generator.db';
@@ -1723,7 +1727,7 @@ export async function getRecordedRoutineStrengthStartIntent(
  * recovery snapshot in one exclusive owner-scoped SQLite transaction.
  * This does NOT hydrate localStorage, set React player state or start timers.
  */
-export async function prepareRoutineNativeWorkoutCheckpoint(input: {
+interface VerifiedRoutineNativeStartInput {
   athleteId: string;
   sessionId: string;
   expectedAuthorizationId: string;
@@ -1731,24 +1735,61 @@ export async function prepareRoutineNativeWorkoutCheckpoint(input: {
   checkpointId: string;
   expectedObservationToken: string;
   athleteExplicitlyRequestedStart: true;
-}): Promise<RoutineNativeStartCheckpoint> {
+}
+
+async function prepareRoutineNativeCheckpointWithOwnedHandle(
+  input: VerifiedRoutineNativeStartInput,
+): Promise<RoutineNativeStartCheckpoint> {
+  await initializeDatabase();
+  const authorized = await readAuthorizedRoutineWorkout(
+    trainingAdjustmentDriver, input.athleteId, input.sessionId,
+  );
+  if (!authorized) throw new Error('Routine native start consent is missing.');
+  const preview = await readStrengthRevisionPreview(
+    trainingAdjustmentDriver, input.athleteId, authorized.previewId,
+  );
+  if (!preview) throw new Error('Routine native start review is missing.');
+  const currentLocalDate = localCalendarDate(new Date());
+  return commitRoutineNativeStartCheckpoint(trainingAdjustmentDriver, {
+    ...input,
+    evidence: preview.evidence.todayLocalDate === currentLocalDate
+      ? preview.evidence
+      : { ...preview.evidence, todayLocalDate: currentLocalDate },
+  });
+}
+
+/** SQLite-only start recovery seed; does NOT hydrate or open the player. */
+export async function prepareRoutineNativeWorkoutCheckpoint(
+  input: VerifiedRoutineNativeStartInput,
+): Promise<RoutineNativeStartCheckpoint> {
+  return withVerifiedAthleteDatabase(input.athleteId,
+    () => prepareRoutineNativeCheckpointWithOwnedHandle(input));
+}
+
+/**
+ * Safe start handoff. Serialize the SQLite commit AND first paused local
+ * checkpoint write under the same athlete database activation/ownership lock.
+ * If either fails, React must remain untouched. SQLite history is retained
+ * if the second store fails, never silently repeated as a new start.
+ */
+export async function commitAndHydrateRoutineNativeWorkout(
+  input: VerifiedRoutineNativeStartInput,
+): Promise<RoutineNativeStartCheckpoint> {
   return withVerifiedAthleteDatabase(input.athleteId, async () => {
     await initializeDatabase();
-    const authorized = await readAuthorizedRoutineWorkout(
-      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    const existing = await loadLiveWorkoutSession(input.athleteId);
+    if (existing) {
+      throw new Error('An earlier athlete workout is already saved. Recover or finish it first.');
+    }
+    const prepared = await prepareRoutineNativeCheckpointWithOwnedHandle(input);
+    await persistFirstRoutineNativeCheckpoint(
+      prepared.initialLiveSession, input.athleteId,
     );
-    if (!authorized) throw new Error('Routine native start consent is missing.');
-    const preview = await readStrengthRevisionPreview(
-      trainingAdjustmentDriver, input.athleteId, authorized.previewId,
-    );
-    if (!preview) throw new Error('Routine native start review is missing.');
-    const currentLocalDate = localCalendarDate(new Date());
-    return commitRoutineNativeStartCheckpoint(trainingAdjustmentDriver, {
-      ...input,
-      evidence: preview.evidence.todayLocalDate === currentLocalDate
-        ? preview.evidence
-        : { ...preview.evidence, todayLocalDate: currentLocalDate },
-    });
+    const restored = await loadLiveWorkoutSession(input.athleteId);
+    if (JSON.stringify(restored) !== JSON.stringify(prepared.initialLiveSession)) {
+      throw new Error('Paused native player checkpoint verification failed after save.');
+    }
+    return prepared;
   });
 }
 
