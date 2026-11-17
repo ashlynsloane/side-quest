@@ -297,6 +297,13 @@ export async function authorizeRoutineStrengthWorkout(
     if (orphanWithdrawal) {
       throw new Error('Unreconciled prior withdrawal blocks fresh authorization.');
     }
+    const orphanStartIntent = await txn.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_start_intents WHERE session_id = ? LIMIT 1',
+      [preview.binding.sessionId],
+    );
+    if (orphanStartIntent) {
+      throw new Error('Unreconciled prior start intent blocks fresh authorization.');
+    }
     const existing = await txn.getAll<{ id: string; athlete_id: string }>(
       `SELECT id, athlete_id FROM strength_workout_authorizations
        WHERE session_id = ? OR preview_id = ? LIMIT 2`,
