@@ -310,7 +310,11 @@ export async function loadLiveWorkoutSession(
 
 export async function clearLiveWorkoutSession(profileId?: string | null): Promise<void> {
   const storage = getLocalStorage();
-  if (!storage) return;
+  if (!storage) throw new Error('Live workout recovery storage is unavailable.');
   const key = scopedLiveSessionKey(storage, profileId);
-  if (key) storage.removeItem(key);
+  if (!key) throw new Error('Cannot clear a workout without a verified athlete profile.');
+  storage.removeItem(key);
+  if (storage.getItem(key) !== null) {
+    throw new Error('The workout recovery checkpoint could not be verified as cleared.');
+  }
 }
