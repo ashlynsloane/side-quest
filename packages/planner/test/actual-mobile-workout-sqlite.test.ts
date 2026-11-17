@@ -592,7 +592,7 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     const { DatabaseSync } = await import('node:sqlite');
     const { appendStrengthRevisionPreview } = await import('../src/strength-revision-preview-sqlite');
     const { strengthSessionSignature } = await import('../src/daily-strength-decision-sqlite');
-    const { localCalendarDate, addLocalCalendarDays } = await import('../src/first-week-dates');
+    const { localCalendarDate } = await import('../src/first-week-dates');
     const today = localCalendarDate(new Date());
     const sourceWorkout = {
       id: 'routine-workout', name: 'QA routine revision', createdAt: startedAt,
@@ -617,7 +617,7 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
       targetRegions: [], recentLoadAdjustments: [], source: 'generated',
     };
     const session = {
-      id: 'routine-session', date: addLocalCalendarDays(today, 1),
+      id: 'routine-session', date: today,
       order: 0, title: 'Routine session', purpose: 'maintenance',
       intendedLoad: 'light', focusTargets: [], workout: sourceWorkout,
       rationale: 'routine QA', completionStatus: 'planned',
@@ -738,12 +738,31 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
       sessionId: 'routine-session',
       expectedAuthorizationId: 'routine-mobile-auth',
     });
-    expect(preStart.status).toBe('hold');
-    expect(preStart.blockers).toContain(
-      'The workout can only start on its scheduled local date.',
-    );
+    expect(preStart.status).toBe('eligible_for_atomic_start_gate');
+    expect(preStart.blockers).toEqual([]);
     expect(preStart.workoutStarted).toBe(false);
     expect(preStart.playerStartAuthorized).toBe(false);
+    const intent = await service.requestRoutineStrengthPreStartIntent({
+      athleteId: 'synthetic-athlete-one',
+      sessionId: 'routine-session',
+      expectedAuthorizationId: 'routine-mobile-auth',
+      intentId: 'routine-mobile-start-intent',
+      expectedObservationToken: preStart.observationToken!,
+      athleteExplicitlyRequestedStart: true,
+    });
+    expect(intent.workoutStarted).toBe(false);
+    expect(intent.playerStartAuthorized).toBe(false);
+    expect(intent.nativeActivationUnverified).toBe(true);
+    expect((await service.exportLocalData()).strength_workout_start_intents).toHaveLength(1);
+    expect((await service.exportLocalData()).workout_ledger).toEqual([]);
+    await expect(service.requestRoutineStrengthPreStartIntent({
+      athleteId: 'synthetic-athlete-one',
+      sessionId: 'routine-session',
+      expectedAuthorizationId: 'routine-mobile-auth',
+      intentId: 'routine-mobile-start-again',
+      expectedObservationToken: preStart.observationToken!,
+      athleteExplicitlyRequestedStart: true,
+    })).rejects.toThrow(/already exists/);
     const withdrawalInput = {
       athleteId: 'synthetic-athlete-one',
       sessionId: 'routine-session',
@@ -779,6 +798,9 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect(await service.getRoutineStrengthWithdrawal(
       'synthetic-athlete-one', 'routine-session',
     )).toEqual(withdrawn);
+    expect(await service.getRecordedRoutineStrengthStartIntent(
+      'synthetic-athlete-one', 'routine-session',
+    )).toEqual(intent);
     expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
       .toHaveLength(1);
     await service.recordAthleteTrainingSafetyContext({
