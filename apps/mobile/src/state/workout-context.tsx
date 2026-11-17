@@ -52,7 +52,7 @@ type WorkoutContextValue = {
     expectedObservationToken: string;
   }) => Promise<void>;
   updateActiveWorkout: (workout: GeneratedWorkout) => void;
-  clearActiveWorkout: () => void;
+  clearActiveWorkout: () => Promise<void>;
 };
 
 const WorkoutContext = createContext<WorkoutContextValue | null>(null);
@@ -243,11 +243,20 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
     },
-    clearActiveWorkout() {
+    async clearActiveWorkout() {
+      if (startInFlight.current) {
+        throw new Error('Wait for the pending workout start to finish before clearing it.');
+      }
+      const athleteAtClear = user?.id ?? null;
+      // Commit durable checkpoint removal first. If storage rejects cleanup,
+      // leave the current player state unchanged for recovery.
+      await clearLiveWorkoutSession(athleteAtClear);
+      if (liveAthleteId.current !== athleteAtClear) {
+        throw new Error('Athlete profile changed while clearing workout; current state retained.');
+      }
       setActiveWorkout(null);
       setActivePlanLink(null);
       setRestoredActiveWorkout(false);
-      void clearLiveWorkoutSession(user?.id ?? null);
     },
   }), [activePlanLink, activeWorkout, plannedPreviewSource, previewExplanation, previewWorkout, restoredActiveWorkout, workoutSessionReady, user?.id]);
 
