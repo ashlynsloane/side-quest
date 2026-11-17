@@ -631,7 +631,7 @@ async function readNativeCheckpointInSnapshot(
     || record.intentId !== row.intent_id || record.intentId !== matchingIntent?.id
     || record.candidateSignature !== authorized.candidateSignature
     || record.createdAt !== row.created_at || !validTimestamp(record.createdAt)
-    || record.createdAt !== matchingIntent.createdAt
+    || record.createdAt !== matchingIntent?.createdAt
     || JSON.stringify(record.initialLiveSession) !== JSON.stringify(
       reconstructInitialLiveSession(authorized, record.createdAt)
     )) {
