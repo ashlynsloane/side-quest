@@ -17,11 +17,10 @@ import {
   clearLiveWorkoutSession,
   createInitialLiveWorkoutSession,
   loadLiveWorkoutSession,
-  persistFirstRoutineNativeCheckpoint,
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
-import { prepareRoutineNativeWorkoutCheckpoint } from '@/services/database';
+import { commitAndHydrateRoutineNativeWorkout } from '@/services/database';
 import {
   generateWorkoutForAssignedTrainingSpace,
   trainingSpaceAssignmentForPlannedSession,
@@ -199,7 +198,7 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
         }
         const idSuffix = new Date().toISOString() +
           '-' + Math.random().toString(36).slice(2, 12);
-        const prepared = await prepareRoutineNativeWorkoutCheckpoint({
+        const prepared = await commitAndHydrateRoutineNativeWorkout({
           athleteId: athleteAtStart,
           sessionId: input.sessionId,
           expectedAuthorizationId: input.expectedAuthorizationId,
@@ -219,12 +218,9 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
         if (liveAthleteId.current !== athleteAtStart) {
           throw new Error('Athlete profile changed before workout hydration. Start audit retained.');
         }
-        // SQLite intent AND paused source checkpoint have already committed.
-        // A localStorage failure does NOT modify React or navigate the player.
-        // On failure, keep both immutable SQLite records for reconciliation.
-        await persistFirstRoutineNativeCheckpoint(
-          prepared.initialLiveSession, athleteAtStart,
-        );
+        // The mobile service committed SQLite AND verified the local recovery
+        // checkpoint under a single athlete-ownership lock. A failure in
+        // either phase leaves React untouched; no automatic retry is allowed.
         if (liveAthleteId.current !== athleteAtStart) {
           throw new Error('Athlete profile changed after checkpoint save. Checkpoint retained.');
         }
