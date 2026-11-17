@@ -21,6 +21,12 @@ import {
   readAuthorizedRoutineWorkout,
   type StrengthWorkoutAuthorizationRequest,
 } from '../src/strength-workout-authorization-sqlite';
+import {
+  STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL,
+  withdrawRoutineStrengthAuthorization,
+  readRoutineAuthorizationWithdrawal,
+  inspectRoutineWorkoutStart,
+} from '../src/strength-workout-start-safety-sqlite';
 import { localCalendarDate, addLocalCalendarDays } from '../src/first-week-dates';
 import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
 import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
@@ -188,6 +194,7 @@ function open(owner = 'synthetic-athlete-a') {
     ${TRAINING_SAFETY_CONTEXT_SQL}
     ${STRENGTH_CHOICE_AUDIT_SQL}
     ${STRENGTH_WORKOUT_AUTHORIZATION_SQL}
+    ${STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
   db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)').run(
@@ -2216,12 +2223,12 @@ describe('exclusive SQLite strength authorization dry-run: NO executable approva
 });
 
 async function freshRoutineCandidate(
-  fixture = open(),
+  fixture = open(), startToday = false,
 ) {
   const { db, sql, saveBlock } = fixture;
   const today = localCalendarDate(new Date());
   const source = sourceSession();
-  source.date = addLocalCalendarDays(today, 1);
+  source.date = startToday ? today : addLocalCalendarDays(today, 1);
   const exerciseMetadata = {
     ...source.workout.stations[0]!.exercises[0]!.exerciseSnapshot,
     movementPatterns: ['squat' as const], avoidanceTags: [],
@@ -2467,5 +2474,189 @@ describe('athlete-confirmed routine workout authorization transaction', () => {
     );
     expect(record).toEqual(created.authorization);
     expect(record?.automaticallyStarted).toBe(false);
+  });
+});
+
+
+describe('routine authorization withdrawal and fresh pre-start safety screen', () => {
+  const startRequest = (athleteId: string, sessionId: string, date: string) => ({
+    athleteId, sessionId, expectedAuthorizationId: 'routine-auth-1',
+    evidence: { ...evidence(), athleteId, todayLocalDate: date },
+  });
+
+  it('screens a same-day, unmodified routine authorization without starting a workout', async () => {
+    const { db, sql, auth, request } = await freshRoutineCandidate(open(), true);
+    const created = await authorizeRoutineStrengthWorkout(sql, auth);
+    const screened = await inspectRoutineWorkoutStart(
+      sql, startRequest(auth.athleteId, request.source.id, auth.evidence.todayLocalDate),
+    );
+    expect(screened.status).toBe('eligible_for_atomic_start_gate');
+    expect(screened.blockers).toEqual([]);
+    expect(screened.authorizationId).toBe(created.authorization.id);
+    expect(screened.observationToken).toBeTruthy();
+    expect(screened.playerStartAuthorized).toBe(false);
+    expect(screened.workoutStarted).toBe(false);
+    expect(screened.requiresAtomicStartRevalidation).toBe(true);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM workout_ledger').get() as { n: number }).n)
+      .toBe(0);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number }).n).toBe(1);
+  });
+
+  it('refuses pre-start eligibility before the scheduled local day or with stale day evidence', async () => {
+    const { sql, auth, request } = await freshRoutineCandidate();
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    const early = await inspectRoutineWorkoutStart(
+      sql, startRequest(auth.athleteId, request.source.id, auth.evidence.todayLocalDate),
+    );
+    expect(early.status).toBe('hold');
+    expect(early.blockers).toContain('The workout can only start on its scheduled local date.');
+    const yesterday = addLocalCalendarDays(auth.evidence.todayLocalDate, -1);
+    const stale = await inspectRoutineWorkoutStart(
+      sql, startRequest(auth.athleteId, request.source.id, yesterday),
+    );
+    expect(stale.status).toBe('hold');
+    expect(stale.blockers).toContain('A fresh local-day check-in is required.');
+  });
+
+  it('withdraws exactly once, retains the original consent and survives SQLite restart', async () => {
+    const { db, sql, file, directory, auth, request } =
+      await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    const withdrawalRequest = {
+      athleteId: auth.athleteId, sessionId: request.source.id,
+      expectedAuthorizationId: auth.authorizationId,
+      withdrawalId: 'withdraw-routine-1',
+      athleteConfirmedWithdrawal: true as const,
+    };
+    const withdrawal = await withdrawRoutineStrengthAuthorization(sql, withdrawalRequest);
+    expect(withdrawal.kind).toBe('athlete_withdrawal');
+    expect(await readRoutineAuthorizationWithdrawal(
+      sql, auth.athleteId, request.source.id,
+    )).toEqual(withdrawal);
+    expect((await inspectRoutineWorkoutStart(
+      sql, startRequest(auth.athleteId, request.source.id, auth.evidence.todayLocalDate),
+    )).blockers).toContain('The athlete withdrew this workout authorization.');
+    await expect(withdrawRoutineStrengthAuthorization(sql, withdrawalRequest))
+      .rejects.toThrow(/already withdrawn/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number }).n).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorization_withdrawals')
+      .get() as { n: number }).n).toBe(1);
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    expect(await readRoutineAuthorizationWithdrawal(
+      driver(reopened), auth.athleteId, request.source.id,
+    )).toEqual(withdrawal);
+    expect((await inspectRoutineWorkoutStart(
+      driver(reopened),
+      startRequest(auth.athleteId, request.source.id, auth.evidence.todayLocalDate),
+    )).status).toBe('hold');
+  });
+
+  it('fails closed on changed local readiness, new symptoms, rehab intent, and plan drift', async () => {
+    for (const variant of ['readiness', 'symptoms', 'rehab', 'plan'] as const) {
+      const { db, sql, auth, request, saveBlock } =
+        await freshRoutineCandidate(open(), true);
+      await authorizeRoutineStrengthWorkout(sql, auth);
+      if (variant === 'readiness') {
+        db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(
+          JSON.stringify({ sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1 }),
+        );
+      } else if (variant === 'symptoms') {
+        db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            status: 'tightness_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400_000).toISOString(),
+          }),
+        );
+      } else if (variant === 'rehab') {
+        await appendTrainingSafetyContextEvent(sql,
+          safetyEvent('start-time-rehab', 'training_intent', 'injury_rehabilitation'),
+          null);
+      } else {
+        saveBlock(block({ ...request.source, title: 'Changed after consent' }));
+      }
+      const result = await inspectRoutineWorkoutStart(sql, startRequest(
+        auth.athleteId, request.source.id, auth.evidence.todayLocalDate,
+      ));
+      expect(result.status).toBe('hold');
+      expect(result.blockers.length).toBeGreaterThan(0);
+      expect(result.playerStartAuthorized).toBe(false);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM workout_ledger')
+        .get() as { n: number }).n).toBe(0);
+    }
+  });
+
+  it('rejects foreign ownership, forged authorization IDs and missing consistent snapshot', async () => {
+    const { sql, auth, request } = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    const expected = startRequest(
+      auth.athleteId, request.source.id, auth.evidence.todayLocalDate,
+    );
+    await expect(inspectRoutineWorkoutStart(sql, { ...expected, athleteId: 'other-athlete',
+      evidence: { ...expected.evidence, athleteId: 'other-athlete' } }))
+      .rejects.toThrow(/ownership mismatch/);
+    const wrong = await inspectRoutineWorkoutStart(sql, {
+      ...expected, expectedAuthorizationId: 'forged',
+    });
+    expect(wrong.status).toBe('hold');
+    expect(wrong.playerStartAuthorized).toBe(false);
+    await expect(inspectRoutineWorkoutStart(
+      { ...sql, readSnapshot: undefined }, expected,
+    )).rejects.toThrow(/snapshot is unavailable/);
+    await expect(withdrawRoutineStrengthAuthorization(sql, {
+      athleteId: 'other-athlete', sessionId: request.source.id,
+      expectedAuthorizationId: auth.authorizationId, withdrawalId: 'foreign-withdraw',
+      athleteConfirmedWithdrawal: true,
+    })).rejects.toThrow(/ownership mismatch/);
+  });
+
+  it('rejects corrupt withdrawal audits rather than overlooking them', async () => {
+    const { db, sql, auth, request } = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    await withdrawRoutineStrengthAuthorization(sql, {
+      athleteId: auth.athleteId, sessionId: request.source.id,
+      expectedAuthorizationId: auth.authorizationId,
+      withdrawalId: 'withdraw-tamper', athleteConfirmedWithdrawal: true,
+    });
+    db.prepare('UPDATE strength_workout_authorization_withdrawals SET event_json = ?')
+      .run(JSON.stringify({ id: 'forged', kind: 'athlete_withdrawal' }));
+    await expect(readRoutineAuthorizationWithdrawal(
+      sql, auth.athleteId, request.source.id,
+    )).rejects.toThrow(/audit integrity mismatch/);
+    await expect(inspectRoutineWorkoutStart(
+      sql, startRequest(auth.athleteId, request.source.id, auth.evidence.todayLocalDate),
+    )).rejects.toThrow(/audit integrity mismatch/);
+  });
+
+  it('rolls back failed withdrawal insert with no partially withdrawn session', async () => {
+    const { db, sql, auth, request } = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    const requestWithdrawal = {
+      athleteId: auth.athleteId, sessionId: request.source.id,
+      expectedAuthorizationId: auth.authorizationId,
+      withdrawalId: 'withdraw-after-retry', athleteConfirmedWithdrawal: true as const,
+    };
+    const failing: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Fixture requires exclusive SQL.');
+        return sql.exclusiveTransaction(writer => fn({
+          ...writer,
+          run: async () => { throw new Error('Injected withdrawal write failure.'); },
+        }));
+      },
+    };
+    await expect(withdrawRoutineStrengthAuthorization(failing, requestWithdrawal))
+      .rejects.toThrow(/Injected withdrawal write failure/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorization_withdrawals')
+      .get() as { n: number }).n).toBe(0);
+    await withdrawRoutineStrengthAuthorization(sql, requestWithdrawal);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorization_withdrawals')
+      .get() as { n: number }).n).toBe(1);
   });
 });
