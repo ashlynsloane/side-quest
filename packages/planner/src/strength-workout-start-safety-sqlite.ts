@@ -4,6 +4,7 @@ import { localCalendarDate } from './first-week-dates';
 import {
   getRoutineStrengthAuthorizationReadiness,
   readAuthorizedRoutineWorkout,
+  type AuthorizedStrengthWorkoutRecord,
 } from './strength-workout-authorization-sqlite';
 import { assessStrengthReviewWithinTransaction } from './strength-revision-review-detail';
 
@@ -234,6 +235,24 @@ function assertStartRequest(request: RoutineWorkoutStartRequest): void {
   }
 }
 
+/** Obtain the day from the immutable authorized plan binding, not the claim. */
+function authorizedScheduledLocalDate(authorization: AuthorizedStrengthWorkoutRecord): string {
+  let date: unknown;
+  try {
+    const binding = JSON.parse(authorization.bindingSignature) as { sourceSignature?: string };
+    const source = JSON.parse(binding.sourceSignature ?? '') as { date?: unknown };
+    date = source.date;
+  } catch {
+    throw new Error('Authorized routine workout schedule binding is unreadable.');
+  }
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+    || !Number.isFinite(Date.parse(date + 'T00:00:00Z'))
+    || new Date(Date.parse(date + 'T00:00:00Z')).toISOString().slice(0, 10) !== date) {
+    throw new Error('Authorized routine workout schedule binding is invalid.');
+  }
+  return date;
+}
+
 async function readStartIntentInSnapshot(
   snapshot: TrainingAdjustmentSqlDriver,
   athleteId: string,
@@ -241,6 +260,7 @@ async function readStartIntentInSnapshot(
   expectedAuthorizationId: string,
   expectedPreviewId: string,
   expectedSignature: string,
+  expectedScheduledLocalDate: string,
 ): Promise<RoutineStrengthStartIntent | null> {
   const rows = await snapshot.getAll<{
     id: string; athlete_id: string; session_id: string;
@@ -277,6 +297,7 @@ async function readStartIntentInSnapshot(
     || intent.previewId !== row.preview_id || intent.previewId !== expectedPreviewId
     || intent.candidateSignature !== expectedSignature
     || !/^\d{4}-\d{2}-\d{2}$/.test(intent.scheduledLocalDate)
+    || intent.scheduledLocalDate !== expectedScheduledLocalDate
     || intent.createdAt !== row.created_at || !validTimestamp(intent.createdAt)) {
     throw new Error('Routine start intent audit integrity mismatch.');
   }
@@ -321,6 +342,7 @@ async function assessStartWithinSnapshot(
     const recordedIntent = await readStartIntentInSnapshot(
       snapshot, request.athleteId, request.sessionId, authorized.id,
       authorized.previewId, authorized.candidateSignature,
+      authorizedScheduledLocalDate(authorized),
     );
     if (recordedIntent) {
       blockers.push('A pre-start intent already exists for this workout; reconcile it before retry.');
@@ -452,6 +474,7 @@ export async function readRoutineStrengthStartIntent(
     return readStartIntentInSnapshot(
       snapshot, athleteId, sessionId, original.id,
       original.previewId, original.candidateSignature,
+      authorizedScheduledLocalDate(original),
     );
   });
 }
