@@ -229,7 +229,7 @@ export default function WorkoutPreviewScreen() {
 
         <View style={styles.startPanel}>
           <View><Text style={styles.startTitle}>Ready when you are</Text><Text style={styles.startBody}>Edits and swaps are saved for this session.</Text></View>
-          <V23PrimaryButton onPress={start} disabled={starting} icon="play">{starting ? 'Saving workout…' : activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
+          <V23PrimaryButton onPress={start} icon="play">{starting ? 'Saving workout…' : activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
           <Pressable onPress={() => void startTogether()} disabled={roomBusy} style={[styles.togetherButton, roomBusy && styles.disabled]}><Text style={styles.togetherButtonText}>{roomBusy ? 'Creating room…' : 'Start this workout together'}</Text></Pressable>
         </View>
       </KeyboardSafeScreen>
