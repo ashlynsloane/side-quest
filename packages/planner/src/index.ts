@@ -1858,3 +1858,15 @@ export type {
   RoutineStrengthStartIntent,
   RoutineStrengthStartIntentRequest,
 } from './strength-workout-start-safety-sqlite';
+
+// Native start checkpoint is a verified durable recovery seed, not playback proof.
+export {
+  STRENGTH_NATIVE_START_CHECKPOINT_SQL,
+  commitRoutineNativeStartCheckpoint,
+  readRoutineNativeStartCheckpoint,
+} from './strength-workout-start-safety-sqlite';
+export type {
+  RoutineInitialLiveWorkoutCheckpoint,
+  RoutineNativeStartCheckpoint,
+  RoutineNativeStartCheckpointRequest,
+} from './strength-workout-start-safety-sqlite';
