@@ -1,41 +1,37 @@
-# Milestone 1 — Routine strength withdrawal and pre-start screening
+# Milestone 1 — Athlete-confirmed routine start, recovery, and withdrawal
 
-**Status:** Source implementation on isolated draft PR #12. NOT a native workout start gate, release clearance, clinician approval, or a change to the installed beta.
+**Status:** Prototype on isolated **draft/unmerged PR #12**. Neither a signed physical-iPhone acceptance result, an installed-beta change, a medical clearance system nor an approved release.
 
-## Implemented boundaries
+## Delivered local-first safety boundaries
 
-The athlete may explicitly authorize an immutable routine-training strength candidate only after the existing atomic review transaction. The source workout and actual execution ledger stay unchanged. Two additional backend capabilities now exist:
+1. **Exact athlete authorization.** An immutable review of a single routine-strength prescription is confirmed by the athlete. The original plan remains unchanged. Authorizing does not automatically execute the workout. Rehabilitation and restriction-aware care do NOT qualify for this athlete-only gate.
+2. **Immutable one-way authorization withdrawal.** Explicit athlete confirmation appends an owner-verified event. A withdrawn consent or a damaged audit holds a new start. Prior completion records are never deleted.
+3. **Read-only pre-start screen.** A consistent SQLite snapshot validates the exact approved exercise prescription, current local day, readiness, symptoms, safety context, restrictions, plan source, completed history and previous start journals. Its 'eligible' result is diagnostic ONLY.
+4. **Atomic native start recovery seed.** An exclusive SQLite transaction reruns the same safety evaluator, checks the UI's local observation token for drift and writes BOTH the one-time start intent and a paused initial workout checkpoint derived from the immutable authorized prescription. Any failure rolls back both rows. Audit integrity checks reject forged workout versions, dates, ownership, duplicated starts and orphaned events. The SQLite seed records NO timer playback.
+5. **Reviewed-workout player entry.** On the review detail screen, the athlete explicitly confirms Start. The app refreshes pre-start evidence, commits the verified SQLite seed, then writes and verifies the paused, exact-authorized player checkpoint in the per-athlete local recovery store. React's active player is populated and navigation occurs ONLY after persistence succeeds. If the checkpoint cannot be written, the screen retains its error instead of showing an unsaved started workout. The athlete must consciously resume the paused player; no automatic exercise timer starts.
+6. **Existing generic workout start/exit hardening.** The ordinary workout-preview Start now awaits its durable live checkpoint write before updating React state or navigating, with in-flight guards against double taps. Finishing and discarding await confirmed checkpoint cleanup before clearing UI state or leaving; failed cleanup keeps the session available for retry. An approved routine start NEVER replaces any pre-existing player checkpoint.
 
-1. **One-way withdrawal transaction.** An athlete can explicitly withdraw a specific authorization using its exact ID. The transaction verifies the athlete-owned database, original immutable authorization and absence of an earlier withdrawal, then appends one immutable event in the strength_workout_authorization_withdrawals table. Duplicate, wrong owner, missing consent, invalid ID, corrupt audit or SQL failure aborts without erasing the original record. Withdrawal does not delete training already performed. A fresh authorization may not silently replace the revoked one.
-2. **Fresh, non-executable pre-start inspection.** The backend reads a single consistent SQLite snapshot of the authorized preview, withdrawal journal, planning source, today's readiness and symptom rows, completed-session links, safety context and restrictions. It holds when authorization differs, was withdrawn, source/constraints drift, the plan is no longer reviewable, an applicable restriction appears, or the planned date is not **today's local day**. The status eligible_for_atomic_start_gate is a diagnostic, **not permission for workout playback**. Player-start authorization and workout-started indicators are always false.
+## Native tables and protected backups
 
-The athlete-scoped mobile data service exposes these functions but intentionally does not call them from the live workout player. A consent withdrawal does not itself cancel an already-running workout. Those execution controls require a separate native transaction and player integration.
+- \`strength_workout_authorizations\`: exact athlete-confirmed version
+- \`strength_workout_authorization_withdrawals\`: append-only revocations
+- \`strength_workout_start_intents\`: immutable requested-start history, not playback proof
+- \`strength_workout_native_start_checkpoints\`: matching initial paused player snapshot, persisted with the intent in one transaction
 
-## Database and backup
+All new tables are included in mobile SQLite initialization, full local export and mandatory critical audit export. No destructive legacy migration, cloud release or production data edit was made. The initial SQLite checkpoint is intentionally not treated as the latest authoritative *progress* snapshot after the athlete starts logging exercise.
 
-- New table: strength_workout_authorization_withdrawals with one withdrawal per original authorization ID, immutable event JSON, timestamp and athlete/session identity.
-- Included in the profile SQLite initializers, local export roster and mandatory critical-audit-export set. Export failure cannot silently omit withdrawal history.
-- No destructive migration, production data edit, cloud migration, existing workout mutation or automatic workout start.
-- Historic rows are read through an owner-verified snapshot. Corrupt/mismatched JSON fails closed rather than being treated as no withdrawal.
+## Exact automated checks and their limitations
 
-## Synthetic regression expectations
+The real, file-backed Node SQLite acceptance exercises the actual mobile SQL service through an Expo transport shim. Planner regressions cover: one exact checkpoint plus intent, no premature workout ledger insert, double-tap rejection, withdrawal, missing owner, changed readiness/restrictions/source/completion, altered checkpoint, orphan audit, failed second SQL write and rollback, backup/export and process/file reopen. Mobile checks cover SQL write injection, cold restart, paused state, no overwrite, storage failure and failed cleanup preserving the original session.
 
-The real disk-backed SQLite acceptance suite now covers:
-- Same-day routine authorization reaches pre-start inspection but never creates a workout or authorizes playback.
-- Future-dated and previous-day evidence blocks.
-- Explicit withdrawal preserves original consent, survives a close/reopen cycle, and disqualifies later start inspections.
-- Duplicate withdrawal, wrong athlete, wrong authorization, missing snapshot and damaged withdrawal audit fail closed.
-- New readiness deterioration, symptoms, rehabilitation intent and changed plan block inspection.
-- Injected write failures leave no partially committed withdrawal and permit clean retry.
+TypeScript, full planner/mobile SQLite tests, synthetic athlete acceptance and iOS JavaScript bundle export are necessary CI checks; none proves an installed native app or signed physical-device workflow. Report passing counts ONLY from a successful exact-head CI run.
 
-These are regression scenarios, not evidence that an iPhone has executed the new path. Only count them as PASS after exact-head CI results are green.
+## Unfinished release-critical recovery/safety work
 
-## Remaining release gates
+1. **Cross-store interruption reconciliation.** If SQLite commits the initial seed but localStorage write is interrupted, a safe explicit resume/reconciliation path must be implemented and evaluated against later withdrawal, new restrictions, a changed local day, completed sessions and intentional discard. NEVER replay an old initial checkpoint automatically or erase a progressed recovery snapshot. Include unambiguous abandonment/terminal-state markers.
+2. **Safety changes during active playback.** A withdrawal or new restriction after the initial launch must produce a clearly defined stop/hold and protect actual logged dose. Already-started workouts are not cancelled automatically by the current withdrawal transaction.
+3. **Full native iOS acceptance.** Run the exact source in an isolated signed build, exercise P01–P15 including rapid taps, process termination between the SQLite and per-athlete checkpoint writes, background saves, refusal and recovery, profile changes, partial completion, restart and storage failures. Treat simulator/JS-export success separately.
+4. **Legacy ownership and recovery.** Verify existing real profile database adoption and rollback, critical audit export, canonical training ledger and recovery behavior before release.
+5. **External medical evidence and approval.** Integrate authoritative provider limitations and avoid treating athlete-set labels as clinician verification. Explicit release-owner signoff remains necessary.
 
-1. **Atomic native start transaction:** The player must re-read restrictions, authorization, withdrawal, workout version and current-day evidence under the same locked transaction that records the start. A prior screen result must never grant execution after evidence changes.
-2. **Active-player revocation and recovery:** Define what happens if withdrawal occurs while the athlete has a paused/running workout, including explicit stop behavior, crash recovery and immutable observed dose.
-3. **Authoritative provider integration:** External provider records and source-coverage claims cannot be inferred from local fields or caller-supplied booleans; rehabilitation, restricted movements and return-to-sport remain outside routine athlete-only approval.
-4. **Device release acceptance:** Isolated signed physical-iPhone P01–P15, actual data-ownership/migration determination and verified rollback/restore; explicit release-owner signoff.
-5. **UI and accessibility:** Explicit withdrawal confirmation, view of retained audit history, fresh start-screen feedback and recovery from a refused start. Do not expose a Start button by consuming the current read-only result.
-
-Keep PR #12 draft/unmerged and separate from cloud PR #20 and the installed beta.
+**Release = HOLD.** Do not merge/deploy this draft, modify cloud PR #20 or touch an installed beta until these gates are resolved.
