@@ -174,69 +174,284 @@ export async function withdrawRoutineStrengthAuthorization(
  * evidence in an atomic start transaction immediately before execution.
  * Never use this result alone to unlock workout playback.
  */
-export async function inspectRoutineWorkoutStart(
-  sql: TrainingAdjustmentSqlDriver,
-  request: {
-    athleteId: string;
-    sessionId: string;
-    expectedAuthorizationId: string;
-    evidence: CurrentStrengthReviewEvidence;
-  },
-): Promise<RoutineWorkoutStartScreen> {
+export interface RoutineWorkoutStartRequest {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+  evidence: CurrentStrengthReviewEvidence;
+}
+
+/**
+ * An append-only record that a user REQUESTED a workout start after all
+ * locally available gates were rechecked in one exclusive SQLite transaction.
+ *
+ * This is NOT a saved live workout checkpoint or license to start the player.
+ * Never consume it as execution permission. The native launch transaction
+ * still needs to combine a fresh gate and durable player activation.
+ */
+export const STRENGTH_START_INTENT_SQL = [
+  'CREATE TABLE IF NOT EXISTS strength_workout_start_intents (',
+  '  id TEXT PRIMARY KEY NOT NULL,',
+  '  athlete_id TEXT NOT NULL,',
+  '  session_id TEXT NOT NULL UNIQUE,',
+  '  authorization_id TEXT NOT NULL,',
+  '  preview_id TEXT NOT NULL,',
+  '  intent_json TEXT NOT NULL,',
+  '  created_at TEXT NOT NULL',
+  ');',
+  'CREATE INDEX IF NOT EXISTS idx_strength_start_intent_owner',
+  '  ON strength_workout_start_intents(athlete_id, session_id);',
+].join('\n');
+
+export interface RoutineStrengthStartIntent {
+  schemaVersion: 1;
+  id: string;
+  kind: 'verified_pre_start_intent_only';
+  athleteId: string;
+  sessionId: string;
+  authorizationId: string;
+  previewId: string;
+  candidateSignature: string;
+  scheduledLocalDate: string;
+  createdAt: string;
+  athleteExplicitlyRequestedStart: true;
+  playerStartAuthorized: false;
+  workoutStarted: false;
+  nativeActivationUnverified: true;
+}
+
+export interface RoutineStrengthStartIntentRequest extends RoutineWorkoutStartRequest {
+  intentId: string;
+  expectedObservationToken: string;
+  athleteExplicitlyRequestedStart: true;
+}
+
+function assertStartRequest(request: RoutineWorkoutStartRequest): void {
   if (!request?.athleteId?.trim() || !request.sessionId?.trim()
     || !request.expectedAuthorizationId?.trim()
-    || request.evidence?.athleteId !== request.athleteId) {
+    || !request.evidence || request.evidence.athleteId !== request.athleteId) {
     throw new Error('Routine workout start review identity is incomplete.');
   }
+}
+
+async function readStartIntentInSnapshot(
+  snapshot: TrainingAdjustmentSqlDriver,
+  athleteId: string,
+  sessionId: string,
+  expectedAuthorizationId: string,
+  expectedPreviewId: string,
+  expectedSignature: string,
+): Promise<RoutineStrengthStartIntent | null> {
+  const rows = await snapshot.getAll<{
+    id: string; athlete_id: string; session_id: string;
+    authorization_id: string; preview_id: string;
+    intent_json: string; created_at: string;
+  }>(
+    'SELECT id, athlete_id, session_id, authorization_id, preview_id, ' +
+    'intent_json, created_at FROM strength_workout_start_intents WHERE session_id = ?',
+    [sessionId],
+  );
+  if (rows.length > 1) throw new Error('Ambiguous routine start intent history.');
+  if (!rows.length) return null;
+  const row = rows[0]!;
+  let intent: RoutineStrengthStartIntent;
+  try { intent = JSON.parse(row.intent_json) as RoutineStrengthStartIntent; }
+  catch { throw new Error('Routine start intent audit is unreadable.'); }
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)
+    || Object.keys(intent).sort().join('|') !== [
+      'athleteExplicitlyRequestedStart', 'athleteId', 'authorizationId',
+      'candidateSignature', 'createdAt', 'id', 'kind',
+      'nativeActivationUnverified', 'playerStartAuthorized',
+      'previewId', 'scheduledLocalDate', 'schemaVersion', 'sessionId',
+      'workoutStarted',
+    ].join('|')
+    || intent.schemaVersion !== 1 || intent.kind !== 'verified_pre_start_intent_only'
+    || intent.athleteExplicitlyRequestedStart !== true
+    || intent.playerStartAuthorized !== false
+    || intent.workoutStarted !== false || intent.nativeActivationUnverified !== true
+    || !intent.id?.trim() || intent.id !== row.id
+    || intent.athleteId !== row.athlete_id || intent.athleteId !== athleteId
+    || intent.sessionId !== row.session_id || intent.sessionId !== sessionId
+    || intent.authorizationId !== row.authorization_id
+    || intent.authorizationId !== expectedAuthorizationId
+    || intent.previewId !== row.preview_id || intent.previewId !== expectedPreviewId
+    || intent.candidateSignature !== expectedSignature
+    || !/^\d{4}-\d{2}-\d{2}$/.test(intent.scheduledLocalDate)
+    || intent.createdAt !== row.created_at || !validTimestamp(intent.createdAt)) {
+    throw new Error('Routine start intent audit integrity mismatch.');
+  }
+  return intent;
+}
+
+/**
+ * Same local evidence evaluator used by the read-only preview and exclusive
+ * pre-start intent write. This function must run INSIDE the caller's owned,
+ * consistent SQLite snapshot or dedicated exclusive transaction handle.
+ */
+async function assessStartWithinSnapshot(
+  snapshot: TrainingAdjustmentSqlDriver,
+  request: RoutineWorkoutStartRequest,
+): Promise<RoutineWorkoutStartScreen> {
+  const authorized = await readAuthorizedRoutineWorkout(
+    snapshot, request.athleteId, request.sessionId,
+  );
+  const blockers: string[] = [];
+  if (!authorized || authorized.id !== request.expectedAuthorizationId) {
+    blockers.push('No matching athlete-confirmed workout authorization.');
+  }
+  if (!authorized) {
+    const orphanWithdrawal = await snapshot.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_authorization_withdrawals WHERE session_id = ? LIMIT 1',
+      [request.sessionId],
+    );
+    const orphanStart = await snapshot.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_start_intents WHERE session_id = ? LIMIT 1',
+      [request.sessionId],
+    );
+    if (orphanWithdrawal || orphanStart) {
+      throw new Error('Orphan routine start or withdrawal audit detected.');
+    }
+  }
+  let observationToken: string | null = null;
+  if (authorized) {
+    const withdrawal = await readWithdrawalInSnapshot(
+      snapshot, request.athleteId, request.sessionId, authorized.id,
+    );
+    if (withdrawal) blockers.push('The athlete withdrew this workout authorization.');
+    const recordedIntent = await readStartIntentInSnapshot(
+      snapshot, request.athleteId, request.sessionId, authorized.id,
+      authorized.previewId, authorized.candidateSignature,
+    );
+    if (recordedIntent) {
+      blockers.push('A pre-start intent already exists for this workout; reconcile it before retry.');
+    }
+    const current = await assessStrengthReviewWithinTransaction(
+      snapshot, request.athleteId, authorized.previewId, request.evidence,
+    );
+    observationToken = current.observationToken;
+    blockers.push(...getRoutineStrengthAuthorizationReadiness(
+      current, request.evidence.todayLocalDate,
+    ).blockers);
+    if (current.summary.sourceDate !== request.evidence.todayLocalDate) {
+      blockers.push('The workout can only start on its scheduled local date.');
+    }
+    if (request.evidence.todayLocalDate !== localCalendarDate(new Date())) {
+      blockers.push('A fresh local-day check-in is required.');
+    }
+    if (current.summary.previewId !== authorized.previewId) {
+      blockers.push('Workout review no longer identifies the confirmed preview.');
+    }
+  }
+  return {
+    schemaVersion: 1,
+    status: blockers.length ? 'hold' : 'eligible_for_atomic_start_gate',
+    athleteId: request.athleteId, sessionId: request.sessionId,
+    authorizationId: authorized?.id ?? null,
+    blockers, observationToken,
+    workoutStarted: false, playerStartAuthorized: false,
+    requiresAtomicStartRevalidation: true,
+  };
+}
+
+/** Read-only local safety preview, always NOT executable. */
+export async function inspectRoutineWorkoutStart(
+  sql: TrainingAdjustmentSqlDriver,
+  request: RoutineWorkoutStartRequest,
+): Promise<RoutineWorkoutStartScreen> {
+  assertStartRequest(request);
   if (typeof sql.readSnapshot !== 'function') {
     throw new Error('Consistent routine workout start snapshot is unavailable.');
   }
-  return sql.readSnapshot(async snapshot => {
-    const authorized = await readAuthorizedRoutineWorkout(
-      snapshot, request.athleteId, request.sessionId,
+  return sql.readSnapshot(snapshot => assessStartWithinSnapshot(snapshot, request));
+}
+
+/**
+ * Atomically revalidate the preview AND append one intent; no player launched.
+ * Optimistic observation-token match prevents pressing Start against a changed
+ * exercise/recovery screen. The token contains local personal context, so it
+ * must never be persisted to the audit or transmitted.
+ */
+export async function recordRoutineStrengthStartIntent(
+  sql: TrainingAdjustmentSqlDriver,
+  request: RoutineStrengthStartIntentRequest,
+): Promise<RoutineStrengthStartIntent> {
+  assertStartRequest(request);
+  if (!request.intentId?.trim() || request.intentId.length > 160
+    || typeof request.expectedObservationToken !== 'string'
+    || !request.expectedObservationToken.trim()
+    || request.expectedObservationToken.length > 1_000_000
+    || request.athleteExplicitlyRequestedStart !== true) {
+    throw new Error('Explicit routine workout start request is incomplete.');
+  }
+  if (typeof sql.exclusiveTransaction !== 'function') {
+    throw new Error('Exclusive routine workout start intent transaction is unavailable.');
+  }
+  const frozen = JSON.parse(JSON.stringify(request)) as RoutineStrengthStartIntentRequest;
+  return sql.exclusiveTransaction(async writer => {
+    const result = await assessStartWithinSnapshot(writer, frozen);
+    if (result.observationToken !== frozen.expectedObservationToken) {
+      throw new Error('Routine workout evidence changed before start intent; refresh review.');
+    }
+    if (result.status !== 'eligible_for_atomic_start_gate'
+      || result.blockers.length || result.playerStartAuthorized !== false
+      || result.workoutStarted !== false) {
+      throw new Error('Routine pre-start intent held: ' + result.blockers.join(' '));
+    }
+    const original = await readAuthorizedRoutineWorkout(
+      writer, frozen.athleteId, frozen.sessionId,
     );
-    const blockers: string[] = [];
-    if (!authorized || authorized.id !== request.expectedAuthorizationId) {
-      blockers.push('No matching athlete-confirmed workout authorization.');
+    if (!original || original.id !== frozen.expectedAuthorizationId
+      || original.candidateSignature !== JSON.stringify(original.workout)) {
+      throw new Error('Original authorized workout changed during the start transaction.');
     }
-    if (!authorized) {
-      const orphan = await snapshot.getFirst<{ id: string }>(
-        'SELECT id FROM strength_workout_authorization_withdrawals WHERE session_id = ? LIMIT 1',
-        [request.sessionId],
-      );
-      if (orphan) throw new Error('Orphan routine authorization withdrawal audit detected.');
-    }
-    let observationToken: string | null = null;
-    if (authorized) {
-      const withdrawal = await readWithdrawalInSnapshot(
-        snapshot, request.athleteId, request.sessionId, authorized.id,
-      );
-      if (withdrawal) blockers.push('The athlete withdrew this workout authorization.');
-      const current = await assessStrengthReviewWithinTransaction(
-        snapshot, request.athleteId, authorized.previewId, request.evidence,
-      );
-      observationToken = current.observationToken;
-      blockers.push(...getRoutineStrengthAuthorizationReadiness(
-        current, request.evidence.todayLocalDate,
-      ).blockers);
-      if (current.summary.sourceDate !== request.evidence.todayLocalDate) {
-        blockers.push('The workout can only start on its scheduled local date.');
-      }
-      if (request.evidence.todayLocalDate !== localCalendarDate(new Date())) {
-        blockers.push('A fresh local-day check-in is required.');
-      }
-      if (current.summary.previewId !== authorized.previewId) {
-        blockers.push('Workout review no longer identifies the confirmed preview.');
-      }
-    }
-    return {
+    const intent: RoutineStrengthStartIntent = {
       schemaVersion: 1,
-      status: blockers.length ? 'hold' : 'eligible_for_atomic_start_gate',
-      athleteId: request.athleteId, sessionId: request.sessionId,
-      authorizationId: authorized?.id ?? null,
-      blockers, observationToken,
-      workoutStarted: false, playerStartAuthorized: false,
-      requiresAtomicStartRevalidation: true,
+      id: frozen.intentId, kind: 'verified_pre_start_intent_only',
+      athleteId: frozen.athleteId, sessionId: frozen.sessionId,
+      authorizationId: original.id, previewId: original.previewId,
+      candidateSignature: original.candidateSignature,
+      scheduledLocalDate: frozen.evidence.todayLocalDate,
+      createdAt: new Date().toISOString(),
+      athleteExplicitlyRequestedStart: true, playerStartAuthorized: false,
+      workoutStarted: false, nativeActivationUnverified: true,
     };
+    await writer.run(
+      'INSERT INTO strength_workout_start_intents ' +
+      '(id, athlete_id, session_id, authorization_id, preview_id, intent_json, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [intent.id, intent.athleteId, intent.sessionId, intent.authorizationId,
+        intent.previewId, JSON.stringify(intent), intent.createdAt],
+    );
+    return intent;
+  });
+}
+
+/**
+ * Historical start-intent read. A persisted intent is never a valid start
+ * token, proof of playback, or permission to skip current restrictions.
+ */
+export async function readRoutineStrengthStartIntent(
+  sql: TrainingAdjustmentSqlDriver,
+  athleteId: string,
+  sessionId: string,
+): Promise<RoutineStrengthStartIntent | null> {
+  if (!athleteId?.trim() || !sessionId?.trim()
+    || typeof sql.readSnapshot !== 'function') {
+    throw new Error('Consistent routine start intent history snapshot is unavailable.');
+  }
+  return sql.readSnapshot(async snapshot => {
+    const original = await readAuthorizedRoutineWorkout(snapshot, athleteId, sessionId);
+    if (!original) {
+      const orphan = await snapshot.getFirst<{ id: string }>(
+        'SELECT id FROM strength_workout_start_intents WHERE session_id = ? LIMIT 1',
+        [sessionId],
+      );
+      if (orphan) throw new Error('Orphan routine start intent audit detected.');
+      return null;
+    }
+    return readStartIntentInSnapshot(
+      snapshot, athleteId, sessionId, original.id,
+      original.previewId, original.candidateSignature,
+    );
   });
 }
