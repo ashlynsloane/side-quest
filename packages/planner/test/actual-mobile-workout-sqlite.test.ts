@@ -1389,6 +1389,53 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await recovered.loadLiveWorkoutSession()).toBeNull();
   });
 
+  it('never opens an approved player with a missing or overwritten first recovery checkpoint', async () => {
+    const store = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const approved = {
+      ...store.createInitialLiveWorkoutSession(workout, startedAt, {
+        sessionId: 'approved-routine-session',
+        sessionDate: '2026-10-20',
+        sessionTitle: 'Authorized exact workout',
+        modifiedFromPlan: true,
+      }),
+      running: false,
+    };
+    await store.persistFirstRoutineNativeCheckpoint(
+      approved, 'synthetic-athlete-one',
+    );
+    expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toEqual(approved);
+    const raw = globalThis.localStorage.getItem(
+      'sidequest.live-workout.session.v1:synthetic-athlete-one',
+    );
+    await expect(store.persistFirstRoutineNativeCheckpoint(
+      approved, 'synthetic-athlete-one',
+    )).rejects.toThrow(/earlier workout checkpoint already exists/);
+    await expect(store.persistFirstRoutineNativeCheckpoint(
+      { ...approved, running: true }, 'synthetic-athlete-two',
+    )).rejects.toThrow(/cannot be verified/);
+    expect(globalThis.localStorage.getItem(
+      'sidequest.live-workout.session.v1:synthetic-athlete-one',
+    )).toBe(raw);
+    await store.clearLiveWorkoutSession('synthetic-athlete-one');
+
+    const originalSetter = globalThis.localStorage.setItem;
+    try {
+      globalThis.localStorage.setItem = () => {
+        throw new Error('Injected first-checkpoint storage failure.');
+      };
+      await expect(store.persistFirstRoutineNativeCheckpoint(
+        approved, 'synthetic-athlete-one',
+      )).rejects.toThrow(/Injected first-checkpoint storage failure/);
+      expect(globalThis.localStorage.getItem(
+        'sidequest.live-workout.session.v1:synthetic-athlete-one',
+      )).toBeNull();
+    } finally {
+      globalThis.localStorage.setItem = originalSetter;
+    }
+    await store.persistFirstRoutineNativeCheckpoint(approved, 'synthetic-athlete-one');
+    expect((await store.loadLiveWorkoutSession('synthetic-athlete-one'))?.running).toBe(false);
+  });
+
   it('does not overwrite an unresolved completion with a new workout or corrupt stored checkpoint', async () => {
     const checkpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
     const sessionA = checkpoint.createInitialLiveWorkoutSession(workout, startedAt);
