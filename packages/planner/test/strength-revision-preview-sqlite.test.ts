@@ -2909,10 +2909,35 @@ describe('atomic pre-start intent is an audit, not workout activation', () => {
       'orphan-intent', submit.athleteId, submit.sessionId,
       'forged-consent', 'forged-preview', '{}', new Date().toISOString(),
     );
+    db.prepare('DELETE FROM strength_workout_authorizations').run();
     await expect(inspectRoutineWorkoutStart(sql, submit))
-      .rejects.toThrow(/audit integrity mismatch/);
+      .rejects.toThrow(/Orphan routine start or withdrawal audit/);
+    await expect(readRoutineStrengthStartIntent(
+      sql, submit.athleteId, submit.sessionId,
+    )).rejects.toThrow(/Orphan routine start intent audit/);
+    await expect(authorizeRoutineStrengthWorkout(sql, {
+      ...submit, previewId: 'routine-preview', authorizationId: 'new-auth',
+      confirmations: {
+        exactExercisesAndDoseReviewed: true,
+        recentTrainingHistoryReviewed: true,
+        noKnownUnreportedRestrictions: true,
+      },
+    })).rejects.toThrow(/Unreconciled prior start intent/);
+  });
+
+  it('detects a forged start date even when the intent otherwise matches', async () => {
+    const { db, sql, submit } = await prepared();
+    const saved = await recordRoutineStrengthStartIntent(sql, submit);
+    db.prepare('UPDATE strength_workout_start_intents SET intent_json = ?').run(
+      JSON.stringify({
+        ...saved,
+        scheduledLocalDate: addLocalCalendarDays(saved.scheduledLocalDate, 1),
+      }),
+    );
     await expect(readRoutineStrengthStartIntent(
       sql, submit.athleteId, submit.sessionId,
     )).rejects.toThrow(/audit integrity mismatch/);
+    await expect(inspectRoutineWorkoutStart(sql, submit))
+      .rejects.toThrow(/audit integrity mismatch/);
   });
 });
