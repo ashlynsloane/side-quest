@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { localCalendarDate, PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_WORKOUT_AUTHORIZATION_SQL, STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL, withdrawRoutineStrengthAuthorization, readRoutineAuthorizationWithdrawal, inspectRoutineWorkoutStart, authorizeRoutineStrengthWorkout, readAuthorizedRoutineWorkout, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, inspectStrengthAuthorizationDryRun, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthAuthorizationDryRunResult, type AuthorizedStrengthWorkoutRecord, type AthleteStrengthAuthorizationConfirmations, type StrengthWorkoutAuthorizationResult, type RoutineAuthorizationWithdrawal, type RoutineWorkoutStartScreen, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { localCalendarDate, PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_WORKOUT_AUTHORIZATION_SQL, STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL, STRENGTH_START_INTENT_SQL, recordRoutineStrengthStartIntent, readRoutineStrengthStartIntent, withdrawRoutineStrengthAuthorization, readRoutineAuthorizationWithdrawal, inspectRoutineWorkoutStart, authorizeRoutineStrengthWorkout, readAuthorizedRoutineWorkout, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, inspectStrengthAuthorizationDryRun, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthAuthorizationDryRunResult, type AuthorizedStrengthWorkoutRecord, type AthleteStrengthAuthorizationConfirmations, type StrengthWorkoutAuthorizationResult, type RoutineAuthorizationWithdrawal, type RoutineWorkoutStartScreen, type RoutineStrengthStartIntent, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -537,6 +537,7 @@ export async function initializeDatabase(): Promise<void> {
     ${TRAINING_SAFETY_CONTEXT_SQL}
     ${STRENGTH_WORKOUT_AUTHORIZATION_SQL}
     ${STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL}
+    ${STRENGTH_START_INTENT_SQL}
 
     CREATE TABLE IF NOT EXISTS training_baseline_review_events (
       id TEXT PRIMARY KEY NOT NULL,
@@ -1668,6 +1669,51 @@ export async function getRoutineStrengthPreStartScreen(input: {
         ? preview.evidence
         : { ...preview.evidence, todayLocalDate: localCalendarDate(new Date()) },
     });
+  });
+}
+
+/**
+ * One exclusive local SQL transaction: recheck exact workout, withdrawal,
+ * active safety context, readiness and displayed observation before recording
+ * a requested start. This does not launch the native player.
+ */
+export async function requestRoutineStrengthPreStartIntent(input: {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+  intentId: string;
+  expectedObservationToken: string;
+  athleteExplicitlyRequestedStart: true;
+}): Promise<RoutineStrengthStartIntent> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const authorized = await readAuthorizedRoutineWorkout(
+      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    );
+    if (!authorized) throw new Error('Routine start consent is missing.');
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, authorized.previewId,
+    );
+    if (!preview) throw new Error('Routine start review is missing.');
+    const currentLocalDate = localCalendarDate(new Date());
+    return recordRoutineStrengthStartIntent(trainingAdjustmentDriver, {
+      ...input,
+      evidence: preview.evidence.todayLocalDate === currentLocalDate
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: currentLocalDate },
+    });
+  });
+}
+
+/** Audit only: persisted pre-start intent is never executable approval. */
+export async function getRecordedRoutineStrengthStartIntent(
+  athleteId: string, sessionId: string,
+): Promise<RoutineStrengthStartIntent | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readRoutineStrengthStartIntent(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
   });
 }
 
@@ -3597,7 +3643,7 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','training_plan_adjustment_events','daily_strength_choice_events','training_baseline_review_events','strength_revision_previews','strength_revision_preview_review_events','strength_evidence_provenance_events','training_safety_context_events','strength_workout_authorizations','strength_workout_authorization_withdrawals','cloud_operation_queue'] as const;
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','training_plan_adjustment_events','daily_strength_choice_events','training_baseline_review_events','strength_revision_previews','strength_revision_preview_review_events','strength_evidence_provenance_events','training_safety_context_events','strength_workout_authorizations','strength_workout_authorization_withdrawals','strength_workout_start_intents','cloud_operation_queue'] as const;
 // Losing an immutable decision or preview journal during export/deletion is
 // never equivalent to having an empty history. The transaction must abort.
 const CRITICAL_AUDIT_EXPORT_TABLES = new Set<string>([
@@ -3611,6 +3657,7 @@ const CRITICAL_AUDIT_EXPORT_TABLES = new Set<string>([
   'training_safety_context_events',
   'strength_workout_authorizations',
   'strength_workout_authorization_withdrawals',
+  'strength_workout_start_intents',
 ]);
 export async function exportLocalData(): Promise<Record<string, unknown[]>> {
   await initializeDatabase();
