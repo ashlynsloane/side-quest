@@ -745,19 +745,44 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect(preStart.blockers).toEqual([]);
     expect(preStart.workoutStarted).toBe(false);
     expect(preStart.playerStartAuthorized).toBe(false);
-    const intent = await service.requestRoutineStrengthPreStartIntent({
+    const checkpointRequest = {
       athleteId: 'synthetic-athlete-one',
       sessionId: 'routine-session',
       expectedAuthorizationId: 'routine-mobile-auth',
       intentId: 'routine-mobile-start-intent',
+      checkpointId: 'routine-mobile-checkpoint',
       expectedObservationToken: preStart.observationToken!,
-      athleteExplicitlyRequestedStart: true,
-    });
-    expect(intent.workoutStarted).toBe(false);
-    expect(intent.playerStartAuthorized).toBe(false);
-    expect(intent.nativeActivationUnverified).toBe(true);
+      athleteExplicitlyRequestedStart: true as const,
+    };
+    state.failNextContaining = 'INSERT INTO strength_workout_native_start_checkpoints';
+    await expect(service.prepareRoutineNativeWorkoutCheckpoint(checkpointRequest))
+      .rejects.toThrow(/synthetic SQLite write interruption/);
+    expect((await service.exportLocalData()).strength_workout_start_intents).toHaveLength(0);
+    expect((await service.exportLocalData()).strength_workout_native_start_checkpoints)
+      .toHaveLength(0);
+    const nativeCheckpoint = await service.prepareRoutineNativeWorkoutCheckpoint(
+      checkpointRequest,
+    );
+    expect(nativeCheckpoint.playerPlaybackStarted).toBe(false);
+    expect(nativeCheckpoint.requiresPlayerHydration).toBe(true);
+    expect(nativeCheckpoint.initialLiveSession.running).toBe(false);
+    expect(nativeCheckpoint.initialLiveSession.workout.stations[0]!.durationSeconds)
+      .toBe(1500);
+    expect(nativeCheckpoint.initialLiveSession.planLink?.sessionId).toBe('routine-session');
+    expect(nativeCheckpoint.initialLiveSession.planLink?.modifiedFromPlan).toBe(true);
+    const intent = await service.getRecordedRoutineStrengthStartIntent(
+      'synthetic-athlete-one', 'routine-session',
+    );
+    expect(intent?.id).toBe('routine-mobile-start-intent');
+    expect(intent?.workoutStarted).toBe(false);
+    expect(intent?.playerStartAuthorized).toBe(false);
     expect((await service.exportLocalData()).strength_workout_start_intents).toHaveLength(1);
+    expect((await service.exportLocalData()).strength_workout_native_start_checkpoints)
+      .toHaveLength(1);
     expect((await service.exportLocalData()).workout_ledger).toEqual([]);
+    await expect(service.prepareRoutineNativeWorkoutCheckpoint({
+      ...checkpointRequest, checkpointId: 'duplicate-native-checkpoint',
+    })).rejects.toThrow(/already exists/);
     await expect(service.requestRoutineStrengthPreStartIntent({
       athleteId: 'synthetic-athlete-one',
       sessionId: 'routine-session',
@@ -804,6 +829,9 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect(await service.getRecordedRoutineStrengthStartIntent(
       'synthetic-athlete-one', 'routine-session',
     )).toEqual(intent);
+    expect(await service.getRecordedRoutineNativeWorkoutCheckpoint(
+      'synthetic-athlete-one', 'routine-session',
+    )).toEqual(nativeCheckpoint);
     expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
       .toHaveLength(1);
     await service.recordAthleteTrainingSafetyContext({
