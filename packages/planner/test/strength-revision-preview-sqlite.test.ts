@@ -2660,3 +2660,49 @@ describe('routine authorization withdrawal and fresh pre-start safety screen', (
       .get() as { n: number }).n).toBe(1);
   });
 });
+
+
+describe('withdrawal audit inconsistency cannot silently enable exercise', () => {
+  it('rejects an orphan withdrawal even when no routine authorization exists', async () => {
+    const { db, sql, auth, request } = await freshRoutineCandidate(open(), true);
+    db.prepare(
+      'INSERT INTO strength_workout_authorization_withdrawals ' +
+      '(id, athlete_id, session_id, authorization_id, event_json, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(
+      'orphan-withdrawal', auth.athleteId, request.source.id, 'deleted-auth',
+      '{}', new Date().toISOString(),
+    );
+    await expect(readRoutineAuthorizationWithdrawal(
+      sql, auth.athleteId, request.source.id,
+    )).rejects.toThrow(/Orphan routine authorization withdrawal/);
+    await expect(inspectRoutineWorkoutStart(sql, {
+      athleteId: auth.athleteId, sessionId: request.source.id,
+      expectedAuthorizationId: auth.authorizationId, evidence: auth.evidence,
+    })).rejects.toThrow(/Orphan routine authorization withdrawal/);
+    await expect(authorizeRoutineStrengthWorkout(sql, auth))
+      .rejects.toThrow(/Unreconciled prior withdrawal/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
+      .get() as { n: number }).n).toBe(0);
+  });
+
+  it('fails closed on a withdrawal for a different authorization of the same session', async () => {
+    const { db, sql, auth, request } = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(sql, auth);
+    db.prepare(
+      'INSERT INTO strength_workout_authorization_withdrawals ' +
+      '(id, athlete_id, session_id, authorization_id, event_json, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(
+      'misbound-withdrawal', auth.athleteId, request.source.id, 'forged-consent',
+      '{}', new Date().toISOString(),
+    );
+    await expect(readRoutineAuthorizationWithdrawal(
+      sql, auth.athleteId, request.source.id,
+    )).rejects.toThrow(/withdrawal audit integrity mismatch/);
+    await expect(inspectRoutineWorkoutStart(sql, {
+      athleteId: auth.athleteId, sessionId: request.source.id,
+      expectedAuthorizationId: auth.authorizationId, evidence: auth.evidence,
+    })).rejects.toThrow(/withdrawal audit integrity mismatch/);
+  });
+});
