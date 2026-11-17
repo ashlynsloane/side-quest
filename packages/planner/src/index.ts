@@ -1834,3 +1834,15 @@ export type {
   StrengthWorkoutAuthorizationRequest,
   StrengthWorkoutAuthorizationResult,
 } from './strength-workout-authorization-sqlite';
+
+// Withdrawal and start screening do not start or prescribe a workout.
+export {
+  STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL,
+  withdrawRoutineStrengthAuthorization,
+  readRoutineAuthorizationWithdrawal,
+  inspectRoutineWorkoutStart,
+} from './strength-workout-start-safety-sqlite';
+export type {
+  RoutineAuthorizationWithdrawal,
+  RoutineWorkoutStartScreen,
+} from './strength-workout-start-safety-sqlite';
