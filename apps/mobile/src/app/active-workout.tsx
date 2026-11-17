@@ -513,10 +513,20 @@ export default function ActiveWorkoutScreen() {
     }
   }
 
+  async function discardAndExit() {
+    try {
+      await clearActiveWorkout();
+      router.replace('/train' as Href);
+    } catch (error) {
+      Alert.alert('Workout retained for recovery', error instanceof Error
+        ? error.message : 'The workout checkpoint could not be cleared. No data was discarded.');
+    }
+  }
+
   function endEarly() {
     Alert.alert('End workout?', 'Save the work you completed, discard this session, or keep training.', [
       { text: 'Keep training', style: 'cancel' },
-      { text: 'Discard', style: 'destructive', onPress: () => { clearActiveWorkout(); router.replace('/train' as Href); } },
+      { text: 'Discard', style: 'destructive', onPress: () => { void discardAndExit(); } },
       { text: 'Save partial', onPress: () => { const fraction = totalPlannedSeconds > 0 ? elapsedSeconds / totalPlannedSeconds : 0; setPhase('complete'); setRunning(false); void persistCompletion(fraction); } },
     ]);
   }
@@ -534,7 +544,13 @@ export default function ActiveWorkoutScreen() {
       await saveWorkoutReflection({ workoutInstanceId: instanceId, workoutId: activeWorkout.id, workoutName: activeWorkout.name, rpe: sessionRpe ?? undefined, energyAfter: energyAfter ?? undefined, notes: reflectionNotes.trim() || undefined, completedAt: completed, createdAt: new Date().toISOString() });
       setReflectionSaved(true);
     }
-    clearActiveWorkout(); router.replace('/' as Href);
+    try {
+      await clearActiveWorkout();
+      router.replace('/' as Href);
+    } catch (error) {
+      Alert.alert('Workout retained for recovery', error instanceof Error
+        ? error.message : 'The completed checkpoint could not be verified as cleared.');
+    }
   }
 
   async function saveFavorite() { await saveFavoriteWorkout(activeWorkout); setSaved(true); }
