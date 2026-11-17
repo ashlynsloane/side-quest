@@ -27,6 +27,9 @@ import {
   readRoutineAuthorizationWithdrawal,
   inspectRoutineWorkoutStart,
   STRENGTH_START_INTENT_SQL,
+  STRENGTH_NATIVE_START_CHECKPOINT_SQL,
+  commitRoutineNativeStartCheckpoint,
+  readRoutineNativeStartCheckpoint,
   recordRoutineStrengthStartIntent,
   readRoutineStrengthStartIntent,
 } from '../src/strength-workout-start-safety-sqlite';
@@ -199,6 +202,7 @@ function open(owner = 'synthetic-athlete-a') {
     ${STRENGTH_WORKOUT_AUTHORIZATION_SQL}
     ${STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL}
     ${STRENGTH_START_INTENT_SQL}
+    ${STRENGTH_NATIVE_START_CHECKPOINT_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
   db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)').run(
@@ -2939,5 +2943,202 @@ describe('atomic pre-start intent is an audit, not workout activation', () => {
     )).rejects.toThrow(/audit integrity mismatch/);
     await expect(inspectRoutineWorkoutStart(sql, submit))
       .rejects.toThrow(/audit integrity mismatch/);
+  });
+});
+
+
+describe('atomic native start recovery seed (not verified player execution)', () => {
+  async function ready() {
+    const fixture = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(fixture.sql, fixture.auth);
+    const input = {
+      athleteId: fixture.auth.athleteId,
+      sessionId: fixture.request.source.id,
+      expectedAuthorizationId: fixture.auth.authorizationId,
+      evidence: fixture.auth.evidence,
+    };
+    const screen = await inspectRoutineWorkoutStart(fixture.sql, input);
+    expect(screen.status).toBe('eligible_for_atomic_start_gate');
+    return {
+      ...fixture,
+      requestStart: {
+        ...input,
+        expectedObservationToken: screen.observationToken!,
+        athleteExplicitlyRequestedStart: true as const,
+        intentId: 'routine-atomic-start-1',
+        checkpointId: 'routine-atomic-checkpoint-1',
+      },
+    };
+  }
+
+  it('persists consent, a paused exact-workout checkpoint, and the start intent as a single atom', async () => {
+    const { db, sql, request, requestStart } = await ready();
+    const planBefore = (db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json;
+    const checkpoint = await commitRoutineNativeStartCheckpoint(sql, requestStart);
+    expect(checkpoint.kind).toBe('prepared_native_player_checkpoint');
+    expect(checkpoint.initialLiveSession.workout).toEqual(request.candidate);
+    expect(checkpoint.initialLiveSession.workout).not.toEqual(request.source.workout);
+    expect(checkpoint.initialLiveSession.planLink.sessionId).toBe(request.source.id);
+    expect(checkpoint.initialLiveSession.planLink.sessionDate).toBe(request.source.date);
+    expect(checkpoint.initialLiveSession.planLink.sessionTitle).toBe(request.source.title);
+    expect(checkpoint.initialLiveSession.planLink.modifiedFromPlan).toBe(true);
+    expect(checkpoint.initialLiveSession.running).toBe(false);
+    expect(checkpoint.initialLiveSession.remainingSeconds)
+      .toBe(request.candidate.stations[0]!.durationSeconds);
+    expect(checkpoint.playerPlaybackStarted).toBe(false);
+    expect(checkpoint.requiresPlayerHydration).toBe(true);
+    expect(checkpoint.initialLiveSession.startedAt).toBe(checkpoint.createdAt);
+    expect(await readRoutineNativeStartCheckpoint(
+      sql, requestStart.athleteId, requestStart.sessionId,
+    )).toEqual(checkpoint);
+    expect((await readRoutineStrengthStartIntent(
+      sql, requestStart.athleteId, requestStart.sessionId,
+    ))?.id).toBe(checkpoint.intentId);
+    expect(count(db, 'strength_workout_start_intents')).toBe(1);
+    expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(1);
+    expect(count(db, 'workout_ledger')).toBe(0);
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(planBefore);
+  });
+
+  it('does not create a second start or change the first checkpoint on double taps', async () => {
+    const { db, sql, requestStart } = await ready();
+    const first = await commitRoutineNativeStartCheckpoint(sql, requestStart);
+    for (const changed of [
+      requestStart, { ...requestStart, intentId: 'duplicate-start-2' },
+      { ...requestStart, checkpointId: 'different-checkpoint' },
+    ]) {
+      await expect(commitRoutineNativeStartCheckpoint(sql, changed))
+        .rejects.toThrow(/already exists/);
+    }
+    expect(count(db, 'strength_workout_start_intents')).toBe(1);
+    expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(1);
+    expect(await readRoutineNativeStartCheckpoint(
+      sql, requestStart.athleteId, requestStart.sessionId,
+    )).toEqual(first);
+  });
+
+  it('rolls back the intent if checkpoint persistence fails after the intent insert', async () => {
+    const { db, sql, requestStart } = await ready();
+    const broken: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        fn: (w: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Fixture must support transactions.');
+        return sql.exclusiveTransaction(writer => fn({
+          ...writer,
+          run: async (query, args) => {
+            if (query.includes('INSERT INTO strength_workout_native_start_checkpoints')) {
+              throw new Error('Injected durable checkpoint I/O failure.');
+            }
+            return writer.run(query, args);
+          },
+        }));
+      },
+    };
+    await expect(commitRoutineNativeStartCheckpoint(broken, requestStart))
+      .rejects.toThrow(/Injected durable checkpoint I\/O failure/);
+    expect(count(db, 'strength_workout_start_intents')).toBe(0);
+    expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(0);
+    expect(count(db, 'workout_ledger')).toBe(0);
+    await commitRoutineNativeStartCheckpoint(sql, requestStart);
+    expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(1);
+  });
+
+  it('refuses stale observation, missing consent, wrong owner or vanished exclusive writer', async () => {
+    const { db, sql, requestStart } = await ready();
+    for (const variant of [
+      { ...requestStart, expectedObservationToken: 'stale' },
+      { ...requestStart, expectedAuthorizationId: 'forged-auth' },
+      { ...requestStart, athleteId: 'foreign-athlete' },
+      { ...requestStart, checkpointId: '' },
+      { ...requestStart, athleteExplicitlyRequestedStart: false },
+    ]) {
+      await expect(commitRoutineNativeStartCheckpoint(sql, variant as typeof requestStart))
+        .rejects.toThrow();
+    }
+    await expect(commitRoutineNativeStartCheckpoint(
+      { ...sql, exclusiveTransaction: undefined }, requestStart,
+    )).rejects.toThrow(/atomic native checkpoint request/);
+    expect(count(db, 'strength_workout_start_intents')).toBe(0);
+    expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(0);
+  });
+
+  it('new recovery restrictions and withdrawal hold the exact atomic checkpoint', async () => {
+    for (const variation of ['withdrawn', 'rehab', 'completed', 'source'] as const) {
+      const { db, sql, saveBlock, request, requestStart } = await ready();
+      if (variation === 'withdrawn') {
+        await withdrawRoutineStrengthAuthorization(sql, {
+          athleteId: requestStart.athleteId,
+          sessionId: requestStart.sessionId,
+          expectedAuthorizationId: requestStart.expectedAuthorizationId,
+          withdrawalId: 'withdraw-before-native-start',
+          athleteConfirmedWithdrawal: true,
+        });
+      } else if (variation === 'rehab') {
+        const safety = await readAthleteTrainingSafetyContext(sql, requestStart.athleteId);
+        await appendTrainingSafetyContextEvent(sql,
+          safetyEvent('native-rehab-hold', 'training_intent', 'injury_rehabilitation'),
+          safety.latestEventId);
+      } else if (variation === 'completed') {
+        db.prepare('INSERT INTO workout_ledger (id, planned_session_id) VALUES (?, ?)')
+          .run('already-completed', requestStart.sessionId);
+      } else {
+        saveBlock(block({ ...request.source, title: 'Edited after athlete reviewed' }));
+      }
+      await expect(commitRoutineNativeStartCheckpoint(sql, requestStart))
+        .rejects.toThrow();
+      expect(count(db, 'strength_workout_start_intents')).toBe(0);
+      expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(0);
+    }
+  });
+
+  it('a prior intent cannot silently be upgraded into an executable recovery seed', async () => {
+    const { db, sql, requestStart } = await ready();
+    await recordRoutineStrengthStartIntent(sql, requestStart);
+    await expect(commitRoutineNativeStartCheckpoint(sql, requestStart))
+      .rejects.toThrow(/already exists/);
+    expect(count(db, 'strength_workout_start_intents')).toBe(1);
+    expect(count(db, 'strength_workout_native_start_checkpoints')).toBe(0);
+  });
+
+  it('cold restart preserves exact initial recovery seed but still records no playback', async () => {
+    const { db, sql, file, directory, requestStart } = await ready();
+    const checkpoint = await commitRoutineNativeStartCheckpoint(sql, requestStart);
+    db.close();
+    const restarted = new DatabaseSync(file);
+    all.push({ db: restarted, directory });
+    expect(await readRoutineNativeStartCheckpoint(
+      driver(restarted), requestStart.athleteId, requestStart.sessionId,
+    )).toEqual(checkpoint);
+    const screen = await inspectRoutineWorkoutStart(driver(restarted), requestStart);
+    expect(screen.status).toBe('hold');
+    expect(screen.playerStartAuthorized).toBe(false);
+    expect(count(restarted, 'workout_ledger')).toBe(0);
+  });
+
+  it('tampered checkpoint fields, missing intent and foreign owner fail closed', async () => {
+    const { db, sql, requestStart } = await ready();
+    const record = await commitRoutineNativeStartCheckpoint(sql, requestStart);
+    await expect(readRoutineNativeStartCheckpoint(
+      sql, 'not-the-owner', requestStart.sessionId,
+    )).rejects.toThrow(/ownership mismatch/);
+    db.prepare('UPDATE strength_workout_native_start_checkpoints SET checkpoint_json = ?')
+      .run(JSON.stringify({
+        ...record, initialLiveSession: { ...record.initialLiveSession, running: true },
+      }));
+    await expect(readRoutineNativeStartCheckpoint(
+      sql, requestStart.athleteId, requestStart.sessionId,
+    )).rejects.toThrow(/checkpoint audit integrity mismatch/);
+    db.prepare('UPDATE strength_workout_native_start_checkpoints SET checkpoint_json = ?')
+      .run(JSON.stringify(record));
+    db.prepare('DELETE FROM strength_workout_start_intents').run();
+    await expect(readRoutineNativeStartCheckpoint(
+      sql, requestStart.athleteId, requestStart.sessionId,
+    )).rejects.toThrow(/checkpoint audit integrity mismatch/);
+    await expect(inspectRoutineWorkoutStart(sql, requestStart))
+      .rejects.toThrow(/checkpoint audit integrity mismatch/);
   });
 });
