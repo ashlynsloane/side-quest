@@ -12,10 +12,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   getCurrentStrengthReviewForConfirmation,
   getRecordedAuthorizationForStrengthPreview,
+  getRoutineStrengthPreStartScreen,
   confirmRoutineStrengthWorkout, setUnapprovedStrengthReviewDisposition,
   flagUnverifiedStrengthReviewConcern, recheckCurrentStrengthConfirmation,
 } from '@/services/database';
 import { useAuth } from '@/state/auth-context';
+import { useWorkoutContext } from '@/state/workout-context';
 
 function duration(seconds: number): string {
   const rounded = seconds / 60;
@@ -40,6 +42,7 @@ function changeHeadline(change: StrengthReviewDoseChange): string {
 export default function StrengthReviewDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { beginAuthorizedRoutineWorkout, activeWorkout, workoutSessionReady } = useWorkoutContext();
   const { previewId } = useLocalSearchParams<{ previewId?: string }>();
   const athleteId = user?.id;
   const currentAthlete = useRef(athleteId);
@@ -53,6 +56,8 @@ export default function StrengthReviewDetailScreen() {
   const [reportedRestrictions, setReportedRestrictions] = useState(false);
   const [savingAuthorization, setSavingAuthorization] = useState(false);
   const [authorizationError, setAuthorizationError] = useState<string | null>(null);
+  const [startingWorkout, setStartingWorkout] = useState(false);
+  const [startWorkoutError, setStartWorkoutError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingDisposition, setSavingDisposition] = useState(false);
@@ -72,6 +77,8 @@ export default function StrengthReviewDetailScreen() {
     setReportedRestrictions(false);
     setSavingAuthorization(false);
     setAuthorizationError(null);
+    setStartingWorkout(false);
+    setStartWorkoutError(null);
     setError(null);
     setDispositionError(null);
     setSavingDisposition(false);
@@ -193,6 +200,55 @@ export default function StrengthReviewDetailScreen() {
     );
   };
 
+  const startConfirmedRoutineWorkout = async () => {
+    if (!athleteId || !authorized || startingWorkout || !workoutSessionReady
+      || activeWorkout || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setStartingWorkout(true);
+    setStartWorkoutError(null);
+    try {
+      const current = await getRoutineStrengthPreStartScreen({
+        athleteId, sessionId: authorized.sessionId,
+        expectedAuthorizationId: authorized.id,
+      });
+      if (current.status !== 'eligible_for_atomic_start_gate'
+        || !current.observationToken || current.blockers.length > 0) {
+        throw new Error(current.blockers.join(' ')
+          || 'Current routine workout safety evidence does not permit starting.');
+      }
+      await beginAuthorizedRoutineWorkout({
+        sessionId: authorized.sessionId,
+        expectedAuthorizationId: authorized.id,
+        expectedObservationToken: current.observationToken,
+      });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        router.push('/active-workout' as Href);
+      }
+    } catch (cause) {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setStartWorkoutError(cause instanceof Error ? cause.message
+          : 'The workout could not safely start. Previous checkpoint records remain preserved.');
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setStartingWorkout(false);
+    }
+  };
+
+  const confirmStartRoutineWorkout = () => {
+    if (!authorized || startingWorkout || !workoutSessionReady || activeWorkout) return;
+    Alert.alert(
+      'Start this exact routine workout?',
+      'Side Quest will recheck today’s readiness, symptoms, restrictions and the exact confirmed exercises. It will save the recovery checkpoint before opening a paused player. This is not medical clearance.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Check and start', onPress: () => { void startConfirmedRoutineWorkout(); } },
+      ],
+    );
+  };
+
   const flagConcern = async (kind: 'provider_restriction' | 'training_coverage') => {
     if (savingConcern || savingDisposition || rechecking || !detail || !athleteId
       || typeof previewId !== 'string'
@@ -306,7 +362,7 @@ export default function StrengthReviewDetailScreen() {
           </Text>
           <Text style={styles.noticeText}>
             {authorized
-              ? 'An exact athlete-confirmed routine workout version is saved. Current restrictions and recovery must be rechecked at the actual start. This draft screen does not launch workouts.'
+              ? 'An exact athlete-confirmed routine workout version is saved. Requesting Start runs a fresh local safety check and saves a paused recovery checkpoint before opening the player.'
               : 'This is a proposed exercise change, not a medical clearance. It cannot be started from this review screen.'}
           </Text>
         </View>
@@ -442,6 +498,23 @@ export default function StrengthReviewDetailScreen() {
                     Not started. This is not clinician clearance and cannot
                     bypass a fresh safety check at session start.
                   </Text>
+                  <Pressable accessibilityRole="button"
+                    accessibilityLabel="Check safety and start the authorized routine workout"
+                    disabled={startingWorkout || !workoutSessionReady || Boolean(activeWorkout)}
+                    onPress={confirmStartRoutineWorkout}
+                    style={[styles.dispositionAction,
+                      (startingWorkout || !workoutSessionReady || Boolean(activeWorkout))
+                      && styles.disabledAction]}>
+                    <Text style={styles.dispositionText}>
+                      {startingWorkout ? 'Checking and saving workout…'
+                        : activeWorkout ? 'Finish the active workout first'
+                          : 'Check safety and start this workout'}
+                    </Text>
+                  </Pressable>
+                  {startWorkoutError ? (
+                    <Text style={styles.error}>{startWorkoutError}</Text>
+                  ) : null}
+
                 </>
               ) : getRoutineStrengthAuthorizationReadiness(detail)
                 .canRequestAuthorization ? (
