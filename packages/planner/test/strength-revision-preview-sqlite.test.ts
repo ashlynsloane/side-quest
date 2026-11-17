@@ -26,6 +26,9 @@ import {
   withdrawRoutineStrengthAuthorization,
   readRoutineAuthorizationWithdrawal,
   inspectRoutineWorkoutStart,
+  STRENGTH_START_INTENT_SQL,
+  recordRoutineStrengthStartIntent,
+  readRoutineStrengthStartIntent,
 } from '../src/strength-workout-start-safety-sqlite';
 import { localCalendarDate, addLocalCalendarDays } from '../src/first-week-dates';
 import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
@@ -195,6 +198,7 @@ function open(owner = 'synthetic-athlete-a') {
     ${STRENGTH_CHOICE_AUDIT_SQL}
     ${STRENGTH_WORKOUT_AUTHORIZATION_SQL}
     ${STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL}
+    ${STRENGTH_START_INTENT_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
   db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)').run(
@@ -2705,5 +2709,210 @@ describe('withdrawal audit inconsistency cannot silently enable exercise', () =>
       athleteId: auth.athleteId, sessionId: request.source.id,
       expectedAuthorizationId: auth.authorizationId, evidence: auth.evidence,
     })).rejects.toThrow(/withdrawal audit integrity mismatch/);
+  });
+});
+
+
+describe('atomic pre-start intent is an audit, not workout activation', () => {
+  async function prepared() {
+    const ready = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(ready.sql, ready.auth);
+    const input = {
+      athleteId: ready.auth.athleteId,
+      sessionId: ready.request.source.id,
+      expectedAuthorizationId: ready.auth.authorizationId,
+      evidence: ready.auth.evidence,
+    };
+    const viewed = await inspectRoutineWorkoutStart(ready.sql, input);
+    expect(viewed.status).toBe('eligible_for_atomic_start_gate');
+    expect(viewed.observationToken).toBeTruthy();
+    return {
+      ...ready, input,
+      submit: {
+        ...input,
+        intentId: 'pre-start-intent-1',
+        expectedObservationToken: viewed.observationToken!,
+        athleteExplicitlyRequestedStart: true as const,
+      },
+    };
+  }
+
+  it('atomically records exact original consent without starting or altering its prescription', async () => {
+    const { db, sql, submit, request } = await prepared();
+    const before = db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string };
+    const claim = await recordRoutineStrengthStartIntent(sql, submit);
+    expect(claim.schemaVersion).toBe(1);
+    expect(claim.kind).toBe('verified_pre_start_intent_only');
+    expect(claim.athleteExplicitlyRequestedStart).toBe(true);
+    expect(claim.authorizationId).toBe(submit.expectedAuthorizationId);
+    expect(claim.previewId).toBe(request.id);
+    expect(claim.candidateSignature).toBe(JSON.stringify(request.candidate));
+    expect(claim.playerStartAuthorized).toBe(false);
+    expect(claim.workoutStarted).toBe(false);
+    expect(claim.nativeActivationUnverified).toBe(true);
+    expect(await readRoutineStrengthStartIntent(
+      sql, submit.athleteId, submit.sessionId,
+    )).toEqual(claim);
+    expect((await inspectRoutineWorkoutStart(sql, submit)).status).toBe('hold');
+    expect((db.prepare('SELECT block_json FROM training_blocks')
+      .get() as { block_json: string }).block_json).toBe(before.block_json);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM workout_ledger')
+      .get() as { n: number }).n).toBe(0);
+  });
+
+  it('prevents duplicate intents and keeps a single append-only record', async () => {
+    const { db, sql, submit } = await prepared();
+    await recordRoutineStrengthStartIntent(sql, submit);
+    for (const attempt of [
+      submit, { ...submit, intentId: 'different-intent' },
+    ]) {
+      await expect(recordRoutineStrengthStartIntent(sql, attempt))
+        .rejects.toThrow(/already exists/);
+    }
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_start_intents')
+      .get() as { n: number }).n).toBe(1);
+  });
+
+  it('rejects stale reviewed evidence, wrong authorization, incomplete consent and missing transaction', async () => {
+    const { db, sql, submit } = await prepared();
+    const requests = [
+      { ...submit, expectedObservationToken: 'stale screen' },
+      { ...submit, expectedAuthorizationId: 'someone-else-approved' },
+      { ...submit, athleteExplicitlyRequestedStart: false },
+      { ...submit, intentId: '' },
+    ];
+    for (const request of requests) {
+      await expect(recordRoutineStrengthStartIntent(sql, request as typeof submit))
+        .rejects.toThrow();
+    }
+    await expect(recordRoutineStrengthStartIntent(
+      { ...sql, exclusiveTransaction: undefined }, submit,
+    )).rejects.toThrow(/Exclusive routine workout start intent transaction/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_start_intents')
+      .get() as { n: number }).n).toBe(0);
+  });
+
+  it('new symptoms, poor readiness, rehab intent, completion and changed plan stop the atomic write', async () => {
+    for (const variant of ['symptoms', 'readiness', 'rehab', 'completed', 'source'] as const) {
+      const { db, sql, submit, saveBlock, request } = await prepared();
+      if (variant === 'symptoms') {
+        db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            status: 'tightness_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400_000).toISOString(),
+          }),
+        );
+      } else if (variant === 'readiness') {
+        db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1,
+          }),
+        );
+      } else if (variant === 'rehab') {
+        const safety = await readAthleteTrainingSafetyContext(sql, submit.athleteId);
+        await appendTrainingSafetyContextEvent(sql,
+          safetyEvent('new-rehab-prior-to-start', 'training_intent', 'injury_rehabilitation'),
+          safety.latestEventId);
+      } else if (variant === 'completed') {
+        db.prepare('INSERT INTO workout_ledger (id, planned_session_id) VALUES (?, ?)')
+          .run('already-done', submit.sessionId);
+      } else {
+        saveBlock(block({ ...request.source, title: 'Plan changed before start' }));
+      }
+      await expect(recordRoutineStrengthStartIntent(sql, submit)).rejects.toThrow();
+      expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_start_intents')
+        .get() as { n: number }).n).toBe(0);
+    }
+  });
+
+  it('withdrawal after a claim retains audit but prevents a fresh start attempt', async () => {
+    const { sql, submit } = await prepared();
+    const first = await recordRoutineStrengthStartIntent(sql, submit);
+    await withdrawRoutineStrengthAuthorization(sql, {
+      athleteId: submit.athleteId,
+      sessionId: submit.sessionId,
+      expectedAuthorizationId: submit.expectedAuthorizationId,
+      withdrawalId: 'post-intent-withdrawal',
+      athleteConfirmedWithdrawal: true,
+    });
+    const screen = await inspectRoutineWorkoutStart(sql, submit);
+    expect(screen.status).toBe('hold');
+    expect(screen.blockers).toContain('The athlete withdrew this workout authorization.');
+    expect(await readRoutineStrengthStartIntent(
+      sql, submit.athleteId, submit.sessionId,
+    )).toEqual(first);
+    await expect(recordRoutineStrengthStartIntent(sql, {
+      ...submit, intentId: 'second-after-withdrawal',
+    })).rejects.toThrow();
+  });
+
+  it('recovers a signed-bound, unconsumed start intent after closing and reopening SQLite', async () => {
+    const { db, sql, file, directory, submit } = await prepared();
+    const saved = await recordRoutineStrengthStartIntent(sql, submit);
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    expect(await readRoutineStrengthStartIntent(
+      driver(reopened), submit.athleteId, submit.sessionId,
+    )).toEqual(saved);
+    expect((await inspectRoutineWorkoutStart(driver(reopened), submit)).status)
+      .toBe('hold');
+  });
+
+  it('rejects corrupted consent, tampered dose and foreign owner instead of opening the player', async () => {
+    const { db, sql, submit } = await prepared();
+    await recordRoutineStrengthStartIntent(sql, submit);
+    await expect(readRoutineStrengthStartIntent(
+      sql, 'wrong-athlete', submit.sessionId,
+    )).rejects.toThrow(/ownership mismatch/);
+    db.prepare('UPDATE strength_workout_start_intents SET intent_json = ?').run(
+      JSON.stringify({ schemaVersion: 1, workoutStarted: true }),
+    );
+    await expect(readRoutineStrengthStartIntent(
+      sql, submit.athleteId, submit.sessionId,
+    )).rejects.toThrow(/audit integrity mismatch/);
+    await expect(inspectRoutineWorkoutStart(sql, submit))
+      .rejects.toThrow(/audit integrity mismatch/);
+  });
+
+  it('aborts failed intent inserts with zero writes, allowing a clean retry', async () => {
+    const { db, sql, submit } = await prepared();
+    const faulty: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Exclusive transaction missing.');
+        return sql.exclusiveTransaction(writer => fn({
+          ...writer,
+          run: async () => { throw new Error('Injected pre-start intent write fault.'); },
+        }));
+      },
+    };
+    await expect(recordRoutineStrengthStartIntent(faulty, submit))
+      .rejects.toThrow(/Injected pre-start intent write fault/);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_start_intents')
+      .get() as { n: number }).n).toBe(0);
+    await recordRoutineStrengthStartIntent(sql, submit);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_start_intents')
+      .get() as { n: number }).n).toBe(1);
+  });
+
+  it('refuses orphan start-intent data even if the original authorization is absent', async () => {
+    const { db, sql, submit } = await prepared();
+    db.prepare(
+      'INSERT INTO strength_workout_start_intents ' +
+      '(id, athlete_id, session_id, authorization_id, preview_id, intent_json, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      'orphan-intent', submit.athleteId, submit.sessionId,
+      'forged-consent', 'forged-preview', '{}', new Date().toISOString(),
+    );
+    await expect(inspectRoutineWorkoutStart(sql, submit))
+      .rejects.toThrow(/audit integrity mismatch/);
+    await expect(readRoutineStrengthStartIntent(
+      sql, submit.athleteId, submit.sessionId,
+    )).rejects.toThrow(/audit integrity mismatch/);
   });
 });
