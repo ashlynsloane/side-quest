@@ -2684,7 +2684,7 @@ describe('withdrawal audit inconsistency cannot silently enable exercise', () =>
     await expect(inspectRoutineWorkoutStart(sql, {
       athleteId: auth.athleteId, sessionId: request.source.id,
       expectedAuthorizationId: auth.authorizationId, evidence: auth.evidence,
-    })).rejects.toThrow(/Orphan routine authorization withdrawal/);
+    })).rejects.toThrow(/Orphan routine start or withdrawal audit/);
     await expect(authorizeRoutineStrengthWorkout(sql, auth))
       .rejects.toThrow(/Unreconciled prior withdrawal/);
     expect((db.prepare('SELECT COUNT(*) AS n FROM strength_workout_authorizations')
