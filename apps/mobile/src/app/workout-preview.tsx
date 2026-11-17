@@ -53,6 +53,8 @@ export default function WorkoutPreviewScreen() {
   const [roomBusy, setRoomBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [naming, setNaming] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
 
   useEffect(() => {
     if (!previewWorkout || originalWorkoutId.current === previewWorkout.id) return;
@@ -111,11 +113,14 @@ export default function WorkoutPreviewScreen() {
       && (activePlanLink?.sessionId ?? null) === (previewPlannedSession?.id ?? null),
   );
 
-  function beginAndNavigate() {
+  async function beginAndNavigate() {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
     try {
-      // A stored partial-completion journal or unreadable checkpoint must
-      // not be overwritten by starting this preview.
-      beginWorkout(workout);
+      // Do not navigate until the original recovery checkpoint is durable.
+      // A duplicate tap cannot replace that checkpoint while it is saving.
+      await beginWorkout(workout);
       router.push('/active-workout' as Href);
     } catch (error) {
       Alert.alert(
@@ -123,10 +128,14 @@ export default function WorkoutPreviewScreen() {
         error instanceof Error ? error.message : 'Could not safely start this workout.',
         [{ text: 'OK' }],
       );
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   }
 
   function start() {
+    if (startingRef.current) return;
     if (!activeWorkout) {
       beginAndNavigate();
       return;
@@ -220,7 +229,7 @@ export default function WorkoutPreviewScreen() {
 
         <View style={styles.startPanel}>
           <View><Text style={styles.startTitle}>Ready when you are</Text><Text style={styles.startBody}>Edits and swaps are saved for this session.</Text></View>
-          <V23PrimaryButton onPress={start} icon="play">{activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
+          <V23PrimaryButton onPress={start} disabled={starting} icon="play">{starting ? 'Saving workout…' : activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
           <Pressable onPress={() => void startTogether()} disabled={roomBusy} style={[styles.togetherButton, roomBusy && styles.disabled]}><Text style={styles.togetherButtonText}>{roomBusy ? 'Creating room…' : 'Start this workout together'}</Text></Pressable>
         </View>
       </KeyboardSafeScreen>
