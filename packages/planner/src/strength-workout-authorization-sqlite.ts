@@ -304,6 +304,13 @@ export async function authorizeRoutineStrengthWorkout(
     if (orphanStartIntent) {
       throw new Error('Unreconciled prior start intent blocks fresh authorization.');
     }
+    const orphanNativeCheckpoint = await txn.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_native_start_checkpoints WHERE session_id = ? LIMIT 1',
+      [preview.binding.sessionId],
+    );
+    if (orphanNativeCheckpoint) {
+      throw new Error('Unreconciled native start checkpoint blocks fresh authorization.');
+    }
     const existing = await txn.getAll<{ id: string; athlete_id: string }>(
       `SELECT id, athlete_id FROM strength_workout_authorizations
        WHERE session_id = ? OR preview_id = ? LIMIT 2`,
