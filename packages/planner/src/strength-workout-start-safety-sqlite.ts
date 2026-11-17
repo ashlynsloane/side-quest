@@ -409,7 +409,18 @@ export async function recordRoutineStrengthStartIntent(
     throw new Error('Exclusive routine workout start intent transaction is unavailable.');
   }
   const frozen = JSON.parse(JSON.stringify(request)) as RoutineStrengthStartIntentRequest;
-  return sql.exclusiveTransaction(async writer => {
+  return sql.exclusiveTransaction(async writer =>
+    (await appendVerifiedStartIntentInTransaction(writer, frozen)).intent);
+}
+
+/**
+ * Transaction-internal single authoritative start verifier and audit append.
+ * Both intent-only records and prepared native checkpoints share this exact gate.
+ */
+async function appendVerifiedStartIntentInTransaction(
+  writer: TrainingAdjustmentSqlDriver,
+  frozen: RoutineStrengthStartIntentRequest,
+): Promise<{ intent: RoutineStrengthStartIntent; original: AuthorizedStrengthWorkoutRecord }> {
     const result = await assessStartWithinSnapshot(writer, frozen);
     if (result.observationToken !== frozen.expectedObservationToken) {
       throw new Error('Routine workout evidence changed before start intent; refresh review.');
@@ -444,8 +455,7 @@ export async function recordRoutineStrengthStartIntent(
       [intent.id, intent.athleteId, intent.sessionId, intent.authorizationId,
         intent.previewId, JSON.stringify(intent), intent.createdAt],
     );
-    return intent;
-  });
+    return { intent, original };
 }
 
 /**
@@ -476,5 +486,225 @@ export async function readRoutineStrengthStartIntent(
       original.previewId, original.candidateSignature,
       authorizedScheduledLocalDate(original),
     );
+  });
+}
+
+
+/**
+ * A fail-closed, append-only recovery seed for a single explicitly requested
+ * routine workout. Created in the SAME SQLite transaction as the matching
+ * start intent. The React player is not mounted or running at commit time.
+ */
+export const STRENGTH_NATIVE_START_CHECKPOINT_SQL = [
+  'CREATE TABLE IF NOT EXISTS strength_workout_native_start_checkpoints (',
+  '  id TEXT PRIMARY KEY NOT NULL,',
+  '  athlete_id TEXT NOT NULL,',
+  '  session_id TEXT NOT NULL UNIQUE,',
+  '  authorization_id TEXT NOT NULL UNIQUE,',
+  '  intent_id TEXT NOT NULL UNIQUE,',
+  '  checkpoint_json TEXT NOT NULL,',
+  '  created_at TEXT NOT NULL',
+  ');',
+  'CREATE INDEX IF NOT EXISTS idx_strength_native_start_checkpoint_owner',
+  '  ON strength_workout_native_start_checkpoints(athlete_id, session_id);',
+].join('\n');
+
+/**
+ * Structurally identical to the mobile LiveWorkoutSessionSnapshot initial
+ * schema. Always paused on disk; the player may only run once a separate
+ * hydration/activation flow has verified and restored it.
+ */
+export interface RoutineInitialLiveWorkoutCheckpoint {
+  schemaVersion: 1;
+  savedAt: string;
+  workout: AuthorizedStrengthWorkoutRecord['workout'];
+  startedAt: string;
+  stationIndex: 0;
+  phase: 'work';
+  remainingSeconds: number;
+  running: false;
+  stationRounds: Record<string, number>;
+  exerciseLoads: Record<string, never>;
+  exerciseSets: Record<string, never>;
+  restEntries: Record<string, never>;
+  restRounds: 1;
+  restLoadUnit: 'lb';
+  planLink: {
+    sessionId: string;
+    sessionDate: string;
+    sessionTitle: string;
+    modifiedFromPlan: boolean;
+  };
+}
+
+export interface RoutineNativeStartCheckpoint {
+  schemaVersion: 1;
+  id: string;
+  kind: 'prepared_native_player_checkpoint';
+  athleteId: string;
+  sessionId: string;
+  authorizationId: string;
+  intentId: string;
+  candidateSignature: string;
+  createdAt: string;
+  initialLiveSession: RoutineInitialLiveWorkoutCheckpoint;
+  requiresPlayerHydration: true;
+  playerPlaybackStarted: false;
+}
+
+export interface RoutineNativeStartCheckpointRequest
+  extends RoutineStrengthStartIntentRequest {
+  checkpointId: string;
+}
+
+function reconstructInitialLiveSession(
+  authorized: AuthorizedStrengthWorkoutRecord,
+  startedAt: string,
+): RoutineInitialLiveWorkoutCheckpoint {
+  let source: { id?: unknown; title?: unknown; date?: unknown; workout?: unknown };
+  try {
+    const binding = JSON.parse(authorized.bindingSignature) as { sourceSignature?: string };
+    source = JSON.parse(binding.sourceSignature ?? '') as typeof source;
+  } catch {
+    throw new Error('Original planned workout start binding is unreadable.');
+  }
+  if (source?.id !== authorized.sessionId
+    || typeof source.title !== 'string' || !source.title.trim()
+    || source.date !== authorizedScheduledLocalDate(authorized)
+    || typeof source.workout !== 'object' || !source.workout) {
+    throw new Error('Original planned workout start binding is inconsistent.');
+  }
+  const workout = authorized.workout;
+  if (authorized.candidateSignature !== JSON.stringify(workout)
+    || !workout.id?.trim() || !workout.stations?.length
+    || !Number.isFinite(workout.stations[0]!.durationSeconds)
+    || workout.stations[0]!.durationSeconds <= 0) {
+    throw new Error('Authorized workout cannot produce an initial native player checkpoint.');
+  }
+  return {
+    schemaVersion: 1, savedAt: startedAt,
+    workout, startedAt, stationIndex: 0, phase: 'work',
+    remainingSeconds: workout.stations[0]!.durationSeconds,
+    running: false, stationRounds: {},
+    exerciseLoads: {}, exerciseSets: {}, restEntries: {},
+    restRounds: 1, restLoadUnit: 'lb',
+    planLink: {
+      sessionId: authorized.sessionId, sessionDate: source.date as string,
+      sessionTitle: source.title,
+      modifiedFromPlan: authorized.candidateSignature !== JSON.stringify(source.workout),
+    },
+  };
+}
+
+async function readNativeCheckpointInSnapshot(
+  snapshot: TrainingAdjustmentSqlDriver,
+  authorized: AuthorizedStrengthWorkoutRecord,
+  matchingIntent: RoutineStrengthStartIntent | null,
+): Promise<RoutineNativeStartCheckpoint | null> {
+  const rows = await snapshot.getAll<{
+    id: string; athlete_id: string; session_id: string;
+    authorization_id: string; intent_id: string;
+    checkpoint_json: string; created_at: string;
+  }>(
+    'SELECT id, athlete_id, session_id, authorization_id, intent_id, ' +
+    'checkpoint_json, created_at FROM strength_workout_native_start_checkpoints WHERE session_id = ?',
+    [authorized.sessionId],
+  );
+  if (rows.length > 1) throw new Error('Ambiguous native workout start checkpoint.');
+  if (!rows.length) return null;
+  const row = rows[0]!;
+  let record: RoutineNativeStartCheckpoint;
+  try { record = JSON.parse(row.checkpoint_json) as RoutineNativeStartCheckpoint; }
+  catch { throw new Error('Native start checkpoint audit is unreadable.'); }
+  if (!record || typeof record !== 'object' || Array.isArray(record)
+    || Object.keys(record).sort().join('|') !== [
+      'athleteId', 'authorizationId', 'candidateSignature', 'createdAt',
+      'id', 'initialLiveSession', 'intentId', 'kind', 'playerPlaybackStarted',
+      'requiresPlayerHydration', 'schemaVersion', 'sessionId',
+    ].join('|')
+    || record.schemaVersion !== 1 || record.kind !== 'prepared_native_player_checkpoint'
+    || record.requiresPlayerHydration !== true || record.playerPlaybackStarted !== false
+    || !record.id?.trim() || record.id !== row.id
+    || record.athleteId !== authorized.athleteId || record.athleteId !== row.athlete_id
+    || record.sessionId !== authorized.sessionId || record.sessionId !== row.session_id
+    || record.authorizationId !== authorized.id || record.authorizationId !== row.authorization_id
+    || record.intentId !== row.intent_id || record.intentId !== matchingIntent?.id
+    || record.candidateSignature !== authorized.candidateSignature
+    || record.createdAt !== row.created_at || !validTimestamp(record.createdAt)
+    || record.createdAt !== matchingIntent.createdAt
+    || JSON.stringify(record.initialLiveSession) !== JSON.stringify(
+      reconstructInitialLiveSession(authorized, record.createdAt)
+    )) {
+    throw new Error('Native start checkpoint audit integrity mismatch.');
+  }
+  return record;
+}
+
+/**
+ * Atomic safety-to-recovery-seed boundary. The intent and player's initial
+ * paused snapshot are committed together or neither is committed. This does
+ * not start timers, render exercises, or hydrate React/localStorage.
+ */
+export async function commitRoutineNativeStartCheckpoint(
+  sql: TrainingAdjustmentSqlDriver,
+  request: RoutineNativeStartCheckpointRequest,
+): Promise<RoutineNativeStartCheckpoint> {
+  assertStartRequest(request);
+  if (!request.checkpointId?.trim() || request.checkpointId.length > 160
+    || !request.intentId?.trim() || request.intentId.length > 160
+    || !request.expectedObservationToken?.trim()
+    || request.athleteExplicitlyRequestedStart !== true
+    || typeof sql.exclusiveTransaction !== 'function') {
+    throw new Error('Explicit atomic native checkpoint request is incomplete.');
+  }
+  const frozen = JSON.parse(JSON.stringify(request)) as RoutineNativeStartCheckpointRequest;
+  return sql.exclusiveTransaction(async writer => {
+    const { intent, original } = await appendVerifiedStartIntentInTransaction(writer, frozen);
+    const record: RoutineNativeStartCheckpoint = {
+      schemaVersion: 1, id: frozen.checkpointId,
+      kind: 'prepared_native_player_checkpoint',
+      athleteId: frozen.athleteId, sessionId: frozen.sessionId,
+      authorizationId: original.id, intentId: intent.id,
+      candidateSignature: original.candidateSignature, createdAt: intent.createdAt,
+      initialLiveSession: reconstructInitialLiveSession(original, intent.createdAt),
+      requiresPlayerHydration: true, playerPlaybackStarted: false,
+    };
+    await writer.run(
+      'INSERT INTO strength_workout_native_start_checkpoints ' +
+      '(id, athlete_id, session_id, authorization_id, intent_id, checkpoint_json, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [record.id, record.athleteId, record.sessionId, record.authorizationId,
+        record.intentId, JSON.stringify(record), record.createdAt],
+    );
+    return record;
+  });
+}
+
+/** Read-only recovery seed. A caller must NOT treat it as proof of playback. */
+export async function readRoutineNativeStartCheckpoint(
+  sql: TrainingAdjustmentSqlDriver,
+  athleteId: string,
+  sessionId: string,
+): Promise<RoutineNativeStartCheckpoint | null> {
+  if (!athleteId?.trim() || !sessionId?.trim()
+    || typeof sql.readSnapshot !== 'function') {
+    throw new Error('Consistent native start checkpoint audit snapshot is unavailable.');
+  }
+  return sql.readSnapshot(async snapshot => {
+    const original = await readAuthorizedRoutineWorkout(snapshot, athleteId, sessionId);
+    if (!original) {
+      const orphan = await snapshot.getFirst<{ id: string }>(
+        'SELECT id FROM strength_workout_native_start_checkpoints WHERE session_id = ? LIMIT 1',
+        [sessionId],
+      );
+      if (orphan) throw new Error('Orphan native start checkpoint audit detected.');
+      return null;
+    }
+    const intent = await readStartIntentInSnapshot(
+      snapshot, athleteId, sessionId, original.id,
+      original.previewId, original.candidateSignature,
+      authorizedScheduledLocalDate(original),
+    );
+    return readNativeCheckpointInSnapshot(snapshot, original, intent);
   });
 }
