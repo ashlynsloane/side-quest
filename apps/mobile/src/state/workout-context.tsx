@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -42,7 +43,7 @@ type WorkoutContextValue = {
   setPreviewWorkout: (workout: GeneratedWorkout | null) => void;
   updatePreviewWorkout: (workout: GeneratedWorkout) => void;
   openPlannedWorkoutPreview: (session: PlannedStrengthSession, context?: RecommendationExplanationContext) => void;
-  beginWorkout: (workout: GeneratedWorkout) => void;
+  beginWorkout: (workout: GeneratedWorkout) => Promise<void>;
   updateActiveWorkout: (workout: GeneratedWorkout) => void;
   clearActiveWorkout: () => void;
 };
@@ -93,6 +94,9 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
   const [activePlanLink, setActivePlanLink] = useState<ActiveWorkoutPlanLink | null>(null);
   const [workoutSessionReady, setWorkoutSessionReady] = useState(false);
   const [restoredActiveWorkout, setRestoredActiveWorkout] = useState(false);
+  const startInFlight = useRef(false);
+  const liveAthleteId = useRef(user?.id ?? null);
+  liveAthleteId.current = user?.id ?? null;
 
   useEffect(() => {
     let live = true;
@@ -141,16 +145,31 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPlannedPreviewSource(source);
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
-    beginWorkout(workout) {
-      // Synchronous fail-closed check runs before any in-memory context
-      // replacement. An unfinished prior completion must remain recoverable.
-      assertCanStartLiveWorkout(user?.id ?? null);
-      const planLink = buildPlanLink(plannedPreviewSource);
-      const snapshot = createInitialLiveWorkoutSession(workout, new Date().toISOString(), planLink ?? undefined);
-      setActiveWorkout(workout);
-      setActivePlanLink(planLink);
-      setRestoredActiveWorkout(false);
-      void saveLiveWorkoutSession(snapshot, user?.id ?? null);
+    async beginWorkout(workout) {
+      // A durable checkpoint MUST succeed before any player state mutation.
+      // Duplicate taps must not race, and a profile switch during the awaited
+      // write must not hydrate a different athlete's in-memory session.
+      if (startInFlight.current) {
+        throw new Error('A workout start is already being saved.');
+      }
+      startInFlight.current = true;
+      const athleteAtStart = user?.id ?? null;
+      try {
+        assertCanStartLiveWorkout(athleteAtStart);
+        const planLink = buildPlanLink(plannedPreviewSource);
+        const snapshot = createInitialLiveWorkoutSession(
+          workout, new Date().toISOString(), planLink ?? undefined,
+        );
+        await saveLiveWorkoutSession(snapshot, athleteAtStart);
+        if (liveAthleteId.current !== athleteAtStart) {
+          throw new Error('Athlete profile changed before workout activation. Saved checkpoint retained.');
+        }
+        setActiveWorkout(workout);
+        setActivePlanLink(planLink);
+        setRestoredActiveWorkout(false);
+      } finally {
+        startInFlight.current = false;
+      }
     },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
