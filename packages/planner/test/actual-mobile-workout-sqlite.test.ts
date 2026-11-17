@@ -760,7 +760,7 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect((await service.exportLocalData()).strength_workout_start_intents).toHaveLength(0);
     expect((await service.exportLocalData()).strength_workout_native_start_checkpoints)
       .toHaveLength(0);
-    const nativeCheckpoint = await service.prepareRoutineNativeWorkoutCheckpoint(
+    const nativeCheckpoint = await service.commitAndHydrateRoutineNativeWorkout(
       checkpointRequest,
     );
     expect(nativeCheckpoint.playerPlaybackStarted).toBe(false);
@@ -770,6 +770,11 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
       .toBe(1500);
     expect(nativeCheckpoint.initialLiveSession.planLink?.sessionId).toBe('routine-session');
     expect(nativeCheckpoint.initialLiveSession.planLink?.modifiedFromPlan).toBe(true);
+    const persistedPlayer = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    expect(await persistedPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))
+      .toEqual(nativeCheckpoint.initialLiveSession);
+    expect((await persistedPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))?.running)
+      .toBe(false);
     const intent = await service.getRecordedRoutineStrengthStartIntent(
       'synthetic-athlete-one', 'routine-session',
     );
@@ -783,6 +788,9 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     await expect(service.prepareRoutineNativeWorkoutCheckpoint({
       ...checkpointRequest, checkpointId: 'duplicate-native-checkpoint',
     })).rejects.toThrow(/already exists/);
+    await expect(service.commitAndHydrateRoutineNativeWorkout({
+      ...checkpointRequest, checkpointId: 'different-double-tap',
+    })).rejects.toThrow(/already saved/);
     await expect(service.requestRoutineStrengthPreStartIntent({
       athleteId: 'synthetic-athlete-one',
       sessionId: 'routine-session',
@@ -832,6 +840,9 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect(await service.getRecordedRoutineNativeWorkoutCheckpoint(
       'synthetic-athlete-one', 'routine-session',
     )).toEqual(nativeCheckpoint);
+    const coldPlayer = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    expect(await coldPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))
+      .toEqual(nativeCheckpoint.initialLiveSession);
     expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
       .toHaveLength(1);
     await service.recordAthleteTrainingSafetyContext({
