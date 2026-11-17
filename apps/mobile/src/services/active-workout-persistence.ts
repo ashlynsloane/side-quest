@@ -187,6 +187,38 @@ export function assertCanStartLiveWorkout(profileId?: string | null): void {
   }
 }
 
+/**
+ * Exclusive first hydration of a routine workout already atomically committed
+ * to the athlete's SQLite start journal. Never replaces any existing live
+ * checkpoint, even a non-pending one. The source must be the server-side
+ * exact authorized workout, paused until deliberate user playback.
+ */
+export async function persistFirstRoutineNativeCheckpoint(
+  snapshot: LiveWorkoutSessionSnapshot,
+  athleteId: string,
+): Promise<void> {
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout recovery storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, athleteId);
+  if (!key || !athleteId.trim()
+    || !isLiveWorkoutSession(snapshot)
+    || snapshot.running !== false
+    || snapshot.stationIndex !== 0
+    || snapshot.phase !== 'work'
+    || !snapshot.planLink?.sessionId
+    || snapshot.pendingCompletion !== undefined) {
+    throw new Error('Native routine start checkpoint cannot be verified.');
+  }
+  if (storage.getItem(key) !== null) {
+    throw new Error('An earlier workout checkpoint already exists. No workout was replaced.');
+  }
+  const encoded = JSON.stringify(snapshot);
+  storage.setItem(key, encoded);
+  if (storage.getItem(key) !== encoded) {
+    throw new Error('Native routine start checkpoint could not be verified after storage.');
+  }
+}
+
 export async function saveLiveWorkoutSession(
   snapshot: LiveWorkoutSessionSnapshot, profileId?: string | null,
 ): Promise<void> {
