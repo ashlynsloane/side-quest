@@ -1846,3 +1846,15 @@ export type {
   RoutineAuthorizationWithdrawal,
   RoutineWorkoutStartScreen,
 } from './strength-workout-start-safety-sqlite';
+
+// Append-only pre-start intent: never evidence that the native player ran.
+export {
+  STRENGTH_START_INTENT_SQL,
+  recordRoutineStrengthStartIntent,
+  readRoutineStrengthStartIntent,
+} from './strength-workout-start-safety-sqlite';
+export type {
+  RoutineWorkoutStartRequest,
+  RoutineStrengthStartIntent,
+  RoutineStrengthStartIntentRequest,
+} from './strength-workout-start-safety-sqlite';
