@@ -730,6 +730,40 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect((await service.exportLocalData()).workout_ledger).toEqual([]);
     expect((await service.getLatestTrainingBlock())?.block.weeks[0]
       ?.sessions[0]?.workout).toEqual(sourceWorkout);
+    const preStart = await service.getRoutineStrengthPreStartScreen({
+      athleteId: 'synthetic-athlete-one',
+      sessionId: 'routine-session',
+      expectedAuthorizationId: 'routine-mobile-auth',
+    });
+    expect(preStart.status).toBe('hold');
+    expect(preStart.blockers).toContain(
+      'The workout can only start on its scheduled local date.',
+    );
+    expect(preStart.workoutStarted).toBe(false);
+    expect(preStart.playerStartAuthorized).toBe(false);
+    const withdrawalInput = {
+      athleteId: 'synthetic-athlete-one',
+      sessionId: 'routine-session',
+      expectedAuthorizationId: 'routine-mobile-auth',
+      withdrawalId: 'routine-mobile-withdrawal',
+      athleteConfirmedWithdrawal: true as const,
+    };
+    state.failNextContaining = 'INSERT INTO strength_workout_authorization_withdrawals';
+    await expect(service.withdrawRecordedRoutineStrengthWorkout(withdrawalInput))
+      .rejects.toThrow(/synthetic SQLite write interruption/);
+    expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
+      .toHaveLength(0);
+    const withdrawn = await service.withdrawRecordedRoutineStrengthWorkout(withdrawalInput);
+    expect(withdrawn.authorizationId).toBe('routine-mobile-auth');
+    expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
+      .toHaveLength(1);
+    expect((await service.getRoutineStrengthPreStartScreen({
+      athleteId: 'synthetic-athlete-one',
+      sessionId: 'routine-session',
+      expectedAuthorizationId: 'routine-mobile-auth',
+    })).blockers).toContain('The athlete withdrew this workout authorization.');
+    await expect(service.withdrawRecordedRoutineStrengthWorkout(withdrawalInput))
+      .rejects.toThrow(/already withdrawn/);
     for (const handle of state.handles.splice(0)) handle.close();
     vi.resetModules();
     service = await import('../../../apps/mobile/src/services/database');
@@ -739,6 +773,11 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     );
     expect(recovered).toEqual(saved.authorization);
     expect(recovered?.automaticallyStarted).toBe(false);
+    expect(await service.getRoutineStrengthWithdrawal(
+      'synthetic-athlete-one', 'routine-session',
+    )).toEqual(withdrawn);
+    expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
+      .toHaveLength(1);
     await service.recordAthleteTrainingSafetyContext({
       athleteId: 'synthetic-athlete-one',
       protectedMovement: 'deep_hip_flexion',
