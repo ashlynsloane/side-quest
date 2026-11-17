@@ -68,8 +68,8 @@ async function readWithdrawalInSnapshot(
     authorization_id: string; event_json: string; created_at: string;
   }>(
     'SELECT id, athlete_id, session_id, authorization_id, event_json, created_at ' +
-    'FROM strength_workout_authorization_withdrawals WHERE authorization_id = ?',
-    [authorizationId],
+    'FROM strength_workout_authorization_withdrawals WHERE session_id = ?',
+    [sessionId],
   );
   if (rows.length > 1) throw new Error('Ambiguous routine authorization withdrawal.');
   if (!rows.length) return null;
@@ -106,7 +106,14 @@ export async function readRoutineAuthorizationWithdrawal(
   }
   return sql.readSnapshot(async snapshot => {
     const original = await readAuthorizedRoutineWorkout(snapshot, athleteId, sessionId);
-    if (!original) return null;
+    if (!original) {
+      const orphan = await snapshot.getFirst<{ id: string }>(
+        'SELECT id FROM strength_workout_authorization_withdrawals WHERE session_id = ? LIMIT 1',
+        [sessionId],
+      );
+      if (orphan) throw new Error('Orphan routine authorization withdrawal audit detected.');
+      return null;
+    }
     return readWithdrawalInSnapshot(snapshot, athleteId, sessionId, original.id);
   });
 }
@@ -191,6 +198,13 @@ export async function inspectRoutineWorkoutStart(
     const blockers: string[] = [];
     if (!authorized || authorized.id !== request.expectedAuthorizationId) {
       blockers.push('No matching athlete-confirmed workout authorization.');
+    }
+    if (!authorized) {
+      const orphan = await snapshot.getFirst<{ id: string }>(
+        'SELECT id FROM strength_workout_authorization_withdrawals WHERE session_id = ? LIMIT 1',
+        [request.sessionId],
+      );
+      if (orphan) throw new Error('Orphan routine authorization withdrawal audit detected.');
     }
     let observationToken: string | null = null;
     if (authorized) {
