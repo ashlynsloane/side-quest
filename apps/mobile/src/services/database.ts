@@ -23,7 +23,7 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
-import { localCalendarDate, PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_WORKOUT_AUTHORIZATION_SQL, STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL, authorizeRoutineStrengthWorkout, readAuthorizedRoutineWorkout, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, inspectStrengthAuthorizationDryRun, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthAuthorizationDryRunResult, type AuthorizedStrengthWorkoutRecord, type AthleteStrengthAuthorizationConfirmations, type StrengthWorkoutAuthorizationResult, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
+import { localCalendarDate, PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_WORKOUT_AUTHORIZATION_SQL, STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL, withdrawRoutineStrengthAuthorization, readRoutineAuthorizationWithdrawal, inspectRoutineWorkoutStart, authorizeRoutineStrengthWorkout, readAuthorizedRoutineWorkout, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, inspectStrengthAuthorizationDryRun, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthAuthorizationDryRunResult, type AuthorizedStrengthWorkoutRecord, type AthleteStrengthAuthorizationConfirmations, type StrengthWorkoutAuthorizationResult, type RoutineAuthorizationWithdrawal, type RoutineWorkoutStartScreen, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
@@ -1608,6 +1608,66 @@ export async function getRecordedAuthorizedStrengthWorkout(
   return withVerifiedAthleteDatabase(athleteId, async () => {
     await initializeDatabase();
     return readAuthorizedRoutineWorkout(trainingAdjustmentDriver, athleteId, sessionId);
+  });
+}
+
+/**
+ * Athlete-owned withdrawal: durable consent revocation, never workout deletion.
+ * Not called by the live player or by an automated planner.
+ */
+export async function withdrawRecordedRoutineStrengthWorkout(input: {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+  withdrawalId: string;
+  athleteConfirmedWithdrawal: true;
+}): Promise<RoutineAuthorizationWithdrawal> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    return withdrawRoutineStrengthAuthorization(trainingAdjustmentDriver, input);
+  });
+}
+
+/** Read-only historical withdrawal state, scoped to the verified athlete DB. */
+export async function getRoutineStrengthWithdrawal(
+  athleteId: string, sessionId: string,
+): Promise<RoutineAuthorizationWithdrawal | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readRoutineAuthorizationWithdrawal(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
+  });
+}
+
+/**
+ * Fresh pre-start PREVIEW only. It is NOT a native workout start action.
+ * The original stored evidence is not upgraded to provider verification;
+ * a new calendar day without review remains a hold.
+ */
+export async function getRoutineStrengthPreStartScreen(input: {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+}): Promise<RoutineWorkoutStartScreen> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const record = await readAuthorizedRoutineWorkout(
+      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    );
+    if (!record) {
+      throw new Error('No athlete-confirmed routine strength authorization exists.');
+    }
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, record.previewId,
+    );
+    if (!preview) throw new Error('Strength authorization preview is missing.');
+    return inspectRoutineWorkoutStart(trainingAdjustmentDriver, {
+      ...input,
+      evidence: preview.evidence.todayLocalDate === localCalendarDate(new Date())
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: localCalendarDate(new Date()) },
+    });
   });
 }
 
