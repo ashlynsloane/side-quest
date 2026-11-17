@@ -329,7 +329,11 @@ async function assessStartWithinSnapshot(
       'SELECT id FROM strength_workout_start_intents WHERE session_id = ? LIMIT 1',
       [request.sessionId],
     );
-    if (orphanWithdrawal || orphanStart) {
+    const orphanCheckpoint = await snapshot.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_native_start_checkpoints WHERE session_id = ? LIMIT 1',
+      [request.sessionId],
+    );
+    if (orphanWithdrawal || orphanStart || orphanCheckpoint) {
       throw new Error('Orphan routine start or withdrawal audit detected.');
     }
   }
@@ -346,6 +350,12 @@ async function assessStartWithinSnapshot(
     );
     if (recordedIntent) {
       blockers.push('A pre-start intent already exists for this workout; reconcile it before retry.');
+    }
+    const recordedCheckpoint = await readNativeCheckpointInSnapshot(
+      snapshot, authorized, recordedIntent,
+    );
+    if (recordedCheckpoint) {
+      blockers.push('An earlier native recovery checkpoint exists; reconcile it before retry.');
     }
     const current = await assessStrengthReviewWithinTransaction(
       snapshot, request.athleteId, authorized.previewId, request.evidence,
