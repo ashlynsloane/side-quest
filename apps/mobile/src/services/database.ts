@@ -2020,13 +2020,27 @@ export async function finalizeAndClearNativeWorkout(input: {
 }): Promise<RoutineNativeTerminalEvent | null> {
   return withVerifiedAthleteDatabase(input.athleteId, async () => {
     await initializeDatabase();
+    // A terminal retry must never clear a *different* live workout that
+    // occupied the athlete's slot since the original start was finalized.
+    // An unreadable slot is protected, not equivalent to an empty one.
+    const slot = await inspectLiveWorkoutSlot(input.athleteId);
+    if (slot === 'unreadable') {
+      throw new Error('Workout recovery checkpoint is unreadable; no athlete data was cleared.');
+    }
+    const live = slot === 'valid'
+      ? await loadLiveWorkoutSession(input.athleteId) : null;
+    if (live && (live.startedAt !== input.startedAt
+      || (live.planLink?.sessionId ?? null) !== input.sessionId)) {
+      throw new Error('Another workout owns the recovery checkpoint; unrelated data was preserved.');
+    }
     let result: RoutineNativeTerminalEvent | null = null;
     if (input.sessionId) {
       const prepared = await readRoutineNativeStartCheckpoint(
         trainingAdjustmentDriver, input.athleteId, input.sessionId,
       );
       if (prepared) {
-        if (prepared.initialLiveSession.startedAt !== input.startedAt) {
+        if (prepared.initialLiveSession.startedAt !== input.startedAt
+          || (live && live.workout.id !== prepared.initialLiveSession.workout.id)) {
           throw new Error('Workout completion or discard does not match the original start.');
         }
         result = await finishRoutineNativeStart(trainingAdjustmentDriver, {
@@ -2040,7 +2054,10 @@ export async function finalizeAndClearNativeWorkout(input: {
         });
       }
     }
-    await clearLiveWorkoutSession(input.athleteId);
+    if (!live && !result) {
+      throw new Error('The original live checkpoint is absent; no other session can be cleared.');
+    }
+    if (live) await clearLiveWorkoutSession(input.athleteId);
     return result;
   });
 }
