@@ -185,13 +185,13 @@ describe('durable pending partial-workout completion contract', () => {
       '2026-10-20T11:00:00.000Z',
     );
     await expect(saveLiveWorkoutSession(b))
-      .rejects.toThrow(/Conflicting pending workout completion/);
+      .rejects.toThrow(/different session/);
     expect((await loadLiveWorkoutSession())?.workout.id).toBe(workout.id);
     expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
     await expect(saveLiveWorkoutSession({
       ...b,
       pendingCompletion: { completionFraction: 0.5, completedAt: '2026-10-20T11:30:00.000Z' },
-    })).rejects.toThrow(/Conflicting pending workout completion/);
+    })).rejects.toThrow(/different session/);
     expect((await loadLiveWorkoutSession())?.pendingCompletion).toEqual(pending);
   });
 
