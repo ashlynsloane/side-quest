@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen, Pill, SectionTitle, Surface } from '@/components/v12-ui';
+import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
 import { getLatestTrainingBlock, inspectGenericWorkoutSafety } from '@/services/database';
 import {
   cancelWorkoutRoom,
@@ -100,8 +101,8 @@ export default function WorkoutRoomScreen() {
   }
   async function requireSharedWorkoutSafety(): Promise<void> {
     if (!user) throw new Error('A verified athlete profile is required.');
-    if (activeWorkout) {
-      throw new Error('Finish or discard the existing saved workout before joining a shared one.');
+    if (activeWorkout || await inspectLiveWorkoutSlot(user.id) !== 'empty') {
+      throw new Error('Finish or recover the existing or unreadable athlete workout checkpoint before joining a shared one.');
     }
     const safety = await inspectGenericWorkoutSafety(user.id);
     if (safety.kind !== 'routine_training') {
