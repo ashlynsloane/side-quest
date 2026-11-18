@@ -1,4 +1,5 @@
 import React from 'react';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import {
   Pressable,
   ScrollView,
@@ -161,7 +162,7 @@ export function TrainWorkspaceScreen({ model, onAction }: TrainWorkspaceScreenPr
         </View>
       ) : null}
 
-      {model.workoutTogether ? (
+      {MILESTONE_1_WORKOUT_TOGETHER_ENABLED && model.workoutTogether ? (
         <View style={[viewStyles.card, viewStyles.togetherCard]}>
           <Text style={textStyles.eyebrow}>Workout Together</Text>
           <Text style={textStyles.cardTitle}>{model.workoutTogether.title}</Text>
