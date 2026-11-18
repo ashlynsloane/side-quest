@@ -5,7 +5,7 @@ import {
   type UnapprovedStrengthReviewDetail,
 } from '@circuit/planner';
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,6 +13,9 @@ import {
   getCurrentStrengthReviewForConfirmation,
   getRecordedAuthorizationForStrengthPreview,
   getRoutineStrengthPreStartScreen,
+  getRoutineNativeRecoveryState,
+  discardUnhydratedRoutineNativeStart,
+  type RoutineNativeRecoveryState,
   confirmRoutineStrengthWorkout, setUnapprovedStrengthReviewDisposition,
   flagUnverifiedStrengthReviewConcern, recheckCurrentStrengthConfirmation,
 } from '@/services/database';
@@ -42,7 +45,7 @@ function changeHeadline(change: StrengthReviewDoseChange): string {
 export default function StrengthReviewDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { beginAuthorizedRoutineWorkout, activeWorkout, workoutSessionReady } = useWorkoutContext();
+  const { beginAuthorizedRoutineWorkout, recoverAuthorizedRoutineWorkout, activeWorkout, workoutSessionReady } = useWorkoutContext();
   const { previewId } = useLocalSearchParams<{ previewId?: string }>();
   const athleteId = user?.id;
   const currentAthlete = useRef(athleteId);
@@ -58,6 +61,9 @@ export default function StrengthReviewDetailScreen() {
   const [authorizationError, setAuthorizationError] = useState<string | null>(null);
   const [startingWorkout, setStartingWorkout] = useState(false);
   const [startWorkoutError, setStartWorkoutError] = useState<string | null>(null);
+  const [recoveryState, setRecoveryState] = useState<RoutineNativeRecoveryState | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingDisposition, setSavingDisposition] = useState(false);
@@ -79,6 +85,9 @@ export default function StrengthReviewDetailScreen() {
     setAuthorizationError(null);
     setStartingWorkout(false);
     setStartWorkoutError(null);
+    setRecoveryState(null);
+    setRecovering(false);
+    setRecoveryError(null);
     setError(null);
     setDispositionError(null);
     setSavingDisposition(false);
@@ -111,6 +120,109 @@ export default function StrengthReviewDetailScreen() {
     });
     return () => { live = false; };
   }, [athleteId, previewId]));
+
+  useEffect(() => {
+    if (!athleteId || !authorized) return;
+    let live = true;
+    void getRoutineNativeRecoveryState(athleteId, authorized.sessionId)
+      .then(result => { if (live) setRecoveryState(result); })
+      .catch(() => {
+        if (live) {
+          setRecoveryState({
+            kind: 'held', checkpoint: null,
+            blockers: ['Workout recovery audit is unavailable. No automatic start is allowed.'],
+          });
+        }
+      });
+    return () => { live = false; };
+  }, [athleteId, authorized?.id, authorized?.sessionId]);
+
+  async function refreshRecoveryStatus() {
+    if (!athleteId || !authorized) return;
+    try {
+      const result = await getRoutineNativeRecoveryState(
+        athleteId, authorized.sessionId,
+      );
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setRecoveryState(result);
+      }
+    } catch {
+      if (currentAthlete.current === athleteId) {
+        setRecoveryState({
+          kind: 'held', checkpoint: null,
+          blockers: ['Recovery history could not be verified. No start is permitted.'],
+        });
+      }
+    }
+  }
+
+  async function recoverInterruptedRoutine() {
+    if (!athleteId || !authorized || recovering || activeWorkout
+      || recoveryState?.kind !== 'recoverable_missing') return;
+    setRecovering(true);
+    setRecoveryError(null);
+    try {
+      await recoverAuthorizedRoutineWorkout({ sessionId: authorized.sessionId });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        router.push('/active-workout' as Href);
+      }
+    } catch (error) {
+      if (currentAthlete.current === athleteId) {
+        setRecoveryError(error instanceof Error ? error.message
+          : 'Exact interrupted start could not be safely restored.');
+        await refreshRecoveryStatus();
+      }
+    } finally {
+      if (currentAthlete.current === athleteId) setRecovering(false);
+    }
+  }
+
+  function confirmInterruptedRecovery() {
+    if (!authorized || recoveryState?.kind !== 'recoverable_missing') return;
+    Alert.alert(
+      'Recover the interrupted workout?',
+      'Restore the one exact, previously confirmed workout into a paused player. Current symptoms and restrictions will be rechecked. Any existing or progressed checkpoint prevents restoration.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Recover paused workout', onPress: () => { void recoverInterruptedRoutine(); } },
+      ],
+    );
+  }
+
+  async function discardInterruptedRoutine() {
+    if (!athleteId || !authorized || recovering || activeWorkout
+      || !['recoverable_missing', 'held'].includes(recoveryState?.kind ?? '')) return;
+    setRecovering(true);
+    setRecoveryError(null);
+    try {
+      await discardUnhydratedRoutineNativeStart({
+        athleteId, sessionId: authorized.sessionId, athleteConfirmedDiscard: true,
+      });
+      await refreshRecoveryStatus();
+    } catch (error) {
+      if (currentAthlete.current === athleteId) {
+        setRecoveryError(error instanceof Error ? error.message
+          : 'Interrupted workout cannot be discarded without verifying all saved data.');
+      }
+    } finally {
+      if (currentAthlete.current === athleteId) setRecovering(false);
+    }
+  }
+
+  function confirmDiscardInterruptedRoutine() {
+    if (!authorized || recovering || activeWorkout) return;
+    Alert.alert(
+      'Abandon the interrupted start?',
+      'Only an interrupted start with NO existing player checkpoint can be abandoned here. Its original audit remains, and it will never be automatically replayed. This does not delete completed training.',
+      [
+        { text: 'Keep start', style: 'cancel' },
+        { text: 'Abandon interrupted start', style: 'destructive',
+          onPress: () => { void discardInterruptedRoutine(); } },
+      ],
+    );
+  }
 
   const recheckCurrentEvidence = async () => {
     if (!athleteId || typeof previewId !== 'string' || !detail
@@ -230,6 +342,7 @@ export default function StrengthReviewDetailScreen() {
         && currentPreview.current === previewId) {
         setStartWorkoutError(cause instanceof Error ? cause.message
           : 'The workout could not safely start. Previous checkpoint records remain preserved.');
+        await refreshRecoveryStatus();
       }
     } finally {
       if (currentAthlete.current === athleteId
@@ -495,25 +608,69 @@ export default function StrengthReviewDetailScreen() {
                     Your original training plan is unchanged.
                   </Text>
                   <Text style={styles.noticeText}>
-                    Not started. This is not clinician clearance and cannot
-                    bypass a fresh safety check at session start.
+                    This authorization is not clinician clearance. Any start or
+                    recovery must pass the current local safety check.
                   </Text>
                   <Pressable accessibilityRole="button"
                     accessibilityLabel="Check safety and start the authorized routine workout"
-                    disabled={startingWorkout || !workoutSessionReady || Boolean(activeWorkout)}
+                    disabled={startingWorkout || recovering || !workoutSessionReady
+                      || Boolean(activeWorkout) || !recoveryState
+                      || recoveryState.kind !== 'not_started'}
                     onPress={confirmStartRoutineWorkout}
                     style={[styles.dispositionAction,
-                      (startingWorkout || !workoutSessionReady || Boolean(activeWorkout))
+                      (startingWorkout || recovering || !workoutSessionReady
+                        || Boolean(activeWorkout) || !recoveryState
+                        || recoveryState.kind !== 'not_started')
                       && styles.disabledAction]}>
                     <Text style={styles.dispositionText}>
                       {startingWorkout ? 'Checking and saving workout…'
                         : activeWorkout ? 'Finish the active workout first'
-                          : 'Check safety and start this workout'}
+                          : recoveryState?.kind === 'recoverable_missing'
+                            ? 'Recover the interrupted start below'
+                            : recoveryState?.kind === 'held'
+                              ? 'Workout start is on safety hold'
+                              : recoveryState?.kind === 'terminal'
+                                ? 'This workout has already been closed'
+                                : recoveryState?.kind === 'already_saved'
+                                  ? 'Existing paused workout is saved'
+                                  : 'Check safety and start this workout'}
                     </Text>
                   </Pressable>
                   {startWorkoutError ? (
                     <Text style={styles.error}>{startWorkoutError}</Text>
                   ) : null}
+                  {recoveryState?.kind === 'recoverable_missing' ? (
+                    <Pressable accessibilityRole="button"
+                      accessibilityLabel="Recover existing interrupted start into paused player"
+                      disabled={recovering || Boolean(activeWorkout)}
+                      onPress={confirmInterruptedRecovery}
+                      style={styles.contextAction}>
+                      <Text style={styles.contextActionText}>
+                        {recovering ? 'Rechecking recovery…' : 'Recover paused workout'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {['recoverable_missing', 'held'].includes(recoveryState?.kind ?? '')
+                    && !activeWorkout ? (
+                    <Pressable accessibilityRole="button"
+                      disabled={recovering}
+                      onPress={confirmDiscardInterruptedRoutine}
+                      style={styles.concernAction}>
+                      <Text style={styles.concernText}>
+                        Abandon interrupted start (only if no player data exists)
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {recoveryState?.kind === 'held'
+                    || recoveryState?.kind === 'terminal' ? (
+                    <Text style={styles.noticeText}>
+                      {recoveryState.blockers.join(' ')}
+                    </Text>
+                  ) : null}
+                  {recoveryError ? (
+                    <Text style={styles.error}>{recoveryError}</Text>
+                  ) : null}
+
 
                 </>
               ) : getRoutineStrengthAuthorizationReadiness(detail)
