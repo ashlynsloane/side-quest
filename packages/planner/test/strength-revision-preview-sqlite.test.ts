@@ -3221,6 +3221,56 @@ describe('native recovery and active-workout safety revalidation', () => {
     }
   });
 
+  it('new symptoms, low readiness and a changed original plan pause the active workout', async () => {
+    for (const variant of ['symptoms', 'readiness', 'plan'] as const) {
+      const fixture = await active();
+      if (variant === 'symptoms') {
+        fixture.db.prepare('UPDATE training_check_ins SET check_in_json = ?').run(
+          JSON.stringify({ status: 'tightness_pain', active: true,
+            activeUntil: new Date(Date.now() + 86400_000).toISOString() }),
+        );
+      } else if (variant === 'readiness') {
+        fixture.db.prepare('UPDATE readiness_check_ins SET check_in_json = ?').run(
+          JSON.stringify({
+            sleep: 1, energy: 1, muscleFreshness: 1, stress: 5, motivation: 1,
+          }),
+        );
+      } else {
+        fixture.saveBlock(block({
+          ...fixture.request.source, title: 'Changed since athlete consent',
+        }));
+      }
+      const decision = await fixture.review();
+      expect(decision.status).toBe('hold');
+      expect(decision.blockers.length).toBeGreaterThan(0);
+      expect(decision.playerStartAuthorized).toBe(false);
+    }
+  });
+
+  it('an older start-intent-only journal is held, not silently reclassified as never started', async () => {
+    const fixture = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(fixture.sql, fixture.auth);
+    const input = {
+      athleteId: fixture.auth.athleteId,
+      sessionId: fixture.request.source.id,
+      expectedAuthorizationId: fixture.auth.authorizationId,
+      evidence: fixture.auth.evidence,
+    };
+    const screen = await inspectRoutineWorkoutStart(fixture.sql, input);
+    await recordRoutineStrengthStartIntent(fixture.sql, {
+      ...input, intentId: 'legacy-intent-without-native-player',
+      expectedObservationToken: screen.observationToken!,
+      athleteExplicitlyRequestedStart: true,
+    });
+    const result = await assessRoutineNativeActiveSafety(fixture.sql, {
+      athleteId: input.athleteId, sessionId: input.sessionId, evidence: input.evidence,
+    });
+    expect(result.status).toBe('hold');
+    expect(result.checkpoint).toBeNull();
+    expect(result.blockers.join(' ')).toMatch(/lacks its native player recovery checkpoint/);
+    expect(result.playerStartAuthorized).toBe(false);
+  });
+
   it('explicit discard records terminal before any future recovery is possible', async () => {
     const { sql, db, input, checkpoint, review } = await active();
     const terminalInput = {
