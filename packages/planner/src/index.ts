@@ -1870,3 +1870,13 @@ export type {
   RoutineNativeStartCheckpoint,
   RoutineNativeStartCheckpointRequest,
 } from './strength-workout-start-safety-sqlite';
+
+export {
+  STRENGTH_NATIVE_START_TERMINAL_SQL,
+  assessRoutineNativeActiveSafety,
+  finishRoutineNativeStart,
+} from './strength-workout-recovery-sqlite';
+export type {
+  RoutineActiveSafetyResult,
+  RoutineNativeTerminalEvent,
+} from './strength-workout-recovery-sqlite';
