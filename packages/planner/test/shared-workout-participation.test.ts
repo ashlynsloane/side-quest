@@ -67,7 +67,7 @@ describe('shared workout app safety wiring source contract (not device execution
     expect(live).toContain("safetyStatus === 'hold'");
     expect(live).toContain("safetyStatus === 'clear'");
     expect(live).toContain('boundedSharedWorkoutFraction(');
-    expect(live).toContain("status === 'active'");
+    expect(live).toContain("status !== 'active'");
     expect(live).toContain('foregroundRef.current = false');
   });
 
