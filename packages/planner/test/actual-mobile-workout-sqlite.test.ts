@@ -951,6 +951,67 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
   });
 });
 
+describe('legacy generic workout entry cannot bypass known rehabilitation restrictions', () => {
+  it('holds unknown context, permits documented ordinary training, then holds durable protected movements', async () => {
+    const fresh = await service.inspectGenericWorkoutSafety('synthetic-athlete-one');
+    expect(fresh.kind).toBe('hold');
+    expect(fresh.blockers.join(' ')).toMatch(/training context/i);
+    expect(await service.recheckRoutineNativeActiveWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'non-native-planned-workout',
+      startedAt, workout,
+    })).toMatchObject({ kind: 'hold' });
+
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'general_training',
+      expectedLastEventId: null,
+    });
+    expect(await service.inspectGenericWorkoutSafety('synthetic-athlete-one'))
+      .toEqual({ kind: 'routine_training', blockers: [] });
+    expect(await service.recheckRoutineNativeActiveWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'non-native-planned-workout',
+      startedAt, workout,
+    })).toEqual({ kind: 'not_applicable', blockers: [] });
+
+    const current = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one',
+      protectedMovement: 'loaded_spinal_rotation',
+      expectedLastEventId: current.context.latestEventId,
+    });
+    const protectedTraining = await service.inspectGenericWorkoutSafety('synthetic-athlete-one');
+    expect(protectedTraining.kind).toBe('hold');
+    expect(protectedTraining.blockers.join(' ')).toMatch(/protected movement/i);
+    expect((await service.recheckRoutineNativeActiveWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'non-native-planned-workout',
+      startedAt, workout,
+    })).kind).toBe('hold');
+
+    // Self-relabeling as 'general training' never clears earlier protection.
+    const updated = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'general_training',
+      expectedLastEventId: updated.context.latestEventId,
+    });
+    expect((await service.inspectGenericWorkoutSafety('synthetic-athlete-one'))
+      .kind).toBe('hold');
+    await expect(service.inspectGenericWorkoutSafety('other-athlete'))
+      .rejects.toThrow(/Athlete profile changed/);
+  });
+
+  it('blocks a generic workout in declared rehabilitation and return-to-sport contexts', async () => {
+    for (const intent of ['injury_rehabilitation', 'return_to_sport'] as const) {
+      const current = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
+      await service.recordAthleteTrainingSafetyContext({
+        athleteId: 'synthetic-athlete-one', intent,
+        expectedLastEventId: current.context.latestEventId,
+      });
+      const inspection = await service.inspectGenericWorkoutSafety('synthetic-athlete-one');
+      expect(inspection.kind).toBe('hold');
+      expect(inspection.blockers.join(' ')).toMatch(/rehabilitation|return-to-sport/i);
+    }
+  });
+});
+
 describe('native athlete training safety context and sticky restrictions', () => {
   it('starts unknown, then accepts ordinary training without clinician paperwork or workout authorization', async () => {
     const unknown = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
