@@ -866,6 +866,29 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect((await service.getRoutineNativeRecoveryState(
       'synthetic-athlete-one', 'routine-session',
     )).kind).toBe('held');
+    // Kill-window simulation: terminal SQLite event is durable but removing
+    // the local checkpoint fails. Retry must never replay the old start.
+    const originalRemoveItem = globalThis.localStorage.removeItem;
+    try {
+      globalThis.localStorage.removeItem = (key: string) => {
+        if (key.startsWith('sidequest.live-workout.session.v1:')) {
+          throw new Error('Injected crash after terminal SQLite commit.');
+        }
+        originalRemoveItem(key);
+      };
+      await expect(service.finalizeAndClearNativeWorkout({
+        athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
+        startedAt: nativeCheckpoint.initialLiveSession.startedAt,
+        disposition: 'discarded',
+      })).rejects.toThrow(/Injected crash after terminal SQLite commit/);
+    } finally {
+      globalThis.localStorage.removeItem = originalRemoveItem;
+    }
+    expect((await service.getRoutineNativeRecoveryState(
+      'synthetic-athlete-one', 'routine-session',
+    )).kind).toBe('terminal');
+    expect((await persistedPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))
+      ?.workout.id).toBe(nativeCheckpoint.initialLiveSession.workout.id);
     const closed = await service.finalizeAndClearNativeWorkout({
       athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
       startedAt: nativeCheckpoint.initialLiveSession.startedAt,
