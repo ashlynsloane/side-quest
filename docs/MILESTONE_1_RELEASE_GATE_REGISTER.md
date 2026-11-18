@@ -20,6 +20,38 @@ that still requires a real athlete, provider source, or native device.
 | Native device acceptance | Physical iPhone P01–P15, correct isolated app identity, install/launch, cold restart, permissions and UI interactions, crash/recovery behavior | **NOT VERIFIED.** An iOS JavaScript export is not a native launch |
 | Release owner authorization | Review and explicit approval of final merge/deployment after all blocking gates pass | **NOT AUTHORIZED** |
 
+## Confirmed product scope — November 18, 2026
+
+**Athlete's decision: defer Workout Together beyond Milestone 1.** The
+Milestone 1 release candidate is **solo-first**: local athlete onboarding,
+daily readiness/symptom check-ins, adaptive solo workout planning and review,
+protective safety holds, completed/partial-dose logging, cold restart,
+and athlete-owned history recovery. This narrows the acceptance and release
+scope, but does not waive restrictions/clinical-source qualification for
+rehabilitation or return-to-sport, the physical-iPhone release gate, or
+real-beta database preservation.
+
+The explicit build-time gate
+`apps/mobile/src/services/milestone-one-scope.ts` sets
+`MILESTONE_1_WORKOUT_TOGETHER_ENABLED = false`. During Milestone 1:
+- The workout preview and optional Train workspace do not show shared starts.
+- Friends does not show incoming shared invitations or "Invite to workout".
+  Friends activity/privacy features and existing invitations are retained.
+- Direct links to `/workout-together`, `/workout-room` and
+  `/together-session` display a passive postponement screen instead of
+  mounting the shared session, starting a clock, or modifying any room.
+- No shared workout database tables, cloud records, room/invitation data, or
+  implementation code were deleted or migrated. The existing installed beta
+  is unchanged.
+
+**Workout Together is explicitly NOT a Milestone 1 release gate.** It must
+be **disabled** in the first staged build; it is NOT considered qualified
+for general use. Re-enabling requires a separate scope review and native
+acceptance of per-athlete crash-safe progress recovery, shared timer and
+clock behavior, individual restrictions, real-device process termination
+and remote-state fault handling. Automated solo acceptance does not prove
+those shared-session requirements.
+
 ## Training-mode policy: no universal clinician approval requirement
 
 The development branch distinguishes ordinary general training from injury
