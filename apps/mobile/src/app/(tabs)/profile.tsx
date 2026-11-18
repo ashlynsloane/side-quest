@@ -36,7 +36,7 @@ export default function ProfileTab() {
     <V23GroupedList>
       <V23Row title="Apps and devices" detail="Calendar, Strava, and connected services" onPress={() => router.push('/calendar-sync' as Href)} />
       <V23Row title="Human Coach Access" detail="Time-limited plan review with your approval" onPress={() => router.push('/coach-access' as Href)} />
-      <V23Row title="Friends and Workout Together" detail="Invitations, sharing, and blocking" onPress={() => router.push('/friends' as Href)} last />
+      <V23Row title="Friends" detail="Sharing and blocking" onPress={() => router.push('/friends' as Href)} last />
     </V23GroupedList>
 
     <V23SectionHeader>Privacy and display</V23SectionHeader>
