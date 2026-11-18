@@ -145,12 +145,11 @@ export default function WorkoutPreviewScreen() {
       return;
     }
     Alert.alert(
-      'Replace the active workout?',
-      `${activeWorkout.name} is paused and saved. Starting this workout will replace that active session.`,
+      'Current workout is saved',
+      `${activeWorkout.name} still has a recoverable workout checkpoint. Return to it and explicitly save the work performed or discard the session before starting a different workout. Nothing was replaced.`,
       [
-        { text: 'Keep current workout', style: 'cancel' },
-        { text: 'Resume current', onPress: () => router.push('/active-workout' as Href) },
-        { text: 'Replace and start', style: 'destructive', onPress: beginAndNavigate },
+        { text: 'Stay here', style: 'cancel' },
+        { text: 'Return to saved workout', onPress: () => router.push('/active-workout' as Href) },
       ],
     );
   }
