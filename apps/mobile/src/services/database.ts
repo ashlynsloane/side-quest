@@ -1918,6 +1918,40 @@ export async function recoverMissingRoutineNativeWorkout(input: {
 }
 
 /**
+ * Athlete explicitly abandons an interrupted start BEFORE it ever had a
+ * persisted live-player checkpoint. Never discard or alter progressed data.
+ * The original immutable SQLite seed remains for audit and cannot be replayed.
+ */
+export async function discardUnhydratedRoutineNativeStart(input: {
+  athleteId: string;
+  sessionId: string;
+  athleteConfirmedDiscard: true;
+}): Promise<RoutineNativeTerminalEvent> {
+  if (input.athleteConfirmedDiscard !== true) {
+    throw new Error('Explicit athlete abandonment confirmation is required.');
+  }
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    if (await inspectLiveWorkoutSlot(input.athleteId) !== 'empty') {
+      throw new Error('Existing player data must not be discarded from the interrupted-start screen.');
+    }
+    const checkpoint = await readRoutineNativeStartCheckpoint(
+      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    );
+    if (!checkpoint) {
+      throw new Error('Original interrupted routine start is missing.');
+    }
+    return finishRoutineNativeStart(trainingAdjustmentDriver, {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id,
+      terminalId: 'native-abandoned-' + new Date().toISOString() +
+        '-' + Math.random().toString(36).slice(2, 12),
+      disposition: 'discarded', athleteConfirmedDiscard: true,
+    });
+  });
+}
+
+/**
  * Recheck the current SQLite safety state every time a guarded routine tries
  * to resume, and periodically during playback. A static initial consent is
  * never a permanent permission. Generic non-authorized workouts are distinct.
