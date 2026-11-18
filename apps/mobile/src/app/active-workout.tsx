@@ -253,7 +253,7 @@ export default function ActiveWorkoutScreen() {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [activePlanLink?.sessionId, sessionHydrated, workout?.id, user?.id, phase === 'complete']);
+  }, [activePlanLink?.sessionId, sessionHydrated, workout, user?.id, phase === 'complete']);
 
   const safeToProgress = safetyStatus === 'clear'
     || safetyStatus === 'not_applicable';
