@@ -700,21 +700,29 @@ export async function readRoutineNativeStartCheckpoint(
     || typeof sql.readSnapshot !== 'function') {
     throw new Error('Consistent native start checkpoint audit snapshot is unavailable.');
   }
-  return sql.readSnapshot(async snapshot => {
-    const original = await readAuthorizedRoutineWorkout(snapshot, athleteId, sessionId);
-    if (!original) {
-      const orphan = await snapshot.getFirst<{ id: string }>(
-        'SELECT id FROM strength_workout_native_start_checkpoints WHERE session_id = ? LIMIT 1',
-        [sessionId],
-      );
-      if (orphan) throw new Error('Orphan native start checkpoint audit detected.');
-      return null;
-    }
-    const intent = await readStartIntentInSnapshot(
-      snapshot, athleteId, sessionId, original.id,
-      original.previewId, original.candidateSignature,
-      authorizedScheduledLocalDate(original),
+  return sql.readSnapshot(snapshot =>
+    readRoutineNativeStartCheckpointWithinTransaction(snapshot, athleteId, sessionId));
+}
+
+/** Only for an already-acquired consistent owned SQLite transaction handle. */
+export async function readRoutineNativeStartCheckpointWithinTransaction(
+  snapshot: TrainingAdjustmentSqlDriver,
+  athleteId: string,
+  sessionId: string,
+): Promise<RoutineNativeStartCheckpoint | null> {
+  const original = await readAuthorizedRoutineWorkout(snapshot, athleteId, sessionId);
+  if (!original) {
+    const orphan = await snapshot.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_native_start_checkpoints WHERE session_id = ? LIMIT 1',
+      [sessionId],
     );
-    return readNativeCheckpointInSnapshot(snapshot, original, intent);
-  });
+    if (orphan) throw new Error('Orphan native start checkpoint audit detected.');
+    return null;
+  }
+  const intent = await readStartIntentInSnapshot(
+    snapshot, athleteId, sessionId, original.id,
+    original.previewId, original.candidateSignature,
+    authorizedScheduledLocalDate(original),
+  );
+  return readNativeCheckpointInSnapshot(snapshot, original, intent);
 }
