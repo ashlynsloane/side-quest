@@ -99,6 +99,53 @@ function scopedLiveSessionKey(storage: StorageLike, profileId?: string | null): 
   return LIVE_SESSION_KEY + ':' + encodeURIComponent(owner);
 }
 
+/** Preserve one ended marker for EACH athlete + workout instance forever. */
+function endedInstanceKey(
+  storage: StorageLike,
+  profileId: string | null | undefined,
+  workoutId: string,
+  startedAt: string,
+): string | null {
+  if (profileId === null) return null;
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+  if (!owner || !workoutId?.trim() || !startedAt?.trim()) return null;
+  return LIVE_ENDED_KEY + ':' + [
+    owner, workoutId, startedAt,
+  ].map(encodeURIComponent).join(':');
+}
+
+function assertInstanceNotEnded(
+  storage: StorageLike,
+  profileId: string | null | undefined,
+  workoutId: string,
+  startedAt: string,
+): void {
+  const key = endedInstanceKey(storage, profileId, workoutId, startedAt);
+  if (!key) throw new Error('Cannot verify an owned workout end marker.');
+  if (storage.getItem(key) !== null) {
+    throw new Error('An ended workout cannot be resurrected by a delayed player write.');
+  }
+  // Honor legacy single-marker history without overwriting it as more
+  // workouts end. A newer per-instance tombstone never clears an older one.
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+  const raw = storage.getItem(LIVE_ENDED_KEY + ':' + encodeURIComponent(owner!));
+  if (!raw) return;
+  let legacy: { workoutId?: unknown; startedAt?: unknown };
+  try { legacy = JSON.parse(raw) as typeof legacy; }
+  catch { throw new Error('Previous workout end marker is unreadable.'); }
+  if (!legacy || typeof legacy !== 'object'
+    || typeof legacy.workoutId !== 'string'
+    || typeof legacy.startedAt !== 'string') {
+    throw new Error('Previous workout end marker cannot be verified.');
+  }
+  if (legacy.workoutId === workoutId && legacy.startedAt === startedAt) {
+    throw new Error('An ended workout cannot be resurrected by a delayed player write.');
+  }
+}
+
+
 type StorageLike = {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -196,6 +243,7 @@ export function assertCanStartLiveWorkout(profileId?: string | null): void {
   if (candidate.pendingCompletion) {
     throw new Error('Finish saving the previous workout before starting a new one. The original completion dose is preserved.');
   }
+  throw new Error('Another workout is already saved. Return to it and explicitly save or discard before starting a new one.');
 }
 
 /**
@@ -223,6 +271,7 @@ export async function persistFirstRoutineNativeCheckpoint(
   if (storage.getItem(key) !== null) {
     throw new Error('An earlier workout checkpoint already exists. No workout was replaced.');
   }
+  assertInstanceNotEnded(storage, athleteId, snapshot.workout.id, snapshot.startedAt);
   const encoded = JSON.stringify(snapshot);
   storage.setItem(key, encoded);
   if (storage.getItem(key) !== encoded) {
@@ -282,17 +331,7 @@ export async function saveLiveWorkoutSession(
   if (!storage) throw new Error('Live workout storage is unavailable.');
   const key = scopedLiveSessionKey(storage, profileId);
   if (!key) throw new Error('Cannot save an unowned live workout.');
-  const endedRaw = storage.getItem(LIVE_ENDED_KEY + ':' + encodeURIComponent(
-    profileId === undefined ? (storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) ?? '') : (profileId ?? ''),
-  ));
-  if (endedRaw) {
-    let ended: { workoutId?: string; startedAt?: string };
-    try { ended = JSON.parse(endedRaw) as typeof ended; }
-    catch { throw new Error('The previous workout end marker is unreadable.'); }
-    if (ended.workoutId === snapshot.workout.id && ended.startedAt === snapshot.startedAt) {
-      throw new Error('An ended workout cannot be resurrected by a delayed player write.');
-    }
-  }
+  assertInstanceNotEnded(storage, profileId, snapshot.workout.id, snapshot.startedAt);
   const oldValue = storage.getItem(key);
   if (oldValue) {
     let previous: unknown;
@@ -305,11 +344,17 @@ export async function saveLiveWorkoutSession(
     if (!isLiveWorkoutSession(previous)) {
       throw new Error('Existing workout checkpoint is unverified. Its data was preserved.');
     }
+    // Never allow a different session to overwrite an intact live checkpoint,
+    // even when the first session has no pending completion journal.
+    const sameSession = previous.workout.id === snapshot.workout.id
+      && previous.startedAt === snapshot.startedAt
+      && (previous.planLink?.sessionId ?? null) === (snapshot.planLink?.sessionId ?? null);
+    if (!sameSession) {
+      throw new Error('Existing athlete workout checkpoint belongs to a different session. Save or discard it first.');
+    }
     if (previous.pendingCompletion) {
       // A pending dose owns this per-athlete slot until its canonical ledger
-      // write succeeds. A late timer write cannot turn 29% back into 100%.
-      const sameSession = previous.workout.id === snapshot.workout.id
-        && previous.startedAt === snapshot.startedAt;
+      // write succeeds. A late timer write cannot turn 29% back into 100.
       if (!snapshot.pendingCompletion) {
         if (!sameSession) {
           throw new Error('Conflicting pending workout completion; save the original dose before replacement.');
@@ -398,12 +443,18 @@ export async function clearLiveWorkoutSession(profileId?: string | null): Promis
     if (!isLiveWorkoutSession(snapshot)) {
       throw new Error('Cannot clear an unverifiable workout recovery checkpoint.');
     }
-    const endedKey = LIVE_ENDED_KEY + ':' + encodeURIComponent(
-      profileId === undefined ? (storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) ?? '') : profileId,
+    const endedKey = endedInstanceKey(
+      storage, profileId, snapshot.workout.id, snapshot.startedAt,
     );
+    if (!endedKey) throw new Error('Cannot write an unowned workout terminal marker.');
+    // Marker before delete: a failed removal retains the player for recovery,
+    // and a late save of this EXACT ended session can never recreate it.
     storage.setItem(endedKey, JSON.stringify({
       workoutId: snapshot.workout.id, startedAt: snapshot.startedAt,
     }));
+    if (storage.getItem(endedKey) === null) {
+      throw new Error('Ended-session protection could not be verified.');
+    }
   }
   storage.removeItem(key);
   if (storage.getItem(key) !== null) {
