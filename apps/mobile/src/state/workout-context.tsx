@@ -20,7 +20,11 @@ import {
   saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
-import { commitAndHydrateRoutineNativeWorkout } from '@/services/database';
+import {
+  commitAndHydrateRoutineNativeWorkout,
+  recoverMissingRoutineNativeWorkout,
+  finalizeAndClearNativeWorkout,
+} from '@/services/database';
 import {
   generateWorkoutForAssignedTrainingSpace,
   trainingSpaceAssignmentForPlannedSession,
@@ -50,8 +54,12 @@ type WorkoutContextValue = {
     expectedAuthorizationId: string;
     expectedObservationToken: string;
   }) => Promise<void>;
+  recoverAuthorizedRoutineWorkout: (input: { sessionId: string }) => Promise<void>;
   updateActiveWorkout: (workout: GeneratedWorkout) => void;
-  clearActiveWorkout: () => Promise<void>;
+  clearActiveWorkout: (options: {
+    disposition: 'discarded' | 'completed';
+    startedAt: string;
+  }) => Promise<void>;
 };
 
 const WorkoutContext = createContext<WorkoutContextValue | null>(null);
@@ -236,17 +244,50 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
         startInFlight.current = false;
       }
     },
+    async recoverAuthorizedRoutineWorkout(input) {
+      const athleteAtStart = user?.id ?? null;
+      if (!athleteAtStart || !workoutSessionReady || activeWorkout || startInFlight.current) {
+        throw new Error('Resolve the active workout before recovering another session.');
+      }
+      startInFlight.current = true;
+      try {
+        const restored = await recoverMissingRoutineNativeWorkout({
+          athleteId: athleteAtStart, sessionId: input.sessionId,
+          athleteConfirmedRecovery: true,
+        });
+        if (liveAthleteId.current !== athleteAtStart) {
+          throw new Error('Athlete profile changed during recovery; original checkpoint retained.');
+        }
+        const local = await loadLiveWorkoutSession(athleteAtStart);
+        if (JSON.stringify(local) !== JSON.stringify(restored.initialLiveSession)) {
+          throw new Error('Original recovered workout checkpoint is unreadable.');
+        }
+        setActiveWorkout(restored.initialLiveSession.workout);
+        setActivePlanLink(restored.initialLiveSession.planLink);
+        setRestoredActiveWorkout(true);
+      } finally {
+        startInFlight.current = false;
+      }
+    },
     updateActiveWorkout(workout) {
       setActiveWorkout(workout);
     },
-    async clearActiveWorkout() {
+    async clearActiveWorkout(options) {
       if (startInFlight.current) {
         throw new Error('Wait for the pending workout start to finish before clearing it.');
       }
       const athleteAtClear = user?.id ?? null;
-      // Commit durable checkpoint removal first. If storage rejects cleanup,
-      // leave the current player state unchanged for recovery.
-      await clearLiveWorkoutSession(athleteAtClear);
+      if (!athleteAtClear || !options?.startedAt?.trim()) {
+        throw new Error('Clearing a workout requires its original athlete and start time.');
+      }
+      // An immutable terminal event is committed BEFORE checkpoint cleanup.
+      // If cleanup fails, retained React state and SQL audit enable retry.
+      await finalizeAndClearNativeWorkout({
+        athleteId: athleteAtClear,
+        sessionId: activePlanLink?.sessionId ?? null,
+        startedAt: options.startedAt,
+        disposition: options.disposition,
+      });
       if (liveAthleteId.current !== athleteAtClear) {
         throw new Error('Athlete profile changed while clearing workout; current state retained.');
       }
