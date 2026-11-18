@@ -1825,7 +1825,17 @@ async function assessOwnedRoutineSafety(
   const checkpoint = await readRoutineNativeStartCheckpoint(
     trainingAdjustmentDriver, athleteId, sessionId,
   );
-  if (!checkpoint) return null;
+  if (!checkpoint) {
+    const priorIntent = await readRoutineStrengthStartIntent(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
+    const terminalWithoutSeed = await trainingAdjustmentDriver.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_native_start_terminal_events WHERE session_id = ? LIMIT 1',
+      [sessionId],
+    );
+    if (terminalWithoutSeed) throw new Error('Orphan terminal without the original native checkpoint.');
+    if (!priorIntent) return null;
+  }
   const authorization = await readAuthorizedRoutineWorkout(
     trainingAdjustmentDriver, athleteId, sessionId,
   );
@@ -1857,13 +1867,20 @@ export async function getRoutineNativeRecoveryState(
     if (assessment.status === 'terminal') return {
       kind: 'terminal', blockers: assessment.blockers, checkpoint: assessment.checkpoint,
     };
+    if (!assessment.checkpoint) return {
+      kind: 'held', blockers: assessment.blockers.length
+        ? assessment.blockers
+        : ['A previous incomplete start cannot be replayed without its original checkpoint.'],
+      checkpoint: null,
+    };
     const slot = await inspectLiveWorkoutSlot(athleteId);
     const local = slot === 'valid' ? await loadLiveWorkoutSession(athleteId) : null;
-    const expected = assessment.checkpoint!.initialLiveSession;
+    const expected = assessment.checkpoint.initialLiveSession;
     const matching = local?.workout.id === expected.workout.id
       && local.startedAt === expected.startedAt
       && local.planLink?.sessionId === sessionId;
-    if (slot === 'unreadable' || (slot === 'valid' && !matching)) {
+    if (slot === 'unreadable' || (slot === 'valid' && (!matching
+      || JSON.stringify(local?.workout) !== assessment.checkpoint.candidateSignature))) {
       return {
         kind: 'held',
         blockers: ['An existing or unreadable player checkpoint must be recovered, not overwritten.'],
