@@ -51,6 +51,7 @@ export default function TogetherSessionScreen() {
   const [safetyStatus, setSafetyStatus] = useState<'checking' | 'clear' | 'hold'>('checking');
   const [safetyReason, setSafetyReason] = useState<string | null>(null);
   const safetyHeldRef = useRef(false);
+  const safetyRoomRef = useRef<string | null>(null);
   const safetyBusyRef = useRef(false);
   const lastSafeElapsedRef = useRef(0);
 
@@ -73,10 +74,13 @@ export default function TogetherSessionScreen() {
   useEffect(() => {
     if (!room?.id || !user?.id) return;
     let live = true;
-    safetyHeldRef.current = false;
-    lastSafeElapsedRef.current = 0;
-    setSafetyStatus('checking');
-    setSafetyReason(null);
+    if (safetyRoomRef.current !== room.id) {
+      safetyRoomRef.current = room.id;
+      safetyHeldRef.current = false;
+      lastSafeElapsedRef.current = 0;
+      setSafetyStatus('checking');
+      setSafetyReason(null);
+    }
     const check = async () => {
       if (!live || safetyHeldRef.current || safetyBusyRef.current) return;
       safetyBusyRef.current = true;
@@ -185,7 +189,7 @@ export default function TogetherSessionScreen() {
   }, [state?.kind, safetyStatus, persist]);
 
   function changeRounds(delta: number) {
-    if (!station) return;
+    if (!station || safetyStatus !== 'clear' || safetyHeldRef.current) return;
     setRounds((current) => ({ ...current, [station.id]: Math.max(0, (current[station.id] ?? 0) + delta) }));
   }
   function leaveEarly() {
@@ -199,11 +203,75 @@ export default function TogetherSessionScreen() {
     ]);
   }
 
+  async function saveHeldPortionAndExit() {
+    if (!room || saveStatus === 'saving') return;
+    const seconds = Math.max(0, lastSafeElapsedRef.current);
+    const elapsedFraction = room.workout.estimatedElapsedSeconds > 0
+      ? seconds / room.workout.estimatedElapsedSeconds : 0;
+    // A shared clock is not itself evidence of physical activity. Never
+    // count the period AFTER the safety hold as additional training dose.
+    const fraction = Math.max(0, Math.min(0.99, elapsedFraction));
+    if (await persist(fraction)) router.replace('/(tabs)/train' as Href);
+  }
+
+  function leaveHeldWithoutSaving() {
+    Alert.alert(
+      'Leave without saving this shared workout?',
+      'The other phones will keep their clock. Any rounds entered on this phone will not be recorded in your training history.',
+      [
+        { text: 'Keep workout record', style: 'cancel' },
+        { text: 'Leave without saving', style: 'destructive',
+          onPress: () => router.replace('/(tabs)/train' as Href) },
+      ],
+    );
+  }
+
   if (error || !room || !state) return <SafeAreaView style={styles.safe}><View style={styles.center}><Text style={styles.title}>{error ? 'Could not open shared workout' : 'Synchronizing room…'}</Text>{error ? <Text style={styles.body}>{error}</Text> : null}<Pressable onPress={() => router.replace('/workout-together' as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Return</Text></Pressable></View></SafeAreaView>;
+
+  if (safetyStatus === 'checking') {
+    return <SafeAreaView style={styles.safe}><View style={styles.center}>
+      <Text style={styles.title}>Checking your training safety</Text>
+      <Text style={styles.body}>The shared clock does not authorize training. Your local restrictions must be checked before showing exercises.</Text>
+      <Pressable onPress={() => router.replace('/workout-room' as Href)} style={styles.secondary}>
+        <Text style={styles.secondaryText}>Return to room</Text>
+      </Pressable>
+    </View></SafeAreaView>;
+  }
+
+  if (safetyStatus === 'hold') {
+    return <SafeAreaView style={styles.safe}><View style={styles.center}>
+      <Text style={styles.title}>Your shared workout is on safety hold</Text>
+      <Text style={styles.body}>{safetyReason ?? 'Current training safety evidence could not be verified.'}</Text>
+      <Text style={styles.body}>Your phone must stop the exercises. The other athletes' clocks continue independently. You may save only the portion elapsed before your hold.</Text>
+      {saveError ? <Text style={styles.body}>{saveError}</Text> : null}
+      <Pressable disabled={saveStatus === 'saving'} onPress={() => { void saveHeldPortionAndExit(); }}
+        style={styles.primary}><Text style={styles.primaryText}>
+          {saveStatus === 'saving' ? 'Saving your portion…' : 'Save prior portion and leave'}
+        </Text></Pressable>
+      <Pressable onPress={() => router.push('/training-safety-context' as Href)}
+        style={styles.secondary}><Text style={styles.secondaryText}>Review training context</Text></Pressable>
+      <Pressable onPress={leaveHeldWithoutSaving} style={styles.secondary}>
+        <Text style={styles.secondaryText}>Leave without a workout record</Text>
+      </Pressable>
+    </View></SafeAreaView>;
+  }
 
   if (state.kind === 'countdown') return <SafeAreaView style={styles.safe}><View style={styles.countdown}><Text style={styles.eyebrow}>EVERY PHONE STARTS TOGETHER</Text><Text style={styles.countNumber}>{state.remaining}</Text><Text style={styles.countTitle}>{room.workoutName}</Text><Text style={styles.body}>Get to your first station. The shared clock begins automatically.</Text></View></SafeAreaView>;
 
-  if (state.kind === 'complete') return <SafeAreaView style={styles.safe}><View style={styles.complete}><Text style={styles.eyebrow}>SHARED WORKOUT COMPLETE</Text><Text style={styles.completeTitle}>Same session. Your own result.</Text><Text style={styles.body}>Your rounds and completion are stored only in your athlete profile. Any selected substitution is recorded against your own plan, not your friend’s.</Text><Pressable onPress={() => router.replace('/(tabs)/train' as Href)} style={styles.primary}><Text style={styles.primaryText}>Done</Text></Pressable></View></SafeAreaView>;
+  if (state.kind === 'complete') return <SafeAreaView style={styles.safe}><View style={styles.complete}>
+    <Text style={styles.eyebrow}>SHARED WORKOUT COMPLETE</Text>
+    <Text style={styles.completeTitle}>Same session. Your own result.</Text>
+    <Text style={styles.body}>Your completion is recorded only after your athlete-owned training ledger confirms the write.</Text>
+    {saveError ? <Text style={styles.body}>{saveError}</Text> : null}
+    <Pressable disabled={saveStatus === 'saving'} onPress={() => {
+      void (async () => {
+        if (await persist(1)) router.replace('/(tabs)/train' as Href);
+      })();
+    }} style={styles.primary}><Text style={styles.primaryText}>
+      {saveStatus === 'saving' ? 'Saving workout locally…'
+        : saveStatus === 'saved' ? 'Done' : 'Save workout before leaving'}
+    </Text></Pressable>
+  </View></SafeAreaView>;
 
   const currentStation = station!;
   return <SafeAreaView style={styles.safe}>
