@@ -33,6 +33,10 @@ import {
   recordRoutineStrengthStartIntent,
   readRoutineStrengthStartIntent,
 } from '../src/strength-workout-start-safety-sqlite';
+import {
+  STRENGTH_NATIVE_START_TERMINAL_SQL, assessRoutineNativeActiveSafety,
+  finishRoutineNativeStart,
+} from '../src/strength-workout-recovery-sqlite';
 import { localCalendarDate, addLocalCalendarDays } from '../src/first-week-dates';
 import { createStrengthReconciliationChecklist } from '../src/strength-evidence-reconciliation';
 import { withUnapprovedStrengthReadSnapshot } from '../src/strength-review-read-snapshot';
@@ -184,6 +188,9 @@ function open(owner = 'synthetic-athlete-a') {
     CREATE TABLE sidequest_athlete_database_owner(singleton INTEGER PRIMARY KEY, user_id TEXT NOT NULL);
     CREATE TABLE training_blocks(id TEXT PRIMARY KEY, block_json TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE workout_ledger(id TEXT PRIMARY KEY, planned_session_id TEXT);
+    CREATE TABLE completed_workouts(
+      id TEXT PRIMARY KEY, started_at TEXT NOT NULL, workout_json TEXT NOT NULL
+    );
     CREATE TABLE training_check_ins(
       id TEXT PRIMARY KEY, check_in_json TEXT NOT NULL,
       active INTEGER NOT NULL, updated_at TEXT NOT NULL
@@ -203,6 +210,7 @@ function open(owner = 'synthetic-athlete-a') {
     ${STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL}
     ${STRENGTH_START_INTENT_SQL}
     ${STRENGTH_NATIVE_START_CHECKPOINT_SQL}
+    ${STRENGTH_NATIVE_START_TERMINAL_SQL}
   `);
   db.prepare('INSERT INTO sidequest_athlete_database_owner VALUES (?, ?)').run(1, owner);
   db.prepare('INSERT INTO training_check_ins VALUES (?, ?, ?, ?)').run(
@@ -233,7 +241,8 @@ afterEach(() => {
 });
 const count = (db: DatabaseSync, table: 'strength_revision_previews' | 'daily_strength_choice_events'
   | 'training_safety_context_events' | 'strength_workout_start_intents'
-  | 'strength_workout_native_start_checkpoints' | 'workout_ledger') =>
+  | 'strength_workout_native_start_checkpoints' | 'workout_ledger'
+  | 'strength_workout_native_start_terminal_events') =>
   (db.prepare('SELECT COUNT(*) AS n FROM ' + table).get() as { n: number }).n;
 
 describe('immutable unapproved strength revision preview: actual SQLite file', () => {
@@ -3141,5 +3150,194 @@ describe('atomic native start recovery seed (not verified player execution)', ()
     )).rejects.toThrow(/checkpoint audit integrity mismatch/);
     await expect(inspectRoutineWorkoutStart(sql, requestStart))
       .rejects.toThrow(/checkpoint audit integrity mismatch/);
+  });
+});
+
+
+describe('native recovery and active-workout safety revalidation', () => {
+  async function active() {
+    const fixture = await freshRoutineCandidate(open(), true);
+    await authorizeRoutineStrengthWorkout(fixture.sql, fixture.auth);
+    const input = {
+      athleteId: fixture.auth.athleteId,
+      sessionId: fixture.request.source.id,
+      expectedAuthorizationId: fixture.auth.authorizationId,
+      evidence: fixture.auth.evidence,
+    };
+    const screened = await inspectRoutineWorkoutStart(fixture.sql, input);
+    const checkpoint = await commitRoutineNativeStartCheckpoint(fixture.sql, {
+      ...input, expectedObservationToken: screened.observationToken!,
+      athleteExplicitlyRequestedStart: true,
+      intentId: 'recovery-start-event', checkpointId: 'recovery-start-checkpoint',
+    });
+    const review = () => assessRoutineNativeActiveSafety(fixture.sql, {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      evidence: input.evidence,
+    });
+    return { ...fixture, input, checkpoint, review };
+  }
+
+  it('reads a paused recovery candidate, never replay authorization', async () => {
+    const { db, checkpoint, review } = await active();
+    const result = await review();
+    expect(result.status).toBe('eligible_for_explicit_recovery');
+    expect(result.playerStartAuthorized).toBe(false);
+    expect(result.checkpoint).toEqual(checkpoint);
+    expect(result.terminal).toBeNull();
+    expect(count(db, 'workout_ledger')).toBe(0);
+  });
+
+  it('current withdrawal, protected movement, rehab and completed history hold resumed exercise', async () => {
+    for (const change of ['withdrawn', 'movement', 'rehab', 'completed'] as const) {
+      const fixture = await active();
+      if (change === 'withdrawn') {
+        await withdrawRoutineStrengthAuthorization(fixture.sql, {
+          athleteId: fixture.input.athleteId,
+          sessionId: fixture.input.sessionId,
+          expectedAuthorizationId: fixture.input.expectedAuthorizationId,
+          withdrawalId: 'withdraw-while-running',
+          athleteConfirmedWithdrawal: true,
+        });
+      } else if (change === 'movement' || change === 'rehab') {
+        const safety = await readAthleteTrainingSafetyContext(
+          fixture.sql, fixture.input.athleteId,
+        );
+        await appendTrainingSafetyContextEvent(
+          fixture.sql, change === 'movement'
+            ? safetyEvent('new-protection', 'protect_movement', 'deep_hip_flexion')
+            : safetyEvent('new-rehab', 'training_intent', 'injury_rehabilitation'),
+          safety.latestEventId,
+        );
+      } else {
+        fixture.db.prepare('INSERT INTO workout_ledger VALUES (?, ?)').run(
+          'previously-completed', fixture.input.sessionId,
+        );
+      }
+      const result = await fixture.review();
+      expect(result.status).toBe('hold');
+      expect(result.blockers.length).toBeGreaterThan(0);
+      expect(result.playerStartAuthorized).toBe(false);
+      expect(count(fixture.db, 'strength_workout_native_start_terminal_events')).toBe(0);
+    }
+  });
+
+  it('explicit discard records terminal before any future recovery is possible', async () => {
+    const { sql, db, input, checkpoint, review } = await active();
+    const terminalInput = {
+      athleteId: input.athleteId,
+      sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id,
+      terminalId: 'discard-after-start',
+      disposition: 'discarded' as const, athleteConfirmedDiscard: true,
+    };
+    const closed = await finishRoutineNativeStart(sql, terminalInput);
+    expect(closed.disposition).toBe('discarded');
+    expect(closed.athleteConfirmedDiscard).toBe(true);
+    expect(closed.canonicalCompletionObserved).toBe(false);
+    expect((await review()).status).toBe('terminal');
+    expect(await finishRoutineNativeStart(sql, {
+      ...terminalInput, terminalId: 'retry-did-not-create-new-event',
+    })).toEqual(closed);
+    expect(count(db, 'strength_workout_native_start_terminal_events')).toBe(1);
+    await expect(finishRoutineNativeStart(sql, {
+      ...terminalInput, disposition: 'completed', athleteConfirmedDiscard: false,
+    })).rejects.toThrow(/different terminal outcome/);
+  });
+
+  it('requires a matching canonical workout before recording completion', async () => {
+    const { db, sql, input, checkpoint, review } = await active();
+    const terminal = {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id, terminalId: 'completed-after-start',
+      disposition: 'completed' as const, athleteConfirmedDiscard: false,
+    };
+    await expect(finishRoutineNativeStart(sql, terminal))
+      .rejects.toThrow(/canonical completed workout/);
+    expect(count(db, 'strength_workout_native_start_terminal_events')).toBe(0);
+    db.prepare('INSERT INTO completed_workouts VALUES (?, ?, ?)').run(
+      checkpoint.initialLiveSession.workout.id + '_' +
+        checkpoint.initialLiveSession.startedAt,
+      checkpoint.initialLiveSession.startedAt,
+      JSON.stringify(checkpoint.initialLiveSession.workout),
+    );
+    const completed = await finishRoutineNativeStart(sql, terminal);
+    expect(completed.canonicalCompletionObserved).toBe(true);
+    expect(completed.athleteConfirmedDiscard).toBe(false);
+    expect((await review()).status).toBe('terminal');
+    await expect(finishRoutineNativeStart(sql, {
+      ...terminal, terminalId: 'forged-discard',
+      disposition: 'discarded', athleteConfirmedDiscard: true,
+    })).rejects.toThrow(/different terminal outcome/);
+  });
+
+  it('wrong owner, forged ID and uncommitted terminal write cannot silently close workout', async () => {
+    const { db, sql, checkpoint, input } = await active();
+    const request = {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id,
+      terminalId: 'interrupted-discard',
+      disposition: 'discarded' as const, athleteConfirmedDiscard: true,
+    };
+    await expect(finishRoutineNativeStart(sql, {
+      ...request, athleteId: 'foreign-athlete',
+    })).rejects.toThrow(/ownership mismatch/);
+    await expect(finishRoutineNativeStart(sql, {
+      ...request, expectedCheckpointId: 'wrong-checkpoint',
+    })).rejects.toThrow(/missing or changed/);
+    const broken: TrainingAdjustmentSqlDriver = {
+      ...sql,
+      exclusiveTransaction: async <T>(
+        cb: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+      ): Promise<T> => {
+        if (!sql.exclusiveTransaction) throw new Error('Missing writer.');
+        return sql.exclusiveTransaction(writer => cb({
+          ...writer, run: async () => {
+            throw new Error('Injected terminal database I/O failure.');
+          },
+        }));
+      },
+    };
+    await expect(finishRoutineNativeStart(broken, request))
+      .rejects.toThrow(/Injected terminal database I\/O failure/);
+    expect(count(db, 'strength_workout_native_start_terminal_events')).toBe(0);
+    expect((await assessRoutineNativeActiveSafety(sql, {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      evidence: input.evidence,
+    })).status).toBe('eligible_for_explicit_recovery');
+  });
+
+  it('cold restart preserves the terminal audit and blocks recovery replay', async () => {
+    const { db, sql, directory, file, input, checkpoint } = await active();
+    const closed = await finishRoutineNativeStart(sql, {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id, terminalId: 'end-before-kill',
+      disposition: 'discarded', athleteConfirmedDiscard: true,
+    });
+    db.close();
+    const reopened = new DatabaseSync(file);
+    all.push({ db: reopened, directory });
+    const result = await assessRoutineNativeActiveSafety(driver(reopened), {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      evidence: input.evidence,
+    });
+    expect(result.status).toBe('terminal');
+    expect(result.terminal).toEqual(closed);
+    expect(result.playerStartAuthorized).toBe(false);
+  });
+
+  it('tampered disposition or mismatched owner never looks recoverable', async () => {
+    const { db, sql, input, checkpoint, review } = await active();
+    await finishRoutineNativeStart(sql, {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id, terminalId: 'tamper-target',
+      disposition: 'discarded', athleteConfirmedDiscard: true,
+    });
+    db.prepare('UPDATE strength_workout_native_start_terminal_events SET event_json = ?').run(
+      JSON.stringify({
+        schemaVersion: 1, id: 'tamper-target', kind: 'routine_native_start_terminal',
+        disposition: 'completed', athleteConfirmedDiscard: true,
+      }),
+    );
+    await expect(review()).rejects.toThrow(/audit integrity mismatch/);
   });
 });
