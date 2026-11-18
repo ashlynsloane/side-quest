@@ -1,4 +1,6 @@
 import type { GeneratedWorkout } from '@circuit/domain';
+import { DeferredWorkoutTogetherScreen } from '@/components/milestone-one-deferred-workout-together';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { nextSubstitutableSession } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,6 +30,13 @@ import { useTheme } from '@/state/theme-context';
 import { typography, type AppPalette } from '@/theme';
 
 export default function WorkoutRoomScreen() {
+  if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) {
+    return <DeferredWorkoutTogetherScreen />;
+  }
+  return <WorkoutRoomExperience />;
+}
+
+function WorkoutRoomExperience() {
   const { code: rawCode } = useLocalSearchParams<{ code?: string }>();
   const code = String(rawCode ?? '').toUpperCase();
   const router = useRouter();
