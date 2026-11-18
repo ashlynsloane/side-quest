@@ -37,6 +37,7 @@ import {
   getSocialPreferences,
   getWorkoutLedgerEntry,
   recheckRoutineNativeActiveWorkout,
+  inspectGenericWorkoutSafety,
   listExercisePreferences,
   listWorkoutLedgerEntries,
   saveCompletedWorkout,
@@ -196,16 +197,18 @@ export default function ActiveWorkoutScreen() {
     safetyBusyRef.current = true;
     try {
       const planId = activePlanLink?.sessionId;
-      if (!planId) {
-        setSafetyStatus('not_applicable');
-        return true;
-      }
-      const result = await recheckRoutineNativeActiveWorkout({
-        athleteId: user.id,
-        sessionId: planId,
-        startedAt: startedAt.current,
-        workout,
-      });
+      const result = planId
+        ? await recheckRoutineNativeActiveWorkout({
+          athleteId: user.id,
+          sessionId: planId,
+          startedAt: startedAt.current,
+          workout,
+        })
+        : await inspectGenericWorkoutSafety(user.id).then(safety => (
+          safety.kind === 'hold'
+            ? { kind: 'hold' as const, blockers: safety.blockers }
+            : { kind: 'not_applicable' as const, blockers: [] }
+        ));
       if (result.kind === 'hold') {
         const reason = result.blockers.join(' ') ||
           'Workout safety evidence changed. Save the dose performed and stop.';
@@ -561,8 +564,11 @@ export default function ActiveWorkoutScreen() {
     if (cuePreferences.hapticsEnabled) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
   }
 
-  function skipWorkPhase() {
-    if (phase === 'work' && safeToProgress && !safetyHeldRef.current) {
+  async function skipWorkPhase() {
+    // A previously clear four-second polling result is not permission to
+    // advance after a new symptom or restriction was just recorded.
+    if (phase === 'work' && safeToProgress && !safetyHeldRef.current
+      && await recheckBeforeContinuing()) {
       setRemainingSeconds(0);
     }
   }
@@ -797,7 +803,7 @@ export default function ActiveWorkoutScreen() {
               <Text style={styles.nextTitle}>{isFinalStation ? 'Workout summary' : `${Math.max(1, Math.round(activeWorkout.request.restSeconds / 60))} min recovery, then ${nextStation?.purpose ?? 'the next station'}`}</Text>
               {nextStation ? <Text style={styles.nextDetail}>{nextStation.exercises.map((item) => item.exerciseSnapshot.name).join(' · ')}</Text> : null}
             </View>
-            <View style={styles.controlRow}><Pressable disabled={!safeToProgress} onPress={skipWorkPhase}
+            <View style={styles.controlRow}><Pressable disabled={!safeToProgress} onPress={() => { void skipWorkPhase(); }}
               style={[styles.primaryButton, !safeToProgress && { opacity: 0.45 }]}><Text style={styles.primaryButtonText}>Finish station</Text></Pressable><Pressable onPress={endEarly} style={styles.outlineButton}><Text style={styles.outlineButtonText}>End workout</Text></Pressable></View>
           </>
         ) : (
