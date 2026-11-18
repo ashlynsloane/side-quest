@@ -778,6 +778,14 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
       .toEqual(nativeCheckpoint.initialLiveSession);
     expect((await persistedPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))?.running)
       .toBe(false);
+    expect((await service.getRoutineNativeRecoveryState(
+      'synthetic-athlete-one', 'routine-session',
+    )).kind).toBe('already_saved');
+    expect(await service.recheckRoutineNativeActiveWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
+      startedAt: nativeCheckpoint.initialLiveSession.startedAt,
+      workout: nativeCheckpoint.initialLiveSession.workout,
+    })).toMatchObject({ kind: 'clear', blockers: [] });
     const intent = await service.getRecordedRoutineStrengthStartIntent(
       'synthetic-athlete-one', 'routine-session',
     );
@@ -823,6 +831,30 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
       sessionId: 'routine-session',
       expectedAuthorizationId: 'routine-mobile-auth',
     })).blockers).toContain('The athlete withdrew this workout authorization.');
+    expect((await service.recheckRoutineNativeActiveWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
+      startedAt: nativeCheckpoint.initialLiveSession.startedAt,
+      workout: nativeCheckpoint.initialLiveSession.workout,
+    })).kind).toBe('hold');
+    expect((await service.getRoutineNativeRecoveryState(
+      'synthetic-athlete-one', 'routine-session',
+    )).kind).toBe('held');
+    const closed = await service.finalizeAndClearNativeWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
+      startedAt: nativeCheckpoint.initialLiveSession.startedAt,
+      disposition: 'discarded',
+    });
+    expect(closed?.disposition).toBe('discarded');
+    expect((await service.getRoutineNativeRecoveryState(
+      'synthetic-athlete-one', 'routine-session',
+    )).kind).toBe('terminal');
+    expect((await service.exportLocalData()).strength_workout_native_start_terminal_events)
+      .toHaveLength(1);
+    expect(await persistedPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))
+      .toBeNull();
+    await expect(persistedPlayer.saveLiveWorkoutSession(
+      nativeCheckpoint.initialLiveSession, 'synthetic-athlete-one',
+    )).rejects.toThrow(/cannot be resurrected/);
     await expect(service.withdrawRecordedRoutineStrengthWorkout(withdrawalInput))
       .rejects.toThrow(/already withdrawn/);
     for (const handle of state.handles.splice(0)) handle.close();
@@ -845,7 +877,12 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     )).toEqual(nativeCheckpoint);
     const coldPlayer = await import('../../../apps/mobile/src/services/active-workout-persistence');
     expect(await coldPlayer.loadLiveWorkoutSession('synthetic-athlete-one'))
-      .toEqual(nativeCheckpoint.initialLiveSession);
+      .toBeNull();
+    expect((await service.getRoutineNativeRecoveryState(
+      'synthetic-athlete-one', 'routine-session',
+    )).kind).toBe('terminal');
+    expect((await service.exportLocalData()).strength_workout_native_start_terminal_events)
+      .toHaveLength(1);
     expect((await service.exportLocalData()).strength_workout_authorization_withdrawals)
       .toHaveLength(1);
     await service.recordAthleteTrainingSafetyContext({
