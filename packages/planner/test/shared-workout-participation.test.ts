@@ -60,6 +60,9 @@ describe('shared workout app safety wiring source contract (not device execution
     expect(room).toContain('await requireSharedWorkoutSafety()');
     expect(room).toContain('await setWorkoutRoomReady(');
     expect(room).toContain('await startWorkoutRoom(');
+    expect(preview).toContain("slot !== 'empty'");
+    expect(room).toContain("inspectLiveWorkoutSlot(user.id) !== 'empty'");
+    expect(live).toContain("inspectLiveWorkoutSlot(user.id) !== 'empty'");
   });
 
   it('holds this participant independently and suppresses remote-clock auto completion on hold', () => {
