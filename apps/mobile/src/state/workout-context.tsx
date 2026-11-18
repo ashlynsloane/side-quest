@@ -25,6 +25,7 @@ import {
   recoverMissingRoutineNativeWorkout,
   finalizeAndClearNativeWorkout,
   getRoutineNativeRecoveryState,
+  inspectGenericWorkoutSafety,
 } from '@/services/database';
 import {
   generateWorkoutForAssignedTrainingSpace,
@@ -197,6 +198,16 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       const athleteAtStart = user?.id ?? null;
       try {
         assertCanStartLiveWorkout(athleteAtStart);
+        if (!athleteAtStart) {
+          throw new Error('Starting a workout requires a verified athlete profile.');
+        }
+        const safety = await inspectGenericWorkoutSafety(athleteAtStart);
+        if (safety.kind !== 'routine_training') {
+          throw new Error('Training safety hold: ' + safety.blockers.join(' '));
+        }
+        if (liveAthleteId.current !== athleteAtStart) {
+          throw new Error('Athlete profile changed while checking training safety.');
+        }
         const planLink = buildPlanLink(plannedPreviewSource);
         const snapshot = createInitialLiveWorkoutSession(
           workout, new Date().toISOString(), planLink ?? undefined,
