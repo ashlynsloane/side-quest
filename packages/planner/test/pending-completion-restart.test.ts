@@ -10,6 +10,8 @@ import {
   saveLiveWorkoutSession,
   loadLiveWorkoutSession,
   clearLiveWorkoutSession,
+  assertCanStartLiveWorkout,
+  persistFirstRoutineNativeCheckpoint,
 } from '../../../apps/mobile/src/services/active-workout-persistence';
 
 const workout = {
@@ -31,6 +33,102 @@ beforeEach(() => {
     },
   });
   globalThis.localStorage.setItem('sidequest.active-workout.profile-id', 'athlete-a');
+});
+
+describe('never replace an active workout or forget ended instances', () => {
+  it('requires an explicit save or discard even when the active checkpoint has no pending completion', async () => {
+    const first = createInitialLiveWorkoutSession(
+      workout, '2026-10-20T10:00:00.000Z',
+    );
+    await saveLiveWorkoutSession({
+      ...first, stationIndex: 1, stationRounds: { stationOne: 2 },
+    });
+    expect(() => assertCanStartLiveWorkout()).toThrow(/already saved/);
+    const other = createInitialLiveWorkoutSession(
+      { ...workout, id: 'second-unique-workout' },
+      '2026-10-20T10:30:00.000Z',
+    );
+    await expect(saveLiveWorkoutSession(other))
+      .rejects.toThrow(/different session/);
+    const sameIdNewStart = createInitialLiveWorkoutSession(
+      workout, '2026-10-20T11:00:00.000Z',
+    );
+    await expect(saveLiveWorkoutSession(sameIdNewStart))
+      .rejects.toThrow(/different session/);
+    expect(await loadLiveWorkoutSession()).toMatchObject({
+      startedAt: first.startedAt,
+      stationIndex: 1,
+      stationRounds: { stationOne: 2 },
+    });
+    await clearLiveWorkoutSession();
+    expect(() => assertCanStartLiveWorkout()).not.toThrow();
+  });
+
+  it('preserves tombstones across several later workouts, so old timer callbacks cannot resurrect any of them', async () => {
+    const a = createInitialLiveWorkoutSession(
+      workout, '2026-10-20T10:00:00.000Z',
+    );
+    const b = createInitialLiveWorkoutSession(
+      { ...workout, id: 'other-synthetic-workout' },
+      '2026-10-20T11:00:00.000Z',
+    );
+    const c = createInitialLiveWorkoutSession(
+      workout, '2026-10-21T10:00:00.000Z',
+    );
+    for (const session of [a, b, c]) {
+      await saveLiveWorkoutSession(session);
+      await clearLiveWorkoutSession();
+    }
+    for (const session of [a, b, c]) {
+      await expect(saveLiveWorkoutSession(session))
+        .rejects.toThrow(/cannot be resurrected/);
+    }
+    const another = createInitialLiveWorkoutSession(
+      workout, '2026-10-22T10:00:00.000Z',
+    );
+    await saveLiveWorkoutSession(another);
+    expect((await loadLiveWorkoutSession())?.startedAt).toBe(another.startedAt);
+    // A late write from the first ended workout also cannot replace the new
+    // unrelated active session, even after subsequent endings.
+    await expect(saveLiveWorkoutSession(a))
+      .rejects.toThrow(/cannot be resurrected/);
+    expect((await loadLiveWorkoutSession())?.startedAt).toBe(another.startedAt);
+  });
+
+  it('does not replay a terminal routine start from a direct initial-checkpoint write', async () => {
+    const original = createInitialLiveWorkoutSession(
+      workout, '2026-10-20T10:00:00.000Z',
+      {
+        sessionId: 'original-approved-session', sessionDate: '2026-10-20',
+        sessionTitle: 'Synthetic routine', modifiedFromPlan: false,
+      },
+    );
+    const paused = { ...original, running: false };
+    await persistFirstRoutineNativeCheckpoint(paused, 'athlete-a');
+    await clearLiveWorkoutSession('athlete-a');
+    await expect(persistFirstRoutineNativeCheckpoint(paused, 'athlete-a'))
+      .rejects.toThrow(/cannot be resurrected/);
+    expect(await loadLiveWorkoutSession('athlete-a')).toBeNull();
+  });
+
+  it('retains a prior single-marker tombstone after later sessions close', async () => {
+    const legacy = createInitialLiveWorkoutSession(
+      workout, '2026-10-20T09:00:00.000Z',
+    );
+    globalThis.localStorage.setItem('sidequest.live-workout.ended.v1:athlete-a',
+      JSON.stringify({ workoutId: legacy.workout.id, startedAt: legacy.startedAt }));
+    const fresh = createInitialLiveWorkoutSession(
+      workout, '2026-10-20T10:00:00.000Z',
+    );
+    await saveLiveWorkoutSession(fresh);
+    await clearLiveWorkoutSession();
+    expect(globalThis.localStorage.getItem('sidequest.live-workout.ended.v1:athlete-a'))
+      .not.toBeNull();
+    await expect(saveLiveWorkoutSession(legacy))
+      .rejects.toThrow(/cannot be resurrected/);
+    await expect(saveLiveWorkoutSession(fresh))
+      .rejects.toThrow(/cannot be resurrected/);
+  });
 });
 
 describe('durable pending partial-workout completion contract', () => {
