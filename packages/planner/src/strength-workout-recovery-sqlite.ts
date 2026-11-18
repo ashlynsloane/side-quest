@@ -196,8 +196,7 @@ export async function assessRoutineNativeActiveSafety(
     blockers.push(...getRoutineStrengthAuthorizationReadiness(
       reviewed, input.evidence.todayLocalDate,
     ).blockers);
-    if (reviewed.summary.previewId !== checkpoint.initialLiveSession.planLink.sessionId
-      && reviewed.summary.previewId !== authorization!.previewId) {
+    if (reviewed.summary.previewId !== authorization!.previewId) {
       blockers.push('The original reviewed workout binding cannot be reconciled.');
     }
     const canonical = await completedOriginalWorkout(reader, checkpoint);
