@@ -155,6 +155,16 @@ export async function assessRoutineNativeActiveSafety(
         [input.sessionId],
       );
       if (orphan) throw new Error('Orphan routine terminal audit detected.');
+      const olderIntent = await reader.getFirst<{ id: string }>(
+        'SELECT id FROM strength_workout_start_intents WHERE session_id = ? LIMIT 1',
+        [input.sessionId],
+      );
+      if (olderIntent) return {
+        schemaVersion: 1, athleteId: input.athleteId, sessionId: input.sessionId,
+        status: 'hold', checkpoint: null, terminal: null,
+        blockers: ['A historical start intent lacks its native player recovery checkpoint. Manual reconciliation is required.'],
+        playerStartAuthorized: false, requiresContinuousRecheck: true,
+      };
       return {
         schemaVersion: 1, athleteId: input.athleteId, sessionId: input.sessionId,
         status: 'none', checkpoint: null, terminal: null, blockers: [],
