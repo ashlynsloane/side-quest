@@ -1,4 +1,6 @@
 import type { GeneratedWorkout, PlannedStrengthSession, TrainingBlockPlan } from '@circuit/domain';
+import { DeferredWorkoutTogetherScreen } from '@/components/milestone-one-deferred-workout-together';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -19,6 +21,13 @@ interface WorkoutOption {
 }
 
 export default function WorkoutTogetherScreen() {
+  if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) {
+    return <DeferredWorkoutTogetherScreen />;
+  }
+  return <WorkoutTogetherExperience />;
+}
+
+function WorkoutTogetherExperience() {
   const router = useRouter();
   const params = useLocalSearchParams<{ friendId?: string; friendName?: string }>();
   const invitedFriendId = typeof params.friendId === 'string' ? params.friendId : undefined;
