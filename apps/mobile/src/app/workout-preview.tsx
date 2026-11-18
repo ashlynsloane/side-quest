@@ -23,6 +23,7 @@ import {
 import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { shareText, workoutText } from '@/services/sharing';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { createWorkoutRoom } from '@/services/workout-together';
 import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
@@ -169,6 +170,7 @@ export default function WorkoutPreviewScreen() {
   }
 
   async function startTogether() {
+    if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) return;
     if (!user || user.mode !== 'cloud' || !cloudEnabled) {
       Alert.alert('Cloud account required', 'Workout Together uses a private room so separate phones receive the same start clock.');
       return;
@@ -265,7 +267,14 @@ export default function WorkoutPreviewScreen() {
         <View style={styles.startPanel}>
           <View><Text style={styles.startTitle}>Ready when you are</Text><Text style={styles.startBody}>Edits and swaps are saved for this session.</Text></View>
           <V23PrimaryButton onPress={start} icon="play">{starting ? 'Saving workout…' : activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
-          <Pressable onPress={() => void startTogether()} disabled={roomBusy} style={[styles.togetherButton, roomBusy && styles.disabled]}><Text style={styles.togetherButtonText}>{roomBusy ? 'Creating room…' : 'Start this workout together'}</Text></Pressable>
+          {MILESTONE_1_WORKOUT_TOGETHER_ENABLED ? (
+            <Pressable onPress={() => void startTogether()} disabled={roomBusy}
+              style={[styles.togetherButton, roomBusy && styles.disabled]}>
+              <Text style={styles.togetherButtonText}>
+                {roomBusy ? 'Creating room…' : 'Start this workout together'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </KeyboardSafeScreen>
 
