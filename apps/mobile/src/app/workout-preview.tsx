@@ -16,6 +16,7 @@ import { WorkoutNameModal } from '@/components/workout-name-modal';
 import {
   isWorkoutFavorite,
   listExercisePreferences,
+  inspectGenericWorkoutSafety,
   saveExercisePreference,
   saveFavoriteWorkout,
 } from '@/services/database';
@@ -170,9 +171,27 @@ export default function WorkoutPreviewScreen() {
       Alert.alert('Cloud account required', 'Workout Together uses a private room so separate phones receive the same start clock.');
       return;
     }
+    if (activeWorkout) {
+      Alert.alert('Existing workout needs attention',
+        'Save or discard your current workout before joining a shared session. Its progress will not be overwritten.');
+      return;
+    }
     setRoomBusy(true);
     try {
-      const room = await createWorkoutRoom({ workout, userId: user.id, displayName: user.displayName });
+      const safety = await inspectGenericWorkoutSafety(user.id);
+      if (safety.kind !== 'routine_training') {
+        Alert.alert('Training safety review required',
+          safety.blockers.join(' ') || 'Shared workouts require reviewed ordinary training context.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Review training context',
+              onPress: () => router.push('/training-safety-context' as Href) },
+          ]);
+        return;
+      }
+      const room = await createWorkoutRoom({
+        workout, userId: user.id, displayName: user.displayName,
+      });
       router.push({ pathname: '/workout-room', params: { code: room.code } } as Href);
     } catch (cause) {
       Alert.alert('Could not create room', cause instanceof Error ? cause.message : String(cause));
