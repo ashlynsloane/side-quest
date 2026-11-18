@@ -763,9 +763,36 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     expect((await service.exportLocalData()).strength_workout_start_intents).toHaveLength(0);
     expect((await service.exportLocalData()).strength_workout_native_start_checkpoints)
       .toHaveLength(0);
-    const nativeCheckpoint = await service.commitAndHydrateRoutineNativeWorkout(
-      checkpointRequest,
-    );
+    // Rehearse the cross-store crash window: both native SQLite records commit,
+    // but local player checkpoint storage fails. Recovery MUST be deliberate.
+    const originalSetItem = globalThis.localStorage.setItem;
+    try {
+      globalThis.localStorage.setItem = (key: string, value: string) => {
+        if (key.startsWith('sidequest.live-workout.session.v1:')) {
+          throw new Error('Injected cross-store player write failure.');
+        }
+        originalSetItem(key, value);
+      };
+      await expect(service.commitAndHydrateRoutineNativeWorkout(checkpointRequest))
+        .rejects.toThrow(/Injected cross-store player write failure/);
+    } finally {
+      globalThis.localStorage.setItem = originalSetItem;
+    }
+    expect((await service.exportLocalData()).strength_workout_start_intents).toHaveLength(1);
+    expect((await service.exportLocalData()).strength_workout_native_start_checkpoints)
+      .toHaveLength(1);
+    expect((await service.getRoutineNativeRecoveryState(
+      'synthetic-athlete-one', 'routine-session',
+    )).kind).toBe('recoverable_missing');
+    await expect(service.recoverMissingRoutineNativeWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
+      athleteConfirmedRecovery: false as true,
+    })).rejects.toThrow(/explicit athlete confirmation/);
+    const nativeCheckpoint = await service.recoverMissingRoutineNativeWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
+      athleteConfirmedRecovery: true,
+    });
+
     expect(nativeCheckpoint.playerPlaybackStarted).toBe(false);
     expect(nativeCheckpoint.requiresPlayerHydration).toBe(true);
     expect(nativeCheckpoint.initialLiveSession.running).toBe(false);
