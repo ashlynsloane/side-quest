@@ -25,7 +25,7 @@ import {
   recoverMissingRoutineNativeWorkout,
   finalizeAndClearNativeWorkout,
   getRoutineNativeRecoveryState,
-  inspectGenericWorkoutSafety,
+  commitAndHydrateGenericWorkout,
 } from '@/services/database';
 import {
   generateWorkoutForAssignedTrainingSpace,
@@ -197,22 +197,22 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       startInFlight.current = true;
       const athleteAtStart = user?.id ?? null;
       try {
-        assertCanStartLiveWorkout(athleteAtStart);
         if (!athleteAtStart) {
           throw new Error('Starting a workout requires a verified athlete profile.');
         }
-        const safety = await inspectGenericWorkoutSafety(athleteAtStart);
-        if (safety.kind !== 'routine_training') {
-          throw new Error('Training safety hold: ' + safety.blockers.join(' '));
-        }
         if (liveAthleteId.current !== athleteAtStart) {
-          throw new Error('Athlete profile changed while checking training safety.');
+          throw new Error('Athlete profile changed before the workout start safety check.');
         }
         const planLink = buildPlanLink(plannedPreviewSource);
-        const snapshot = createInitialLiveWorkoutSession(
-          workout, new Date().toISOString(), planLink ?? undefined,
-        );
-        await saveLiveWorkoutSession(snapshot, athleteAtStart);
+        const snapshot = {
+          ...createInitialLiveWorkoutSession(
+            workout, new Date().toISOString(), planLink ?? undefined,
+          ),
+          // Legacy workouts must never start a timer before current safety
+          // and the athlete's recoverable initial checkpoint are verified.
+          running: false,
+        };
+        await commitAndHydrateGenericWorkout(athleteAtStart, snapshot);
         if (liveAthleteId.current !== athleteAtStart) {
           throw new Error('Athlete profile changed before workout activation. Saved checkpoint retained.');
         }
