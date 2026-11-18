@@ -185,9 +185,11 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
       setPreviewExplanation(explainPlannedStrengthSession(resolvedSession, context));
     },
     async beginWorkout(workout) {
-      // A durable checkpoint MUST succeed before any player state mutation.
-      // Duplicate taps must not race, and a profile switch during the awaited
-      // write must not hydrate a different athlete's in-memory session.
+      // No generic path may replace an active or still-restorable session.
+      // Explicit save/discard in the player owns that athlete decision.
+      if (!workoutSessionReady || activeWorkout) {
+        throw new Error('Finish or recover the active workout before starting another.');
+      }
       if (startInFlight.current) {
         throw new Error('A workout start is already being saved.');
       }
