@@ -18,6 +18,7 @@ import {
   type SharedWorkoutRoom,
   type WorkoutRoomMember,
 } from '@/services/workout-together';
+import { boundedSharedWorkoutFraction } from '@/services/shared-workout-safe-fraction';
 import { useAuth } from '@/state/auth-context';
 import { useWorkoutContext } from '@/state/workout-context';
 import { useTheme } from '@/state/theme-context';
@@ -54,6 +55,8 @@ export default function TogetherSessionScreen() {
   const safetyRoomRef = useRef<string | null>(null);
   const safetyBusyRef = useRef(false);
   const lastSafeElapsedRef = useRef(0);
+  const lastClockTickRef = useRef<number | null>(null);
+  const foregroundRef = useRef(true);
 
   useEffect(() => {
     void (async () => {
@@ -78,6 +81,8 @@ export default function TogetherSessionScreen() {
       safetyRoomRef.current = room.id;
       safetyHeldRef.current = false;
       lastSafeElapsedRef.current = 0;
+      lastClockTickRef.current = null;
+      foregroundRef.current = true;
       setSafetyStatus('checking');
       setSafetyReason(null);
     }
@@ -109,7 +114,15 @@ export default function TogetherSessionScreen() {
     void check();
     const poll = setInterval(() => { void check(); }, 4000);
     const foreground = AppState.addEventListener('change', status => {
-      if (status === 'active') void check();
+      if (status !== 'active') {
+        foregroundRef.current = false;
+        lastClockTickRef.current = null;
+        if (!safetyHeldRef.current) setSafetyStatus('checking');
+        return;
+      }
+      foregroundRef.current = true;
+      if (!safetyHeldRef.current) setSafetyStatus('checking');
+      void check();
     });
     return () => {
       live = false;
@@ -120,16 +133,33 @@ export default function TogetherSessionScreen() {
 
   const state = useMemo(() => room?.startsAt ? timeline(room.workout, room.startsAt, now) : null, [room, now]);
   useEffect(() => {
-    if (safetyStatus !== 'clear' || !state
-      || state.kind === 'countdown' || state.kind === 'complete') return;
-    lastSafeElapsedRef.current = Math.max(lastSafeElapsedRef.current, state.elapsed);
-  }, [safetyStatus, state?.kind, state?.elapsed]);
+    // Do not backfill a remote room clock after a delayed join, background
+    // suspension, blocked safety check, or skipped JS timer frames.
+    if (safetyStatus !== 'clear' || !foregroundRef.current || !state
+      || state.kind === 'countdown' || state.kind === 'complete') {
+      lastClockTickRef.current = null;
+      return;
+    }
+    if (lastClockTickRef.current !== null) {
+      const observedMilliseconds = Math.max(0, Math.min(1000, now - lastClockTickRef.current));
+      lastSafeElapsedRef.current += observedMilliseconds / 1000;
+    }
+    lastClockTickRef.current = now;
+  }, [now, safetyStatus, state?.kind]);
 
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
   const persist = useCallback(async (fraction: number): Promise<boolean> => {
     if (!room || !user || savingRef.current) return false;
     if (persisted.current) return true;
+    const safeFraction = boundedSharedWorkoutFraction(
+      fraction, lastSafeElapsedRef.current, room.workout.estimatedElapsedSeconds,
+    );
+    if (safeFraction <= 0) {
+      setSaveStatus('error');
+      setSaveError('This device has no observed, safety-cleared participation time. The shared room clock alone cannot create a completed workout.');
+      return false;
+    }
     savingRef.current = true;
     setSaveStatus('saving');
     setSaveError(null);
@@ -143,7 +173,7 @@ export default function TogetherSessionScreen() {
           workout: room.workout,
           startedAt: room.startsAt ?? room.createdAt,
           completedAt,
-          completionFraction: fraction,
+          completionFraction: safeFraction,
           stationRounds: rounds,
           plannedSessionId: substitutesPlan ? member?.plannedSessionId : undefined,
           ledgerSource: 'workout_together',
@@ -166,7 +196,7 @@ export default function TogetherSessionScreen() {
       setSaveStatus('saved');
       try {
         await markWorkoutRoomMemberComplete(room.id, user.id);
-        if (room.hostUserId === user.id && fraction >= .99) {
+        if (room.hostUserId === user.id && safeFraction >= .99) {
           await finishWorkoutRoom(room.id, user.id);
         }
       } catch {
