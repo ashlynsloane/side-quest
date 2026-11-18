@@ -36,6 +36,7 @@ import {
   getLatestExerciseLoads,
   getSocialPreferences,
   getWorkoutLedgerEntry,
+  recheckRoutineNativeActiveWorkout,
   listExercisePreferences,
   listWorkoutLedgerEntries,
   saveCompletedWorkout,
@@ -51,6 +52,7 @@ import { useExerciseCatalog } from '@/services/exercise-catalog';
 import {
   clearLiveWorkoutSession,
   loadLiveWorkoutSession,
+  holdLiveWorkoutForSafety,
   saveLiveWorkoutSession,
   type LiveWorkoutLoadValue as LoadValue,
   type LiveWorkoutRestEntry as RestEntry,
@@ -89,6 +91,13 @@ export default function ActiveWorkoutScreen() {
   const [running, setRunning] = useState(false);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const [safetyStatus, setSafetyStatus] = useState<
+    'checking' | 'clear' | 'not_applicable' | 'hold'
+  >('checking');
+  const [safetyHoldReason, setSafetyHoldReason] = useState<string | null>(null);
+  const safetyBusyRef = useRef(false);
+  const safetyHeldRef = useRef(false);
+
   const [stationRounds, setStationRounds] = useState<Record<string, number>>({});
   const [exerciseLoads, setExerciseLoads] = useState<Record<string, LoadValue>>({});
   const [exerciseSets, setExerciseSets] = useState<Record<string, LoggedSet[]>>({});
@@ -140,7 +149,13 @@ export default function ActiveWorkoutScreen() {
           Math.max(0, snapshot.remainingSeconds),
           snapshot.phase === 'work' ? (safeStation?.durationSeconds ?? snapshot.remainingSeconds) : Math.max(15, workout.request.restSeconds),
         ));
-        setRunning(snapshot.pendingCompletion ? false : restoredActiveWorkout ? false : snapshot.running);
+        if (snapshot.safetyHold) {
+          safetyHeldRef.current = true;
+          setSafetyHoldReason(snapshot.safetyHold.reason);
+          setSafetyStatus('hold');
+        }
+        setRunning(snapshot.pendingCompletion || snapshot.safetyHold
+          ? false : restoredActiveWorkout ? false : snapshot.running);
         setStationRounds(snapshot.stationRounds);
         setExerciseLoads(snapshot.exerciseLoads);
         setExerciseSets(snapshot.exerciseSets);
@@ -167,12 +182,81 @@ export default function ActiveWorkoutScreen() {
             : 'Workout resumed from your last saved point.');
         }
       } else {
-        setRunning(true);
+        setRunning(false);
       }
       setSessionHydrated(true);
     });
     return () => { live = false; };
   }, [restoredActiveWorkout, workout?.id, workoutSessionReady, user?.id]);
+
+  async function recheckBeforeContinuing(): Promise<boolean> {
+    if (!user?.id || !workout || !sessionHydrated) return false;
+    if (safetyHeldRef.current) return false;
+    if (safetyBusyRef.current) return false;
+    safetyBusyRef.current = true;
+    try {
+      const planId = activePlanLink?.sessionId;
+      if (!planId) {
+        setSafetyStatus('not_applicable');
+        return true;
+      }
+      const result = await recheckRoutineNativeActiveWorkout({
+        athleteId: user.id,
+        sessionId: planId,
+        startedAt: startedAt.current,
+        workout,
+      });
+      if (result.kind === 'hold') {
+        const reason = result.blockers.join(' ') ||
+          'Workout safety evidence changed. Save the dose performed and stop.';
+        safetyHeldRef.current = true;
+        setRunning(false);
+        setSafetyStatus('hold');
+        setSafetyHoldReason(reason);
+        try { await holdLiveWorkoutForSafety(user.id, reason); }
+        catch {
+          setSafetyHoldReason(reason +
+            ' The paused recovery checkpoint could not be verified. Do not resume.');
+        }
+        return false;
+      }
+      setSafetyStatus(result.kind);
+      return true;
+    } catch {
+      const reason = 'Current workout safety history cannot be verified. Pause and preserve any completed work.';
+      safetyHeldRef.current = true;
+      setRunning(false);
+      setSafetyStatus('hold');
+      setSafetyHoldReason(reason);
+      try { await holdLiveWorkoutForSafety(user.id, reason); } catch { /* keep UI held */ }
+      return false;
+    } finally {
+      safetyBusyRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!sessionHydrated || !workout || !user?.id || phase === 'complete') return;
+    let live = true;
+    // Recheck immediately, on foreground and every four seconds while active.
+    const check = async () => {
+      if (!live || safetyHeldRef.current) return;
+      await recheckBeforeContinuing();
+    };
+    void check();
+    const timer = setInterval(() => { void check(); }, 4000);
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') void check();
+    });
+    return () => {
+      live = false;
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [activePlanLink?.sessionId, sessionHydrated, workout?.id, user?.id, phase === 'complete']);
+
+  const safeToProgress = safetyStatus === 'clear'
+    || safetyStatus === 'not_applicable';
 
   const station = workout?.stations[stationIndex] ?? null;
   const isFinalStation = Boolean(workout && stationIndex === workout.stations.length - 1);
@@ -281,7 +365,7 @@ export default function ActiveWorkoutScreen() {
   useEffect(() => {
     if (!workout || remainingSeconds !== 0 || phase !== 'work') return;
     setPhase('rest');
-    setRunning(true);
+    setRunning(safeToProgress && !safetyHeldRef.current);
     setRemainingSeconds(Math.max(15, workout.request.restSeconds));
     initializeRestLog(station ?? workout.stations[stationIndex]!);
     if (cuePreferences.audioEnabled) void completionPlayer.seekTo(0).then(() => completionPlayer.play()).catch(() => undefined);
@@ -460,7 +544,8 @@ export default function ActiveWorkoutScreen() {
     return { stationRounds: nextRounds, exerciseLoads: nextLoads, exerciseSets: nextSets };
   }
 
-  function continueAfterRest(log: boolean) {
+  async function continueAfterRest(log: boolean) {
+    if (!(await recheckBeforeContinuing())) return;
     const logged = log ? commitRestLog() : undefined;
     if (isFinalStation) {
       setPhase('complete'); setRunning(false);
@@ -471,12 +556,16 @@ export default function ActiveWorkoutScreen() {
     setStationIndex(nextIndex);
     setPhase('work');
     setRemainingSeconds(activeWorkout.stations[nextIndex]!.durationSeconds);
-    setRunning(true);
+    setRunning(!safetyHeldRef.current);
     cueKey.current = null;
     if (cuePreferences.hapticsEnabled) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
   }
 
-  function skipWorkPhase() { if (phase === 'work') setRemainingSeconds(0); }
+  function skipWorkPhase() {
+    if (phase === 'work' && safeToProgress && !safetyHeldRef.current) {
+      setRemainingSeconds(0);
+    }
+  }
 
   async function pauseAndLeave() {
     if (phase === 'complete' || pauseSaveBusy) return;
@@ -564,6 +653,11 @@ export default function ActiveWorkoutScreen() {
     return result.candidates;
   }
   async function handleSwap(reason: ExerciseSwapReason, candidateId: string) {
+    if (!(await recheckBeforeContinuing()) || safetyStatus !== 'not_applicable') {
+      Alert.alert('Workout prescription locked',
+        'An athlete-authorized routine must use its exact reviewed exercises. Save the current dose rather than changing this session.');
+      return;
+    }
     if (!swapTarget) return;
     setSwapBusy(true);
     try {
@@ -659,6 +753,22 @@ export default function ActiveWorkoutScreen() {
         <Pressable onPress={endEarly} style={styles.endPill}><Text style={styles.endButtonText}>End</Text></Pressable>
       </View>
       {activePlanLink ? <View style={styles.planBanner}><V23Icon name="plan" color={tokens.accent} size={17} /><Text style={styles.planBannerText}>Planned {formatPlanDate(activePlanLink.sessionDate)} · {activePlanLink.sessionTitle}{activePlanLink.modifiedFromPlan ? ' · Customized' : ''}</Text></View> : null}
+      {safetyStatus === 'hold' ? (
+        <View style={styles.resumeBanner}>
+          <Text style={styles.resumeBannerText}>
+            SAFETY HOLD — workout paused. {safetyHoldReason}
+            {' '}You may save the work already completed or discard the session.
+            Continuing or starting another station is disabled.
+          </Text>
+        </View>
+      ) : null}
+      {safetyStatus === 'checking' ? (
+        <View style={styles.resumeBanner}>
+          <Text style={styles.resumeBannerText}>
+            Checking current workout safety before continuing…
+          </Text>
+        </View>
+      ) : null}
       {pauseSaveError ? <View style={styles.resumeBanner}><Text style={styles.resumeBannerText}>{pauseSaveError}</Text></View> : null}
       {resumeNotice ? <Pressable onPress={() => setResumeNotice(null)} style={styles.resumeBanner}><V23Icon name="play" color={tokens.accent} size={17} /><Text style={styles.resumeBannerText}>{resumeNotice}</Text></Pressable> : null}
 
@@ -667,7 +777,14 @@ export default function ActiveWorkoutScreen() {
           <View style={styles.timerTopLine}><Text style={styles.phaseLabel}>{phase === 'rest' ? (remainingSeconds > 0 ? 'REST + LOG' : 'READY') : 'WORK'}</Text><V23Chip tone={phase === 'rest' ? 'warm' : 'accent'}>{running ? 'Running' : 'Paused'}</V23Chip></View>
           <Text style={styles.timer}>{formatTime(remainingSeconds)}</Text>
           <Text style={styles.timerContext}>{phase === 'rest' ? 'Record the station while you recover.' : `${currentStation.exercises.length} movements · focus on quality`}</Text>
-          {phase === 'work' ? <Pressable onPress={() => setRunning((value) => !value)} style={styles.timerControl}><Text style={styles.timerControlText}>{running ? 'Pause timer' : 'Resume timer'}</Text></Pressable> : null}
+          {phase === 'work' ? <Pressable disabled={safetyStatus === 'checking' || safetyStatus === 'hold'}
+            onPress={() => {
+              if (running) { setRunning(false); return; }
+              void recheckBeforeContinuing().then(ok => {
+                if (ok && !safetyHeldRef.current) setRunning(true);
+              });
+            }} style={[styles.timerControl,
+              !safeToProgress && { opacity: 0.45 }]}><Text style={styles.timerControlText}>{running ? 'Pause timer' : 'Resume timer'}</Text></Pressable> : null}
         </View>
 
         {phase === 'work' ? (
@@ -680,13 +797,14 @@ export default function ActiveWorkoutScreen() {
               <Text style={styles.nextTitle}>{isFinalStation ? 'Workout summary' : `${Math.max(1, Math.round(activeWorkout.request.restSeconds / 60))} min recovery, then ${nextStation?.purpose ?? 'the next station'}`}</Text>
               {nextStation ? <Text style={styles.nextDetail}>{nextStation.exercises.map((item) => item.exerciseSnapshot.name).join(' · ')}</Text> : null}
             </View>
-            <View style={styles.controlRow}><Pressable onPress={skipWorkPhase} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Finish station</Text></Pressable><Pressable onPress={endEarly} style={styles.outlineButton}><Text style={styles.outlineButtonText}>End workout</Text></Pressable></View>
+            <View style={styles.controlRow}><Pressable disabled={!safeToProgress} onPress={skipWorkPhase}
+              style={[styles.primaryButton, !safeToProgress && { opacity: 0.45 }]}><Text style={styles.primaryButtonText}>Finish station</Text></Pressable><Pressable onPress={endEarly} style={styles.outlineButton}><Text style={styles.outlineButtonText}>End workout</Text></Pressable></View>
           </>
         ) : (
           <RestLogPanel station={currentStation} rounds={restRounds} setRounds={setRestRounds} entries={restEntries} setEntries={setRestEntries} latestLoads={latestLoads} loadUnit={restLoadUnit} onLoadUnitChange={changeRestLoadUnit} styles={styles} tokens={tokens} />
         )}
 
-        {phase === 'rest' ? <><Pressable onPress={() => continueAfterRest(true)} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{isFinalStation ? 'Save and finish workout' : 'Save and start next station'}</Text></Pressable><Pressable onPress={() => continueAfterRest(false)} style={styles.textButton}><Text style={styles.textButtonText}>{isFinalStation ? 'Finish without logging' : 'Continue without logging'}</Text></Pressable></> : null}
+        {phase === 'rest' ? <><Pressable disabled={!safeToProgress} onPress={() => { void continueAfterRest(true ); } style={styles.primaryButton}><Text style={styles.primaryButtonText}>{isFinalStation ? 'Save and finish workout' : 'Save and start next station'}</Text></Pressable><Pressable disabled={!safeToProgress} onPress={() => { void continueAfterRest(false ); } style={styles.textButton}><Text style={styles.textButtonText}>{isFinalStation ? 'Finish without logging' : 'Continue without logging'}</Text></Pressable></> : null}
       </KeyboardSafeScreen>
 
       <ExerciseDemoModal exercise={demoExercise} visible={Boolean(demoExercise)} onClose={() => setDemoExercise(null)} />
