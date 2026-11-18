@@ -25,7 +25,7 @@ describe('shared workout completion evidence never exceeds local safe foreground
       [1, 1800, 0],
       [1, 1800, -50],
     ] as const) {
-      expect(boundedSharedWorkoutFraction(...input)).toBe(0);
+      expect(boundedSharedWorkoutFraction(input[0], input[1], input[2])).toBe(0);
     }
   });
 
