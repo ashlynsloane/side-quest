@@ -1472,6 +1472,65 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
   });
 
+  it('a live safety hold survives timer writes and cold restart without losing partial work', async () => {
+    const store = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const initial = store.createInitialLiveWorkoutSession(workout, startedAt);
+    await store.saveLiveWorkoutSession(initial, 'synthetic-athlete-one');
+    await store.holdLiveWorkoutForSafety(
+      'synthetic-athlete-one', 'New persistent movement restriction.',
+    );
+    const held = await store.loadLiveWorkoutSession('synthetic-athlete-one');
+    expect(held?.safetyHold?.kind).toBe('routine_native_safety_hold');
+    expect(held?.safetyHold?.reason).toMatch(/movement restriction/);
+    expect(held?.running).toBe(false);
+    await store.saveLiveWorkoutSession({
+      ...initial, running: true, phase: 'rest', stationIndex: 1,
+    }, 'synthetic-athlete-one');
+    const late = await store.loadLiveWorkoutSession('synthetic-athlete-one');
+    expect(late?.running).toBe(false);
+    expect(late?.safetyHold).toEqual(held?.safetyHold);
+    await store.saveLiveWorkoutSession({
+      ...initial, running: false,
+      pendingCompletion: { completedAt, completionFraction: 0.29 },
+    }, 'synthetic-athlete-one');
+    const partial = await store.loadLiveWorkoutSession('synthetic-athlete-one');
+    expect(partial?.pendingCompletion?.completionFraction).toBe(0.29);
+    expect(partial?.safetyHold).toEqual(held?.safetyHold);
+    vi.resetModules();
+    const restarted = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const recovered = await restarted.loadLiveWorkoutSession('synthetic-athlete-one');
+    expect(recovered?.safetyHold).toEqual(held?.safetyHold);
+    expect(recovered?.running).toBe(false);
+    expect(recovered?.pendingCompletion?.completionFraction).toBe(0.29);
+  });
+
+  it('ended-workout tombstone blocks a delayed timer write from resurrecting the discarded session', async () => {
+    const store = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const initial = store.createInitialLiveWorkoutSession(workout, startedAt);
+    await store.saveLiveWorkoutSession(initial, 'synthetic-athlete-one');
+    await store.clearLiveWorkoutSession('synthetic-athlete-one');
+    expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+    await expect(store.saveLiveWorkoutSession({
+      ...initial, savedAt: new Date().toISOString(),
+    }, 'synthetic-athlete-one')).rejects.toThrow(/cannot be resurrected/);
+    expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+    const distinct = store.createInitialLiveWorkoutSession(
+      workout, '2026-10-21T08:00:00.000Z',
+    );
+    await store.saveLiveWorkoutSession(distinct, 'synthetic-athlete-one');
+    expect((await store.loadLiveWorkoutSession('synthetic-athlete-one'))?.startedAt)
+      .toBe(distinct.startedAt);
+    await store.clearLiveWorkoutSession('synthetic-athlete-one');
+    const rawKey = 'sidequest.live-workout.session.v1:synthetic-athlete-one';
+    globalThis.localStorage.setItem(rawKey, '{broken json');
+    expect(await store.inspectLiveWorkoutSlot('synthetic-athlete-one'))
+      .toBe('unreadable');
+    await expect(store.persistFirstRoutineNativeCheckpoint({
+      ...distinct, running: false,
+    }, 'synthetic-athlete-one')).rejects.toThrow(/already exists/);
+    expect(globalThis.localStorage.getItem(rawKey)).toBe('{broken json');
+  });
+
   it('does not overwrite an unresolved completion with a new workout or corrupt stored checkpoint', async () => {
     const checkpoint = await import('../../../apps/mobile/src/services/active-workout-persistence');
     const sessionA = checkpoint.createInitialLiveWorkoutSession(workout, startedAt);
