@@ -20,6 +20,7 @@ import {
   saveExercisePreference,
   saveFavoriteWorkout,
 } from '@/services/database';
+import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { shareText, workoutText } from '@/services/sharing';
 import { createWorkoutRoom } from '@/services/workout-together';
@@ -41,6 +42,7 @@ export default function WorkoutPreviewScreen() {
     previewModifiedFromPlan,
     activeWorkout,
     activePlanLink,
+    workoutSessionReady,
     updatePreviewWorkout,
     beginWorkout,
   } = useWorkoutContext();
@@ -171,13 +173,17 @@ export default function WorkoutPreviewScreen() {
       Alert.alert('Cloud account required', 'Workout Together uses a private room so separate phones receive the same start clock.');
       return;
     }
-    if (activeWorkout) {
+    if (!workoutSessionReady || activeWorkout) {
       Alert.alert('Existing workout needs attention',
-        'Save or discard your current workout before joining a shared session. Its progress will not be overwritten.');
+        'Wait for workout recovery to finish, then save or discard your current workout before joining a shared session.');
       return;
     }
     setRoomBusy(true);
     try {
+      const slot = await inspectLiveWorkoutSlot(user.id);
+      if (slot !== 'empty') {
+        throw new Error('Another saved or unreadable workout checkpoint must be recovered before joining a shared session.');
+      }
       const safety = await inspectGenericWorkoutSafety(user.id);
       if (safety.kind !== 'routine_training') {
         Alert.alert('Training safety review required',
