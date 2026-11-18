@@ -1969,6 +1969,43 @@ export async function discardUnhydratedRoutineNativeStart(input: {
 }
 
 /**
+ * Conservative gate for the older manual/planned workout player.
+ * A healthy ordinary-training user is not asked to obtain provider paperwork.
+ * Unresolved context, symptoms or rehabilitation history cannot be silently
+ * bypassed by the generic player. This is NOT exercise-level medical clearance.
+ */
+async function assessOwnedGenericWorkoutSafety(
+  athleteId: string,
+): Promise<{ kind: 'routine_training' | 'hold'; blockers: string[] }> {
+  await initializeDatabase();
+  if (!trainingAdjustmentDriver.readSnapshot) {
+    throw new Error('Consistent athlete-owned training safety snapshot is unavailable.');
+  }
+  return trainingAdjustmentDriver.readSnapshot(async reader => {
+    const context = await readAthleteTrainingSafetyContext(reader, athleteId);
+    const policy = evaluateTrainingSafetyPolicy(context);
+    if (policy.track !== 'routine_training_review') {
+      return {
+        kind: 'hold',
+        blockers: policy.reasons.length ? policy.reasons
+          : ['Review your training context before using the generic workout player.'],
+      };
+    }
+    return { kind: 'routine_training', blockers: [] };
+  });
+}
+
+export async function inspectGenericWorkoutSafety(
+  athleteId: string,
+): Promise<{ kind: 'routine_training' | 'hold'; blockers: string[] }> {
+  if (!athleteId?.trim()) {
+    throw new Error('Generic workout safety check requires the athlete profile.');
+  }
+  return withVerifiedAthleteDatabase(athleteId,
+    () => assessOwnedGenericWorkoutSafety(athleteId));
+}
+
+/**
  * Recheck the current SQLite safety state every time a guarded routine tries
  * to resume, and periodically during playback. A static initial consent is
  * never a permanent permission. Generic non-authorized workouts are distinct.
@@ -1981,7 +2018,12 @@ export async function recheckRoutineNativeActiveWorkout(input: {
 }): Promise<{ kind: 'not_applicable' | 'clear' | 'hold'; blockers: string[] }> {
   return withVerifiedAthleteDatabase(input.athleteId, async () => {
     const assessment = await assessOwnedRoutineSafety(input.athleteId, input.sessionId);
-    if (!assessment) return { kind: 'not_applicable', blockers: [] };
+    if (!assessment) {
+      const generic = await assessOwnedGenericWorkoutSafety(input.athleteId);
+      return generic.kind === 'hold'
+        ? { kind: 'hold', blockers: generic.blockers }
+        : { kind: 'not_applicable', blockers: [] };
+    }
     const blockers = [...assessment.blockers];
     const original = assessment.checkpoint?.initialLiveSession;
     if (!original || assessment.status !== 'eligible_for_explicit_recovery') {
