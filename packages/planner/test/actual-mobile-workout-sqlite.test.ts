@@ -786,7 +786,7 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
     )).kind).toBe('recoverable_missing');
     await expect(service.recoverMissingRoutineNativeWorkout({
       athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
-      athleteConfirmedRecovery: false as true,
+      athleteConfirmedRecovery: false as unknown as true,
     })).rejects.toThrow(/explicit athlete confirmation/);
     const nativeCheckpoint = await service.recoverMissingRoutineNativeWorkout({
       athleteId: 'synthetic-athlete-one', sessionId: 'routine-session',
