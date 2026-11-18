@@ -123,10 +123,21 @@ export default function WorkoutPreviewScreen() {
       await beginWorkout(workout);
       router.push('/active-workout' as Href);
     } catch (error) {
+      const message = error instanceof Error
+        ? error.message : 'Could not safely start this workout.';
+      const needsSafetyReview = message.startsWith('Training safety hold:');
       Alert.alert(
-        'Previous workout needs attention',
-        error instanceof Error ? error.message : 'Could not safely start this workout.',
-        [{ text: 'OK' }],
+        needsSafetyReview ? 'Training safety review required'
+          : 'Previous workout needs attention',
+        message,
+        needsSafetyReview
+          ? [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Review training context', onPress: () => {
+              router.push('/training-safety-context' as Href);
+            } },
+          ]
+          : [{ text: 'OK' }],
       );
     } finally {
       startingRef.current = false;
