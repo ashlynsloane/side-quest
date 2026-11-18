@@ -24,6 +24,7 @@ import {
   commitAndHydrateRoutineNativeWorkout,
   recoverMissingRoutineNativeWorkout,
   finalizeAndClearNativeWorkout,
+  getRoutineNativeRecoveryState,
 } from '@/services/database';
 import {
   generateWorkoutForAssignedTrainingSpace,
@@ -115,14 +116,38 @@ export function WorkoutProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let live = true;
     if (!user) { setWorkoutSessionReady(true); return; }
-    void loadLiveWorkoutSession(user.id).then((snapshot) => {
+    const athleteId = user.id;
+    void (async () => {
+      const snapshot = await loadLiveWorkoutSession(athleteId);
       if (!live) return;
-      if (snapshot) {
+      if (snapshot?.planLink?.sessionId) {
+        // AuthProvider activates the owned SQLite file before exposing user.
+        // An immutable native terminal event is authoritative: never render
+        // the original paused checkpoint as a new workout after a crash.
+        const state = await getRoutineNativeRecoveryState(
+          athleteId, snapshot.planLink.sessionId,
+        );
+        if (!live) return;
+        if (state.kind === 'terminal') {
+          const original = state.checkpoint?.initialLiveSession;
+          if (!original || original.startedAt !== snapshot.startedAt
+            || original.workout.id !== snapshot.workout.id) {
+            throw new Error('Terminal native workout audit and player checkpoint do not match.');
+          }
+          await clearLiveWorkoutSession(athleteId);
+          return;
+        }
+      }
+      if (snapshot && live) {
         setActiveWorkout(snapshot.workout);
         setActivePlanLink(snapshot.planLink ?? null);
         setRestoredActiveWorkout(true);
       }
-      setWorkoutSessionReady(true);
+    })().catch(() => {
+      // Never auto-restore over unreadable, orphaned or foreign start history.
+      // Both SQLite and local checkpoint bytes are retained for reconciliation.
+    }).finally(() => {
+      if (live) setWorkoutSessionReady(true);
     });
     return () => { live = false; };
   }, [user?.id]);
