@@ -37,11 +37,23 @@ TypeScript, full planner/mobile SQLite tests, synthetic athlete acceptance and i
 
 These are **source-level and synthetic tests only**. A 4-second poll is not instantaneous clinical monitoring; app suspension and external care changes may delay observation. The app must never imply that athlete-entered provenance verifies outside medical orders.
 
+## Subsequent entry-path hardening — November 18, 2026
+
+**Risk-first work:** A generic workout previously allowed "Replace and start" over a still-recoverable active workout. The live persistence adapter now refuses all cross-session writes, even when the old session has no pending completion journal. Returning to the active workout to explicitly save or discard is required. Old completed/discarded tombstones are now keyed by athlete + exact workout ID + original start timestamp; ending subsequent sessions never erases the protection. Athlete-scoped terminal cleanup must first verify the exact live checkpoint, so a retry for a different older session cannot delete newer data.
+
+**Ordinary manual/planned starts:** A legacy start now checks the owner-verified training safety context under the same activation lock as saving its initial paused player checkpoint. Unknown, restriction-aware, rehabilitation and return-to-sport tracks are held and directed to the in-app Training Safety Context review; a general-training self-attestation never erases older protected-movement history. The legacy active player also rechecks context throughout use, including manual sessions without a plan link. Skipping a work station requires a fresh recheck, not just an earlier four-second poll. Ordinary workouts do NOT begin the timer automatically on start. These are conservative safety gates, not independent confirmation of an unrestricted clinical condition.
+
+**Shared sessions:** Workout Together is a DIFFERENT player and must never inherit solo-player safety guarantees by implication. A local athlete's safety is checked before creating a room, marking Ready and host launch. Each participant's shared screen checks independently on entry, foreground and while active, hides exercises on a sticky safety hold, and does not stop other athletes' clocks. The canonical local SQLite save must complete before displaying Saved or navigating away; a failed save remains retryable. Shared completion cannot exceed the athlete's locally observed, safety-cleared foreground time; the host's room clock does not independently establish that anyone performed an exercise. Explicit partial-save/leave and no-save exit are available on hold.
+
+**Synthetic regression coverage** includes multi-session tombstone retention, attempts to overwrite active checkpoints, owner mismatch on cleanup, generic context gate transitions and sticky protected movements, safe paused generic starts, independent room entry guards, saved-after-ledger ordering, and shared completion-fraction upper bounds. Source-contract checks are not runtime UI or physical-device validation.
+
+**Shared-path release limitation:** Unlike the solo native player, Workout Together does not yet have an equivalent crash-safe per-athlete pending-completion and exercise-progress checkpoint with signed-device recovery validation. A network disconnect, force-quit or host clock jump needs further end-to-end acceptance. Do not represent this path as reliably recoverable or clinician-approved until that work is completed. An explicitly staged release that defers shared workouts is a safer option, subject to owner decision.
+
 ## Remaining release blockers
 
 1. **Physical signed iPhone acceptance** on this exact integrated source: P01–P15, phone kill between the SQLite commit and localStorage checkpoint write, safe explicit recovery, background/foreground while running, new restrictions mid-session, terminal cleanup interruption, wrong account, partial completion and profile switching. The CI iOS JS export is not a native-device run.
 2. **Historical data and recovery migration** on owned, representative prior beta databases and localStorage state with backup/restore and rollback. Do not silently adopt unknown user files.
-3. **Authoritative clinical/source evidence** for restriction-aware rehab and return-to-sport. The current athlete-only routine workflow does NOT clear these tracks; unrestricted generic workout paths require separate comprehensive policy qualification.
+3. **Authoritative clinical/source evidence** for restriction-aware rehab and return-to-sport. The current athlete-only routine workflow does NOT clear these tracks; conservative holds now cover the generic and shared entry paths, but exercise-level medical restriction matching is not validated.
 4. **Release owner approval** after evidence review. Keep the PR draft/unmerged, the installed beta untouched and cloud PR #20 unchanged.
 
 **Release = HOLD.** Do not merge/deploy this draft, modify cloud PR #20 or touch an installed beta until these gates are resolved.
