@@ -9,6 +9,27 @@ This file is the single operational checklist for Milestone 1. It supersedes
 vague progress claims but does not replace detailed technical incident notes
 in `RELEASE_INTEGRATION_CONTROL.md`.
 
+## Scope amendment — November 18, 2026
+
+**Milestone 1 is solo-first.** The athlete has approved deferring Workout
+Together to a later milestone. The first staged release must provide reliable
+solo training, adaptive planning, athlete-owned readiness and symptom
+history, safety holds, partial/completed workout logging, cold-restart
+recovery and multi-profile isolation. Workout Together is **not** part of
+Milestone 1 and is not a prerequisite to ship the approved solo subset.
+
+The shared-workout interface is now disabled behind a fixed development
+feature gate. Preview and Train UI omit shared start controls; Friends
+hides invites to start/join; direct navigation to any of its three
+routes yields a passive deferral screen. Neither the shared implementation
+nor preexisting cloud invitation/workout data is deleted.
+
+**Release requirements unchanged:** validated physical-iPhone acceptance,
+preservation/migration/rollback of historical real-beta training data,
+safety-policy qualification for restricted exercise and rehabilitation,
+and explicit release-owner approval. A successful JavaScript export or
+synthetic SQLite test is not equivalent to device qualification.
+
 ## What "done" means
 
 An isolated athlete can create a profile, generate and review an appropriate
