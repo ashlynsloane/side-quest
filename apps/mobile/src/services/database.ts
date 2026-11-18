@@ -34,6 +34,9 @@ import {
   inspectLiveWorkoutSlot,
   clearLiveWorkoutSession,
   persistFirstRoutineNativeCheckpoint,
+  assertCanStartLiveWorkout,
+  saveLiveWorkoutSession,
+  type LiveWorkoutSessionSnapshot,
 } from './active-workout-persistence';
 
 let db = SQLite.openDatabaseSync('circuit-generator.db');
@@ -2004,6 +2007,35 @@ export async function inspectGenericWorkoutSafety(
   return withVerifiedAthleteDatabase(athleteId,
     () => assessOwnedGenericWorkoutSafety(athleteId));
 }
+
+/**
+ * The legacy workout player also requires a serialized, owner-locked
+ * safety-to-recovery handoff. It is not an authorization for restricted
+ * rehabilitation or an exercise-level clinical prescription.
+ */
+export async function commitAndHydrateGenericWorkout(
+  athleteId: string, snapshot: LiveWorkoutSessionSnapshot,
+): Promise<void> {
+  if (!athleteId?.trim() || snapshot?.running !== false
+    || snapshot.stationIndex !== 0 || snapshot.phase !== 'work'
+    || snapshot.pendingCompletion || snapshot.safetyHold
+    || !snapshot.workout?.id?.trim()) {
+    throw new Error('Generic workout needs a verified paused initial checkpoint.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    const safety = await assessOwnedGenericWorkoutSafety(athleteId);
+    if (safety.kind !== 'routine_training') {
+      throw new Error('Training safety hold: ' + safety.blockers.join(' '));
+    }
+    assertCanStartLiveWorkout(athleteId);
+    await saveLiveWorkoutSession(snapshot, athleteId);
+    const restored = await loadLiveWorkoutSession(athleteId);
+    if (JSON.stringify(restored) !== JSON.stringify(snapshot)) {
+      throw new Error('Generic player recovery checkpoint failed durable verification.');
+    }
+  });
+}
+
 
 /**
  * Recheck the current SQLite safety state every time a guarded routine tries
