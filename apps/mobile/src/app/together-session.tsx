@@ -2,10 +2,14 @@ import type { Exercise, GeneratedWorkout, WorkoutStation } from '@circuit/domain
 import { useKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
-import { saveCompletedWorkout } from '@/services/database';
+import {
+  inspectGenericWorkoutSafety,
+  saveCompletedWorkout,
+  withVerifiedAthleteDatabase,
+} from '@/services/database';
 import {
   finishWorkoutRoom,
   getWorkoutRoomByCode,
@@ -15,6 +19,7 @@ import {
   type WorkoutRoomMember,
 } from '@/services/workout-together';
 import { useAuth } from '@/state/auth-context';
+import { useWorkoutContext } from '@/state/workout-context';
 import { useTheme } from '@/state/theme-context';
 import { typography, type AppPalette } from '@/theme';
 
@@ -29,6 +34,7 @@ export default function TogetherSessionScreen() {
   const code = String(rawCode ?? '').toUpperCase();
   const router = useRouter();
   const { user } = useAuth();
+  const { activeWorkout } = useWorkoutContext();
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [room, setRoom] = useState<SharedWorkoutRoom | null>(null);
@@ -38,6 +44,15 @@ export default function TogetherSessionScreen() {
   const [demo, setDemo] = useState<Exercise | null>(null);
   const [error, setError] = useState<string | null>(null);
   const persisted = useRef(false);
+  const savingRef = useRef(false);
+  const completedAtRef = useRef<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [safetyStatus, setSafetyStatus] = useState<'checking' | 'clear' | 'hold'>('checking');
+  const [safetyReason, setSafetyReason] = useState<string | null>(null);
+  const safetyHeldRef = useRef(false);
+  const safetyBusyRef = useRef(false);
+  const lastSafeElapsedRef = useRef(0);
 
   useEffect(() => {
     void (async () => {
@@ -55,7 +70,57 @@ export default function TogetherSessionScreen() {
   }, [code, user?.id]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(timer); }, []);
 
+  useEffect(() => {
+    if (!room?.id || !user?.id) return;
+    let live = true;
+    safetyHeldRef.current = false;
+    lastSafeElapsedRef.current = 0;
+    setSafetyStatus('checking');
+    setSafetyReason(null);
+    const check = async () => {
+      if (!live || safetyHeldRef.current || safetyBusyRef.current) return;
+      safetyBusyRef.current = true;
+      try {
+        if (activeWorkout) {
+          throw new Error('Another athlete workout is already saved. Recover or finish it first.');
+        }
+        const decision = await inspectGenericWorkoutSafety(user.id);
+        if (!live) return;
+        if (decision.kind === 'hold') {
+          safetyHeldRef.current = true;
+          setSafetyStatus('hold');
+          setSafetyReason(decision.blockers.join(' ') ||
+            'The shared session cannot continue under current safety restrictions.');
+        } else {
+          setSafetyStatus('clear');
+        }
+      } catch (cause) {
+        if (!live) return;
+        safetyHeldRef.current = true;
+        setSafetyStatus('hold');
+        setSafetyReason(cause instanceof Error ? cause.message
+          : 'Athlete safety evidence cannot be verified.');
+      } finally { safetyBusyRef.current = false; }
+    };
+    void check();
+    const poll = setInterval(() => { void check(); }, 4000);
+    const foreground = AppState.addEventListener('change', status => {
+      if (status === 'active') void check();
+    });
+    return () => {
+      live = false;
+      clearInterval(poll);
+      foreground.remove();
+    };
+  }, [room?.id, user?.id, activeWorkout]);
+
   const state = useMemo(() => room?.startsAt ? timeline(room.workout, room.startsAt, now) : null, [room, now]);
+  useEffect(() => {
+    if (safetyStatus !== 'clear' || !state
+      || state.kind === 'countdown' || state.kind === 'complete') return;
+    lastSafeElapsedRef.current = Math.max(lastSafeElapsedRef.current, state.elapsed);
+  }, [safetyStatus, state?.kind, state?.elapsed]);
+
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
   const persist = useCallback(async (fraction: number) => {
