@@ -1518,6 +1518,16 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
       'sidequest.live-workout.session.v1:synthetic-athlete-one',
     )).toBe(raw);
     await store.clearLiveWorkoutSession('synthetic-athlete-one');
+    await expect(store.persistFirstRoutineNativeCheckpoint(
+      approved, 'synthetic-athlete-one',
+    )).rejects.toThrow(/cannot be resurrected/);
+    // A different, freshly authorized workout instance is the only valid
+    // input for testing a new first-save storage failure.
+    const nextApproved = {
+      ...approved,
+      startedAt: '2026-10-21T10:00:00.000Z',
+      savedAt: '2026-10-21T10:00:00.000Z',
+    };
 
     const originalSetter = globalThis.localStorage.setItem;
     try {
@@ -1525,7 +1535,7 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
         throw new Error('Injected first-checkpoint storage failure.');
       };
       await expect(store.persistFirstRoutineNativeCheckpoint(
-        approved, 'synthetic-athlete-one',
+        nextApproved, 'synthetic-athlete-one',
       )).rejects.toThrow(/Injected first-checkpoint storage failure/);
       expect(globalThis.localStorage.getItem(
         'sidequest.live-workout.session.v1:synthetic-athlete-one',
@@ -1533,8 +1543,10 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     } finally {
       globalThis.localStorage.setItem = originalSetter;
     }
-    await store.persistFirstRoutineNativeCheckpoint(approved, 'synthetic-athlete-one');
+    await store.persistFirstRoutineNativeCheckpoint(nextApproved, 'synthetic-athlete-one');
     expect((await store.loadLiveWorkoutSession('synthetic-athlete-one'))?.running).toBe(false);
+    expect((await store.loadLiveWorkoutSession('synthetic-athlete-one'))?.startedAt)
+      .toBe(nextApproved.startedAt);
   });
 
   it('a failed checkpoint removal retains the original workout until a verified retry', async () => {
@@ -1642,7 +1654,7 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
       otherWorkout, '2026-10-21T11:00:00.000Z',
     );
     await expect(checkpoint.saveLiveWorkoutSession(replacement, 'synthetic-athlete-one'))
-      .rejects.toThrow(/Conflicting pending workout completion/);
+      .rejects.toThrow(/different session/);
     expect(globalThis.localStorage.getItem(
       'sidequest.live-workout.session.v1:synthetic-athlete-one',
     )).toBe(storedBefore);
