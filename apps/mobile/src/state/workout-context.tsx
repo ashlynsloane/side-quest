@@ -13,11 +13,9 @@ import {
 
 import { useAuth } from '@/state/auth-context';
 import {
-  assertCanStartLiveWorkout,
   clearLiveWorkoutSession,
   createInitialLiveWorkoutSession,
   loadLiveWorkoutSession,
-  saveLiveWorkoutSession,
   type ActiveWorkoutPlanLink,
 } from '@/services/active-workout-persistence';
 import {
