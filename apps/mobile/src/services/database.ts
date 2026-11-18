@@ -31,6 +31,8 @@ import type { DailyReadinessCheckIn } from './readiness';
 import {
   ACTIVE_WORKOUT_PROFILE_KEY,
   loadLiveWorkoutSession,
+  inspectLiveWorkoutSlot,
+  clearLiveWorkoutSession,
   persistFirstRoutineNativeCheckpoint,
 } from './active-workout-persistence';
 
@@ -1806,6 +1808,189 @@ export async function getRecordedRoutineNativeWorkoutCheckpoint(
     return readRoutineNativeStartCheckpoint(
       trainingAdjustmentDriver, athleteId, sessionId,
     );
+  });
+}
+
+export type RoutineNativeRecoveryState = {
+  kind: 'not_started' | 'recoverable_missing' | 'already_saved' | 'held' | 'terminal';
+  blockers: string[];
+  checkpoint: RoutineNativeStartCheckpoint | null;
+};
+
+/** Active safety and recovery are checked against the exact original version. */
+async function assessOwnedRoutineSafety(
+  athleteId: string, sessionId: string,
+): Promise<RoutineActiveSafetyResult | null> {
+  await initializeDatabase();
+  const checkpoint = await readRoutineNativeStartCheckpoint(
+    trainingAdjustmentDriver, athleteId, sessionId,
+  );
+  if (!checkpoint) return null;
+  const authorization = await readAuthorizedRoutineWorkout(
+    trainingAdjustmentDriver, athleteId, sessionId,
+  );
+  if (!authorization) throw new Error('Native routine authorization history is missing.');
+  const preview = await readStrengthRevisionPreview(
+    trainingAdjustmentDriver, athleteId, authorization.previewId,
+  );
+  if (!preview) throw new Error('Native routine exercise review history is missing.');
+  const date = localCalendarDate(new Date());
+  return assessRoutineNativeActiveSafety(trainingAdjustmentDriver, {
+    athleteId, sessionId,
+    evidence: preview.evidence.todayLocalDate === date
+      ? preview.evidence : { ...preview.evidence, todayLocalDate: date },
+  });
+}
+
+/**
+ * Local pre-resume observation; not a bearer token.
+ * Does NOT heal, restore, clear or replace the athlete's actual workout.
+ */
+export async function getRoutineNativeRecoveryState(
+  athleteId: string, sessionId: string,
+): Promise<RoutineNativeRecoveryState> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    const assessment = await assessOwnedRoutineSafety(athleteId, sessionId);
+    if (!assessment) return {
+      kind: 'not_started', blockers: [], checkpoint: null,
+    };
+    if (assessment.status === 'terminal') return {
+      kind: 'terminal', blockers: assessment.blockers, checkpoint: assessment.checkpoint,
+    };
+    const slot = await inspectLiveWorkoutSlot(athleteId);
+    const local = slot === 'valid' ? await loadLiveWorkoutSession(athleteId) : null;
+    const expected = assessment.checkpoint!.initialLiveSession;
+    const matching = local?.workout.id === expected.workout.id
+      && local.startedAt === expected.startedAt
+      && local.planLink?.sessionId === sessionId;
+    if (slot === 'unreadable' || (slot === 'valid' && !matching)) {
+      return {
+        kind: 'held',
+        blockers: ['An existing or unreadable player checkpoint must be recovered, not overwritten.'],
+        checkpoint: assessment.checkpoint,
+      };
+    }
+    if (local?.safetyHold) return {
+      kind: 'held', blockers: [local.safetyHold.reason],
+      checkpoint: assessment.checkpoint,
+    };
+    if (assessment.status === 'hold') return {
+      kind: 'held', blockers: assessment.blockers, checkpoint: assessment.checkpoint,
+    };
+    return {
+      kind: matching ? 'already_saved' : 'recoverable_missing',
+      blockers: [], checkpoint: assessment.checkpoint,
+    };
+  });
+}
+
+/**
+ * An athlete can explicitly recover ONLY a still-safe, never-hydrated initial
+ * paused checkpoint. Cannot replay a terminal event or replace progress.
+ * The source SQLite event remains unchanged and all current safety is checked.
+ */
+export async function recoverMissingRoutineNativeWorkout(input: {
+  athleteId: string; sessionId: string; athleteConfirmedRecovery: true;
+}): Promise<RoutineNativeStartCheckpoint> {
+  if (input.athleteConfirmedRecovery !== true) {
+    throw new Error('Recovering a paused workout requires explicit athlete confirmation.');
+  }
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    const assessment = await assessOwnedRoutineSafety(input.athleteId, input.sessionId);
+    if (!assessment || assessment.status !== 'eligible_for_explicit_recovery'
+      || !assessment.checkpoint) {
+      throw new Error('Native start recovery held: ' +
+        (assessment?.blockers.join(' ') || 'No safe original start exists.'));
+    }
+    if (await inspectLiveWorkoutSlot(input.athleteId) !== 'empty') {
+      throw new Error('An earlier player checkpoint exists. No data was replaced.');
+    }
+    await persistFirstRoutineNativeCheckpoint(
+      assessment.checkpoint.initialLiveSession, input.athleteId,
+    );
+    const restored = await loadLiveWorkoutSession(input.athleteId);
+    if (JSON.stringify(restored) !==
+      JSON.stringify(assessment.checkpoint.initialLiveSession)) {
+      throw new Error('Recovered player checkpoint failed exact verification.');
+    }
+    return assessment.checkpoint;
+  });
+}
+
+/**
+ * Recheck the current SQLite safety state every time a guarded routine tries
+ * to resume, and periodically during playback. A static initial consent is
+ * never a permanent permission. Generic non-authorized workouts are distinct.
+ */
+export async function recheckRoutineNativeActiveWorkout(input: {
+  athleteId: string;
+  sessionId: string;
+  startedAt: string;
+  workout: GeneratedWorkout;
+}): Promise<{ kind: 'not_applicable' | 'clear' | 'hold'; blockers: string[] }> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    const assessment = await assessOwnedRoutineSafety(input.athleteId, input.sessionId);
+    if (!assessment) return { kind: 'not_applicable', blockers: [] };
+    const blockers = [...assessment.blockers];
+    const original = assessment.checkpoint?.initialLiveSession;
+    if (!original || assessment.status !== 'eligible_for_explicit_recovery') {
+      if (!blockers.length) blockers.push('Original routine workout cannot currently continue.');
+    }
+    if (original?.startedAt !== input.startedAt
+      || original.workout.id !== input.workout.id
+      || JSON.stringify(original.workout) !== JSON.stringify(input.workout)) {
+      blockers.push('The active workout differs from its athlete-confirmed exact prescription.');
+    }
+    const slot = await inspectLiveWorkoutSlot(input.athleteId);
+    const local = slot === 'valid'
+      ? await loadLiveWorkoutSession(input.athleteId) : null;
+    if (!local || local.startedAt !== input.startedAt
+      || local.workout.id !== input.workout.id
+      || local.planLink?.sessionId !== input.sessionId) {
+      blockers.push('The active athlete-owned recovery checkpoint is missing or mismatched.');
+    }
+    if (local?.safetyHold) blockers.push(local.safetyHold.reason);
+    return {
+      kind: blockers.length ? 'hold' : 'clear',
+      blockers,
+    };
+  });
+}
+
+/**
+ * Record explicit abandonment or canonical completion BEFORE removing a
+ * routine player's recovery checkpoint. A crashed cleanup is retryable; the
+ * append-only terminal event prevents the original seed from being replayed.
+ */
+export async function finalizeAndClearNativeWorkout(input: {
+  athleteId: string; sessionId: string | null;
+  startedAt: string;
+  disposition: 'discarded' | 'completed';
+}): Promise<RoutineNativeTerminalEvent | null> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    let result: RoutineNativeTerminalEvent | null = null;
+    if (input.sessionId) {
+      const prepared = await readRoutineNativeStartCheckpoint(
+        trainingAdjustmentDriver, input.athleteId, input.sessionId,
+      );
+      if (prepared) {
+        if (prepared.initialLiveSession.startedAt !== input.startedAt) {
+          throw new Error('Workout completion or discard does not match the original start.');
+        }
+        result = await finishRoutineNativeStart(trainingAdjustmentDriver, {
+          athleteId: input.athleteId,
+          sessionId: input.sessionId,
+          expectedCheckpointId: prepared.id,
+          terminalId: 'native-terminal-' + new Date().toISOString() +
+            '-' + Math.random().toString(36).slice(2, 12),
+          disposition: input.disposition,
+          athleteConfirmedDiscard: input.disposition === 'discarded',
+        });
+      }
+    }
+    await clearLiveWorkoutSession(input.athleteId);
+    return result;
   });
 }
 
