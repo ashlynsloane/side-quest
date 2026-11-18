@@ -1552,7 +1552,12 @@ describe('actual mobile workout persistence with real disk SQLite', () => {
     }, 'synthetic-athlete-one')).rejects.toThrow(/cannot be resurrected/);
     expect(await store.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
     const distinct = store.createInitialLiveWorkoutSession(
-      workout, '2026-10-21T08:00:00.000Z',
+      workout, '2026-10-21T08:00:00.000Z', {
+        sessionId: 'synthetic-planned-session',
+        sessionDate: '2026-10-21',
+        sessionTitle: 'New synthetic workout',
+        modifiedFromPlan: false,
+      },
     );
     await store.saveLiveWorkoutSession(distinct, 'synthetic-athlete-one');
     expect((await store.loadLiveWorkoutSession('synthetic-athlete-one'))?.startedAt)
