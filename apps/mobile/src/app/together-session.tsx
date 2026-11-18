@@ -123,38 +123,66 @@ export default function TogetherSessionScreen() {
 
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
-  const persist = useCallback(async (fraction: number) => {
-    if (!room || !user || persisted.current) return;
-    persisted.current = true;
-    const completedAt = new Date().toISOString();
+  const persist = useCallback(async (fraction: number): Promise<boolean> => {
+    if (!room || !user || savingRef.current) return false;
+    if (persisted.current) return true;
+    savingRef.current = true;
+    setSaveStatus('saving');
+    setSaveError(null);
+    const completedAt = completedAtRef.current ?? new Date().toISOString();
+    completedAtRef.current = completedAt;
     const substitutesPlan = member?.planRelation === 'substitute_next' && Boolean(member.plannedSessionId);
     const shared = room.workout.sharedContext;
-    await saveCompletedWorkout({
-      workout: room.workout,
-      startedAt: room.startsAt ?? room.createdAt,
-      completedAt,
-      completionFraction: fraction,
-      stationRounds: rounds,
-      plannedSessionId: substitutesPlan ? member?.plannedSessionId : undefined,
-      ledgerSource: 'workout_together',
-      relationToPlan: substitutesPlan ? 'replaced_planned' : 'additional',
-      idempotencyKey: `workout_together:${room.id}:${user.id}`,
-      friendSubstitution: substitutesPlan && member?.plannedSessionId && member.plannedSessionTitle ? {
-        kind: room.selectionMode === 'combined' ? 'combined_friend_workout' : 'friend_workout',
-        roomCode: room.code,
-        sourceUserIds: shared?.sourceUserIds ?? room.selectedCandidateUserIds,
-        sourceDisplayNames: shared?.sourceDisplayNames ?? [],
-        sourceSessionIds: shared?.sourceSessionIds ?? room.selectedSourceSessionIds,
-        originalSessionId: member.plannedSessionId,
-        originalSessionTitle: member.plannedSessionTitle,
-        replacementWorkoutName: room.workoutName,
-      } : undefined,
-    });
-    await markWorkoutRoomMemberComplete(room.id, user.id);
-    if (room.hostUserId === user.id && fraction >= .99) await finishWorkoutRoom(room.id, user.id);
+    try {
+      await withVerifiedAthleteDatabase(user.id, async () => {
+        await saveCompletedWorkout({
+          workout: room.workout,
+          startedAt: room.startsAt ?? room.createdAt,
+          completedAt,
+          completionFraction: fraction,
+          stationRounds: rounds,
+          plannedSessionId: substitutesPlan ? member?.plannedSessionId : undefined,
+          ledgerSource: 'workout_together',
+          relationToPlan: substitutesPlan ? 'replaced_planned' : 'additional',
+          idempotencyKey: `workout_together:${room.id}:${user.id}`,
+          friendSubstitution: substitutesPlan && member?.plannedSessionId && member.plannedSessionTitle ? {
+            kind: room.selectionMode === 'combined' ? 'combined_friend_workout' : 'friend_workout',
+            roomCode: room.code,
+            sourceUserIds: shared?.sourceUserIds ?? room.selectedCandidateUserIds,
+            sourceDisplayNames: shared?.sourceDisplayNames ?? [],
+            sourceSessionIds: shared?.sourceSessionIds ?? room.selectedSourceSessionIds,
+            originalSessionId: member.plannedSessionId,
+            originalSessionTitle: member.plannedSessionTitle,
+            replacementWorkoutName: room.workoutName,
+          } : undefined,
+        });
+      });
+      // Local canonical SQLite success is distinct from remote room status.
+      persisted.current = true;
+      setSaveStatus('saved');
+      try {
+        await markWorkoutRoomMemberComplete(room.id, user.id);
+        if (room.hostUserId === user.id && fraction >= .99) {
+          await finishWorkoutRoom(room.id, user.id);
+        }
+      } catch {
+        setSaveError('Your workout is saved locally, but room status could not synchronize.');
+      }
+      return true;
+    } catch (cause) {
+      // A failed canonical write must never be displayed as a saved workout,
+      // nor permanently suppress another explicit retry of the same identity.
+      setSaveStatus('error');
+      setSaveError(cause instanceof Error ? cause.message
+        : 'Shared workout could not be saved. Retry before leaving.');
+      return false;
+    } finally { savingRef.current = false; }
   }, [room, user, member, rounds]);
 
-  useEffect(() => { if (state?.kind === 'complete') void persist(1); }, [state?.kind, persist]);
+  useEffect(() => {
+    if (state?.kind === 'complete' && safetyStatus === 'clear'
+      && !safetyHeldRef.current) void persist(1);
+  }, [state?.kind, safetyStatus, persist]);
 
   function changeRounds(delta: number) {
     if (!station) return;
@@ -165,7 +193,9 @@ export default function TogetherSessionScreen() {
     const fraction = Math.max(0, Math.min(1, state.elapsed / room.workout.estimatedElapsedSeconds));
     Alert.alert('Leave your shared workout?', 'This will not pause the other phones. Your completed portion can still be saved.', [
       { text: 'Stay', style: 'cancel' },
-      { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => { await persist(fraction); router.replace('/(tabs)/train' as Href); })() },
+      { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => {
+        if (await persist(fraction)) router.replace('/(tabs)/train' as Href);
+      })() },
     ]);
   }
 
