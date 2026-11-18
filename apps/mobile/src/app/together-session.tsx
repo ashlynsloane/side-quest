@@ -1,4 +1,6 @@
 import type { Exercise, GeneratedWorkout, WorkoutStation } from '@circuit/domain';
+import { DeferredWorkoutTogetherScreen } from '@/components/milestone-one-deferred-workout-together';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -31,6 +33,13 @@ type TimelineState =
   | { kind: 'complete'; remaining: 0; stationIndex: number; elapsed: number };
 
 export default function TogetherSessionScreen() {
+  if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) {
+    return <DeferredWorkoutTogetherScreen />;
+  }
+  return <TogetherSessionExperience />;
+}
+
+function TogetherSessionExperience() {
   useKeepAwake();
   const { code: rawCode } = useLocalSearchParams<{ code?: string }>();
   const code = String(rawCode ?? '').toUpperCase();
