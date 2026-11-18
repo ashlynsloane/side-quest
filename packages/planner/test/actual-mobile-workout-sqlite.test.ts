@@ -951,6 +951,68 @@ describe('actual mobile athlete-confirmed routine workout authorization', () => 
   });
 });
 
+describe('legacy generic workout owner-locked paused checkpoint handoff', () => {
+  it('does not save an unauthorized initial checkpoint and never auto-plays when ordinary context is recorded', async () => {
+    const live = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const snapshot = {
+      ...live.createInitialLiveWorkoutSession(workout, startedAt),
+      running: false,
+    };
+    await expect(service.commitAndHydrateGenericWorkout(
+      'synthetic-athlete-one', snapshot,
+    )).rejects.toThrow(/Training safety hold/);
+    expect(await live.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one', intent: 'general_training',
+      expectedLastEventId: null,
+    });
+    await service.commitAndHydrateGenericWorkout('synthetic-athlete-one', snapshot);
+    const stored = await live.loadLiveWorkoutSession('synthetic-athlete-one');
+    expect(stored).toEqual(snapshot);
+    expect(stored?.running).toBe(false);
+    expect(() => live.assertCanStartLiveWorkout('synthetic-athlete-one'))
+      .toThrow(/already saved/);
+    await expect(service.commitAndHydrateGenericWorkout(
+      'synthetic-athlete-one',
+      { ...snapshot, startedAt: '2026-10-20T13:00:00.000Z' },
+    )).rejects.toThrow(/already saved/);
+    expect(await live.loadLiveWorkoutSession('synthetic-athlete-one'))
+      .toEqual(snapshot);
+    const context = await service.getAthleteTrainingSafetyPolicy('synthetic-athlete-one');
+    await service.recordAthleteTrainingSafetyContext({
+      athleteId: 'synthetic-athlete-one',
+      protectedMovement: 'shoulder_loading',
+      expectedLastEventId: context.context.latestEventId,
+    });
+    expect((await service.recheckRoutineNativeActiveWorkout({
+      athleteId: 'synthetic-athlete-one', sessionId: 'unapproved-generic',
+      startedAt, workout,
+    })).kind).toBe('hold');
+    await live.holdLiveWorkoutForSafety(
+      'synthetic-athlete-one', 'New shoulder loading restriction.',
+    );
+    expect((await live.loadLiveWorkoutSession('synthetic-athlete-one'))?.running)
+      .toBe(false);
+    expect((await live.loadLiveWorkoutSession('synthetic-athlete-one'))?.safetyHold?.reason)
+      .toMatch(/shoulder loading restriction/);
+  });
+
+  it('does not write a paused generic workout to the new owner after profile switching', async () => {
+    const live = await import('../../../apps/mobile/src/services/active-workout-persistence');
+    const original = {
+      ...live.createInitialLiveWorkoutSession(workout, startedAt),
+      running: false,
+    };
+    await service.activateUserDatabase('synthetic-athlete-two');
+    await expect(service.commitAndHydrateGenericWorkout(
+      'synthetic-athlete-one', original,
+    )).rejects.toThrow(/Athlete profile changed/);
+    expect(await live.loadLiveWorkoutSession('synthetic-athlete-one')).toBeNull();
+    expect(await live.loadLiveWorkoutSession('synthetic-athlete-two')).toBeNull();
+  });
+});
+
 describe('legacy generic workout entry cannot bypass known rehabilitation restrictions', () => {
   it('holds unknown context, permits documented ordinary training, then holds durable protected movements', async () => {
     const fresh = await service.inspectGenericWorkoutSafety('synthetic-athlete-one');
