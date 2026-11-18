@@ -604,7 +604,7 @@ export default function ActiveWorkoutScreen() {
 
   async function discardAndExit() {
     try {
-      await clearActiveWorkout();
+      await clearActiveWorkout({ disposition: 'discarded', startedAt: startedAt.current });
       router.replace('/train' as Href);
     } catch (error) {
       Alert.alert('Workout retained for recovery', error instanceof Error
@@ -634,7 +634,7 @@ export default function ActiveWorkoutScreen() {
       setReflectionSaved(true);
     }
     try {
-      await clearActiveWorkout();
+      await clearActiveWorkout({ disposition: 'completed', startedAt: startedAt.current });
       router.replace('/' as Href);
     } catch (error) {
       Alert.alert('Workout retained for recovery', error instanceof Error
@@ -804,7 +804,7 @@ export default function ActiveWorkoutScreen() {
           <RestLogPanel station={currentStation} rounds={restRounds} setRounds={setRestRounds} entries={restEntries} setEntries={setRestEntries} latestLoads={latestLoads} loadUnit={restLoadUnit} onLoadUnitChange={changeRestLoadUnit} styles={styles} tokens={tokens} />
         )}
 
-        {phase === 'rest' ? <><Pressable disabled={!safeToProgress} onPress={() => { void continueAfterRest(true ); } style={styles.primaryButton}><Text style={styles.primaryButtonText}>{isFinalStation ? 'Save and finish workout' : 'Save and start next station'}</Text></Pressable><Pressable disabled={!safeToProgress} onPress={() => { void continueAfterRest(false ); } style={styles.textButton}><Text style={styles.textButtonText}>{isFinalStation ? 'Finish without logging' : 'Continue without logging'}</Text></Pressable></> : null}
+        {phase === 'rest' ? <><Pressable disabled={!safeToProgress} onPress={() => { void continueAfterRest(true); }} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{isFinalStation ? 'Save and finish workout' : 'Save and start next station'}</Text></Pressable><Pressable disabled={!safeToProgress} onPress={() => { void continueAfterRest(false); }} style={styles.textButton}><Text style={styles.textButtonText}>{isFinalStation ? 'Finish without logging' : 'Continue without logging'}</Text></Pressable></> : null}
       </KeyboardSafeScreen>
 
       <ExerciseDemoModal exercise={demoExercise} visible={Boolean(demoExercise)} onClose={() => setDemoExercise(null)} />
