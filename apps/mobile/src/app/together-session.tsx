@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
+import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
 import {
   inspectGenericWorkoutSafety,
   saveCompletedWorkout,
@@ -90,8 +91,8 @@ export default function TogetherSessionScreen() {
       if (!live || safetyHeldRef.current || safetyBusyRef.current) return;
       safetyBusyRef.current = true;
       try {
-        if (activeWorkout) {
-          throw new Error('Another athlete workout is already saved. Recover or finish it first.');
+        if (activeWorkout || await inspectLiveWorkoutSlot(user.id) !== 'empty') {
+          throw new Error('Another saved or unreadable athlete workout checkpoint exists. Recover or finish it before continuing with the shared session.');
         }
         const decision = await inspectGenericWorkoutSafety(user.id);
         if (!live) return;
