@@ -14,6 +14,7 @@ import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-run
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
 import { firstWeekAttemptSeed } from '@/services/first-week-provenance';
+import { inspectPlannedSessionCoherence } from '@/services/first-week-session-alignment';
 import {
   allowedFastStartEquipment, excludedRegionsFromFastStart,
   fastStartCrossTrainingReview, fastStartMovementExclusions, fastStartNeedsSpecificReview,
@@ -264,15 +265,36 @@ async function buildFirstWeek(
   const equipment = allowedFastStartEquipment(
     parseFastStartLocations(params), parsePrimaryFastStartLocation(params), evidence.profiles,
   );
+  const excludedRegions = excludedRegionsFromFastStart(protections.restrictions, protections.areas);
+  const excludedSet = new Set(excludedRegions);
+  // The general generator may tolerate incidental secondary loads. Fast-start
+  // protection is stricter: candidate exercises touching a protected region
+  // must be excluded before generation, not just on the start screen.
+  const safeExercises = excludedSet.size > 0
+    ? exercises.filter((exercise) =>
+      exercise.bodyRegions.every((load) => !excludedSet.has(load.region)))
+    : exercises;
+  if (safeExercises.length === 0) {
+    throw new Error('No exercises satisfy every selected protected-area restriction. Review and refine restrictions; no workouts were saved.');
+  }
   const { recentRegionExposures, previousExerciseIds } = evidence;
   const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: attempt.weekStartDate, availableEquipment: equipment,
-    excludedRegions: excludedRegionsFromFastStart(protections.restrictions, protections.areas),
+    excludedRegions,
     excludedMovementTags: fastStartMovementExclusions(protections.restrictions, protections.areas).tags,
     regionRestrictions: [],
     excludedMovementPatterns: fastStartMovementExclusions(protections.restrictions, protections.areas).patterns,
-    difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises, recentRegionExposures, previousExerciseIds });
+    difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises: safeExercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
+  for (const week of block.weeks) {
+    for (const session of week.sessions) {
+      const alignment = inspectPlannedSessionCoherence(session.workout, session);
+      if (!alignment.ok) {
+        throw new Error('First-week safety review: ' + alignment.message
+          + ' No incompatible strength session was saved.');
+      }
+    }
+  }
   return { goal, block };
 }
 
