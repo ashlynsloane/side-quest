@@ -354,6 +354,15 @@ export default function GoalPlanScreen() {
         setError(`A ${planLength}-week plan would extend beyond the event. Choose a shorter plan or a later event date.`);
         return;
       }
+      if (disciplines.length > 0 && !capacity.enduranceHoursEvidence) {
+        setError('Current swim, bike and run hours are unknown. Enter your actual current weekly endurance time (including 0 if applicable) before creating a sport-specific plan. Available hours are not an observed baseline.');
+        return;
+      }
+      if (disciplines.includes('run') && capacity.runStatus !== 'not_running'
+        && (!capacity.runMileageEvidence || capacity.runMileageEvidence === 'unknown')) {
+        setError('Recent running mileage is unknown. Open Advanced athlete context and report your actual highest weekly mileage (including 0 if applicable) before planning a running event.');
+        return;
+      }
       if (equipment.length === 0) {
         setError('Choose at least one equipment option or Bodyweight only.');
         return;
