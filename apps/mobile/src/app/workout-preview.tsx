@@ -250,7 +250,7 @@ export default function WorkoutPreviewScreen() {
           </View>
         </V23Card>
 
-        {!plannedSessionCoherence.ok ? <V23Card tone="warm">
+        {!plannedSessionCoherence.ok ? <V23Card tone="muted">
           <Text style={styles.overviewTitle}>Planned workout needs review</Text>
           <Text style={styles.overviewBody}>{plannedSessionCoherence.message}</Text>
           <Text style={styles.overviewBody}>No workout will be started until the focus and protected-area conflicts are resolved.</Text>
