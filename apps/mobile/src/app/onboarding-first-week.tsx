@@ -1,4 +1,4 @@
-import type { BodyRegion, EnduranceDiscipline, EnduranceSchedule, EquipmentId, PerformanceGoal, PerformanceGoalType, TrainingBlockPlan, Weekday } from '@circuit/domain';
+import type { EnduranceDiscipline, EnduranceSchedule, PerformanceGoal, PerformanceGoalType, TrainingBlockPlan, Weekday } from '@circuit/domain';
 import { addLocalCalendarDays, buildFirstWeekTrainingSummary, generateTrainingBlock, nextLocalMonday, recommendStrengthDose, type AthleteCapacityProfile } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import Constants from 'expo-constants';
@@ -14,10 +14,21 @@ import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-run
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
 import { firstWeekAttemptSeed } from '@/services/first-week-provenance';
+import {
+  allowedFastStartEquipment, excludedRegionsFromFastStart,
+  fastStartCrossTrainingReview, fastStartMovementExclusions, fastStartNeedsSpecificReview,
+  normalizeCrossTrainingModes, normalizeFastStartLocations,
+  normalizeFastStartRestrictions, normalizeProtectedAreas,
+  type FastStartLocation, type FastStartRestriction,
+} from '@/services/first-week-input-policy';
 import { firstWeekPriorityForGoal } from '@/services/first-week-goal-policy';
 import { isSyntheticNativeGenerationRace, holdSyntheticFirstWeekBeforePersistence } from '@/services/native-qa-generation-race';
 
-type Params = { goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; background?: string; runStatus?: string; injury?: string; strength?: string };
+type Params = { goal?: string; priority?: string; hours?: string; days?: string;
+  equipment?: string; equipmentLocations?: string;
+  restriction?: string; restrictions?: string; protectedAreas?: string;
+  desiredModes?: string; background?: string; runStatus?: string; injury?: string;
+  strength?: string; };
 type BuildState = 'building' | 'ready' | 'error';
 
 const WEEKDAYS: Weekday[] = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
@@ -176,8 +187,20 @@ export default function OnboardingFirstWeekScreen() {
           </View>) : <Text style={styles.sessionMeta}>No scheduled workout</Text>}
       </View>
     </View>)}</Surface>
+    {parseDesiredModes(params).length > 0 ? <Surface style={styles.noteCard}>
+      <Text style={styles.sectionLabel}>CARDIO & CROSS-TRAINING REQUESTS</Text>
+      {fastStartCrossTrainingReview(parseDesiredModes(params)).map((entry) =>
+        <Text key={entry.mode} style={styles.body}>{entry.label}: not yet scheduled — review recent dose and movement eligibility</Text>)}
+      <Text style={styles.body}>These are athlete-selected interests, not approved activities or invented training sessions. Return to plan editing to review actual readiness and scheduling.</Text>
+    </Surface> : <Surface style={styles.noteCard}>
+      <Text style={styles.sectionLabel}>CARDIO & CROSS-TRAINING</Text>
+      <Text style={styles.body}>No additional sports were selected during setup. You can add swimming, cycling, running, elliptical or arc trainer after reviewing restrictions and recent training.</Text>
+    </Surface>}
     {enduranceWarning ? <Surface style={styles.errorCard}><Text style={styles.errorTitle}>Endurance calendar needs review</Text><Text style={styles.body}>{enduranceWarning}</Text><Text style={styles.body}>Your strength block was saved. The Week screen can retry the wider plan.</Text></Surface> : null}
-    <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{params.restriction && params.restriction !== 'none' ? <Text style={styles.body}>A reported limitation still requires review of specific exercises and clinical restrictions before training.</Text> : null}</View>
+    <View style={styles.noteCard}><Text style={styles.sectionLabel}>WHY THIS STARTING POINT</Text><Text style={styles.body}>{rationaleFor(params)}</Text><Text style={styles.body}>This fast-start questionnaire collected availability, not verified completed training. Endurance allocation is provisional; recent running mileage is unknown. The example strength week is not an approved progression or injury clearance.</Text>{parseFastStartProtections(params).areas.length > 0
+      || parseFastStartProtections(params).restrictions.some((v) => v !== 'none')
+        ? <Text style={styles.body}>Reported protected areas are applied conservatively to the generated strength draft. These exclusions do not establish clinical clearance.</Text>
+        : null}</View>
     <Pressable testID="sidequest-qa-review-first-week" accessibilityRole="button" onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
     <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
@@ -190,6 +213,10 @@ async function buildFirstWeek(
   athleteId: string,
 ): Promise<{ goal: PerformanceGoal; block: TrainingBlockPlan }> {
   const goalType = parseGoal(params.goal);
+  const protections = parseFastStartProtections(params);
+  if (fastStartNeedsSpecificReview(protections.restrictions)) {
+    throw new Error('Unmapped injury/protection concern requires an explicit restriction review before planning.');
+  }
   const totalHours = clamp(Number(params.hours) || 10, 3, 25);
   const capacity = buildCapacity(params, totalHours);
   const weeksUntilEvent = goalType === 'general_offseason' ? 0 : 12;
@@ -211,6 +238,13 @@ async function buildFirstWeek(
     sessionsPerWeek,
     defaultSessionMinutes: recommendation.sessionMinutes,
     capacityProfile: capacity,
+    firstWeekSetup: {
+      availableLocations: parseFastStartLocations(params),
+      selectedLocation: parsePrimaryFastStartLocation(params),
+      protectedAreas: protections.areas,
+      cardioInterests: parseDesiredModes(params),
+      cardioDoseStatus: 'requires_review',
+    },
     phaseStrengthSessions: recommendation.phaseSchedule,
     strengthDoseMetadata: { minutesPerWeek: sessionsPerWeek * recommendation.sessionMinutes, minimumEffectiveMinutes: recommendation.minimumEffectiveMinutes, maximumRecommendedMinutes: recommendation.maximumRecommendedMinutes, maxHighLoadStrengthDays: recommendation.maxHighLoadStrengthDays, maxTotalHardDays: recommendation.maxTotalHardDays, sessionRoles: recommendation.sessionRoles.slice(0, sessionsPerWeek) },
     createdAt: now,
@@ -227,9 +261,16 @@ async function buildFirstWeek(
     ]);
     return { profiles, recentRegionExposures, previousExerciseIds };
   });
-  const equipment = equipmentFor(params.equipment, evidence.profiles);
+  const equipment = allowedFastStartEquipment(
+    parseFastStartLocations(params), parsePrimaryFastStartLocation(params), evidence.profiles,
+  );
   const { recentRegionExposures, previousExerciseIds } = evidence;
-  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: attempt.weekStartDate, availableEquipment: equipment, excludedRegions: excludedRegionsFor(params.restriction), excludedMovementTags: [], regionRestrictions: [], excludedMovementPatterns: [], difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises, recentRegionExposures, previousExerciseIds });
+  const result = generateTrainingBlock({ goal, numberOfWeeks: 4, weekStartDate: attempt.weekStartDate, availableEquipment: equipment,
+    excludedRegions: excludedRegionsFromFastStart(protections.restrictions, protections.areas),
+    excludedMovementTags: fastStartMovementExclusions(protections.restrictions, protections.areas).tags,
+    regionRestrictions: [],
+    excludedMovementPatterns: fastStartMovementExclusions(protections.restrictions, protections.areas).patterns,
+    difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
   return { goal, block };
@@ -286,8 +327,32 @@ function buildCapacity(params: Params, totalHours: number): AthleteCapacityProfi
   };
 }
 
-function equipmentFor(value: string | undefined, profiles: Awaited<ReturnType<typeof ensureDefaultEquipmentProfiles>>): EquipmentId[] { if (value === 'bodyweight') return ['bodyweight']; const kind = value === 'full_gym' ? 'full_gym' : value === 'travel' ? 'travel' : 'home'; return profiles.find((profile) => profile.kind === kind)?.equipment ?? profiles.find((profile) => profile.isDefault)?.equipment ?? ['bodyweight']; }
-function excludedRegionsFor(value: string | undefined): BodyRegion[] { if (value === 'lower_body') return ['quadriceps','hamstrings','glutes','gastrocnemius','soleus','feet_ankles']; if (value === 'upper_body') return ['chest','shoulders','upper_back','lats','biceps','triceps']; if (value === 'back') return ['lower_back','core_rotation']; return []; }
+function parsePrimaryFastStartLocation(params: Params): FastStartLocation {
+  const value = params.equipment;
+  return value === 'full_gym' || value === 'travel' || value === 'bodyweight'
+    ? value : 'home';
+}
+function parseFastStartLocations(params: Params): FastStartLocation[] {
+  return normalizeFastStartLocations(params.equipmentLocations?.split(','),
+    parsePrimaryFastStartLocation(params));
+}
+function parseFastStartProtections(params: Params) {
+  const legacy = params.restriction;
+  const fallback: FastStartRestriction =
+    legacy === 'upper_body' || legacy === 'lower_body' || legacy === 'back' || legacy === 'other'
+      ? legacy : 'none';
+  let areas: unknown = [];
+  try { areas = params.protectedAreas ? JSON.parse(params.protectedAreas) : []; } catch {
+    throw new Error('Protected body-area details could not be read. Review your choices before generating.');
+  }
+  return {
+    restrictions: normalizeFastStartRestrictions(params.restrictions?.split(','), fallback),
+    areas: normalizeProtectedAreas(areas),
+  };
+}
+function parseDesiredModes(params: Params) {
+  return normalizeCrossTrainingModes(params.desiredModes?.split(','));
+}
 function parseDays(value: string | undefined): Weekday[] { const values = (value ?? '1,3,5').split(',').map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < 7).map((index) => WEEKDAYS[index]); return [...new Set(values)].length >= 2 ? [...new Set(values)] : ['tuesday','thursday','saturday']; }
 function parseGoal(value: string | undefined): PerformanceGoalType { return value === 'triathlon_olympic' || value === 'road_half_marathon' || value === 'road_marathon' || value === 'trail_50k' || value === 'general_offseason' ? value : 'ironman_70_3'; }
 function parsePriority(value: string | undefined): PerformanceGoal['priority'] { return value === 'finish' || value === 'race' ? value : 'perform'; }
