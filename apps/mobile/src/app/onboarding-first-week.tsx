@@ -14,6 +14,7 @@ import { refreshLatestWholeAthletePlan } from '@/services/whole-athlete-plan-run
 import type { TrainingCalendarEvent } from '@circuit/domain';
 import type { AppPalette } from '@/theme';
 import { firstWeekAttemptSeed } from '@/services/first-week-provenance';
+import { firstWeekPriorityForGoal } from '@/services/first-week-goal-policy';
 import { isSyntheticNativeGenerationRace, holdSyntheticFirstWeekBeforePersistence } from '@/services/native-qa-generation-race';
 
 type Params = { goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; background?: string; runStatus?: string; injury?: string; strength?: string };
@@ -206,7 +207,7 @@ async function buildFirstWeek(
     eventDate,
     weeksUntilEvent,
     disciplines: disciplinesFor(goalType),
-    priority: parsePriority(params.priority),
+    priority: firstWeekPriorityForGoal(goalType, parsePriority(params.priority)),
     sessionsPerWeek,
     defaultSessionMinutes: recommendation.sessionMinutes,
     capacityProfile: capacity,
