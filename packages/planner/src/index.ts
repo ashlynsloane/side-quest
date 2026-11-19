@@ -1,5 +1,7 @@
 import type {
   BodyRegion,
+  JointRegion,
+  RegionRestriction,
   EnduranceDiscipline,
   EnduranceSchedule,
   FocusTarget,
