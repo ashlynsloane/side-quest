@@ -1,4 +1,4 @@
-import type { BodyRegion, EquipmentId } from '@circuit/domain';
+import type { AvoidanceTag, BodyRegion, EquipmentId, MovementPattern } from '@circuit/domain';
 
 export type FastStartLocation = 'home' | 'full_gym' | 'travel' | 'bodyweight';
 export type FastStartRestriction = 'none' | 'lower_body' | 'upper_body' | 'back' | 'other';
@@ -130,6 +130,22 @@ export function excludedRegionsFromFastStart(
     ...protectedAreas.flatMap((item) => AREA_REGIONS[item.area]),
   ])];
 }
+export function fastStartMovementExclusions(
+  restrictions: FastStartRestriction[],
+  protectedAreas: ProtectedAreaDetail[],
+): { tags: AvoidanceTag[]; patterns: MovementPattern[] } {
+  const areas = new Set(protectedAreas.map((item) => item.area));
+  const lower = restrictions.includes('lower_body');
+  const back = restrictions.includes('back');
+  const footOrCalf = areas.has('achilles_calf') || areas.has('foot_ankle');
+  return {
+    tags: [...(lower || footOrCalf ? ['jumping', 'high_impact'] as AvoidanceTag[] : []),
+      ...(back ? ['rotation', 'spinal_flexion'] as AvoidanceTag[] : [])],
+    patterns: [...(lower || footOrCalf ? ['jump_hop'] as MovementPattern[] : []),
+      ...(back ? ['rotation', 'trunk_flexion'] as MovementPattern[] : [])],
+  };
+}
+
 export function fastStartNeedsSpecificReview(
   restrictions: FastStartRestriction[],
 ): boolean {
