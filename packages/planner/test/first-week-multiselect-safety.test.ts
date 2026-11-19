@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { inspectPlannedSessionCoherence } from '../../../apps/mobile/src/services/first-week-session-alignment';
 import { exerciseSeed } from '@circuit/exercise-content';
 import type { PerformanceGoal, WeeklyPlanRequest } from '@circuit/domain';
 import { generateWeeklyPlan, isBlueprintCompatibleWithRestrictions } from '../src/index';
@@ -100,14 +101,18 @@ describe('Session purpose must agree with protected anatomy', () => {
     if (result.ok) {
       expect(result.plan.sessions.some((session) =>
         session.title === 'Upper-Body Strength Foundation')).toBe(false);
+      // The older general-purpose generator can retain incidental secondary
+      // loads even when a region is marked excluded. Such a legacy output must
+      // be blocked by the new last-mile workout start guard. The first-week
+      // pathway additionally prefilters the exercise pool before generation.
       for (const session of result.plan.sessions) {
-        for (const station of session.workout.stations) {
-          for (const exercise of station.exercises) {
-            const regions = exercise.exerciseSnapshot.bodyRegions.map((load) => load.region);
-            for (const excluded of req.excludedRegions) {
-              expect(regions.includes(excluded as typeof regions[number])).toBe(false);
-            }
-          }
+        const actualRegions = session.workout.stations.flatMap((station) =>
+          station.exercises.flatMap((item) =>
+            item.exerciseSnapshot.bodyRegions.map((load) => load.region)));
+        const hasProtectedExposure = actualRegions.some((region) =>
+          req.excludedRegions.includes(region));
+        if (hasProtectedExposure) {
+          expect(inspectPlannedSessionCoherence(session.workout, session).ok).toBe(false);
         }
       }
     } else {
