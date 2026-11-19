@@ -6,6 +6,9 @@ import { useOnboarding } from '@/state/onboarding-context';
 import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 import { type AppPalette } from '@/theme';
+import {
+  firstWeekGoalReviewLabel, firstWeekPriorityForGoal, firstWeekUsesRacePriority,
+} from '@/services/first-week-goal-policy';
 
 type Step = 'welcome' | 'goal' | 'schedule' | 'equipment' | 'restrictions' | 'profile' | 'review';
 type GoalChoice = 'ironman_70_3' | 'triathlon_olympic' | 'road_half_marathon' | 'road_marathon' | 'trail_50k' | 'general_offseason';
@@ -81,7 +84,7 @@ export default function OnboardingScreen() {
       router.replace({
         pathname: '/onboarding-first-week',
         params: {
-          goal, priority, hours: String(hours), days: days.join(','),
+          goal, priority: firstWeekPriorityForGoal(goal, priority), hours: String(hours), days: days.join(','),
           equipment, restriction, background, runStatus, injury, strength,
         },
       } as Href);
@@ -111,11 +114,11 @@ export default function OnboardingScreen() {
 }
 
 function Welcome({ styles }: { styles: ReturnType<typeof makeStyles> }) {
-  return <Surface style={styles.hero}><Text style={styles.kicker}>FAST START + ATHLETE CONTEXT</Text><Text style={styles.heroTitle}>Build a useful first week without flattening your training history.</Text><View style={styles.promiseList}>{['Goal, priority, and real availability', 'Equipment and current restrictions', 'Sport background and run status', 'Injury patterns that should change progression'].map((item, index) => <View key={item} style={styles.promiseRow}><View style={styles.number}><Text style={styles.numberText}>{index + 1}</Text></View><Text style={styles.promiseText}>{item}</Text></View>)}</View><Text style={styles.note}>This creates a conservative first draft. Connected training history makes later recommendations more precise.</Text></Surface>;
+  return <Surface style={styles.hero}><Text style={styles.kicker}>FAST START + ATHLETE CONTEXT</Text><Text style={styles.heroTitle}>Build a useful first week without flattening your training history.</Text><View style={styles.promiseList}>{['Goal and real availability', 'Equipment and current restrictions', 'Sport background and run status', 'Injury patterns that should change progression'].map((item, index) => <View key={item} style={styles.promiseRow}><View style={styles.number}><Text style={styles.numberText}>{index + 1}</Text></View><Text style={styles.promiseText}>{item}</Text></View>)}</View><Text style={styles.note}>This creates a conservative first draft. Connected training history makes later recommendations more precise.</Text></Surface>;
 }
 
 function GoalStep({ goal, priority, setGoal, setPriority, styles }: { goal: GoalChoice; priority: PriorityChoice; setGoal: (v: GoalChoice) => void; setPriority: (v: PriorityChoice) => void; styles: ReturnType<typeof makeStyles> }) {
-  return <><Text style={styles.sectionLabel}>WHAT ARE YOU TRAINING FOR?</Text><View style={styles.choiceGrid}>{GOALS.map((item) => <Choice key={item.id} selected={goal === item.id} title={item.label} detail={item.detail} onPress={() => setGoal(item.id)} styles={styles} />)}</View><Text style={styles.sectionLabel}>RACE PRIORITY</Text><View style={styles.segmentRow}>{([['finish','C · Finish well'],['perform','B · Perform'],['race','A · Race all-out']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setPriority(id)} style={[styles.segment, priority === id && styles.segmentActive]}><Text style={[styles.segmentText, priority === id && styles.segmentTextActive]}>{label}</Text></Pressable>)}</View></>;
+  return <><Text style={styles.sectionLabel}>WHAT ARE YOU TRAINING FOR?</Text><View style={styles.choiceGrid}>{GOALS.map((item) => <Choice key={item.id} selected={goal === item.id} title={item.label} detail={item.detail} onPress={() => { setGoal(item.id); if (!firstWeekUsesRacePriority(item.id)) setPriority('perform'); }} styles={styles} />)}</View>{firstWeekUsesRacePriority(goal) ? <><Text style={styles.sectionLabel}>RACE PRIORITY</Text><View style={styles.segmentRow}>{([['finish','C · Finish well'],['perform','B · Perform'],['race','A · Race all-out']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setPriority(id)} style={[styles.segment, priority === id && styles.segmentActive]}><Text style={[styles.segmentText, priority === id && styles.segmentTextActive]}>{label}</Text></Pressable>)}</View></> : null}</>;
 }
 
 function ScheduleStep({ hours, setHours, days, toggleDay, styles }: { hours: number; setHours: (v: number) => void; days: number[]; toggleDay: (v: number) => void; styles: ReturnType<typeof makeStyles> }) {
@@ -149,7 +152,7 @@ function CompactChoiceGroup<T extends string>({ title, value, setValue, options,
 function Review({ goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength, styles }: { goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[]; equipment: EquipmentChoice; restriction: RestrictionChoice; background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice; strength: StrengthChoice; styles: ReturnType<typeof makeStyles> }) {
   const goalLabel = GOALS.find((item) => item.id === goal)?.label ?? goal;
   const rows = [
-    ['Goal', `${goalLabel} · ${priority === 'race' ? 'A' : priority === 'perform' ? 'B' : 'C'} priority`],
+    ['Goal', firstWeekGoalReviewLabel(goal, goalLabel, priority)],
     ['Capacity', `${hours} hr/week · ${days.map((d) => DAYS[d]).join(' · ')}`],
     ['Setup', `${labelize(equipment)} · ${restriction === 'none' ? 'No restriction selected' : labelize(restriction)}`],
     ['Athlete profile', `${labelize(background)} background · ${labelize(runStatus)}`],
@@ -162,7 +165,7 @@ function Choice({ selected, title, detail, onPress, styles }: { selected: boolea
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.choice, selected && styles.choiceActive, pressed && styles.pressed]}><View style={[styles.radio, selected && styles.radioActive]}>{selected ? <Text style={styles.radioCheck}>✓</Text> : null}</View><View style={{ flex: 1 }}><Text style={styles.choiceTitle}>{title}</Text><Text style={styles.choiceDetail}>{detail}</Text></View></Pressable>;
 }
 function titleFor(step: Step) { return ({ welcome:'Build your first week.', goal:'Choose the goal.', schedule:'Use the time you actually have.', equipment:'What is available now?', restrictions:'Anything to protect?', profile:'How do you respond to training?', review:'Ready to build.' } as const)[step]; }
-function subtitleFor(step: Step) { return ({ welcome:'A fast start with one layer of athlete context.', goal:'The goal and priority shape the strength dose.', schedule:'Availability is a constraint, not a test.', equipment:'Start broad. Exact loads can come later.', restrictions:'Keep unrelated training available whenever possible.', profile:'Enough nuance to avoid treating every endurance athlete the same.', review:'The next screen is the generated first-week preview.' } as const)[step]; }
+function subtitleFor(step: Step) { return ({ welcome:'A fast start with one layer of athlete context.', goal:'Choose your objective; race priority is optional for competition goals.', schedule:'Availability is a constraint, not a test.', equipment:'Start broad. Exact loads can come later.', restrictions:'Keep unrelated training available whenever possible.', profile:'Enough nuance to avoid treating every endurance athlete the same.', review:'The next screen is the generated first-week preview.' } as const)[step]; }
 function labelize(value: string) { return value.replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
 
 function makeStyles(palette: AppPalette) { return StyleSheet.create({
