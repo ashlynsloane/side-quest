@@ -6,7 +6,7 @@ import type {
   TrainingCalendarSource,
   TrainingCheckIn,
 } from '@circuit/domain';
-import { normalizeCalendarEvent, normalizeStrengthSession } from '@circuit/planner';
+import { normalizeCalendarEvent, normalizeStrengthSession, unverifiedEnduranceDisciplines } from '@circuit/planner';
 import {
   buildWholeAthleteWeek,
   type DisciplineBaseline,
@@ -81,8 +81,7 @@ export async function generateAndPersistWholeAthleteBlock(
   // A goal or available time is not evidence of a tolerated session dose.
   // Do not emit synthetic default-duration swim/bike/run sessions without a
   // discipline-specific recorded baseline. Existing strength sessions remain.
-  const unverifiedDisciplines = (['swim', 'bike', 'run'] as const).filter((discipline) =>
-    !input.goal.disciplines.includes(discipline) || !baselines[discipline]);
+  const unverifiedDisciplines = unverifiedEnduranceDisciplines(input.goal.disciplines, baselines);
   const frequencyTargets = Object.fromEntries(unverifiedDisciplines.map((discipline) =>
     [discipline, { min: 0, preferred: 0, max: 0 }])) as Partial<Record<TrainableDiscipline,
       { min: number; preferred: number; max: number }>>;
