@@ -6,7 +6,7 @@ import type { EnduranceDiscipline } from '@circuit/domain';
 export function unverifiedEnduranceDisciplines(
   selected: EnduranceDiscipline[],
   baselines: Partial<Record<EnduranceDiscipline, {
-    sessionsPerWeek: number; minutesPerWeek: number; longestSessionMinutes: number;
+    sessionsPerWeek: number; minutesPerWeek: number; longestSessionMinutes?: number;
   }>>,
 ): EnduranceDiscipline[] {
   return (['swim', 'bike', 'run'] as const).filter((discipline) => {
@@ -15,6 +15,6 @@ export function unverifiedEnduranceDisciplines(
     return !baseline
       || !Number.isFinite(baseline.sessionsPerWeek) || baseline.sessionsPerWeek <= 0
       || !Number.isFinite(baseline.minutesPerWeek) || baseline.minutesPerWeek <= 0
-      || !Number.isFinite(baseline.longestSessionMinutes) || baseline.longestSessionMinutes <= 0;
+      || !Number.isFinite(baseline.longestSessionMinutes) || (baseline.longestSessionMinutes ?? 0) <= 0;
   });
 }
