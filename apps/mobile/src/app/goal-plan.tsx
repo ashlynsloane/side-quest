@@ -232,6 +232,7 @@ export default function GoalPlanScreen() {
   const [planLength, setPlanLength] = useState<TrainingBlockLength>(4);
   const [equipment, setEquipment] = useState<EquipmentId[]>(DEFAULT_EQUIPMENT);
   const [equipmentProfiles, setEquipmentProfiles] = useState<EquipmentProfile[]>([]);
+  const [savedFirstWeekSetup, setSavedFirstWeekSetup] = useState<PerformanceGoal['firstWeekSetup']>();
   const [selectedEquipmentProfileId, setSelectedEquipmentProfileId] = useState<string | null>(null);
   const [preferredStrengthDays, setPreferredStrengthDays] = useState<Weekday[]>(() => parsePreferredDays(onboardingParams.days));
   const [enduranceSchedule, setEnduranceSchedule] = useState<EnduranceSchedule>({
@@ -273,6 +274,7 @@ export default function GoalPlanScreen() {
       ensureDefaultEquipmentProfiles(),
     ]).then(([goal, savedBlock, savedPTProfile, savedCheckIn, savedCalendarEvents, savedEquipmentProfiles]) => {
       if (cancelled) return;
+      if (goal?.firstWeekSetup) setSavedFirstWeekSetup(goal.firstWeekSetup);
       if (goal && !fromOnboarding) {
         setGoalType(goal.type);
         setEventDateText(goal.eventDate ?? dateFromWeeks(goal.weeksUntilEvent));
@@ -391,6 +393,7 @@ export default function GoalPlanScreen() {
         sessionsPerWeek: strengthRecommendation.sessionsPerWeek,
         defaultSessionMinutes: strengthRecommendation.sessionMinutes,
         capacityProfile: capacity,
+        firstWeekSetup: savedFirstWeekSetup,
         phaseStrengthSessions: strengthRecommendation.phaseSchedule,
         strengthDoseMetadata: {
           minutesPerWeek: strengthRecommendation.minutesPerWeek,
@@ -669,6 +672,12 @@ export default function GoalPlanScreen() {
         </Section>
 
         <Section title="Training location">
+          {savedFirstWeekSetup?.availableLocations.length ? <Text style={styles.helper}>
+            Available locations reported at setup: {savedFirstWeekSetup.availableLocations
+              .map((venue) => venue === 'full_gym' ? 'Full gym'
+                : venue === 'home' ? 'Home' : venue === 'travel' ? 'Travel' : 'Bodyweight')
+              .join(' + ')}. Choose one actual venue for this plan; equipment cannot be borrowed from a second location.
+          </Text> : null}
           <Text style={styles.helper}>Select a saved Home, Work, Full Gym, or Travel setup. You can temporarily change individual items below.</Text>
           <View style={styles.chipRow}>
             {equipmentProfiles.map((profile) => <Chip key={profile.id} label={profile.name} selected={selectedEquipmentProfileId === profile.id} onPress={() => { setSelectedEquipmentProfileId(profile.id); setEquipment(profile.equipment); }} />)}
