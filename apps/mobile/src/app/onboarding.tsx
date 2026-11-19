@@ -188,14 +188,87 @@ function ScheduleStep({ hours, setHours, days, toggleDay, styles }: { hours: num
   return <><Surface style={styles.focusCard}><Text style={styles.bigNumber}>{hours}</Text><Text style={styles.bigUnit}>total training hours available each week</Text><View style={styles.stepper}><Pressable onPress={() => setHours(Math.max(3, hours - 1))} style={styles.stepperButton}><Text style={styles.stepperText}>−</Text></Pressable><Pressable onPress={() => setHours(Math.min(25, hours + 1))} style={styles.stepperButton}><Text style={styles.stepperText}>+</Text></Pressable></View></Surface><Text style={styles.sectionLabel}>DAYS STRENGTH COULD FIT</Text><View style={styles.dayRow}>{DAYS.map((label,index) => <Pressable key={`${label}-${index}`} onPress={() => toggleDay(index)} style={[styles.day, days.includes(index) && styles.dayActive]}><Text style={[styles.dayText, days.includes(index) && styles.dayTextActive]}>{label}</Text></Pressable>)}</View><Text style={styles.helper}>Choose at least two realistic options. Side Quest may schedule fewer sessions than the number of days you select.</Text></>;
 }
 
-function EquipmentStep({ value, setValue, styles }: { value: EquipmentChoice; setValue: (v: EquipmentChoice) => void; styles: ReturnType<typeof makeStyles> }) {
-  const options: Array<[EquipmentChoice,string,string]> = [['home','Home setup','Bodyweight, bands, small tools, and the weights you own.'],['full_gym','Full gym','Free weights, cables, machines, benches, and pull-up options.'],['travel','Hotel / travel','Portable tools and whatever is available temporarily.'],['bodyweight','Bodyweight only','No equipment required.']];
-  return <View style={styles.choiceGrid}>{options.map(([id,title,detail]) => <Choice key={id} selected={value === id} title={title} detail={detail} onPress={() => setValue(id)} styles={styles} />)}<Text style={styles.helper}>Exact weights and individual equipment can be refined after the first draft.</Text></View>;
+function EquipmentStep({ value, setValue, locations, setLocations, styles }: {
+  value: EquipmentChoice; setValue: (v: EquipmentChoice) => void;
+  locations: EquipmentChoice[]; setLocations: (v: EquipmentChoice[]) => void;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  function toggle(id: EquipmentChoice) {
+    const next = toggleFastStartLocation(locations, id);
+    setLocations(next);
+    setValue(fastStartPrimaryLocation(next, value));
+  }
+  return <View style={styles.choiceGrid}>
+    <Text style={styles.helper}>Select all places you can train. Equipment from different locations is never combined into one workout.</Text>
+    {FAST_START_LOCATIONS.map(({ id, title, detail }) =>
+      <Choice key={id} selected={locations.includes(id)} title={title} detail={detail}
+        onPress={() => toggle(id)} styles={styles} />)}
+    {locations.length > 1 ? <View style={styles.profileStack}>
+      <Text style={styles.sectionLabel}>BUILD THIS FIRST WEEK FOR</Text>
+      <Text style={styles.helper}>Choose one venue for this draft. The other locations are kept for future planning.</Text>
+      <View style={styles.chipWrap}>{locations.map((id) => <Pressable key={id} onPress={() => setValue(id)}
+        style={[styles.chip, value === id && styles.chipActive]}>
+        <Text style={[styles.chipText, value === id && styles.chipTextActive]}>
+          {FAST_START_LOCATIONS.find((item) => item.id === id)?.title ?? id}
+        </Text></Pressable>)}</View>
+    </View> : null}
+    <Text style={styles.helper}>Exact equipment at each venue can be refined after the first draft.</Text>
+  </View>;
 }
 
-function RestrictionsStep({ value, setValue, styles }: { value: RestrictionChoice; setValue: (v: RestrictionChoice) => void; styles: ReturnType<typeof makeStyles> }) {
-  const options: Array<[RestrictionChoice,string,string]> = [['none','Nothing to protect today','Build normally and let me add details later.'],['lower_body','Lower body','Use a conservative lower-body and impact filter.'],['upper_body','Upper body','Reduce pressing, pulling, and overhead exposure.'],['back','Back or trunk','Reduce provocative trunk loading.'],['other','Something else','Create the draft, then refine the restriction before training.']];
-  return <View style={styles.choiceGrid}>{options.map(([id,title,detail]) => <Choice key={id} selected={value === id} title={title} detail={detail} onPress={() => setValue(id)} styles={styles} />)}<Text style={styles.note}>This is a temporary planning filter, not a diagnosis or medical clearance.</Text></View>;
+function RestrictionsStep({ restrictions, setRestrictions, areas, setAreas, expanded, setExpanded, styles }: {
+  restrictions: RestrictionChoice[]; setRestrictions: (v: RestrictionChoice[]) => void;
+  areas: ProtectedAreaDetail[]; setAreas: (v: ProtectedAreaDetail[]) => void;
+  expanded: boolean; setExpanded: (v: boolean) => void;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const options: Array<[RestrictionChoice,string,string]> = [
+    ['none','Nothing to protect today','No additional onboarding exclusions.'],
+    ['lower_body','Lower body','Conservatively exclude lower-body loading.'],
+    ['upper_body','Upper body','Conservatively exclude upper-body loading.'],
+    ['back','Back or trunk','Exclude back and trunk-loading regions.'],
+    ['other','Something else / unsure','Requires specifying the limitation before generating a workout.'],
+  ];
+  const selected = new Set(areas.map((item) => item.area));
+  function toggleArea(id: ProtectedArea) {
+    setAreas(selected.has(id) ? areas.filter((item) => item.area !== id)
+      : [...areas, { area: id, side: 'bilateral' }]);
+    if (restrictions.includes('none')) setRestrictions([]);
+  }
+  function updateSide(id: ProtectedArea, side: ProtectedSide) {
+    setAreas(areas.map((item) => item.area === id ? { ...item, side } : item));
+  }
+  return <View style={styles.choiceGrid}>
+    <Text style={styles.helper}>Select all that apply. Exclusions combine conservatively; this is not medical clearance.</Text>
+    {options.map(([id,title,detail]) =>
+      <Choice key={id} selected={restrictions.includes(id)} title={title} detail={detail}
+        onPress={() => {
+          setRestrictions(toggleFastStartRestriction(restrictions, id));
+          if (id === 'none') setAreas([]);
+        }} styles={styles} />)}
+    <Pressable accessibilityRole="button" onPress={() => setExpanded(!expanded)}
+      style={styles.detailsButton}><Text style={styles.detailsButtonText}>
+        {expanded ? 'Hide anatomical detail' : 'Refine specific body areas and side'}
+      </Text></Pressable>
+    {expanded ? <View style={styles.profileStack}>
+      <Text style={styles.sectionLabel}>SPECIFIC AREAS TO PROTECT</Text>
+      {PROTECTED_AREAS.map(({ id, label }) => <View key={id} style={styles.protectedDetail}>
+        <Choice selected={selected.has(id)} title={label} detail="Conservative regional exclusion"
+          onPress={() => toggleArea(id)} styles={styles} />
+        {selected.has(id) ? <View style={styles.chipWrap}>
+          {([['left','Left'],['right','Right'],['bilateral','Both']] as const).map(([side, caption]) =>
+            <Pressable key={side} onPress={() => updateSide(id, side)}
+              style={[styles.chip, areas.find((item) => item.area === id)?.side === side && styles.chipActive]}>
+              <Text style={[styles.chipText,
+                areas.find((item) => item.area === id)?.side === side && styles.chipTextActive]}>{caption}</Text>
+            </Pressable>)}
+        </View> : null}
+      </View>)}
+      <Text style={styles.note}>Side is preserved for review. Until side-aware exercise rules are verified, a selected region is excluded bilaterally. Broad exclusions remain active until deselected.</Text>
+    </View> : null}
+    {restrictions.includes('other') ? <Text style={styles.note}>Unmapped restriction: the first-week build will pause. Select mapped areas or complete a PT/restriction review.</Text> : null}
+    <Text style={styles.note}>Restrictions are planning constraints, not a diagnosis or clinical exercise clearance.</Text>
+  </View>;
 }
 
 function ProfileStep({ background, setBackground, runStatus, setRunStatus, injury, setInjury, strength, setStrength, styles }: { background: BackgroundChoice; setBackground: (v: BackgroundChoice) => void; runStatus: RunStatusChoice; setRunStatus: (v: RunStatusChoice) => void; injury: InjuryChoice; setInjury: (v: InjuryChoice) => void; strength: StrengthChoice; setStrength: (v: StrengthChoice) => void; styles: ReturnType<typeof makeStyles> }) {
@@ -212,16 +285,36 @@ function CompactChoiceGroup<T extends string>({ title, value, setValue, options,
   return <View style={styles.compactGroup}><Text style={styles.sectionLabel}>{title}</Text><View style={styles.chipWrap}>{options.map(([id,label]) => <Pressable key={id} onPress={() => setValue(id)} style={[styles.chip, value === id && styles.chipActive]}><Text style={[styles.chipText, value === id && styles.chipTextActive]}>{label}</Text></Pressable>)}</View></View>;
 }
 
-function Review({ goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength, styles }: { goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[]; equipment: EquipmentChoice; restriction: RestrictionChoice; background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice; strength: StrengthChoice; styles: ReturnType<typeof makeStyles> }) {
+function Review({ goal, priority, hours, days, equipment, locations, restrictions, areas,
+  desiredModes, background, runStatus, injury, strength, styles }: {
+  goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[];
+  equipment: EquipmentChoice; locations: EquipmentChoice[]; restrictions: RestrictionChoice[];
+  areas: ProtectedAreaDetail[]; desiredModes: CrossTrainingMode[];
+  background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice;
+  strength: StrengthChoice; styles: ReturnType<typeof makeStyles>;
+}) {
   const goalLabel = GOALS.find((item) => item.id === goal)?.label ?? goal;
+  const locationLabels = locations.map((id) =>
+    FAST_START_LOCATIONS.find((item) => item.id === id)?.title ?? id);
+  const detailLabels = areas.map((item) =>
+    `${PROTECTED_AREAS.find((area) => area.id === item.area)?.label ?? item.area} (${item.side})`);
   const rows = [
     ['Goal', firstWeekGoalReviewLabel(goal, goalLabel, priority)],
-    ['Capacity', `${hours} hr/week · ${days.map((d) => DAYS[d]).join(' · ')}`],
-    ['Setup', `${labelize(equipment)} · ${restriction === 'none' ? 'No restriction selected' : labelize(restriction)}`],
+    ['Availability', `${hours} hr/week · ${days.map((d) => DAYS[d]).join(' · ')}`],
+    ['Locations', locationLabels.join(' + ') + ` · first draft: ${labelize(equipment)}`],
+    ['Restrictions', [...restrictions.filter((v) => v !== 'none').map(labelize), ...detailLabels].join(' · ') || 'None selected'],
     ['Athlete profile', `${labelize(background)} background · ${labelize(runStatus)}`],
     ['Progression context', `${labelize(injury)} · ${labelize(strength)} strength`],
+    ['Cardio interests', desiredModes.map((id) =>
+      CROSS_TRAINING_MODES.find((mode) => mode.id === id)?.label ?? id).join(' · ') || 'None selected'],
   ];
-  return <><Surface style={styles.reviewCard}>{rows.map(([label,value]) => <View key={label} style={styles.reviewRow}><Text style={styles.reviewLabel}>{label}</Text><Text style={styles.reviewValue}>{value}</Text></View>)}</Surface><View style={styles.payoff}><Text style={styles.kicker}>NEXT</Text><Text style={styles.payoffTitle}>Side Quest will generate the first draft directly.</Text><Text style={styles.helper}>You will see the first week before entering the rest of the app. The full planner remains available as an advanced edit path.</Text></View></>;
+  return <><Surface style={styles.reviewCard}>{rows.map(([label,value]) =>
+    <View key={label} style={styles.reviewRow}><Text style={styles.reviewLabel}>{label}</Text>
+      <Text style={styles.reviewValue}>{value}</Text></View>)}</Surface>
+    <View style={styles.payoff}><Text style={styles.kicker}>NEXT</Text>
+      <Text style={styles.payoffTitle}>Side Quest will generate a provisional first draft.</Text>
+      <Text style={styles.helper}>Cross-training preferences remain unscheduled until recent dose and eligibility are reviewed. You can revise the draft before training; full planning remains available.</Text>
+    </View></>;
 }
 
 function Choice({ selected, title, detail, onPress, styles }: { selected: boolean; title: string; detail: string; onPress: () => void; styles: ReturnType<typeof makeStyles> }) {
@@ -232,6 +325,9 @@ function subtitleFor(step: Step) { return ({ welcome:'A fast start with one laye
 function labelize(value: string) { return value.replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
 
 function makeStyles(palette: AppPalette) { return StyleSheet.create({
+  detailsButton:{borderWidth:1,borderColor:palette.forest,borderRadius:14,padding:11,alignItems:'center'},
+  detailsButtonText:{fontSize:14,fontWeight:'800',color:palette.forest},
+  protectedDetail:{gap:6,paddingVertical:5},
   progressTrack:{height:5,borderRadius:999,backgroundColor:palette.border,overflow:'hidden'}, progressFill:{height:'100%',borderRadius:999,backgroundColor:palette.forest},
   hero:{padding:22,gap:16}, kicker:{fontSize:11,lineHeight:15,fontWeight:'900',letterSpacing:1.4,color:palette.forest}, heroTitle:{fontSize:23,lineHeight:29,fontWeight:'900',color:palette.ink}, promiseList:{gap:12}, promiseRow:{flexDirection:'row',alignItems:'center',gap:12}, number:{width:30,height:30,borderRadius:10,backgroundColor:palette.mint,alignItems:'center',justifyContent:'center'},numberText:{fontWeight:'900',color:palette.forest},promiseText:{fontSize:15.5,fontWeight:'800',color:palette.ink,flex:1},note:{fontSize:13.5,lineHeight:19,color:palette.inkMuted,fontStyle:'italic'},
   sectionLabel:{fontSize:12,lineHeight:16,fontWeight:'900',letterSpacing:1.25,color:palette.forest,marginTop:2}, choiceGrid:{gap:10}, choice:{minHeight:76,borderWidth:1.5,borderColor:palette.border,borderRadius:18,padding:15,flexDirection:'row',alignItems:'center',gap:13,backgroundColor:palette.white},choiceActive:{borderColor:palette.forest,backgroundColor:palette.mint},radio:{width:27,height:27,borderRadius:14,borderWidth:1.5,borderColor:palette.border,alignItems:'center',justifyContent:'center'},radioActive:{backgroundColor:palette.forest,borderColor:palette.forest},radioCheck:{color:palette.white,fontWeight:'900'},choiceTitle:{fontSize:16,lineHeight:20,fontWeight:'900',color:palette.ink},choiceDetail:{fontSize:13,lineHeight:18,color:palette.inkMuted,marginTop:3},
