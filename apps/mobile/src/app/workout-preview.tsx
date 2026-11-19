@@ -21,6 +21,7 @@ import {
   saveFavoriteWorkout,
 } from '@/services/database';
 import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
+import { inspectPlannedSessionCoherence } from '@/services/first-week-session-alignment';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { shareText, workoutText } from '@/services/sharing';
 import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
@@ -79,6 +80,7 @@ export default function WorkoutPreviewScreen() {
   }
 
   const workout = previewWorkout;
+  const plannedSessionCoherence = inspectPlannedSessionCoherence(workout, previewPlannedSession);
   const focusRegions = workout.targetRegions.slice(0, 4).map(formatRegion);
   const equipmentSummary = workout.requiredEquipment.length
     ? workout.requiredEquipment.slice(0, 3).map(formatRegion).join(' · ')
@@ -118,6 +120,10 @@ export default function WorkoutPreviewScreen() {
   );
 
   async function beginAndNavigate() {
+    if (!plannedSessionCoherence.ok) {
+      Alert.alert('Review planned workout', plannedSessionCoherence.message);
+      return;
+    }
     if (startingRef.current) return;
     startingRef.current = true;
     setStarting(true);
@@ -150,6 +156,10 @@ export default function WorkoutPreviewScreen() {
   }
 
   function start() {
+    if (!plannedSessionCoherence.ok) {
+      Alert.alert('Review planned workout', plannedSessionCoherence.message);
+      return;
+    }
     if (startingRef.current) return;
     if (!activeWorkout) {
       beginAndNavigate();
@@ -240,6 +250,11 @@ export default function WorkoutPreviewScreen() {
           </View>
         </V23Card>
 
+        {!plannedSessionCoherence.ok ? <V23Card tone="warm">
+          <Text style={styles.overviewTitle}>Planned workout needs review</Text>
+          <Text style={styles.overviewBody}>{plannedSessionCoherence.message}</Text>
+          <Text style={styles.overviewBody}>No workout will be started until the focus and protected-area conflicts are resolved.</Text>
+        </V23Card> : null}
         {previewExplanation ? <CoachInsights explanation={previewExplanation} /> : null}
 
         {workout.recentLoadAdjustments.length ? <V23Card tone="muted" style={styles.adjustmentCard}>{workout.recentLoadAdjustments.map((item) => <Text key={item} style={styles.adjustment}>• {item}</Text>)}</V23Card> : null}
