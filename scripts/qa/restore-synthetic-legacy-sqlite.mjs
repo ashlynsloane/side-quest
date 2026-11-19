@@ -1,0 +1,157 @@
+// Synthetic SQLite restore/recovery rehearsal ONLY. Not a real-data migration.
+// Require an independently supplied synthetic owner and never overwrite any
+// existing destination or write back into the original snapshot.
+import { backup, DatabaseSync } from 'node:sqlite';
+import { existsSync, linkSync, rmSync, statSync } from 'node:fs';
+import { basename, dirname, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+async function main() {
+  if (process.env.SIDEQUEST_QA_SYNTHETIC_RESTORE !== '1') {
+    throw new Error('Explicit synthetic restore QA authorization required.');
+  }
+  if (process.argv.length !== 4) {
+    throw new Error('Expected synthetic-source.db synthetic-restored.db.');
+  }
+  const expectedOwner = process.env.SIDEQUEST_QA_EXPECTED_OWNER_ID ?? '';
+  if (!/^synthetic-[a-z0-9-]+$/.test(expectedOwner)) {
+    throw new Error('A separate synthetic-only owner proof is required.');
+  }
+  const input = resolve(process.argv[2]);
+  const output = resolve(process.argv[3]);
+  if (input === output || !input.endsWith('.db') || !output.endsWith('.db')) {
+    throw new Error('Distinct .db files are required.');
+  }
+  if (!basename(input).includes('synthetic') || !basename(output).includes('synthetic')) {
+    throw new Error('Refusing filenames that are not explicitly synthetic fixtures.');
+  }
+  if (!existsSync(input) || !statSync(input).isFile()) {
+    throw new Error('Synthetic backup source must already exist.');
+  }
+  if (existsSync(output) || !existsSync(dirname(output))) {
+    throw new Error('Existing or missing output destination; refusing any overwrite.');
+  }
+  const temp = output.slice(0, -3) + '.synthetic-restore-incomplete-' + randomUUID() + '.db';
+  let source;
+  try {
+    source = new DatabaseSync(input, { readOnly: true });
+    const integrity = source.prepare('PRAGMA quick_check').all();
+    if (integrity.length !== 1 || integrity[0].quick_check !== 'ok') {
+      throw new Error('Source integrity could not be verified.');
+    }
+    if (source.prepare('PRAGMA foreign_key_check').all().length !== 0) {
+      throw new Error('Source relational integrity failed.');
+    }
+    const ownerExists = source.prepare(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='sidequest_athlete_database_owner'",
+    ).get()?.n === 1;
+    if (!ownerExists) throw new Error('Synthetic snapshot has no verified owner marker.');
+    const owner = source.prepare(
+      'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton=1',
+    ).get()?.user_id;
+    if (owner !== expectedOwner) {
+      throw new Error('Independently supplied synthetic owner does not match the snapshot.');
+    }
+    // SQLite online backup is safe for a snapshot still using WAL. Opening
+    // and copying via a raw file read risks losing committed WAL records.
+    await backup(source, temp);
+    const restored = new DatabaseSync(temp, { readOnly: true });
+    try {
+      const result = restored.prepare('PRAGMA quick_check').all();
+      if (result.length !== 1 || result[0].quick_check !== 'ok') {
+        throw new Error('Restored database integrity failed.');
+      }
+      if (restored.prepare('PRAGMA foreign_key_check').all().length !== 0) {
+        throw new Error('Restored relational integrity failed.');
+      }
+      const restoredOwner = restored.prepare(
+        'SELECT user_id FROM sidequest_athlete_database_owner WHERE singleton=1',
+      ).get()?.user_id;
+      if (restoredOwner !== expectedOwner) {
+        throw new Error('Restored owner marker changed.');
+      }
+      // Compare every ordinary persisted table, not just the three core
+      // training tables. Otherwise a restore can appear successful while
+      // silently omitting profile, plan or exercise metadata.
+      const tableNames = (database) => database.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      ).all().map((row) => String(row.name));
+      const originalTables = tableNames(source);
+      const copiedTables = tableNames(restored);
+      if (JSON.stringify(originalTables) !== JSON.stringify(copiedTables)) {
+        throw new Error('Restored table inventory differs.');
+      }
+      // SQLite backup also must preserve indexes, views and triggers.
+      const schema = (database) => database.prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+      ).all();
+      if (JSON.stringify(schema(source)) !== JSON.stringify(schema(restored))) {
+        throw new Error('Restored schema objects differ.');
+      }
+      for (const name of originalTables) {
+        const quoted = '"' + name.replaceAll('"', '""') + '"';
+        const originalCount = source.prepare(
+          'SELECT COUNT(*) AS n FROM ' + quoted,
+        ).get()?.n;
+        const restoredCount = restored.prepare(
+          'SELECT COUNT(*) AS n FROM ' + quoted,
+        ).get()?.n;
+        if (originalCount !== restoredCount) {
+          throw new Error('Restored table row counts differ.');
+        }
+        // A matching count is insufficient: compare actual synthetic values,
+        // including BLOB bytes, without ever printing their contents.
+        // This script is deliberately limited to small QA fixtures.
+        const rows = (database) => database.prepare(
+          'SELECT * FROM ' + quoted,
+        ).all().map((row) => JSON.stringify(row)).sort();
+        const originalRows = rows(source);
+        const copiedRows = rows(restored);
+        if (JSON.stringify(originalRows) !== JSON.stringify(copiedRows)) {
+          throw new Error('Restored table contents differ.');
+        }
+      }
+      for (const pragma of ['user_version', 'application_id']) {
+        const sourceValue = source.prepare('PRAGMA ' + pragma).get()?.[pragma];
+        const restoredValue = restored.prepare('PRAGMA ' + pragma).get()?.[pragma];
+        if (sourceValue !== restoredValue) {
+          throw new Error('Restored database metadata differs.');
+        }
+      }
+      // sqlite_sequence is an internal table omitted from the user schema
+      // inventory above, but is essential to preserve AUTOINCREMENT state.
+      const sequencePresent = source.prepare(
+        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'",
+      ).get()?.n === 1;
+      if (sequencePresent) {
+        const seqRows = (database) => database.prepare(
+          'SELECT name, seq FROM sqlite_sequence ORDER BY name',
+        ).all();
+        if (JSON.stringify(seqRows(source)) !== JSON.stringify(seqRows(restored))) {
+          throw new Error('Restored AUTOINCREMENT state differs.');
+        }
+      }
+    } finally {
+      restored.close();
+    }
+    // Atomic no-overwrite publication, including a last-moment race where a
+    // second process creates the destination after the existence precheck.
+    linkSync(temp, output);
+    process.stdout.write(JSON.stringify({
+      mode: 'synthetic_only_restore_rehearsal',
+      ownerVerified: true,
+      integrityOk: true,
+      restoredToNewFile: true,
+      migratedRealAthleteData: false,
+      note: 'Synthetic restore only. Real owner provenance, device migration, and rollback require separate approval.',
+    }) + '\n');
+  } finally {
+    source?.close();
+    if (existsSync(temp)) rmSync(temp, { force: true });
+  }
+}
+main().catch(() => {
+  // No paths, owner values, training records or raw database errors in logs.
+  process.stderr.write('Synthetic restore refused or failed. No existing database overwritten.\n');
+  process.exitCode = 2;
+});

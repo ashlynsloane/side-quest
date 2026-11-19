@@ -1,10 +1,11 @@
-import { buildDailyAdjustmentOptions, normalizeStrengthSession, type AdjustmentReason, type DailyAdjustmentResult } from '@circuit/planner';
+import { addLocalCalendarDays, buildDailyAdjustmentOptions, localCalendarDate, normalizeStrengthSession, type AdjustmentReason, type DailyAdjustmentResult } from '@circuit/planner';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getLatestTrainingBlock } from '@/services/database';
+import { getActiveTrainingCheckIn, getLatestTrainingBlock, getTodayReadinessCheckIn } from '@/services/database';
+import { readinessBand, readinessScore } from '@/services/readiness';
 
 const REASONS: Array<{ id: AdjustmentReason; title: string; detail: string }> = [
   { id: 'fatigue', title: 'I’m too tired', detail: 'Use current fatigue without treating it as a failure.' },
@@ -23,8 +24,12 @@ export default function SessionAdjustmentScreen() {
   const requestAction = useMemo(() => reason === 'time' ? 'shorter' : reason === 'fatigue' ? 'easier' : reason === 'pain' ? 'skip' : 'different', [reason]);
 
   const load = useCallback(() => {
-    void getLatestTrainingBlock().then((saved) => {
-      const today = new Date().toISOString().slice(0, 10);
+    void Promise.all([
+      getLatestTrainingBlock(),
+      getActiveTrainingCheckIn(),
+      getTodayReadinessCheckIn(),
+    ]).then(([saved, activeCheckIn, readiness]) => {
+      const today = localCalendarDate(new Date());
       const sessions = saved?.block.weeks.flatMap((week) => week.sessions) ?? [];
       const planned = sessions.find((session) => session.date === today && session.completionStatus !== 'completed' && session.completionStatus !== 'skipped');
       if (!planned) {
@@ -34,9 +39,12 @@ export default function SessionAdjustmentScreen() {
       setSessionTitle(planned.title);
       const unified = normalizeStrengthSession(planned);
       const week = sessions.filter((session) => Math.abs(new Date(session.date).getTime() - new Date(today).getTime()) <= 6 * 86400000).map(normalizeStrengthSession);
-      const availableDates = Array.from({ length: 6 }, (_, index) => {
-        const date = new Date(); date.setDate(date.getDate() + index + 1); return date.toISOString().slice(0, 10);
-      });
+      const availableDates = Array.from({ length: 6 }, (_, index) =>
+        addLocalCalendarDays(today, index + 1));
+      const activeSymptomRestriction = activeCheckIn?.status === 'tightness_pain'
+        || activeCheckIn?.status === 'unable_to_train';
+      const recoveryHold = readiness != null
+        && readinessBand(readinessScore(readiness)) === 'recover';
       setResult(buildDailyAdjustmentOptions({
         sessionId: unified.id,
         reason,
@@ -50,6 +58,8 @@ export default function SessionAdjustmentScreen() {
         weekSessions: week,
         availableDates,
         recentFatigueTrend: reason === 'fatigue' ? 'stable' : undefined,
+        activeSymptomRestriction,
+        recoveryHold,
       }));
     });
   }, [reason, requestAction]);
@@ -95,7 +105,11 @@ export default function SessionAdjustmentScreen() {
                 {option.weeklyConsequences.map((line) => <Text key={line} style={styles.bullet}>• {line}</Text>)}
               </View>
             ))}
-            <Text style={styles.footer}>Major changes remain proposals until the athlete approves them. Missed work is never automatically compressed into later days.</Text>
+            <Text style={styles.footer}>All options are previews and require explicit athlete approval. This screen does not apply or save a change. Missed work is never automatically compressed into later days.</Text>
+            <Pressable accessibilityRole="button" style={styles.reviewLink}
+              onPress={() => router.push('/strength-review-inbox')}>
+              <Text style={styles.reviewLinkText}>View saved exercise-revision drafts ›</Text>
+            </Pressable>
           </View>
         ) : <Text style={styles.helper}>No adjustable planned strength session was found for today.</Text>}
       </ScrollView>
@@ -113,5 +127,8 @@ const styles = StyleSheet.create({
   reasonList: { gap: 8 }, reasonCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, gap: 3 }, selectedCard: { backgroundColor: colors.soft, borderColor: colors.accent }, reasonTitle: { color: colors.ink, fontSize: 16, fontWeight: '700' },
   sessionCard: { backgroundColor: colors.accent, borderRadius: 18, padding: 17, gap: 4 }, cardEyebrow: { color: '#C7D9CE', fontSize: 10, fontWeight: '800', letterSpacing: 1 }, sessionTitle: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
   optionsSection: { gap: 10 }, sectionTitle: { color: colors.ink, fontSize: 22, fontWeight: '700' }, safety: { color: colors.warning, fontWeight: '700', lineHeight: 20 },
+  reviewLink: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+    borderRadius: 14, padding: 14, marginTop: 8 },
+  reviewLinkText: { color: colors.accent, fontSize: 14, fontWeight: '800' },
   optionCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 18, padding: 16, gap: 6 }, recommendedCard: { backgroundColor: colors.soft, borderColor: colors.accent, borderWidth: 2 }, optionLabel: { color: colors.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 }, optionTitle: { color: colors.ink, fontSize: 18, fontWeight: '700' }, bullet: { color: colors.muted, fontSize: 13, lineHeight: 19 }, consequenceTitle: { color: colors.ink, fontSize: 13, fontWeight: '800', marginTop: 4 }, footer: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
 });

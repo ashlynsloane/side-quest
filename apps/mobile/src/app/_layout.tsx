@@ -1,15 +1,16 @@
 // Legacy validation compatibility: header: () => <BrandMasthead />.
 import { Stack, useRouter, useSegments, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthProvider, useAuth } from '@/state/auth-context';
 import { ThemeProvider, useTheme } from '@/state/theme-context';
-import { WorkoutProvider } from '@/state/workout-context';
+import { WorkoutProvider, useWorkoutContext } from '@/state/workout-context';
 import { OnboardingProvider, useOnboarding } from '@/state/onboarding-context';
 import { refreshTrainingIntegrations } from '@/services/integration-runtime';
 import { V23BrandHeader } from '@/components/v23-ui';
 import { normalizeUserFacingError } from '@/services/production-readiness';
+import { authRedirectFor } from '@/services/auth-navigation';
 
 
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
@@ -17,11 +18,11 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
   return <ThemeProvider><RootFailure message={message} retry={retry} /></ThemeProvider>;
 }
 
-function RootFailure({ message, retry }: { message: string; retry: () => void }) {
+function RootFailure({ message, retry, title = "The app hit an unexpected state." }: { message: string; retry: () => void; title?: string }) {
   const { tokens } = useTheme();
   return <View style={[rootFailureStyles.root, { backgroundColor: tokens.canvas }]}>
     <Text style={[rootFailureStyles.eyebrow, { color: tokens.accent }]}>SIDE QUEST RECOVERY</Text>
-    <Text style={[rootFailureStyles.title, { color: tokens.text }]}>The app hit an unexpected state.</Text>
+    <Text style={[rootFailureStyles.title, { color: tokens.text }]}>{title}</Text>
     <Text style={[rootFailureStyles.body, { color: tokens.textMuted }]}>{message}</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="Try Side Quest again" onPress={retry} style={[rootFailureStyles.button, { backgroundColor: tokens.accent }]}><Text style={rootFailureStyles.buttonText}>Try again</Text></Pressable>
   </View>;
@@ -33,31 +34,59 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <WorkoutProvider>
-          <OnboardingProvider>
+        <ScopedWorkoutProvider>
+          <ScopedOnboardingProvider>
             <AuthGate />
-          </OnboardingProvider>
-        </WorkoutProvider>
+          </ScopedOnboardingProvider>
+        </ScopedWorkoutProvider>
       </ThemeProvider>
     </AuthProvider>
   );
 }
 
+function ScopedWorkoutProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  // Unmount both the active workout and its preview when auth ownership changes.
+  // A new athlete may only restore that athlete's namespaced checkpoint.
+  return <WorkoutProvider key={user?.id ?? 'signed-out'}>{children}</WorkoutProvider>;
+}
+
+function ScopedOnboardingProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  // Changing athletes discards previous first-run UI state and any pending
+  // asynchronous evaluation before the new athlete's context mounts.
+  return <OnboardingProvider key={user?.id ?? 'signed-out'}>{children}</OnboardingProvider>;
+}
+
 function AuthGate() {
-  const { user, loading, cloudEnabled } = useAuth();
+  const { user, loading, cloudEnabled, startupRecoveryError, retryStartup } = useAuth();
   const { palette } = useTheme();
-  const { loading: onboardingLoading, needsOnboarding } = useOnboarding();
+  const { loading: onboardingLoading, needsOnboarding, state: onboardingState } = useOnboarding();
+  const { activeWorkout, workoutSessionReady } = useWorkoutContext();
   const router = useRouter();
   const segments = useSegments() as string[];
   useEffect(() => {
-    if (loading || onboardingLoading) return;
-    const authRoute = segments[0] === 'sign-in';
-    const onboardingRoute = segments[0] === 'onboarding';
-    const onboardingSetupRoute = ['goal-catalog', 'goal-plan', 'equipment-profiles', 'pt-profile', 'training-intelligence', 'calendar-sync', 'generate'].includes(segments[0] ?? '');
-    if (!user && !authRoute) router.replace('/sign-in' as Href);
-    if (user && needsOnboarding && !onboardingRoute && !onboardingSetupRoute) router.replace('/onboarding' as Href);
-    if (user && !needsOnboarding && authRoute) router.replace('/(tabs)' as Href);
-  }, [user, loading, onboardingLoading, needsOnboarding, segments, router]);
+    if (startupRecoveryError) return;
+    const redirect = authRedirectFor({
+      authenticated: Boolean(user),
+      authLoading: loading,
+      onboardingLoading,
+      needsOnboarding,
+      firstWeekPrerequisitesComplete: Boolean(
+        onboardingState.firstWeekSetupStartedAt
+          && onboardingState.strengthModelAcknowledged
+          && onboardingState.privacyModelAcknowledged,
+      ),
+      route: segments[0],
+      workoutSessionReady,
+      hasActiveWorkout: Boolean(activeWorkout),
+    });
+    if (redirect) router.replace(redirect as Href);
+  }, [user, loading, onboardingLoading, needsOnboarding,
+    onboardingState.firstWeekSetupStartedAt,
+    onboardingState.strengthModelAcknowledged,
+    onboardingState.privacyModelAcknowledged,
+    workoutSessionReady, activeWorkout, segments, router, startupRecoveryError]);
   useEffect(() => {
     if (loading || !user) return;
     const refresh = () => { void refreshTrainingIntegrations({ cloudEnabled: cloudEnabled && user.mode === 'cloud', userId: user.id }); };
@@ -66,6 +95,9 @@ function AuthGate() {
     const interval = setInterval(refresh, 15 * 60 * 1000);
     return () => { subscription.remove(); clearInterval(interval); };
   }, [cloudEnabled, loading, user]);
+  if (startupRecoveryError) {
+    return <RootFailure title="Your local training history needs recovery." message={startupRecoveryError} retry={() => void retryStartup()} />;
+  }
   if (loading || onboardingLoading) {
     return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.canvas }}><ActivityIndicator size="large" color={palette.forest} /></View>;
   }

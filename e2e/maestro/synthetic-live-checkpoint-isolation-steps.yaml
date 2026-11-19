@@ -1,0 +1,150 @@
+# Native issue #14 gate: athlete A and B own distinct, durable live workout
+# checkpoints. This is separate from completed endurance-history isolation.
+# Start on athlete A's fully onboarded local synthetic profile.
+appId: com.sidequest.synthetic.qa
+---
+# A: create, journal and cold-restore an interrupted strength workout.
+- runFlow: synthetic-strength-pause-checkpoint.yaml
+- takeScreenshot: "athlete-a-live-checkpoint"
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-today-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-today-tab"
+- assertVisible: "WORKOUT IN PROGRESS"
+- assertVisible:
+    id: "sidequest-qa-resume-active-workout"
+- takeScreenshot: "athlete-a-checkpoint-after-cold-restart"
+
+# B: profile switch must not display A's active session, despite A being saved.
+- tapOn:
+    id: "sidequest-qa-profile-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-sign-out"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Create your beta profile"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-live-athlete-b@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Live Athlete B"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- runFlow: synthetic-onboarding-steps.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-today-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-today-tab"
+- assertNotVisible: "WORKOUT IN PROGRESS"
+- assertNotVisible:
+    id: "sidequest-qa-resume-active-workout"
+- takeScreenshot: "athlete-b-has-no-athlete-a-active-session"
+
+# B: create an independent workout checkpoint in B's own profile.
+- runFlow: synthetic-strength-pause-checkpoint.yaml
+- takeScreenshot: "athlete-b-owns-new-checkpoint"
+
+# A: log back into the ORIGINAL athlete. Recover A's initial checkpoint,
+# never B's in-memory workout or B's checkpoint.
+- tapOn:
+    id: "sidequest-qa-profile-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-sign-out"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Create your beta profile"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-athlete@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic QA Athlete"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+# Native evidence 43132842718: when A's last route was active-workout and
+# A's checkpoint exists, auth navigation correctly restores directly into
+# the paused "Recover and record" screen rather than the tab shell.
+# This is an allowed recovery route, NOT a missing Today tab.
+- extendedWaitUntil:
+    visible: "Recover and record"
+    timeout: 30000
+- assertVisible: "STATION 1 COMPLETE"
+- assertVisible: "Paused"
+- takeScreenshot: "athlete-a-restored-station-instead-of-b"
+# Leave must durably keep A's checkpoint; the Today card then verifies the
+# checkpoint is still discoverable through normal navigation.
+- tapOn: "Leave"
+- extendedWaitUntil:
+    visible: "WORKOUT IN PROGRESS"
+    timeout: 30000
+- assertVisible:
+    id: "sidequest-qa-resume-active-workout"
+
+# B: switch again; B's separate checkpoint must also still exist.
+- tapOn:
+    id: "sidequest-qa-profile-tab"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-sign-out"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-sign-out"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Create your beta profile"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-live-athlete-b@example.invalid"
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Live Athlete B"
+- tapOn: "Create your beta profile"
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+# B also returns to its own last active-workout route with B's separate
+# persisted checkpoint, never A's. Check both UI state and discoverability.
+- extendedWaitUntil:
+    visible: "Recover and record"
+    timeout: 30000
+- assertVisible: "STATION 1 COMPLETE"
+- assertVisible: "Paused"
+- takeScreenshot: "athlete-b-original-station-restored"
+- tapOn: "Leave"
+- extendedWaitUntil:
+    visible: "WORKOUT IN PROGRESS"
+    timeout: 30000
+- assertVisible:
+    id: "sidequest-qa-resume-active-workout"
+- takeScreenshot: "athlete-b-checkpoint-still-on-today"

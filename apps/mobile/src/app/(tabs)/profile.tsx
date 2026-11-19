@@ -27,14 +27,16 @@ export default function ProfileTab() {
     <V23GroupedList>
       <V23Row title="Goals and capacity" detail="Goal, availability, experience, and sport profile" onPress={() => router.push('/goal-catalog' as Href)} />
       <V23Row title="Training spaces" detail="Home, gym, and the equipment you actually have access to" onPress={() => router.push('/training-spaces' as Href)} />
-      <V23Row title="Restrictions and symptoms" detail="PT context and training safeguards" onPress={() => router.push('/pt-profile' as Href)} last />
+      <V23Row title="Restrictions and symptoms" detail="PT context and training safeguards" onPress={() => router.push('/pt-profile' as Href)} />
+      <V23Row title="Training safety context" detail="Routine training, injury rehab, and protected movements" onPress={() => router.push('/training-safety-context' as Href)} />
+      <V23Row title="Unapproved strength drafts" detail="Read-only dose comparisons and review history; no workout changes" onPress={() => router.push('/strength-review-inbox' as Href)} last />
     </V23GroupedList>
 
     <V23SectionHeader>Connections</V23SectionHeader>
     <V23GroupedList>
       <V23Row title="Apps and devices" detail="Calendar, Strava, and connected services" onPress={() => router.push('/calendar-sync' as Href)} />
       <V23Row title="Human Coach Access" detail="Time-limited plan review with your approval" onPress={() => router.push('/coach-access' as Href)} />
-      <V23Row title="Friends and Workout Together" detail="Invitations, sharing, and blocking" onPress={() => router.push('/friends' as Href)} last />
+      <V23Row title="Friends" detail="Sharing and blocking" onPress={() => router.push('/friends' as Href)} last />
     </V23GroupedList>
 
     <V23SectionHeader>Privacy and display</V23SectionHeader>
@@ -51,7 +53,7 @@ export default function ProfileTab() {
       {__DEV__ ? <V23Row title="Developer tools" detail="Product scenarios, visual QA, and diagnostics" onPress={() => router.push('/developer-tools' as Href)} last /> : null}
     </V23GroupedList>
 
-    <Pressable onPress={() => void signOut()} style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}><Text style={styles.signOutText}>Sign out</Text></Pressable>
+    <Pressable testID="sidequest-qa-sign-out" accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => void signOut()} style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}><Text style={styles.signOutText}>Sign out</Text></Pressable>
   </V23Screen>;
 }
 

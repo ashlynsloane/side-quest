@@ -1,0 +1,8 @@
+# Synthetic athlete logs a completed ride without inventing distance.
+# Runs onboarding flow first in the isolated, credential-free QA simulator.
+appId: com.sidequest.synthetic.qa
+---
+# Standalone scenario composes all prerequisites for direct manual execution.
+# CI runs the named stage alone after verifying its preceding stage.
+- runFlow: synthetic-onboarding-first-week.yaml
+- runFlow: synthetic-completed-ride-steps.yaml

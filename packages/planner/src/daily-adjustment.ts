@@ -22,6 +22,8 @@ export interface AdjustmentContext {
   availableDates: string[];
   recentFatigueTrend?: 'stable' | 'worsening' | 'improving';
   recentBoneStress?: boolean;
+  activeSymptomRestriction?: boolean;
+  recoveryHold?: boolean;
   returnToRun?: boolean;
   minimumStrengthMinutesRemaining?: number;
   primaryProgressionDiscipline?: UnifiedDiscipline;
@@ -54,7 +56,8 @@ export interface DailyAdjustmentResult {
 export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, context: AdjustmentContext): DailyAdjustmentResult {
   const session = context.plannedSession;
   const safetyConcern = Boolean(
-    request.reason === 'illness'
+    context.activeSymptomRestriction
+    || request.reason === 'illness'
     || request.focalPain
     || (request.reason === 'pain' && (request.symptomSeverity ?? 0) >= 3)
     || request.fatigueKind === 'illness_like'
@@ -65,12 +68,25 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
     const rest = skipOption(session, 'recommended', [
       'New focal pain, illness-like symptoms, or worsening symptoms take priority over plan completion.',
       'The app should pause incompatible progression rather than diagnose the cause.',
-    ], ['Today’s training load is removed.', 'The week should be reviewed before impact or heavy loading resumes.']);
+    ], ['If approved, today’s planned training load would be removed.', 'The week requires review before impact or heavy loading resumes.']);
     return {
       headline: 'Protect health today',
       recommendedOptionId: rest.id,
       options: [rest],
       safetyMessage: 'Stop the session. Seek appropriate medical assessment for severe, worsening, or concerning symptoms.',
+    };
+  }
+
+  if (context.recoveryHold) {
+    const rest = skipOption(session, 'recommended', [
+      'Low self-reported readiness requires review before proceeding with the original dose.',
+      'Do not add replacement work or automatically increase another day.',
+    ], ['The planned workout remains unchanged until explicitly reviewed.']);
+    return {
+      headline: 'Review recovery before training',
+      recommendedOptionId: rest.id,
+      options: [rest],
+      safetyMessage: 'Consider rest. This is not a diagnosis or medical clearance; revisit the plan when readiness improves.',
     };
   }
 
@@ -89,7 +105,9 @@ export function buildDailyAdjustmentOptions(request: SessionAdjustmentRequest, c
     if (replacement) options.push(replacement);
   }
 
-  const move = chooseMove(session, context);
+  // Moving the original training dose is never an implicit fallback for
+  // fatigue, reduced time or equipment access. It must be expressly asked for.
+  const move = request.requestedAction === 'move' ? chooseMove(session, context) : null;
   if (move) options.push(move);
   options.push(skipOption(session, session.priority === 'optional' || request.athletePrefersRecovery ? 'recommended' : 'acceptable', [
     session.priority === 'optional'
@@ -124,7 +142,7 @@ function shortenOption(session: UnifiedTrainingSession, availableMinutes: number
     weeklyConsequences: [`Weekly training time decreases by ${session.durationMinutes - duration} minutes.`, preservesPurpose ? 'The primary objective is substantially preserved.' : 'The original objective remains only partially completed.'],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: false,
+    requiresApproval: true,
     confidence: 'high',
   };
 }
@@ -145,7 +163,7 @@ function easierOption(session: UnifiedTrainingSession, context: AdjustmentContex
     weeklyConsequences: ['Today’s hard-session objective is removed.', 'Upcoming key sessions remain in place unless fatigue continues.'],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: false,
+    requiresApproval: true,
     confidence: worsening ? 'high' : 'moderate',
   };
 }
@@ -170,7 +188,7 @@ function chooseReplacement(session: UnifiedTrainingSession, available: UnifiedDi
     weeklyConsequences: [`${session.discipline} frequency decreases unless the original session is moved.`, `${safe} volume increases modestly without adding a new hard day.`],
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: session.keySession,
+    requiresApproval: true,
     confidence: 'moderate',
   };
 }
@@ -211,7 +229,7 @@ function skipOption(session: UnifiedTrainingSession, level: AdjustmentOption['re
     weeklyConsequences,
     protectsMentalHealth: true,
     protectsPhysicalHealth: true,
-    requiresApproval: session.keySession,
+    requiresApproval: true,
     confidence: 'high',
   };
 }

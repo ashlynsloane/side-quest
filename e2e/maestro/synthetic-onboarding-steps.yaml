@@ -1,0 +1,95 @@
+# Synthetic-only scenario: fresh local profile -> proposed multisport week.
+# This is designed for the isolated simulator bundle identifier, never the beta.
+# Requires EXPO_PUBLIC_BETA_INVITE_CODE and Supabase cloud auth to be unset.
+appId: com.sidequest.synthetic.qa
+---
+# Run after a synthetic profile has been created on the same app instance.
+# Every staged CI journey starts a fresh Maestro process; explicitly foreground
+# the installed app rather than letting the first tap simply activate it.
+- launchApp
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Choose the goal."
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Use the time you actually have."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "What is available now?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Anything to protect?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "How do you respond to training?"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+- assertVisible: "Ready to build."
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-onboarding-next"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+# Actual simulator hierarchy exposes the button as
+# "Build my first week, ›" (with a nested arrow). Target its stable native ID,
+# never an exact-text selector for the child label.
+- assertVisible:
+    id: "sidequest-qa-onboarding-next"
+- takeScreenshot: "synthetic-before-first-week-build"
+- tapOn:
+    id: "sidequest-qa-onboarding-next"
+    retryTapIfNoChange: true
+# Detect a missed navigation separately from a slow first-week generator.
+- extendedWaitUntil:
+    notVisible: "Ready to build."
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Your first week is ready."
+    timeout: 120000
+- assertVisible: "Your first week is ready."
+- takeScreenshot: "synthetic-first-week"
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-review-first-week"
+    direction: DOWN
+    visibilityPercentage: 50
+    timeout: 20000
+- tapOn:
+    id: "sidequest-qa-review-first-week"

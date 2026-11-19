@@ -1,0 +1,44 @@
+# Exercise completed-activity persistence over a genuine iOS application restart.
+# Never uses real athlete data or credentials.
+appId: com.sidequest.synthetic.qa
+---
+# Requires an existing synthetic 75-minute bike record on device.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-week-tab"
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-week-tab"
+    retryTapIfNoChange: true
+# The earlier native failure was an occluded touch: Maestro considered
+# the History link visible at y=828, behind the 76-point Week tab bar.
+# centerElement moves it into the actual tappable scroll viewport.
+- scrollUntilVisible:
+    element:
+      id: "sidequest-qa-open-training-history"
+    direction: DOWN
+    centerElement: true
+    visibilityPercentage: 85
+    timeout: 30000
+- takeScreenshot: "synthetic-history-link-before-tap"
+- tapOn:
+    id: "sidequest-qa-open-training-history"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000
+# A tap on the overlying Week tab must not qualify as a pass.
+- assertNotVisible: "Training evidence this week"
+# The iOS parent Pressable exposes the record as one accessibility element.
+- assertVisible: "Review Completed bike activity"
+- tapOn: "Review Completed bike activity"
+- extendedWaitUntil:
+    visible: "75 minutes.*"
+    timeout: 30000
+- takeScreenshot: "synthetic-ride-recovered-after-relaunch"
+- tapOn: "Go back"
+- extendedWaitUntil:
+    visible: "Training history"
+    timeout: 30000

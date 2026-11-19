@@ -493,11 +493,23 @@ export interface PerformanceGoal {
     currentEnduranceHours: number;
     runStatus: 'normal' | 'reduced' | 'return_to_run' | 'not_running';
     maxRunMilesLast12Weeks: number;
+    /** Data provenance: a conservative zero placeholder is NOT a recorded zero-mile week. */
+    runMileageEvidence?: 'unknown' | 'athlete_reported' | 'source_observed';
+    /** Reserved scheduling hours are NOT completed endurance hours. */
+    enduranceHoursEvidence?: 'unverified_planning_assumption' | 'athlete_reported' | 'source_observed';
     boneStressInjuryHistory: 'none' | 'remote' | 'recent_or_current';
     swimProficiency: 'developing' | 'average' | 'strong';
     bikeProficiency: 'developing' | 'average' | 'strong';
     runProficiency: 'developing' | 'average' | 'strong';
     strengthExperience: 'beginner' | 'intermediate' | 'advanced';
+  };
+  /** Provisional first-run choices; not observed dose or medical clearance. */
+  firstWeekSetup?: {
+    availableLocations: Array<'home' | 'full_gym' | 'travel' | 'bodyweight'>;
+    selectedLocation: 'home' | 'full_gym' | 'travel' | 'bodyweight';
+    protectedAreas: Array<{ area: string; side: PainAreaSide }>;
+    cardioInterests: Array<'swim' | 'bike' | 'run' | 'elliptical' | 'arc_trainer'>;
+    cardioDoseStatus: 'requires_review';
   };
   phaseStrengthSessions?: Partial<Record<TrainingPhase, 0 | 1 | 2 | 3 | 4 | 5>>;
   strengthDoseMetadata?: {

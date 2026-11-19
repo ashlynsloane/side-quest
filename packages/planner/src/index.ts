@@ -1,5 +1,7 @@
 import type {
   BodyRegion,
+  JointRegion,
+  RegionRestriction,
   EnduranceDiscipline,
   EnduranceSchedule,
   FocusTarget,
@@ -28,6 +30,28 @@ import type {
 import { createWorkoutVariant, generateWorkout } from '@circuit/generator';
 import { evaluateStrengthLoad, scaleWorkMinutes } from './strength-load-management';
 export { evaluateStrengthLoad } from './strength-load-management';
+export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
+export { buildFirstWeekTrainingSummary } from './first-week-training-summary';
+export { resolveFirstWeekCapacity } from './first-week-capacity';
+export { unverifiedEnduranceDisciplines } from './endurance-baseline-policy';
+export { createManualEnduranceActivity } from './manual-endurance';
+export type { ManualEnduranceInput } from './manual-endurance';
+export { addLocalCalendarDays, localCalendarDate, nextLocalMonday, localMondayOf } from './first-week-dates';
+export type { ResolvedFirstWeekCapacity } from './first-week-capacity';
+export type { FirstWeekTrainingSummary, FirstWeekTrainingItem } from './first-week-training-summary';
+export { assessWeekForBaseline, approveWeekBaseline, assessSavedBaseline, baselineSourceSignature } from './training-baseline-review';
+export { comparePlannedWeekWithFrozenLimits } from './training-week-comparison';
+export { buildPlanAdjustmentPreview, applyAcceptedPlanAdjustments, rawGeneratedEventSignature, planExposureSignature } from './training-plan-adjustments';
+export { PLAN_ADJUSTMENT_TABLE_SQL, readTrainingAdjustmentDecisions, appendTrainingAdjustmentDecision, effectiveTrainingCalendarEvents, planAdjustmentDecisionsForLocalWeek } from './training-adjustment-sqlite';
+export type { TrainingAdjustmentSqlDriver } from './training-adjustment-sqlite';
+export type { PlanAdjustmentEvent, PlanAdjustmentCandidate, PlanAdjustmentPreview, PlanAdjustmentAction, PlanAdjustmentDecision } from './training-plan-adjustments';
+export { trainingSourceQueryEnvelope } from './training-source-window';
+export type { TrainingSourceQueryEnvelope } from './training-source-window';
+export type { PlanningWeekComparison, TrainingDimensionComparison } from './training-week-comparison';
+export type { CoverageReviewAttestation, ApprovedWeekSnapshot, BaselineReviewIssue } from './training-baseline-review';
+export type { TrainingWeekEvidence, TrainingWeekEvidenceInput } from './core-training-week-evidence';
+export { EXPERIMENTAL_TRAINING_POLICY_V1, freezeExperimentalTrainingAllowance, reconcileGuardrailExposure, evaluateExperimentalTrainingGuardrails } from './experimental-training-guardrails';
+export type { ApprovedCompletedBaseline, FrozenTrainingAllowance, TrainingExposureRecord, TrainingGuardrailEvaluation, PlanningInterruptionState, GuardrailStatus } from './experimental-training-guardrails';
 export { buildExerciseNoveltyDecision, classifyExerciseFamiliarity, profileExerciseNovelty } from './exercise-novelty';
 
 type SessionBlueprint = {
@@ -485,6 +509,28 @@ function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
+/**
+ * A mandatory session focus must not be wholly excluded. Prefer all 'strong'
+ * anchors; light accessory/core regions cannot rescue an incompatible title.
+ * A 'keep_light' PT restriction is incompatible with a strong focus there.
+ * The exercise-level filtering remains the generation engine's job.
+ */
+export function isBlueprintCompatibleWithRestrictions(
+  targets: FocusTarget[],
+  excluded: Array<BodyRegion | JointRegion>,
+  regionRestrictions: RegionRestriction[] = [],
+): boolean {
+  const strong = targets.filter((target) => target.emphasis === 'strong');
+  const anchors = strong.length > 0 ? strong : targets.filter((target) => target.emphasis === 'moderate');
+  const relevant = anchors.length > 0 ? anchors : targets;
+  if (relevant.length === 0) return false;
+  const excludedSet = new Set<string>(excluded);
+  return relevant.some((target) => !excludedSet.has(target.region)
+    && !regionRestrictions.some((restriction) => restriction.region === target.region
+      && (restriction.mode === 'avoid'
+        || (restriction.mode === 'keep_light' && target.emphasis === 'strong'))));
+}
+
 export function generateWeeklyPlan(
   request: WeeklyPlanRequest,
   context: WeeklyPlanningContext,
@@ -510,7 +556,25 @@ export function generateWeeklyPlan(
     rampWeekIndex: context.strengthRampWeekIndex,
   });
   const safeSessionCount = strengthLoadDecision.allowedSessions;
-  const selectedBlueprints = selectBlueprints(blueprints, safeSessionCount, request.goal, phase);
+  // A session cannot keep its original purpose when all of its important
+  // focus regions have been excluded by the athlete or an active PT profile.
+  // Skip incompatible blueprints rather than letting the exercise generator
+  // substitute unrelated movements under a misleading title.
+  const compatibleBlueprints = blueprints.filter((blueprint) =>
+    isBlueprintCompatibleWithRestrictions(
+      blueprint.focusTargets, request.excludedRegions, request.regionRestrictions ?? [],
+    ));
+  if (compatibleBlueprints.length === 0) {
+    return {
+      ok: false, reason: 'WORKOUT_GENERATION_FAILED',
+      messages: ['No strength-session focus is compatible with the active body-region restrictions. Review the restrictions; nothing was prescribed.'],
+    };
+  }
+  const selectedBlueprints = selectBlueprints(
+    compatibleBlueprints,
+    Math.min(safeSessionCount, compatibleBlueprints.length) as 1 | 2 | 3 | 4 | 5,
+    request.goal, phase,
+  );
   const scheduledDays = scheduleSessionDays(request, selectedBlueprints, phase);
   const plannedExposures: RecentRegionExposure[] = [];
   const sessions: PlannedStrengthSession[] = [];
@@ -590,6 +654,9 @@ export function generateWeeklyPlan(
     warnings: [
       ...planWarnings(request, phase),
       ...(strengthLoadDecision.action === 'progress' ? [] : strengthLoadDecision.reasons),
+      ...(selectedBlueprints.length < safeSessionCount
+        ? [`${safeSessionCount - selectedBlueprints.length} strength session(s) deferred: their focus conflicts with active body-region restrictions; no unrelated substitute was prescribed.`]
+        : []),
     ],
   };
 
@@ -1720,3 +1787,142 @@ export * from './visible-progress-workspace';
 export * from './visible-you-workspace';
 
 export * from './recommendation-explanation';
+
+export { buildDailyTrainingReview } from './daily-training-review';
+export type { DailyTrainingReview } from './daily-training-review';
+
+export { buildDailyFeedbackAdvice } from './daily-feedback-advice';
+export type { DailyFeedbackAdvice } from './daily-feedback-advice';
+
+export { buildDailySessionChoices } from './daily-session-choices';
+export type { DailySessionChoice, DailySessionChoices } from './daily-session-choices';
+
+export { STRENGTH_CHOICE_AUDIT_SQL, appendStrengthChoiceDecision, readStrengthChoiceAudit, strengthSessionSignature, effectiveStrengthChoice } from './daily-strength-decision-sqlite';
+export type { StrengthChoiceDecision, EffectiveStrengthChoice } from './daily-strength-decision-sqlite';
+
+// Milestone 1: read-only exercise revision and evidence gates; no mobile approval action.
+export { evaluateStrengthWorkoutRevision } from './strength-workout-revision-review';
+export type { StrengthRevisionReview } from './strength-workout-revision-review';
+export { reviewStrengthRevisionForDecision } from './strength-revision-decision-review';
+export type { CurrentStrengthReviewEvidence, StrengthRevisionDecisionReview } from './strength-revision-decision-review';
+
+export { createStrengthRevisionPreviewBinding, verifyStrengthRevisionPreviewBinding } from './strength-revision-preview-binding';
+export type { StrengthRevisionPreviewBinding, StrengthRevisionBindingResult } from './strength-revision-preview-binding';
+
+// Durable unapproved exercise-preview journal; never used to authorize a workout.
+export { STRENGTH_REVISION_PREVIEW_SQL, appendStrengthRevisionPreview, readStrengthRevisionPreview, reassessStoredStrengthRevisionPreview } from './strength-revision-preview-sqlite';
+export type { StoredStrengthRevisionPreview, StoredStrengthPreviewAssessment } from './strength-revision-preview-sqlite';
+
+// Reversible preview-review disposition only; NEVER executable strength authorization.
+export { STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent } from './strength-preview-review-events-sqlite';
+export type { StrengthPreviewReviewEvent, StrengthPreviewReviewState } from './strength-preview-review-events-sqlite';
+
+export { listUnapprovedStrengthReviewInbox } from './strength-revision-review-inbox';
+export type { UnapprovedStrengthReviewInboxItem } from './strength-revision-review-inbox';
+
+// Exact before/after workout visualization only; cannot authorize or start exercise.
+export { summarizeUnapprovedStrengthRevision } from './strength-revision-review-summary';
+export type { StrengthReviewDoseChange, StrengthRevisionReadOnlySummary } from './strength-revision-review-summary';
+
+// One owner-locked, read-only detail snapshot with current stale-state assessment.
+export { readUnapprovedStrengthReviewDetail } from './strength-revision-review-detail';
+export type { UnapprovedStrengthReviewDetail } from './strength-revision-review-detail';
+
+// Structured, non-executable approval readiness diagnostics only.
+export { inspectStrengthApprovalPreflight } from './strength-approval-preflight';
+export type { StrengthApprovalPreflight, StrengthApprovalDiagnosticGate, StrengthApprovalGateId } from './strength-approval-preflight';
+
+export {
+  STRENGTH_EVIDENCE_PROVENANCE_SQL,
+  readStrengthEvidenceProvenance,
+  appendStrengthEvidenceProvenance,
+} from './strength-evidence-provenance-sqlite';
+export type {
+  StrengthEvidenceClaimKind, StrengthEvidenceSource, StrengthEvidenceClaim,
+  StrengthEvidenceProvenanceEvent, StrengthEvidenceProvenanceLedger,
+  StrengthEvidenceProvenanceStatus,
+} from './strength-evidence-provenance-sqlite';
+
+export { createStrengthReconciliationChecklist } from './strength-evidence-reconciliation';
+export type {
+  StrengthReconciliationTask, StrengthReconciliationTaskKind,
+  StrengthReconciliationChecklist,
+} from './strength-evidence-reconciliation';
+
+export {
+  TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext,
+  appendTrainingSafetyContextEvent, evaluateTrainingSafetyPolicy,
+} from './training-safety-context-sqlite';
+export type {
+  AthleteTrainingIntent, ProtectedMovement, TrainingSafetyContextEvent,
+  AthleteTrainingSafetyContext, TrainingSafetyPolicy,
+} from './training-safety-context-sqlite';
+
+export { assessStrengthMovementRestrictions } from './strength-movement-restriction-review';
+export type {
+  RestrictedExerciseStatus, RestrictedExerciseFinding,
+  StrengthMovementRestrictionAssessment,
+} from './strength-movement-restriction-review';
+
+// Explicit non-executable write-time evidence revalidation; no workout approval.
+export { inspectStrengthAuthorizationDryRun } from './strength-authorization-dry-run';
+export type { StrengthAuthorizationDryRunResult } from './strength-authorization-dry-run';
+
+export {
+  STRENGTH_WORKOUT_AUTHORIZATION_SQL,
+  authorizeRoutineStrengthWorkout,
+  getRoutineStrengthAuthorizationReadiness,
+  readAuthorizedRoutineWorkout,
+} from './strength-workout-authorization-sqlite';
+export type {
+  AthleteStrengthAuthorizationConfirmations,
+  AuthorizedStrengthWorkoutRecord,
+  StrengthWorkoutAuthorizationRequest,
+  StrengthWorkoutAuthorizationResult,
+} from './strength-workout-authorization-sqlite';
+
+// Withdrawal and start screening do not start or prescribe a workout.
+export {
+  STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL,
+  withdrawRoutineStrengthAuthorization,
+  readRoutineAuthorizationWithdrawal,
+  inspectRoutineWorkoutStart,
+} from './strength-workout-start-safety-sqlite';
+export type {
+  RoutineAuthorizationWithdrawal,
+  RoutineWorkoutStartScreen,
+} from './strength-workout-start-safety-sqlite';
+
+// Append-only pre-start intent: never evidence that the native player ran.
+export {
+  STRENGTH_START_INTENT_SQL,
+  recordRoutineStrengthStartIntent,
+  readRoutineStrengthStartIntent,
+} from './strength-workout-start-safety-sqlite';
+export type {
+  RoutineWorkoutStartRequest,
+  RoutineStrengthStartIntent,
+  RoutineStrengthStartIntentRequest,
+} from './strength-workout-start-safety-sqlite';
+
+// Native start checkpoint is a verified durable recovery seed, not playback proof.
+export {
+  STRENGTH_NATIVE_START_CHECKPOINT_SQL,
+  commitRoutineNativeStartCheckpoint,
+  readRoutineNativeStartCheckpoint,
+} from './strength-workout-start-safety-sqlite';
+export type {
+  RoutineInitialLiveWorkoutCheckpoint,
+  RoutineNativeStartCheckpoint,
+  RoutineNativeStartCheckpointRequest,
+} from './strength-workout-start-safety-sqlite';
+
+export {
+  STRENGTH_NATIVE_START_TERMINAL_SQL,
+  assessRoutineNativeActiveSafety,
+  finishRoutineNativeStart,
+} from './strength-workout-recovery-sqlite';
+export type {
+  RoutineActiveSafetyResult,
+  RoutineNativeTerminalEvent,
+} from './strength-workout-recovery-sqlite';

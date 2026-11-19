@@ -77,9 +77,74 @@ export interface LiveWorkoutSessionSnapshot {
   restRounds: number;
   restLoadUnit: 'lb' | 'kg';
   planLink?: ActiveWorkoutPlanLink;
+  /** Durable retry intent; cannot silently become a full completion after restart. */
+  pendingCompletion?: { completionFraction: number; completedAt: string };
+  /** Sticky pause: never cleared by a late timer write or a routine recheck. */
+  safetyHold?: { detectedAt: string; reason: string; kind: 'routine_native_safety_hold' };
 }
 
 const LIVE_SESSION_KEY = 'sidequest.live-workout.session.v1';
+const LIVE_ENDED_KEY = 'sidequest.live-workout.ended.v1';
+
+export const ACTIVE_WORKOUT_PROFILE_KEY = 'sidequest.active-workout.profile-id';
+const ORIGINAL_DATABASE_OWNER_KEY = 'circuit.original-database-owner';
+
+function scopedLiveSessionKey(storage: StorageLike, profileId?: string | null): string | null {
+  // Explicit null means unauthenticated. Never fall back to a prior account
+  // simply because an asynchronous callback is still finishing sign-out.
+  if (profileId === null) return null;
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+  if (!owner) return null;
+  return LIVE_SESSION_KEY + ':' + encodeURIComponent(owner);
+}
+
+/** Preserve one ended marker for EACH athlete + workout instance forever. */
+function endedInstanceKey(
+  storage: StorageLike,
+  profileId: string | null | undefined,
+  workoutId: string,
+  startedAt: string,
+): string | null {
+  if (profileId === null) return null;
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+  if (!owner || !workoutId?.trim() || !startedAt?.trim()) return null;
+  return LIVE_ENDED_KEY + ':' + [
+    owner, workoutId, startedAt,
+  ].map(encodeURIComponent).join(':');
+}
+
+function assertInstanceNotEnded(
+  storage: StorageLike,
+  profileId: string | null | undefined,
+  workoutId: string,
+  startedAt: string,
+): void {
+  const key = endedInstanceKey(storage, profileId, workoutId, startedAt);
+  if (!key) throw new Error('Cannot verify an owned workout end marker.');
+  if (storage.getItem(key) !== null) {
+    throw new Error('An ended workout cannot be resurrected by a delayed player write.');
+  }
+  // Honor legacy single-marker history without overwriting it as more
+  // workouts end. A newer per-instance tombstone never clears an older one.
+  const owner = profileId === undefined
+    ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+  const raw = storage.getItem(LIVE_ENDED_KEY + ':' + encodeURIComponent(owner!));
+  if (!raw) return;
+  let legacy: { workoutId?: unknown; startedAt?: unknown };
+  try { legacy = JSON.parse(raw) as typeof legacy; }
+  catch { throw new Error('Previous workout end marker is unreadable.'); }
+  if (!legacy || typeof legacy !== 'object'
+    || typeof legacy.workoutId !== 'string'
+    || typeof legacy.startedAt !== 'string') {
+    throw new Error('Previous workout end marker cannot be verified.');
+  }
+  if (legacy.workoutId === workoutId && legacy.startedAt === startedAt) {
+    throw new Error('An ended workout cannot be resurrected by a delayed player write.');
+  }
+}
+
 
 type StorageLike = {
   getItem(key: string): string | null;
@@ -104,12 +169,29 @@ function isActiveWorkoutPlanLink(value: unknown): value is ActiveWorkoutPlanLink
 function isLiveWorkoutSession(value: unknown): value is LiveWorkoutSessionSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<LiveWorkoutSessionSnapshot>;
+  const pending = snapshot.pendingCompletion;
+  const hold = snapshot.safetyHold;
+  const holdValid = hold === undefined || (
+    hold !== null && hold.kind === 'routine_native_safety_hold'
+    && typeof hold.reason === 'string' && hold.reason.trim().length > 0
+    && typeof hold.detectedAt === 'string'
+    && Number.isFinite(Date.parse(hold.detectedAt))
+  );
+  const pendingValid = pending === undefined || (
+    pending !== null
+    && Number.isFinite(pending.completionFraction)
+    && pending.completionFraction >= 0
+    && pending.completionFraction <= 1
+    && typeof pending.completedAt === 'string'
+    && Number.isFinite(Date.parse(pending.completedAt))
+  );
   return snapshot.schemaVersion === 1
     && Boolean(snapshot.workout?.id)
     && typeof snapshot.startedAt === 'string'
     && Number.isInteger(snapshot.stationIndex)
     && (snapshot.phase === 'work' || snapshot.phase === 'rest')
-    && typeof snapshot.remainingSeconds === 'number';
+    && typeof snapshot.remainingSeconds === 'number'
+    && pendingValid && holdValid;
 }
 
 export function createInitialLiveWorkoutSession(
@@ -136,18 +218,199 @@ export function createInitialLiveWorkoutSession(
   };
 }
 
-export async function saveLiveWorkoutSession(snapshot: LiveWorkoutSessionSnapshot): Promise<void> {
-  getLocalStorage()?.setItem(LIVE_SESSION_KEY, JSON.stringify(snapshot));
+/**
+ * A pending completion is a durable, immutable write-ahead journal. Do not
+ * replace it with a new workout merely because the UI has been navigated to
+ * a different preview. Only a successful canonical ledger save and explicit
+ * checkpoint clear may unblock starting a new session.
+ */
+export function assertCanStartLiveWorkout(profileId?: string | null): void {
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) throw new Error('Cannot start an unowned workout.');
+  const raw = storage.getItem(key);
+  if (!raw) return;
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(raw);
+  } catch {
+    throw new Error('The previous workout checkpoint could not be read. Its data was preserved.');
+  }
+  if (!isLiveWorkoutSession(candidate)) {
+    throw new Error('The previous workout checkpoint could not be verified. Its data was preserved.');
+  }
+  if (candidate.pendingCompletion) {
+    throw new Error('Finish saving the previous workout before starting a new one. The original completion dose is preserved.');
+  }
+  throw new Error('Another workout is already saved. Return to it and explicitly save or discard before starting a new one.');
 }
 
-export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapshot | null> {
+/**
+ * Exclusive first hydration of a routine workout already atomically committed
+ * to the athlete's SQLite start journal. Never replaces any existing live
+ * checkpoint, even a non-pending one. The source must be the server-side
+ * exact authorized workout, paused until deliberate user playback.
+ */
+export async function persistFirstRoutineNativeCheckpoint(
+  snapshot: LiveWorkoutSessionSnapshot,
+  athleteId: string,
+): Promise<void> {
   const storage = getLocalStorage();
-  const serialized = storage?.getItem(LIVE_SESSION_KEY);
+  if (!storage) throw new Error('Live workout recovery storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, athleteId);
+  if (!key || !athleteId.trim()
+    || !isLiveWorkoutSession(snapshot)
+    || snapshot.running !== false
+    || snapshot.stationIndex !== 0
+    || snapshot.phase !== 'work'
+    || !snapshot.planLink?.sessionId
+    || snapshot.pendingCompletion !== undefined) {
+    throw new Error('Native routine start checkpoint cannot be verified.');
+  }
+  if (storage.getItem(key) !== null) {
+    throw new Error('An earlier workout checkpoint already exists. No workout was replaced.');
+  }
+  assertInstanceNotEnded(storage, athleteId, snapshot.workout.id, snapshot.startedAt);
+  const encoded = JSON.stringify(snapshot);
+  storage.setItem(key, encoded);
+  if (storage.getItem(key) !== encoded) {
+    throw new Error('Native routine start checkpoint could not be verified after storage.');
+  }
+}
+
+/** Inspect the exact athlete-owned slot without treating malformed data as absent. */
+export async function inspectLiveWorkoutSlot(
+  athleteId: string,
+): Promise<'empty' | 'valid' | 'unreadable'> {
+  const storage = getLocalStorage();
+  const key = storage && scopedLiveSessionKey(storage, athleteId);
+  if (!storage || !key) throw new Error('Athlete-owned live workout slot is unavailable.');
+  const raw = storage.getItem(key);
+  if (!raw) {
+    const migrated = await loadLiveWorkoutSession(athleteId);
+    if (migrated) return 'valid';
+    return storage.getItem(key) ? 'unreadable' : 'empty';
+  }
+  try { return isLiveWorkoutSession(JSON.parse(raw)) ? 'valid' : 'unreadable'; }
+  catch { return 'unreadable'; }
+}
+
+/** Immediate sticky pause; prior workout dose and pending completion remain intact. */
+export async function holdLiveWorkoutForSafety(
+  athleteId: string, reason: string,
+): Promise<void> {
+  const storage = getLocalStorage();
+  const key = storage && scopedLiveSessionKey(storage, athleteId);
+  if (!storage || !key || !reason?.trim()) {
+    throw new Error('Native safety pause requires an owned checkpoint and reason.');
+  }
+  const raw = storage.getItem(key);
+  if (!raw) throw new Error('No active player checkpoint available for safety pause.');
+  let snapshot: unknown;
+  try { snapshot = JSON.parse(raw); } catch { throw new Error('Unreadable player checkpoint cannot be paused safely.'); }
+  if (!isLiveWorkoutSession(snapshot)) throw new Error('Unverified player checkpoint cannot be paused safely.');
+  const held: LiveWorkoutSessionSnapshot = {
+    ...snapshot, running: false,
+    safetyHold: snapshot.safetyHold ?? {
+      kind: 'routine_native_safety_hold', reason,
+      detectedAt: new Date().toISOString(),
+    },
+  };
+  storage.setItem(key, JSON.stringify(held));
+  const verified = storage.getItem(key);
+  if (verified !== JSON.stringify(held)) {
+    throw new Error('Failed to verify the persisted native safety hold.');
+  }
+}
+
+export async function saveLiveWorkoutSession(
+  snapshot: LiveWorkoutSessionSnapshot, profileId?: string | null,
+): Promise<void> {
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) throw new Error('Cannot save an unowned live workout.');
+  assertInstanceNotEnded(storage, profileId, snapshot.workout.id, snapshot.startedAt);
+  const oldValue = storage.getItem(key);
+  if (oldValue) {
+    let previous: unknown;
+    try {
+      previous = JSON.parse(oldValue);
+    } catch {
+      // Never silently overwrite a malformed historical recovery record.
+      throw new Error('Existing workout checkpoint is unreadable. Its data was preserved.');
+    }
+    if (!isLiveWorkoutSession(previous)) {
+      throw new Error('Existing workout checkpoint is unverified. Its data was preserved.');
+    }
+    // Never allow a different session to overwrite an intact live checkpoint,
+    // even when the first session has no pending completion journal.
+    const sameSession = previous.workout.id === snapshot.workout.id
+      && previous.startedAt === snapshot.startedAt
+      && (previous.planLink?.sessionId ?? null) === (snapshot.planLink?.sessionId ?? null);
+    if (!sameSession) {
+      throw new Error('Existing athlete workout checkpoint belongs to a different session. Save or discard it first.');
+    }
+    if (previous.pendingCompletion) {
+      // A pending dose owns this per-athlete slot until its canonical ledger
+      // write succeeds. A late timer write cannot turn 29% back into 100.
+      if (!snapshot.pendingCompletion) {
+        if (!sameSession) {
+          throw new Error('Conflicting pending workout completion; save the original dose before replacement.');
+        }
+        return;
+      }
+      if (!sameSession
+        || previous.pendingCompletion.completedAt !== snapshot.pendingCompletion.completedAt
+        || previous.pendingCompletion.completionFraction !== snapshot.pendingCompletion.completionFraction) {
+        throw new Error('Conflicting pending workout completion; original dose retained.');
+      }
+      // Idempotent retry of the exact same immutable journal.
+      return;
+    }
+  }
+  const previous = oldValue ? JSON.parse(oldValue) as LiveWorkoutSessionSnapshot : null;
+  const write = previous?.safetyHold
+    ? { ...snapshot, safetyHold: previous.safetyHold, running: false }
+    : snapshot;
+  storage.setItem(key, JSON.stringify(write));
+}
+
+export async function loadLiveWorkoutSession(
+  profileId?: string | null,
+): Promise<LiveWorkoutSessionSnapshot | null> {
+  const storage = getLocalStorage();
+  if (!storage) return null;
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) return null;
+  let serialized = storage.getItem(key);
+  if (!serialized) {
+    // Only the original database owner may adopt the single-profile legacy
+    // checkpoint. This is a copy-before-delete migration; failed writes leave
+    // the historical checkpoint untouched for explicit recovery.
+    const owner = profileId === undefined
+      ? storage.getItem(ACTIVE_WORKOUT_PROFILE_KEY) : profileId;
+    if (owner && storage.getItem(ORIGINAL_DATABASE_OWNER_KEY) === owner) {
+      const legacy = storage.getItem(LIVE_SESSION_KEY);
+      if (legacy) {
+        try {
+          const candidate: unknown = JSON.parse(legacy);
+          if (!isLiveWorkoutSession(candidate)) return null;
+          storage.setItem(key, legacy);
+          storage.removeItem(LIVE_SESSION_KEY);
+          serialized = legacy;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
   if (!serialized) return null;
   try {
     const parsed: unknown = JSON.parse(serialized);
     if (!isLiveWorkoutSession(parsed)) {
-      storage?.removeItem(LIVE_SESSION_KEY);
+      // Do not silently remove an invalid persisted recovery journal.
       return null;
     }
     return {
@@ -157,11 +420,44 @@ export async function loadLiveWorkoutSession(): Promise<LiveWorkoutSessionSnapsh
       planLink: isActiveWorkoutPlanLink(parsed.planLink) ? parsed.planLink : undefined,
     };
   } catch {
-    storage?.removeItem(LIVE_SESSION_KEY);
     return null;
   }
 }
 
-export async function clearLiveWorkoutSession(): Promise<void> {
-  getLocalStorage()?.removeItem(LIVE_SESSION_KEY);
+export async function clearLiveWorkoutSession(profileId?: string | null): Promise<void> {
+  // Signed-out callbacks must be strictly read/write NO-OP. Do not throw or
+  // target the previous profile when identity is explicitly null or unresolved.
+  if (profileId === null) return;
+  const storage = getLocalStorage();
+  if (!storage) throw new Error('Live workout recovery storage is unavailable.');
+  const key = scopedLiveSessionKey(storage, profileId);
+  if (!key) {
+    if (profileId === undefined) return;
+    throw new Error('Cannot clear a workout without a verified athlete profile.');
+  }
+  const raw = storage.getItem(key);
+  if (raw) {
+    let snapshot: unknown;
+    try { snapshot = JSON.parse(raw); }
+    catch { throw new Error('Cannot clear an unreadable workout recovery checkpoint.'); }
+    if (!isLiveWorkoutSession(snapshot)) {
+      throw new Error('Cannot clear an unverifiable workout recovery checkpoint.');
+    }
+    const endedKey = endedInstanceKey(
+      storage, profileId, snapshot.workout.id, snapshot.startedAt,
+    );
+    if (!endedKey) throw new Error('Cannot write an unowned workout terminal marker.');
+    // Marker before delete: a failed removal retains the player for recovery,
+    // and a late save of this EXACT ended session can never recreate it.
+    storage.setItem(endedKey, JSON.stringify({
+      workoutId: snapshot.workout.id, startedAt: snapshot.startedAt,
+    }));
+    if (storage.getItem(endedKey) === null) {
+      throw new Error('Ended-session protection could not be verified.');
+    }
+  }
+  storage.removeItem(key);
+  if (storage.getItem(key) !== null) {
+    throw new Error('The workout recovery checkpoint could not be verified as cleared.');
+  }
 }

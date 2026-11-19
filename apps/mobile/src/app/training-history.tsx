@@ -78,7 +78,7 @@ export default function TrainingHistoryScreen() {
       ? <Pressable
           key={item.id}
           accessibilityRole="button"
-          accessibilityLabel={`Open ${item.workout.name} strength workout`}
+          accessibilityLabel={`Open ${item.workout.name} strength workout, ${Math.round(item.workout.completionFraction * 100)} percent completed`}
           onPress={() => router.push({ pathname: '/workout-detail', params: { id: item.workout.id } } as never)}
           style={({ pressed }) => [styles.card, pressed && styles.pressed]}
         >

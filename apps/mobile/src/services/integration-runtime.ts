@@ -1,4 +1,5 @@
 import { autoRefreshTrainingCalendars } from './calendar-sync';
+import { isIsolatedQaRuntime } from './supabase';
 import { listCoachAccess, syncAthleteFuturePlan } from './coach';
 import { getLatestTrainingCalendarSource, saveIntegrationSyncState, softDeleteEnduranceActivitiesBySource } from './database';
 import { processReliabilityQueue, queueReliabilityOperation } from './reliability';
@@ -21,6 +22,9 @@ async function runRefresh({ cloudEnabled, userId, force }: { cloudEnabled: boole
   await saveIntegrationSyncState({integrationId:'foreground_recovery',status:'syncing',connected:cloudEnabled,lastAttemptedAt:attemptedAt,updatedAt:attemptedAt});
   try{
     if(cloudEnabled&&userId)await processReliabilityQueue({cloudEnabled,userId,force});
+    // Synthetic device QA must never fetch external calendar URLs or cloud data.
+    // Existing local synthetic activity and ledger checks remain available.
+    if (isIsolatedQaRuntime) { await markRuntimeSuccess(attemptedAt); return; }
     await autoRefreshTrainingCalendars({ force });
     const source=await getLatestTrainingCalendarSource().catch(()=>null);
     if(source?.active&&source.syncStatus==='error')await queueReliabilityOperation('calendar_sync','calendar:active');

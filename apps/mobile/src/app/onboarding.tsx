@@ -3,14 +3,28 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppScreen, Surface } from '@/components/v12-ui';
 import { useOnboarding } from '@/state/onboarding-context';
+import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 import { type AppPalette } from '@/theme';
+import {
+  FAST_START_LOCATIONS, PROTECTED_AREAS, CROSS_TRAINING_MODES,
+  fastStartPrimaryLocation, fastStartNeedsSpecificReview,
+  normalizeFastStartLocations, normalizeFastStartRestrictions,
+  normalizeProtectedAreas, normalizeCrossTrainingModes,
+  toggleFastStartLocation, toggleFastStartRestriction,
+  type FastStartLocation, type FastStartRestriction,
+  type ProtectedAreaDetail, type ProtectedArea, type ProtectedSide,
+  type CrossTrainingMode,
+} from '@/services/first-week-input-policy';
+import {
+  firstWeekGoalReviewLabel, firstWeekPriorityForGoal, firstWeekUsesRacePriority,
+} from '@/services/first-week-goal-policy';
 
 type Step = 'welcome' | 'goal' | 'schedule' | 'equipment' | 'restrictions' | 'profile' | 'review';
 type GoalChoice = 'ironman_70_3' | 'triathlon_olympic' | 'road_half_marathon' | 'road_marathon' | 'trail_50k' | 'general_offseason';
 type PriorityChoice = 'finish' | 'perform' | 'race';
-type EquipmentChoice = 'home' | 'full_gym' | 'travel' | 'bodyweight';
-type RestrictionChoice = 'none' | 'lower_body' | 'upper_body' | 'back' | 'other';
+type EquipmentChoice = FastStartLocation;
+type RestrictionChoice = FastStartRestriction;
 type BackgroundChoice = 'swim' | 'bike' | 'run' | 'triathlon' | 'balanced';
 type RunStatusChoice = 'normal' | 'reduced' | 'return_to_run' | 'not_running';
 type InjuryChoice = 'none' | 'remote_bone_stress' | 'recent_bone_stress' | 'recurring_run';
@@ -27,41 +41,61 @@ const GOALS: Array<{ id: GoalChoice; label: string; detail: string }> = [
   { id: 'general_offseason', label: 'General strength', detail: 'Build strength without a race date.' },
 ];
 
-type OnboardingDraft = { step: Step; goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[]; equipment: EquipmentChoice; restriction: RestrictionChoice; background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice; strength: StrengthChoice };
+type OnboardingDraft = {
+  step: Step; goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[];
+  equipment: EquipmentChoice; equipmentLocations?: EquipmentChoice[];
+  restriction: RestrictionChoice; restrictions?: RestrictionChoice[];
+  protectedAreas?: ProtectedAreaDetail[]; desiredModes?: CrossTrainingMode[];
+  expandedDetails?: boolean; background: BackgroundChoice; runStatus: RunStatusChoice;
+  injury: InjuryChoice; strength: StrengthChoice;
+};
 const DRAFT_KEY = 'sidequest.onboarding.first-week-draft.v1';
 type DraftStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
 const draftStorage = (globalThis as typeof globalThis & { localStorage?: DraftStorage }).localStorage;
-function loadDraft(): Partial<OnboardingDraft> { try { const raw = draftStorage?.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) as Partial<OnboardingDraft> : {}; } catch { return {}; } }
-function saveDraft(draft: OnboardingDraft): void { try { draftStorage?.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* setup can still continue without persistence */ } }
+function loadDraft(key: string): Partial<OnboardingDraft> { try { const raw = draftStorage?.getItem(key); return raw ? JSON.parse(raw) as Partial<OnboardingDraft> : {}; } catch { return {}; } }
+function saveDraft(key: string, draft: OnboardingDraft): void { try { draftStorage?.setItem(key, JSON.stringify(draft)); } catch { /* setup can still continue without persistence */ } }
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const { acknowledgeStrengthModel, acknowledgePrivacyModel } = useOnboarding();
+  const { beginFirstWeek } = useOnboarding();
+  const { user } = useAuth();
+  const draftKey = `${DRAFT_KEY}.${user?.id ?? 'guest'}`;
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
-  const initialDraft = useMemo(loadDraft, []);
+  const initialDraft = useMemo(() => loadDraft(draftKey), [draftKey]);
   const [step, setStep] = useState<Step>(initialDraft.step ?? 'welcome');
   const [goal, setGoal] = useState<GoalChoice>(initialDraft.goal ?? 'ironman_70_3');
   const [priority, setPriority] = useState<PriorityChoice>(initialDraft.priority ?? 'perform');
   const [hours, setHours] = useState(initialDraft.hours ?? 10);
   const [days, setDays] = useState<number[]>(initialDraft.days ?? [1, 3, 5]);
   const [equipment, setEquipment] = useState<EquipmentChoice>(initialDraft.equipment ?? 'home');
-  const [restriction, setRestriction] = useState<RestrictionChoice>(initialDraft.restriction ?? 'none');
+  const [equipmentLocations, setEquipmentLocations] = useState<EquipmentChoice[]>(() =>
+    normalizeFastStartLocations(initialDraft.equipmentLocations, initialDraft.equipment ?? 'home'));
+  const [restrictions, setRestrictions] = useState<RestrictionChoice[]>(() =>
+    normalizeFastStartRestrictions(initialDraft.restrictions, initialDraft.restriction ?? 'none'));
+  const [protectedAreas, setProtectedAreas] = useState<ProtectedAreaDetail[]>(() =>
+    normalizeProtectedAreas(initialDraft.protectedAreas));
+  const [desiredModes, setDesiredModes] = useState<CrossTrainingMode[]>(() =>
+    normalizeCrossTrainingModes(initialDraft.desiredModes));
+  const [expandedDetails, setExpandedDetails] = useState(Boolean(initialDraft.expandedDetails));
   const [background, setBackground] = useState<BackgroundChoice>(initialDraft.background ?? 'balanced');
   const [runStatus, setRunStatus] = useState<RunStatusChoice>(initialDraft.runStatus ?? 'normal');
   const [injury, setInjury] = useState<InjuryChoice>(initialDraft.injury ?? 'none');
   const [strength, setStrength] = useState<StrengthChoice>(initialDraft.strength ?? 'intermediate');
 
-  useEffect(() => { saveDraft({ step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength }); }, [step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength]);
+  useEffect(() => { saveDraft(draftKey, {
+    step, goal, priority, hours, days, equipment, equipmentLocations,
+    restriction: restrictions[0] ?? 'none', restrictions, protectedAreas,
+    desiredModes, expandedDetails, background, runStatus, injury, strength,
+  }); }, [draftKey, step, goal, priority, hours, days, equipment,
+    equipmentLocations, restrictions, protectedAreas, desiredModes, expandedDetails,
+    background, runStatus, injury, strength]);
 
   const stepIndex = STEPS.indexOf(step);
   const progress = Math.max(0, stepIndex) / (STEPS.length - 1);
 
   function next() {
-    if (step === 'welcome') {
-      acknowledgeStrengthModel(true);
-      acknowledgePrivacyModel(true);
-    }
+    if (step === 'welcome') beginFirstWeek();
     setStep(STEPS[Math.min(stepIndex + 1, STEPS.length - 1)] ?? 'review');
   }
   function back() {
@@ -71,26 +105,71 @@ export default function OnboardingScreen() {
   function toggleDay(index: number) {
     setDays((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index].sort());
   }
+  const [navigationError, setNavigationError] = useState<string | null>(null);
   function finish() {
-    const query = new URLSearchParams({
-      goal, priority, hours: String(hours), days: days.join(','), equipment, restriction,
-      background, runStatus, injury, strength,
-    });
-    router.replace(`/onboarding-first-week?${query.toString()}` as Href);
+    setNavigationError(null);
+    if (fastStartNeedsSpecificReview(restrictions)) {
+      setNavigationError('An additional restriction cannot be mapped to exercises. Return to the protection step and select a known anatomical region or remove "Something else" before generating a session.');
+      return;
+    }
+    try {
+      // Expo Router owns query encoding. Avoid URLSearchParams inside native
+      // Hermes: a thrown event-handler exception previously left users on the
+      // last onboarding step with no actionable error.
+      router.replace({
+        pathname: '/onboarding-first-week',
+        params: {
+          goal, priority: firstWeekPriorityForGoal(goal, priority), hours: String(hours), days: days.join(','),
+          equipment: fastStartPrimaryLocation(equipmentLocations, equipment),
+          equipmentLocations: equipmentLocations.join(','),
+          restriction: restrictions[0] ?? 'none',
+          restrictions: restrictions.join(','),
+          protectedAreas: JSON.stringify(protectedAreas),
+          desiredModes: desiredModes.join(','),
+          background, runStatus, injury, strength,
+        },
+      } as Href);
+    } catch (caught) {
+      setNavigationError(caught instanceof Error ? caught.message
+        : 'Could not open the proposed week. Try again or return to setup.');
+    }
   }
 
   return <AppScreen eyebrow={`STEP ${stepIndex + 1} OF ${STEPS.length}`} title={titleFor(step)} subtitle={subtitleFor(step)}>
     <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.max(8, progress * 100)}%` }]} /></View>
+    <Pressable accessibilityRole="button" onPress={() => setExpandedDetails((value) => !value)}
+      style={styles.detailsButton}><Text style={styles.detailsButtonText}>
+        {expandedDetails ? 'Show fewer setup options' : 'Expand setup details (optional)'}
+      </Text></Pressable>
     {step === 'welcome' ? <Welcome styles={styles} /> : null}
     {step === 'goal' ? <GoalStep goal={goal} priority={priority} setGoal={setGoal} setPriority={setPriority} styles={styles} /> : null}
     {step === 'schedule' ? <ScheduleStep hours={hours} setHours={setHours} days={days} toggleDay={toggleDay} styles={styles} /> : null}
-    {step === 'equipment' ? <EquipmentStep value={equipment} setValue={setEquipment} styles={styles} /> : null}
-    {step === 'restrictions' ? <RestrictionsStep value={restriction} setValue={setRestriction} styles={styles} /> : null}
-    {step === 'profile' ? <ProfileStep background={background} setBackground={setBackground} runStatus={runStatus} setRunStatus={setRunStatus} injury={injury} setInjury={setInjury} strength={strength} setStrength={setStrength} styles={styles} /> : null}
-    {step === 'review' ? <Review goal={goal} priority={priority} hours={hours} days={days} equipment={equipment} restriction={restriction} background={background} runStatus={runStatus} injury={injury} strength={strength} styles={styles} /> : null}
+    {step === 'equipment' ? <EquipmentStep value={equipment} setValue={setEquipment}
+      locations={equipmentLocations} setLocations={setEquipmentLocations} styles={styles} /> : null}
+    {step === 'restrictions' ? <RestrictionsStep restrictions={restrictions} setRestrictions={setRestrictions}
+      areas={protectedAreas} setAreas={setProtectedAreas}
+      expanded={expandedDetails} setExpanded={setExpandedDetails} styles={styles} /> : null}
+    {step === 'profile' ? <><ProfileStep background={background} setBackground={setBackground} runStatus={runStatus} setRunStatus={setRunStatus} injury={injury} setInjury={setInjury} strength={strength} setStrength={setStrength} styles={styles} />
+      <Pressable accessibilityRole="button" onPress={() => setExpandedDetails(true)} style={styles.detailsButton}>
+        <Text style={styles.detailsButtonText}>Add cardio and cross-training preferences</Text>
+      </Pressable>
+      {expandedDetails ? <View style={styles.profileStack}><Text style={styles.sectionLabel}>ACTIVITIES YOU WANT CONSIDERED (SELECT ALL)</Text>
+        <View style={styles.chipWrap}>{CROSS_TRAINING_MODES.map(({ id, label }) =>
+          <Pressable key={id} onPress={() => setDesiredModes((current) =>
+            current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+            style={[styles.chip, desiredModes.includes(id) && styles.chipActive]}>
+            <Text style={[styles.chipText, desiredModes.includes(id) && styles.chipTextActive]}>{label}</Text>
+          </Pressable>)}</View>
+        <Text style={styles.note}>Preferences are not completed training or medical clearance. Cardio dose and eligibility require review before scheduling.</Text>
+      </View> : null}</> : null}
+    {step === 'review' ? <Review goal={goal} priority={priority} hours={hours} days={days}
+      equipment={fastStartPrimaryLocation(equipmentLocations, equipment)} locations={equipmentLocations}
+      restrictions={restrictions} areas={protectedAreas} desiredModes={desiredModes}
+      background={background} runStatus={runStatus} injury={injury} strength={strength} styles={styles} /> : null}
+    {navigationError ? <Text accessibilityRole="alert" style={{ color: palette.ink, paddingHorizontal: 10 }}>First-week navigation error: {navigationError}</Text> : null}
     <View style={styles.actions}>
       <Pressable onPress={back} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}><Text style={styles.secondaryText}>{step === 'welcome' ? 'Not now' : 'Back'}</Text></Pressable>
-      <Pressable disabled={step === 'schedule' && days.length < 2} onPress={step === 'review' ? finish : next} style={({ pressed }) => [styles.primary, step === 'schedule' && days.length < 2 && styles.disabled, pressed && styles.pressed]}>
+      <Pressable testID="sidequest-qa-onboarding-next" accessibilityRole="button" disabled={step === 'schedule' && days.length < 2} onPress={step === 'review' ? finish : next} style={({ pressed }) => [styles.primary, step === 'schedule' && days.length < 2 && styles.disabled, pressed && styles.pressed]}>
         <Text style={styles.primaryText}>{step === 'review' ? 'Build my first week' : step === 'welcome' ? 'Start setup' : 'Continue'}</Text><Text style={styles.arrow}>›</Text>
       </Pressable>
     </View>
@@ -98,25 +177,98 @@ export default function OnboardingScreen() {
 }
 
 function Welcome({ styles }: { styles: ReturnType<typeof makeStyles> }) {
-  return <Surface style={styles.hero}><Text style={styles.kicker}>FAST START + ATHLETE CONTEXT</Text><Text style={styles.heroTitle}>Build a useful first week without flattening your training history.</Text><View style={styles.promiseList}>{['Goal, priority, and real availability', 'Equipment and current restrictions', 'Sport background and run status', 'Injury patterns that should change progression'].map((item, index) => <View key={item} style={styles.promiseRow}><View style={styles.number}><Text style={styles.numberText}>{index + 1}</Text></View><Text style={styles.promiseText}>{item}</Text></View>)}</View><Text style={styles.note}>This creates a conservative first draft. Connected training history makes later recommendations more precise.</Text></Surface>;
+  return <Surface style={styles.hero}><Text style={styles.kicker}>FAST START + ATHLETE CONTEXT</Text><Text style={styles.heroTitle}>Build a useful first week without flattening your training history.</Text><View style={styles.promiseList}>{['Goal and real availability', 'Equipment and current restrictions', 'Sport background and run status', 'Injury patterns that should change progression'].map((item, index) => <View key={item} style={styles.promiseRow}><View style={styles.number}><Text style={styles.numberText}>{index + 1}</Text></View><Text style={styles.promiseText}>{item}</Text></View>)}</View><Text style={styles.note}>This creates a conservative first draft. Connected training history makes later recommendations more precise.</Text></Surface>;
 }
 
 function GoalStep({ goal, priority, setGoal, setPriority, styles }: { goal: GoalChoice; priority: PriorityChoice; setGoal: (v: GoalChoice) => void; setPriority: (v: PriorityChoice) => void; styles: ReturnType<typeof makeStyles> }) {
-  return <><Text style={styles.sectionLabel}>WHAT ARE YOU TRAINING FOR?</Text><View style={styles.choiceGrid}>{GOALS.map((item) => <Choice key={item.id} selected={goal === item.id} title={item.label} detail={item.detail} onPress={() => setGoal(item.id)} styles={styles} />)}</View><Text style={styles.sectionLabel}>RACE PRIORITY</Text><View style={styles.segmentRow}>{([['finish','C · Finish well'],['perform','B · Perform'],['race','A · Race all-out']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setPriority(id)} style={[styles.segment, priority === id && styles.segmentActive]}><Text style={[styles.segmentText, priority === id && styles.segmentTextActive]}>{label}</Text></Pressable>)}</View></>;
+  return <><Text style={styles.sectionLabel}>WHAT ARE YOU TRAINING FOR?</Text><View style={styles.choiceGrid}>{GOALS.map((item) => <Choice key={item.id} selected={goal === item.id} title={item.label} detail={item.detail} onPress={() => { setGoal(item.id); if (!firstWeekUsesRacePriority(item.id)) setPriority('perform'); }} styles={styles} />)}</View>{firstWeekUsesRacePriority(goal) ? <><Text style={styles.sectionLabel}>RACE PRIORITY</Text><View style={styles.segmentRow}>{([['finish','C · Finish well'],['perform','B · Perform'],['race','A · Race all-out']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setPriority(id)} style={[styles.segment, priority === id && styles.segmentActive]}><Text style={[styles.segmentText, priority === id && styles.segmentTextActive]}>{label}</Text></Pressable>)}</View></> : null}</>;
 }
 
 function ScheduleStep({ hours, setHours, days, toggleDay, styles }: { hours: number; setHours: (v: number) => void; days: number[]; toggleDay: (v: number) => void; styles: ReturnType<typeof makeStyles> }) {
   return <><Surface style={styles.focusCard}><Text style={styles.bigNumber}>{hours}</Text><Text style={styles.bigUnit}>total training hours available each week</Text><View style={styles.stepper}><Pressable onPress={() => setHours(Math.max(3, hours - 1))} style={styles.stepperButton}><Text style={styles.stepperText}>−</Text></Pressable><Pressable onPress={() => setHours(Math.min(25, hours + 1))} style={styles.stepperButton}><Text style={styles.stepperText}>+</Text></Pressable></View></Surface><Text style={styles.sectionLabel}>DAYS STRENGTH COULD FIT</Text><View style={styles.dayRow}>{DAYS.map((label,index) => <Pressable key={`${label}-${index}`} onPress={() => toggleDay(index)} style={[styles.day, days.includes(index) && styles.dayActive]}><Text style={[styles.dayText, days.includes(index) && styles.dayTextActive]}>{label}</Text></Pressable>)}</View><Text style={styles.helper}>Choose at least two realistic options. Side Quest may schedule fewer sessions than the number of days you select.</Text></>;
 }
 
-function EquipmentStep({ value, setValue, styles }: { value: EquipmentChoice; setValue: (v: EquipmentChoice) => void; styles: ReturnType<typeof makeStyles> }) {
-  const options: Array<[EquipmentChoice,string,string]> = [['home','Home setup','Bodyweight, bands, small tools, and the weights you own.'],['full_gym','Full gym','Free weights, cables, machines, benches, and pull-up options.'],['travel','Hotel / travel','Portable tools and whatever is available temporarily.'],['bodyweight','Bodyweight only','No equipment required.']];
-  return <View style={styles.choiceGrid}>{options.map(([id,title,detail]) => <Choice key={id} selected={value === id} title={title} detail={detail} onPress={() => setValue(id)} styles={styles} />)}<Text style={styles.helper}>Exact weights and individual equipment can be refined after the first draft.</Text></View>;
+function EquipmentStep({ value, setValue, locations, setLocations, styles }: {
+  value: EquipmentChoice; setValue: (v: EquipmentChoice) => void;
+  locations: EquipmentChoice[]; setLocations: (v: EquipmentChoice[]) => void;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  function toggle(id: EquipmentChoice) {
+    const next = toggleFastStartLocation(locations, id);
+    setLocations(next);
+    setValue(fastStartPrimaryLocation(next, value));
+  }
+  return <View style={styles.choiceGrid}>
+    <Text style={styles.helper}>Select all places you can train. Equipment from different locations is never combined into one workout.</Text>
+    {FAST_START_LOCATIONS.map(({ id, title, detail }) =>
+      <Choice key={id} selected={locations.includes(id)} title={title} detail={detail}
+        onPress={() => toggle(id)} styles={styles} />)}
+    {locations.length > 1 ? <View style={styles.profileStack}>
+      <Text style={styles.sectionLabel}>BUILD THIS FIRST WEEK FOR</Text>
+      <Text style={styles.helper}>Choose one venue for this draft. The other locations are kept for future planning.</Text>
+      <View style={styles.chipWrap}>{locations.map((id) => <Pressable key={id} onPress={() => setValue(id)}
+        style={[styles.chip, value === id && styles.chipActive]}>
+        <Text style={[styles.chipText, value === id && styles.chipTextActive]}>
+          {FAST_START_LOCATIONS.find((item) => item.id === id)?.title ?? id}
+        </Text></Pressable>)}</View>
+    </View> : null}
+    <Text style={styles.helper}>Exact equipment at each venue can be refined after the first draft.</Text>
+  </View>;
 }
 
-function RestrictionsStep({ value, setValue, styles }: { value: RestrictionChoice; setValue: (v: RestrictionChoice) => void; styles: ReturnType<typeof makeStyles> }) {
-  const options: Array<[RestrictionChoice,string,string]> = [['none','Nothing to protect today','Build normally and let me add details later.'],['lower_body','Lower body','Use a conservative lower-body and impact filter.'],['upper_body','Upper body','Reduce pressing, pulling, and overhead exposure.'],['back','Back or trunk','Reduce provocative trunk loading.'],['other','Something else','Create the draft, then refine the restriction before training.']];
-  return <View style={styles.choiceGrid}>{options.map(([id,title,detail]) => <Choice key={id} selected={value === id} title={title} detail={detail} onPress={() => setValue(id)} styles={styles} />)}<Text style={styles.note}>This is a temporary planning filter, not a diagnosis or medical clearance.</Text></View>;
+function RestrictionsStep({ restrictions, setRestrictions, areas, setAreas, expanded, setExpanded, styles }: {
+  restrictions: RestrictionChoice[]; setRestrictions: (v: RestrictionChoice[]) => void;
+  areas: ProtectedAreaDetail[]; setAreas: (v: ProtectedAreaDetail[]) => void;
+  expanded: boolean; setExpanded: (v: boolean) => void;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const options: Array<[RestrictionChoice,string,string]> = [
+    ['none','Nothing to protect today','No additional onboarding exclusions.'],
+    ['lower_body','Lower body','Conservatively exclude lower-body loading.'],
+    ['upper_body','Upper body','Conservatively exclude upper-body loading.'],
+    ['back','Back or trunk','Exclude back and trunk-loading regions.'],
+    ['other','Something else / unsure','Requires specifying the limitation before generating a workout.'],
+  ];
+  const selected = new Set(areas.map((item) => item.area));
+  function toggleArea(id: ProtectedArea) {
+    setAreas(selected.has(id) ? areas.filter((item) => item.area !== id)
+      : [...areas, { area: id, side: 'bilateral' }]);
+    if (restrictions.includes('none')) setRestrictions([]);
+  }
+  function updateSide(id: ProtectedArea, side: ProtectedSide) {
+    setAreas(areas.map((item) => item.area === id ? { ...item, side } : item));
+  }
+  return <View style={styles.choiceGrid}>
+    <Text style={styles.helper}>Select all that apply. Exclusions combine conservatively; this is not medical clearance.</Text>
+    {options.map(([id,title,detail]) =>
+      <Choice key={id} selected={restrictions.includes(id)} title={title} detail={detail}
+        onPress={() => {
+          setRestrictions(toggleFastStartRestriction(restrictions, id));
+          if (id === 'none') setAreas([]);
+        }} styles={styles} />)}
+    <Pressable accessibilityRole="button" onPress={() => setExpanded(!expanded)}
+      style={styles.detailsButton}><Text style={styles.detailsButtonText}>
+        {expanded ? 'Hide anatomical detail' : 'Refine specific body areas and side'}
+      </Text></Pressable>
+    {expanded ? <View style={styles.profileStack}>
+      <Text style={styles.sectionLabel}>SPECIFIC AREAS TO PROTECT</Text>
+      {PROTECTED_AREAS.map(({ id, label }) => <View key={id} style={styles.protectedDetail}>
+        <Choice selected={selected.has(id)} title={label} detail="Conservative regional exclusion"
+          onPress={() => toggleArea(id)} styles={styles} />
+        {selected.has(id) ? <View style={styles.chipWrap}>
+          {([['left','Left'],['right','Right'],['bilateral','Both']] as const).map(([side, caption]) =>
+            <Pressable key={side} onPress={() => updateSide(id, side)}
+              style={[styles.chip, areas.find((item) => item.area === id)?.side === side && styles.chipActive]}>
+              <Text style={[styles.chipText,
+                areas.find((item) => item.area === id)?.side === side && styles.chipTextActive]}>{caption}</Text>
+            </Pressable>)}
+        </View> : null}
+      </View>)}
+      <Text style={styles.note}>Side is preserved for review. Until side-aware exercise rules are verified, a selected region is excluded bilaterally. Broad exclusions remain active until deselected.</Text>
+    </View> : null}
+    {restrictions.includes('other') ? <Text style={styles.note}>Unmapped restriction: the first-week build will pause. Select mapped areas or complete a PT/restriction review.</Text> : null}
+    <Text style={styles.note}>Restrictions are planning constraints, not a diagnosis or clinical exercise clearance.</Text>
+  </View>;
 }
 
 function ProfileStep({ background, setBackground, runStatus, setRunStatus, injury, setInjury, strength, setStrength, styles }: { background: BackgroundChoice; setBackground: (v: BackgroundChoice) => void; runStatus: RunStatusChoice; setRunStatus: (v: RunStatusChoice) => void; injury: InjuryChoice; setInjury: (v: InjuryChoice) => void; strength: StrengthChoice; setStrength: (v: StrengthChoice) => void; styles: ReturnType<typeof makeStyles> }) {
@@ -133,26 +285,49 @@ function CompactChoiceGroup<T extends string>({ title, value, setValue, options,
   return <View style={styles.compactGroup}><Text style={styles.sectionLabel}>{title}</Text><View style={styles.chipWrap}>{options.map(([id,label]) => <Pressable key={id} onPress={() => setValue(id)} style={[styles.chip, value === id && styles.chipActive]}><Text style={[styles.chipText, value === id && styles.chipTextActive]}>{label}</Text></Pressable>)}</View></View>;
 }
 
-function Review({ goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength, styles }: { goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[]; equipment: EquipmentChoice; restriction: RestrictionChoice; background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice; strength: StrengthChoice; styles: ReturnType<typeof makeStyles> }) {
+function Review({ goal, priority, hours, days, equipment, locations, restrictions, areas,
+  desiredModes, background, runStatus, injury, strength, styles }: {
+  goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[];
+  equipment: EquipmentChoice; locations: EquipmentChoice[]; restrictions: RestrictionChoice[];
+  areas: ProtectedAreaDetail[]; desiredModes: CrossTrainingMode[];
+  background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice;
+  strength: StrengthChoice; styles: ReturnType<typeof makeStyles>;
+}) {
   const goalLabel = GOALS.find((item) => item.id === goal)?.label ?? goal;
+  const locationLabels = locations.map((id) =>
+    FAST_START_LOCATIONS.find((item) => item.id === id)?.title ?? id);
+  const detailLabels = areas.map((item) =>
+    `${PROTECTED_AREAS.find((area) => area.id === item.area)?.label ?? item.area} (${item.side})`);
   const rows = [
-    ['Goal', `${goalLabel} · ${priority === 'race' ? 'A' : priority === 'perform' ? 'B' : 'C'} priority`],
-    ['Capacity', `${hours} hr/week · ${days.map((d) => DAYS[d]).join(' · ')}`],
-    ['Setup', `${labelize(equipment)} · ${restriction === 'none' ? 'No restriction selected' : labelize(restriction)}`],
+    ['Goal', firstWeekGoalReviewLabel(goal, goalLabel, priority)],
+    ['Availability', `${hours} hr/week · ${days.map((d) => DAYS[d]).join(' · ')}`],
+    ['Locations', locationLabels.join(' + ') + ` · first draft: ${labelize(equipment)}`],
+    ['Restrictions', [...restrictions.filter((v) => v !== 'none').map(labelize), ...detailLabels].join(' · ') || 'None selected'],
     ['Athlete profile', `${labelize(background)} background · ${labelize(runStatus)}`],
     ['Progression context', `${labelize(injury)} · ${labelize(strength)} strength`],
+    ['Cardio interests', desiredModes.map((id) =>
+      CROSS_TRAINING_MODES.find((mode) => mode.id === id)?.label ?? id).join(' · ') || 'None selected'],
   ];
-  return <><Surface style={styles.reviewCard}>{rows.map(([label,value]) => <View key={label} style={styles.reviewRow}><Text style={styles.reviewLabel}>{label}</Text><Text style={styles.reviewValue}>{value}</Text></View>)}</Surface><View style={styles.payoff}><Text style={styles.kicker}>NEXT</Text><Text style={styles.payoffTitle}>Side Quest will generate the first draft directly.</Text><Text style={styles.helper}>You will see the first week before entering the rest of the app. The full planner remains available as an advanced edit path.</Text></View></>;
+  return <><Surface style={styles.reviewCard}>{rows.map(([label,value]) =>
+    <View key={label} style={styles.reviewRow}><Text style={styles.reviewLabel}>{label}</Text>
+      <Text style={styles.reviewValue}>{value}</Text></View>)}</Surface>
+    <View style={styles.payoff}><Text style={styles.kicker}>NEXT</Text>
+      <Text style={styles.payoffTitle}>Side Quest will generate a provisional first draft.</Text>
+      <Text style={styles.helper}>Cross-training preferences remain unscheduled until recent dose and eligibility are reviewed. You can revise the draft before training; full planning remains available.</Text>
+    </View></>;
 }
 
 function Choice({ selected, title, detail, onPress, styles }: { selected: boolean; title: string; detail: string; onPress: () => void; styles: ReturnType<typeof makeStyles> }) {
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.choice, selected && styles.choiceActive, pressed && styles.pressed]}><View style={[styles.radio, selected && styles.radioActive]}>{selected ? <Text style={styles.radioCheck}>✓</Text> : null}</View><View style={{ flex: 1 }}><Text style={styles.choiceTitle}>{title}</Text><Text style={styles.choiceDetail}>{detail}</Text></View></Pressable>;
 }
 function titleFor(step: Step) { return ({ welcome:'Build your first week.', goal:'Choose the goal.', schedule:'Use the time you actually have.', equipment:'What is available now?', restrictions:'Anything to protect?', profile:'How do you respond to training?', review:'Ready to build.' } as const)[step]; }
-function subtitleFor(step: Step) { return ({ welcome:'A fast start with one layer of athlete context.', goal:'The goal and priority shape the strength dose.', schedule:'Availability is a constraint, not a test.', equipment:'Start broad. Exact loads can come later.', restrictions:'Keep unrelated training available whenever possible.', profile:'Enough nuance to avoid treating every endurance athlete the same.', review:'The next screen is the generated first-week preview.' } as const)[step]; }
+function subtitleFor(step: Step) { return ({ welcome:'A fast start with one layer of athlete context.', goal:'Choose your objective; race priority is optional for competition goals.', schedule:'Availability is a constraint, not a test.', equipment:'Start broad. Exact loads can come later.', restrictions:'Keep unrelated training available whenever possible.', profile:'Enough nuance to avoid treating every endurance athlete the same.', review:'The next screen is the generated first-week preview.' } as const)[step]; }
 function labelize(value: string) { return value.replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
 
 function makeStyles(palette: AppPalette) { return StyleSheet.create({
+  detailsButton:{borderWidth:1,borderColor:palette.forest,borderRadius:14,padding:11,alignItems:'center'},
+  detailsButtonText:{fontSize:14,fontWeight:'800',color:palette.forest},
+  protectedDetail:{gap:6,paddingVertical:5},
   progressTrack:{height:5,borderRadius:999,backgroundColor:palette.border,overflow:'hidden'}, progressFill:{height:'100%',borderRadius:999,backgroundColor:palette.forest},
   hero:{padding:22,gap:16}, kicker:{fontSize:11,lineHeight:15,fontWeight:'900',letterSpacing:1.4,color:palette.forest}, heroTitle:{fontSize:23,lineHeight:29,fontWeight:'900',color:palette.ink}, promiseList:{gap:12}, promiseRow:{flexDirection:'row',alignItems:'center',gap:12}, number:{width:30,height:30,borderRadius:10,backgroundColor:palette.mint,alignItems:'center',justifyContent:'center'},numberText:{fontWeight:'900',color:palette.forest},promiseText:{fontSize:15.5,fontWeight:'800',color:palette.ink,flex:1},note:{fontSize:13.5,lineHeight:19,color:palette.inkMuted,fontStyle:'italic'},
   sectionLabel:{fontSize:12,lineHeight:16,fontWeight:'900',letterSpacing:1.25,color:palette.forest,marginTop:2}, choiceGrid:{gap:10}, choice:{minHeight:76,borderWidth:1.5,borderColor:palette.border,borderRadius:18,padding:15,flexDirection:'row',alignItems:'center',gap:13,backgroundColor:palette.white},choiceActive:{borderColor:palette.forest,backgroundColor:palette.mint},radio:{width:27,height:27,borderRadius:14,borderWidth:1.5,borderColor:palette.border,alignItems:'center',justifyContent:'center'},radioActive:{backgroundColor:palette.forest,borderColor:palette.forest},radioCheck:{color:palette.white,fontWeight:'900'},choiceTitle:{fontSize:16,lineHeight:20,fontWeight:'900',color:palette.ink},choiceDetail:{fontSize:13,lineHeight:18,color:palette.inkMuted,marginTop:3},

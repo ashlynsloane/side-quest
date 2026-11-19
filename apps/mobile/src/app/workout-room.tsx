@@ -1,11 +1,14 @@
 import type { GeneratedWorkout } from '@circuit/domain';
+import { DeferredWorkoutTogetherScreen } from '@/components/milestone-one-deferred-workout-together';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { nextSubstitutableSession } from '@circuit/planner';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { AppScreen, Pill, SectionTitle, Surface } from '@/components/v12-ui';
-import { getLatestTrainingBlock } from '@/services/database';
+import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
+import { getLatestTrainingBlock, inspectGenericWorkoutSafety } from '@/services/database';
 import {
   cancelWorkoutRoom,
   getWorkoutRoomByCode,
@@ -22,14 +25,23 @@ import {
   type WorkoutRoomMember,
 } from '@/services/workout-together';
 import { useAuth } from '@/state/auth-context';
+import { useWorkoutContext } from '@/state/workout-context';
 import { useTheme } from '@/state/theme-context';
 import { typography, type AppPalette } from '@/theme';
 
 export default function WorkoutRoomScreen() {
+  if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) {
+    return <DeferredWorkoutTogetherScreen />;
+  }
+  return <WorkoutRoomExperience />;
+}
+
+function WorkoutRoomExperience() {
   const { code: rawCode } = useLocalSearchParams<{ code?: string }>();
   const code = String(rawCode ?? '').toUpperCase();
   const router = useRouter();
   const { user } = useAuth();
+  const { activeWorkout } = useWorkoutContext();
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [room, setRoom] = useState<SharedWorkoutRoom | null>(null);
@@ -96,8 +108,43 @@ export default function WorkoutRoomScreen() {
     try{await setWorkoutRoomPlanRelation({roomId:room.id,userId:user.id,relation,plannedSessionId:relation==='substitute_next'?nextSession?.id:undefined,plannedSessionTitle:relation==='substitute_next'?nextSession?.title:undefined});await refresh();}
     catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setBusy(false)}
   }
-  async function toggleReady(){if(!room||!user||!me)return;setBusy(true);try{await setWorkoutRoomReady(room.id,user.id,!me.ready);await refresh();}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setBusy(false)}}
-  async function start(){if(!room||!user||!isHost)return;setBusy(true);try{await startWorkoutRoom(room.id,user.id,8);await refresh();}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}finally{setBusy(false)}}
+  async function requireSharedWorkoutSafety(): Promise<void> {
+    if (!user) throw new Error('A verified athlete profile is required.');
+    if (activeWorkout || await inspectLiveWorkoutSlot(user.id) !== 'empty') {
+      throw new Error('Finish or recover the existing or unreadable athlete workout checkpoint before joining a shared one.');
+    }
+    const safety = await inspectGenericWorkoutSafety(user.id);
+    if (safety.kind !== 'routine_training') {
+      throw new Error('Training safety hold: ' + safety.blockers.join(' ') +
+        ' Open Training Context before participating.');
+    }
+  }
+
+  async function toggleReady() {
+    if (!room || !user || !me) return;
+    setBusy(true);
+    try {
+      if (!me.ready) await requireSharedWorkoutSafety();
+      await setWorkoutRoomReady(room.id, user.id, !me.ready);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally { setBusy(false); }
+  }
+
+  async function start() {
+    if (!room || !user || !isHost) return;
+    setBusy(true);
+    try {
+      // Room readiness is not permanent individual safety permission.
+      // Every participant will independently check again on their phone.
+      await requireSharedWorkoutSafety();
+      await startWorkoutRoom(room.id, user.id, 8);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally { setBusy(false); }
+  }
   async function shareCode(){if(room)await Share.share({message:`Join my workout in Side Quest. Room code: ${room.code}`});}
   function cancel(){if(!room||!user||!isHost){router.back();return}Alert.alert('Cancel workout room?','Everyone in the lobby will be disconnected.',[{text:'Keep room',style:'cancel'},{text:'Cancel room',style:'destructive',onPress:()=>void(async()=>{await cancelWorkoutRoom(room.id,user.id);router.replace('/workout-together' as Href)})()}]);}
 
@@ -121,6 +168,12 @@ export default function WorkoutRoomScreen() {
     <Pressable disabled={busy||!me||!relationConfirmed} onPress={()=>void toggleReady()} style={[styles.secondary,me?.ready?styles.ready:undefined,!relationConfirmed?styles.disabled:undefined]}><Text style={styles.secondaryText}>{!relationConfirmed?'Confirm plan choice first':me?.ready?'I’m ready ✓':'Mark me ready'}</Text></Pressable>
     {isHost?<Pressable disabled={busy||!everyoneReady} onPress={()=>void start()} style={[styles.primary,!everyoneReady||busy?styles.disabled:undefined]}><Text style={styles.primaryText}>{everyoneReady?'Start together · 8 second countdown':'Everyone must confirm and be ready'}</Text></Pressable>:null}
     {error?<Text style={styles.error}>{error}</Text>:null}
+    {error?.includes('Training safety hold:') ? (
+      <Pressable onPress={() => router.push('/training-safety-context' as Href)}
+        style={styles.secondary}>
+        <Text style={styles.secondaryText}>Review training safety context</Text>
+      </Pressable>
+    ) : null}
     <Surface><Text style={styles.title}>Private by design</Text><Text style={styles.body}>Only sanitized workout structure and each athlete’s substitution choice are shared. Loads, completed rounds, pain, restrictions, readiness, heart rate, notes, and history remain private.</Text></Surface>
     <Pressable onPress={cancel}><Text style={styles.cancel}>{isHost?'Cancel room':'Leave lobby'}</Text></Pressable>
   </AppScreen>;

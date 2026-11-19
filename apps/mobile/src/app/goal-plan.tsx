@@ -33,6 +33,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DEFAULT_EQUIPMENT } from '@/features/generate/default-request';
 import { suggestEnduranceSchedule } from '@/services/calendar-sync';
+import { firstWeekPriorityForGoal } from '@/services/first-week-goal-policy';
 import {
   getActiveTrainingCheckIn,
   getLatestPerformanceGoal,
@@ -198,7 +199,7 @@ const TERRAIN_OPTIONS: Array<{ id: GoalTerrain; label: string }> = [
 
 export default function GoalPlanScreen() {
   const { exercises } = useExerciseCatalog();
-  const onboardingParams = useLocalSearchParams<{ onboarding?: string; goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string }>();
+  const onboardingParams = useLocalSearchParams<{ onboarding?: string; goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; runStatus?: string; injury?: string; strength?: string; background?: string }>();
   const fromOnboarding = onboardingParams.onboarding === '1';
 
   const router = useRouter();
@@ -207,10 +208,31 @@ export default function GoalPlanScreen() {
   const [eventDateText, setEventDateText] = useState(() => dateFromWeeks(12));
   const [priority, setPriority] = useState<PerformanceGoal['priority']>(() => isPriority(onboardingParams.priority) ? onboardingParams.priority : 'perform');
   const [terrain, setTerrain] = useState<GoalTerrain>('rolling');
-  const [capacity, setCapacity] = useState<AthleteCapacityProfile>({ totalWeeklyHours: parseHours(onboardingParams.hours), currentEnduranceHours: Math.max(0, parseHours(onboardingParams.hours) - 4), runStatus: 'normal', maxRunMilesLast12Weeks: 20, boneStressInjuryHistory: 'none', swimProficiency: 'average', bikeProficiency: 'average', runProficiency: 'average', strengthExperience: 'intermediate' });
+  const [capacity, setCapacity] = useState<AthleteCapacityProfile>(() => {
+    const status = onboardingParams.runStatus;
+    const runStatus = status === 'normal' || status === 'reduced'
+      || status === 'return_to_run' || status === 'not_running' ? status : 'not_running';
+    const background = onboardingParams.background;
+    const injury = onboardingParams.injury;
+    return {
+      totalWeeklyHours: parseHours(onboardingParams.hours),
+      // Unknown is NOT a measured zero. Evidence is intentionally unset until entered.
+      currentEnduranceHours: 0,
+      maxRunMilesLast12Weeks: 0, runMileageEvidence: 'unknown',
+      runStatus,
+      boneStressInjuryHistory: injury === 'recent_bone_stress' ? 'recent_or_current'
+        : injury === 'remote_bone_stress' ? 'remote' : 'none',
+      swimProficiency: background === 'swim' ? 'strong' : 'developing',
+      bikeProficiency: background === 'bike' ? 'strong' : 'developing',
+      runProficiency: background === 'run' ? 'strong' : 'developing',
+      strengthExperience: onboardingParams.strength === 'advanced' ? 'advanced'
+        : onboardingParams.strength === 'beginner' ? 'beginner' : 'intermediate',
+    };
+  });
   const [planLength, setPlanLength] = useState<TrainingBlockLength>(4);
   const [equipment, setEquipment] = useState<EquipmentId[]>(DEFAULT_EQUIPMENT);
   const [equipmentProfiles, setEquipmentProfiles] = useState<EquipmentProfile[]>([]);
+  const [savedFirstWeekSetup, setSavedFirstWeekSetup] = useState<PerformanceGoal['firstWeekSetup']>();
   const [selectedEquipmentProfileId, setSelectedEquipmentProfileId] = useState<string | null>(null);
   const [preferredStrengthDays, setPreferredStrengthDays] = useState<Weekday[]>(() => parsePreferredDays(onboardingParams.days));
   const [enduranceSchedule, setEnduranceSchedule] = useState<EnduranceSchedule>({
@@ -252,6 +274,7 @@ export default function GoalPlanScreen() {
       ensureDefaultEquipmentProfiles(),
     ]).then(([goal, savedBlock, savedPTProfile, savedCheckIn, savedCalendarEvents, savedEquipmentProfiles]) => {
       if (cancelled) return;
+      if (goal?.firstWeekSetup) setSavedFirstWeekSetup(goal.firstWeekSetup);
       if (goal && !fromOnboarding) {
         setGoalType(goal.type);
         setEventDateText(goal.eventDate ?? dateFromWeeks(goal.weeksUntilEvent));
@@ -281,6 +304,7 @@ export default function GoalPlanScreen() {
 
   function chooseGoal(type: PerformanceGoalType) {
     setGoalType(type);
+    if (type === 'general_offseason') setPriority('perform');
     const option = goalOption(type);
     if (type !== 'general_offseason') setEventDateText(dateFromWeeks(option.defaultWeeks));
     setTerrain(defaultTerrain(type));
@@ -332,6 +356,15 @@ export default function GoalPlanScreen() {
         setError(`A ${planLength}-week plan would extend beyond the event. Choose a shorter plan or a later event date.`);
         return;
       }
+      if (disciplines.length > 0 && !capacity.enduranceHoursEvidence) {
+        setError('Current swim, bike and run hours are unknown. Enter your actual current weekly endurance time (including 0 if applicable) before creating a sport-specific plan. Available hours are not an observed baseline.');
+        return;
+      }
+      if (disciplines.includes('run') && capacity.runStatus !== 'not_running'
+        && (!capacity.runMileageEvidence || capacity.runMileageEvidence === 'unknown')) {
+        setError('Recent running mileage is unknown. Open Advanced athlete context and report your actual highest weekly mileage (including 0 if applicable) before planning a running event.');
+        return;
+      }
       if (equipment.length === 0) {
         setError('Choose at least one equipment option or Bodyweight only.');
         return;
@@ -356,10 +389,11 @@ export default function GoalPlanScreen() {
         weeksUntilEvent: weeks ?? 0,
         terrain: supportsTerrain(goalType) ? terrain : undefined,
         disciplines,
-        priority,
+        priority: firstWeekPriorityForGoal(goalType, priority),
         sessionsPerWeek: strengthRecommendation.sessionsPerWeek,
         defaultSessionMinutes: strengthRecommendation.sessionMinutes,
         capacityProfile: capacity,
+        firstWeekSetup: savedFirstWeekSetup,
         phaseStrengthSessions: strengthRecommendation.phaseSchedule,
         strengthDoseMetadata: {
           minutesPerWeek: strengthRecommendation.minutesPerWeek,
@@ -588,7 +622,13 @@ export default function GoalPlanScreen() {
           <Text style={styles.inputLabel}>Total training hours available each week</Text>
           <TextInput value={String(capacity.totalWeeklyHours)} onChangeText={(value) => setCapacity((current) => ({ ...current, totalWeeklyHours: Number(value.replace(/[^0-9.]/g, '')) || 0 }))} keyboardType="decimal-pad" style={styles.input} placeholder="10" placeholderTextColor="#7a827c" />
           <Text style={styles.inputLabel}>Current swim + bike + run hours each week</Text>
-          <TextInput value={String(capacity.currentEnduranceHours)} onChangeText={(value) => setCapacity((current) => ({ ...current, currentEnduranceHours: Number(value.replace(/[^0-9.]/g, '')) || 0 }))} keyboardType="decimal-pad" style={styles.input} placeholder="6" placeholderTextColor="#7a827c" />
+          <TextInput value={capacity.enduranceHoursEvidence ? String(capacity.currentEnduranceHours) : ''}
+            onChangeText={(value) => setCapacity((current) => ({
+              ...current,
+              currentEnduranceHours: Number(value.replace(/[^0-9.]/g, '')) || 0,
+              enduranceHoursEvidence: value.trim() ? 'athlete_reported' : undefined,
+            }))} keyboardType="decimal-pad" style={styles.input} placeholder="Unknown — enter actual weekly hours" placeholderTextColor="#7a827c" />
+          <Text style={styles.helper}>Leave blank if unknown. Available training hours are not proof of completed or currently tolerated endurance training.</Text>
           <Text style={styles.inputLabel}>Current running status</Text>
           <View style={styles.chipRow}>{([['normal','Normal'],['reduced','Reduced'],['return_to_run','Return to run'],['not_running','Not running']] as const).map(([id,label]) => <Chip key={id} label={label} selected={capacity.runStatus === id} onPress={() => setCapacity((current) => ({ ...current, runStatus: id }))} />)}</View>
           <Pressable onPress={() => setShowAdvancedCapacity((value) => !value)} style={styles.advancedDisclosure}>
@@ -596,7 +636,14 @@ export default function GoalPlanScreen() {
           </Pressable>
           {showAdvancedCapacity ? <View style={styles.advancedPanel}>
           <Text style={styles.inputLabel}>Highest weekly run mileage in the last 12 weeks</Text>
-          <TextInput value={String(capacity.maxRunMilesLast12Weeks)} onChangeText={(value) => setCapacity((current) => ({ ...current, maxRunMilesLast12Weeks: Number(value.replace(/[^0-9.]/g, '')) || 0 }))} keyboardType="decimal-pad" style={styles.input} placeholder="20" placeholderTextColor="#7a827c" />
+          <TextInput value={capacity.runMileageEvidence === 'athlete_reported' || capacity.runMileageEvidence === 'source_observed'
+              ? String(capacity.maxRunMilesLast12Weeks) : ''}
+            onChangeText={(value) => setCapacity((current) => ({
+              ...current,
+              maxRunMilesLast12Weeks: Number(value.replace(/[^0-9.]/g, '')) || 0,
+              runMileageEvidence: value.trim() ? 'athlete_reported' : 'unknown',
+            }))} keyboardType="decimal-pad" style={styles.input} placeholder="Unknown — enter actual highest week" placeholderTextColor="#7a827c" />
+          <Text style={styles.helper}>A blank field means unknown, not zero running miles. Do not infer an approved return-to-run dose.</Text>
           <Text style={styles.inputLabel}>Bone-stress injury history</Text>
           <View style={styles.chipRow}>{([['none','None'],['remote','Past history'],['recent_or_current','Recent/current']] as const).map(([id,label]) => <Chip key={id} label={label} selected={capacity.boneStressInjuryHistory === id} onPress={() => setCapacity((current) => ({ ...current, boneStressInjuryHistory: id }))} />)}</View>
           <Text style={styles.inputLabel}>Discipline proficiency</Text>
@@ -625,6 +672,12 @@ export default function GoalPlanScreen() {
         </Section>
 
         <Section title="Training location">
+          {savedFirstWeekSetup?.availableLocations.length ? <Text style={styles.helper}>
+            Available locations reported at setup: {savedFirstWeekSetup.availableLocations
+              .map((venue) => venue === 'full_gym' ? 'Full gym'
+                : venue === 'home' ? 'Home' : venue === 'travel' ? 'Travel' : 'Bodyweight')
+              .join(' + ')}. Choose one actual venue for this plan; equipment cannot be borrowed from a second location.
+          </Text> : null}
           <Text style={styles.helper}>Select a saved Home, Work, Full Gym, or Travel setup. You can temporarily change individual items below.</Text>
           <View style={styles.chipRow}>
             {equipmentProfiles.map((profile) => <Chip key={profile.id} label={profile.name} selected={selectedEquipmentProfileId === profile.id} onPress={() => { setSelectedEquipmentProfileId(profile.id); setEquipment(profile.equipment); }} />)}

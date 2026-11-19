@@ -1,0 +1,47 @@
+# A synthetic-only local account that intentionally holds the first-week
+# generator immediately BEFORE its owner-locked SQLite persistence step.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-athlete-email"
+    timeout: 45000
+# Native iOS XCTest occasionally focuses the first form field while the
+# initial email tap is still settling (archived strength run 43152426701).
+# Fill NAME first, deliberately dismiss the keyboard, then enter EMAIL.
+# Read back both actual field values and require enabled entry.
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Race Athlete A"
+# iOS 26's accessibility snapshot reports focused=false even while the
+# keyboard is open. Verify the actual field value, not its focused flag.
+- copyTextFrom:
+    id: "sidequest-qa-athlete-name"
+- assertTrue:
+    condition: ${maestro.copiedText === "Synthetic Race Athlete A"}
+    label: "Synthetic athlete name matches the name input"
+- tapOn: "Create your beta profile"
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-first-week-race-a@example.invalid"
+- copyTextFrom:
+    id: "sidequest-qa-athlete-email"
+- assertTrue:
+    condition: ${maestro.copiedText === "synthetic-first-week-race-a@example.invalid"}
+    label: "Synthetic athlete email matches the email input"
+- tapOn: "Create your beta profile"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-enter-beta"
+      enabled: true
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "generation-race-athlete-a-new-profile"

@@ -15,6 +15,7 @@ interface OnboardingValue {
   loading: boolean;
   needsOnboarding: boolean;
   refresh(): Promise<void>;
+  beginFirstWeek(): void;
   acknowledgeStrengthModel(value: boolean): void;
   acknowledgePrivacyModel(value: boolean): void;
   markReviewed(key: OnboardingReviewKey, value: boolean): void;
@@ -52,6 +53,15 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     setState((current) => saveOnboardingState(user.id, update(current)));
   }, [user]);
 
+  const beginFirstWeek = useCallback(() => {
+    mutate((current) => ({
+      ...current,
+      strengthModelAcknowledged: true,
+      privacyModelAcknowledged: true,
+      firstWeekSetupStartedAt: current.firstWeekSetupStartedAt ?? new Date().toISOString(),
+    }));
+  }, [mutate]);
+
   const acknowledgeStrengthModel = useCallback((value: boolean) => {
     mutate((current) => ({ ...current, strengthModelAcknowledged: value }));
   }, [mutate]);
@@ -86,12 +96,13 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     loading,
     needsOnboarding,
     refresh,
+    beginFirstWeek,
     acknowledgeStrengthModel,
     acknowledgePrivacyModel,
     markReviewed,
     complete,
     reset,
-  }), [state, loading, needsOnboarding, refresh, acknowledgeStrengthModel, acknowledgePrivacyModel, markReviewed, complete, reset]);
+  }), [state, loading, needsOnboarding, refresh, beginFirstWeek, acknowledgeStrengthModel, acknowledgePrivacyModel, markReviewed, complete, reset]);
 
   return <OnboardingContext.Provider value={value}>{children}</OnboardingContext.Provider>;
 }

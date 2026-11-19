@@ -23,29 +23,182 @@ import type {
   WorkoutDifficultyFeedback,
   WorkoutSensorLink,
 } from '@circuit/domain';
+import { localCalendarDate, PLAN_ADJUSTMENT_TABLE_SQL, STRENGTH_WORKOUT_AUTHORIZATION_SQL, STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL, STRENGTH_START_INTENT_SQL, STRENGTH_NATIVE_START_CHECKPOINT_SQL, STRENGTH_NATIVE_START_TERMINAL_SQL, assessRoutineNativeActiveSafety, finishRoutineNativeStart, commitRoutineNativeStartCheckpoint, readRoutineNativeStartCheckpoint, recordRoutineStrengthStartIntent, readRoutineStrengthStartIntent, withdrawRoutineStrengthAuthorization, readRoutineAuthorizationWithdrawal, inspectRoutineWorkoutStart, authorizeRoutineStrengthWorkout, readAuthorizedRoutineWorkout, STRENGTH_CHOICE_AUDIT_SQL, STRENGTH_REVISION_PREVIEW_SQL, STRENGTH_PREVIEW_REVIEW_EVENTS_SQL, STRENGTH_EVIDENCE_PROVENANCE_SQL, TRAINING_SAFETY_CONTEXT_SQL, readAthleteTrainingSafetyContext, evaluateTrainingSafetyPolicy, appendTrainingSafetyContextEvent, effectiveTrainingCalendarEvents, readTrainingAdjustmentDecisions, readStrengthChoiceAudit, readStrengthRevisionPreview, readStrengthPreviewReviewState, appendStrengthPreviewReviewEvent, listUnapprovedStrengthReviewInbox, readUnapprovedStrengthReviewDetail, inspectStrengthAuthorizationDryRun, appendStrengthEvidenceProvenance, appendTrainingAdjustmentDecision, type StrengthChoiceDecision, type StoredStrengthRevisionPreview, type StrengthPreviewReviewEvent, type StrengthPreviewReviewState, type UnapprovedStrengthReviewInboxItem, type CurrentStrengthReviewEvidence, type UnapprovedStrengthReviewDetail, type StrengthAuthorizationDryRunResult, type AuthorizedStrengthWorkoutRecord, type AthleteStrengthAuthorizationConfirmations, type StrengthWorkoutAuthorizationResult, type RoutineAuthorizationWithdrawal, type RoutineWorkoutStartScreen, type RoutineStrengthStartIntent, type RoutineNativeStartCheckpoint, type RoutineActiveSafetyResult, type RoutineNativeTerminalEvent, type StrengthEvidenceProvenanceEvent, type TrainingSafetyContextEvent, type AthleteTrainingIntent, type ProtectedMovement, type AthleteTrainingSafetyContext, type TrainingSafetyPolicy, type TrainingAdjustmentSqlDriver, type PlanAdjustmentEvent, type ApprovedWeekSnapshot } from '@circuit/planner';
 import * as SQLite from 'expo-sqlite';
 import 'expo-sqlite/localStorage/install';
 
 import type { DailyReadinessCheckIn } from './readiness';
+import {
+  ACTIVE_WORKOUT_PROFILE_KEY,
+  loadLiveWorkoutSession,
+  inspectLiveWorkoutSlot,
+  clearLiveWorkoutSession,
+  persistFirstRoutineNativeCheckpoint,
+  assertCanStartLiveWorkout,
+  saveLiveWorkoutSession,
+  type LiveWorkoutSessionSnapshot,
+} from './active-workout-persistence';
 
 let db = SQLite.openDatabaseSync('circuit-generator.db');
 let activeDatabaseName = 'circuit-generator.db';
 let initialized = false;
 
+/**
+ * First-week generation can finish after a profile switch. Serialize database
+ * activation with its multi-step persistence so a mutable SQLite handle can
+ * never change owner halfway through saving a goal, block, and calendar.
+ *
+ * Generation happens OUTSIDE this queue. If the requested athlete has
+ * switched before writing begins, reject without modifying the new profile.
+ */
+let verifiedActiveAthlete: string | null = null;
+let athleteDatabaseQueue: Promise<void> = Promise.resolve();
+
+async function runWithDatabaseActivationLock<T>(work: () => Promise<T>): Promise<T> {
+  const preceding = athleteDatabaseQueue;
+  let release!: () => void;
+  athleteDatabaseQueue = new Promise<void>((resolve) => { release = resolve; });
+  await preceding;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
+/** Scoped SQLite write boundary for long, awaited first-week persistence.
+ * Never use this for an unbounded computation or network request.
+ */
+export async function withVerifiedAthleteDatabase<T>(
+  athleteId: string, persist: () => Promise<T>,
+): Promise<T> {
+  if (!athleteId.trim()) throw new Error('Athlete database identity is required.');
+  return runWithDatabaseActivationLock(async () => {
+    if (verifiedActiveAthlete !== athleteId) {
+      throw new Error('Athlete profile changed while preparing the first week. No plan was saved.');
+    }
+    return persist();
+  });
+}
+
 type StorageLike = { getItem(key:string):string|null; setItem(key:string,value:string):void };
 const profileStorage = (globalThis as typeof globalThis & { localStorage: StorageLike }).localStorage;
+const FILE_OWNER_PREFIX = 'circuit.database-file-owner.v1:';
+
+function chooseProfileDatabaseName(userId: string): string {
+  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const legacyName = `circuit-generator-${safeId}.db`;
+  // Keep the historical filename for its first confirmed owner. A second
+  // athlete with an equivalent sanitized ID MUST NOT open that same database.
+  // This local ownership ledger also preserves stable filenames after switch.
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const candidate = attempt === 0
+      ? legacyName
+      : `circuit-generator-${safeId}-collision-${attempt}.db`;
+    const key = FILE_OWNER_PREFIX + candidate;
+    const owner = profileStorage.getItem(key);
+    if (owner !== null && owner !== userId) continue;
+    // Ownership is committed only AFTER SQLite itself has verified the owner.
+    return candidate;
+  }
+  throw new Error('Could not allocate a unique athlete database filename.');
+}
+
+const DB_OWNER_TABLE = 'sidequest_athlete_database_owner';
+
+/**
+ * An unclaimed historical database cannot be attributed solely by its
+ * sanitized filename. The ownership row lives INSIDE the SQLite file, so
+ * wiping localStorage does not erase evidence of its original athlete.
+ */
+async function verifyAthleteDatabaseOwner(
+  database: typeof db,
+  userId: string,
+  permitLegacyAdoption: boolean,
+): Promise<void> {
+  // A rejected legacy adoption must be READ-ONLY. Creating the owner
+  // table before checking existing user tables modified unowned SQLite bytes
+  // even though access was refused. Inspect sqlite_master first.
+  const ownerTable = await database.getFirstAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    DB_OWNER_TABLE,
+  );
+  if (ownerTable) {
+    const existing = await database.getFirstAsync<{ user_id: string }>(
+      `SELECT user_id FROM ${DB_OWNER_TABLE} WHERE singleton = 1`,
+    );
+    if (existing) {
+      if (existing.user_id !== userId) {
+        throw new Error('Athlete database ownership mismatch. No training records were opened.');
+      }
+      return;
+    }
+  }
+  const tables = await database.getAllAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN (?, 'sqlite_sequence')",
+    DB_OWNER_TABLE,
+  );
+  if (tables.length && !permitLegacyAdoption) {
+    throw new Error(
+      'Existing athlete database has no verifiable owner. Data was preserved; migration requires review.',
+    );
+  }
+  if (!ownerTable) {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS sidequest_athlete_database_owner (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        user_id TEXT NOT NULL
+      );
+    `);
+  }
+  // Only new/unambiguous owner claims may mutate the file. The owner marker
+  // is committed before initializeDatabase or any athlete table is exposed.
+  await database.runAsync(
+    `INSERT INTO ${DB_OWNER_TABLE} (singleton, user_id) VALUES (1, ?)`,
+    userId,
+  );
+}
 
 export async function activateUserDatabase(userId: string): Promise<void> {
+  if (!userId.trim()) throw new Error('Athlete database identity is required.');
+  return runWithDatabaseActivationLock(async () => {
   const ownerKey = 'circuit.original-database-owner';
-  let originalOwner = profileStorage.getItem(ownerKey);
-  if (!originalOwner) { originalOwner = userId; profileStorage.setItem(ownerKey, userId); }
-  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-  const nextName = originalOwner === userId ? 'circuit-generator.db' : `circuit-generator-${safeId}.db`;
-  if (nextName === activeDatabaseName) { await initializeDatabase(); return; }
-  db = SQLite.openDatabaseSync(nextName);
-  activeDatabaseName = nextName;
-  initialized = false;
-  await initializeDatabase();
+  const storedOriginalOwner = profileStorage.getItem(ownerKey);
+  const originalOwner = storedOriginalOwner ?? userId;
+  const nextName = originalOwner === userId
+    ? 'circuit-generator.db' : chooseProfileDatabaseName(userId);
+  const oldDb = db;
+  const oldName = activeDatabaseName;
+  const oldInitialized = initialized;
+  const candidate = nextName === oldName ? oldDb : SQLite.openDatabaseSync(nextName);
+  const storedOwner = profileStorage.getItem(FILE_OWNER_PREFIX + nextName);
+  // Existing files from before this change require independent ownership
+  // provenance. An old original owner is supported when its identity was
+  // previously persisted; a preexisting side-profile file is supported only
+  // with the matching filename ownership claim.
+  const permitLegacyAdoption = nextName === 'circuit-generator.db'
+    ? storedOriginalOwner === userId
+    : storedOwner === userId;
+  await verifyAthleteDatabaseOwner(candidate, userId, permitLegacyAdoption);
+  try {
+    if (nextName !== oldName) {
+      db = candidate;
+      activeDatabaseName = nextName;
+      initialized = false;
+    }
+    await initializeDatabase();
+    // Commit ownership and active identity only AFTER initialization passes.
+    if (!storedOriginalOwner) profileStorage.setItem(ownerKey, userId);
+    profileStorage.setItem(FILE_OWNER_PREFIX + nextName, userId);
+    profileStorage.setItem(ACTIVE_WORKOUT_PROFILE_KEY, userId);
+    verifiedActiveAthlete = userId;
+  } catch (error) {
+    db = oldDb;
+    activeDatabaseName = oldName;
+    initialized = oldInitialized;
+    throw error;
+  }
+  });
 }
 
 export function getActiveDatabaseName(): string { return activeDatabaseName; }
@@ -383,6 +536,31 @@ export async function initializeDatabase(): Promise<void> {
     );
 
 
+    -- Append-only per-profile decisions. An approval is never updated in place;
+    -- a later revocation or new approval is an additional event.
+    ${PLAN_ADJUSTMENT_TABLE_SQL}
+    ${STRENGTH_CHOICE_AUDIT_SQL}
+    ${STRENGTH_REVISION_PREVIEW_SQL}
+    ${STRENGTH_PREVIEW_REVIEW_EVENTS_SQL}
+    ${STRENGTH_EVIDENCE_PROVENANCE_SQL}
+    ${TRAINING_SAFETY_CONTEXT_SQL}
+    ${STRENGTH_WORKOUT_AUTHORIZATION_SQL}
+    ${STRENGTH_AUTHORIZATION_WITHDRAWAL_SQL}
+    ${STRENGTH_START_INTENT_SQL}
+    ${STRENGTH_NATIVE_START_CHECKPOINT_SQL}
+    ${STRENGTH_NATIVE_START_TERMINAL_SQL}
+
+    CREATE TABLE IF NOT EXISTS training_baseline_review_events (
+      id TEXT PRIMARY KEY NOT NULL,
+      planning_week_start TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('approval', 'revocation')),
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_baseline_reviews_week
+      ON training_baseline_review_events(planning_week_start, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS training_intelligence_state (
       id TEXT PRIMARY KEY NOT NULL,
       state_json TEXT NOT NULL,
@@ -490,6 +668,7 @@ export async function saveCompletedWorkout({
   relationToPlan,
   friendSubstitution,
   idempotencyKey,
+  syntheticOnlyHoldAfterUncommittedInsert,
 }: {
   workout: GeneratedWorkout;
   startedAt: string;
@@ -504,6 +683,8 @@ export async function saveCompletedWorkout({
   relationToPlan?: WorkoutPlanRelation;
   friendSubstitution?: Omit<FriendWorkoutSubstitution, 'completedAt'>;
   idempotencyKey?: string;
+  /** QA-only caller-supplied barrier executed after an uncommitted INSERT. */
+  syntheticOnlyHoldAfterUncommittedInsert?: () => Promise<void>;
 }): Promise<void> {
   await initializeDatabase();
   const workoutInstanceId = idempotencyKey?.trim() || `${workout.id}_${completedAt}`;
@@ -511,7 +692,17 @@ export async function saveCompletedWorkout({
     'SELECT id FROM completed_workouts WHERE id = ? LIMIT 1',
     workoutInstanceId,
   );
-  if (existing) return;
+  if (existing) {
+    // A prior attempt can commit the workout ledger and fail before updating
+    // derived memory or the planned-session status. A retry must repair those
+    // derived views rather than silently returning with a stale plan.
+    await rebuildDerivedTrainingMemory();
+    await markPlannedSessionCompletedForWorkout(
+      workout.id, plannedSessionId,
+      friendSubstitution ? { ...friendSubstitution, completedAt } : undefined,
+    );
+    return;
+  }
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(
@@ -525,6 +716,14 @@ export async function saveCompletedWorkout({
       completionFraction,
       JSON.stringify(stationRounds),
     );
+
+    // Real in-transaction crash rehearsal: the first canonical workout row
+    // exists only as an uncommitted SQLite write. Do not resolve this promise
+    // before OS SIGKILL. The app's exact synthetic bundle/profile gate is
+    // enforced by the sole caller; no normal beta code supplies this callback.
+    if (syntheticOnlyHoldAfterUncommittedInsert) {
+      await syntheticOnlyHoldAfterUncommittedInsert();
+    }
 
     const exposures = calculateWorkoutExposures(workout, completionFraction);
     for (const [region, rawExposure] of exposures) {
@@ -583,9 +782,12 @@ export async function saveCompletedWorkout({
         const equipmentId = option?.items.find((entry) => entry.equipmentId !== 'bodyweight')?.equipmentId
           ?? option?.items[0]?.equipmentId;
         const fallbackLoad = exerciseLoads[item.exerciseId];
+        // Never fabricate a completed set for every exercise when an athlete
+        // saved only part of a workout without recording sets. The session's
+        // partial fraction is real, but which movements they did is unknown.
         const sets = exerciseSets[item.exerciseId]?.length
           ? exerciseSets[item.exerciseId]
-          : [{
+          : completionFraction < 1 ? [] : [{
               id: `${workoutInstanceId}_${item.exerciseId}_set_1`,
               reps: item.unit === 'seconds' ? undefined : item.target,
               seconds: item.unit === 'seconds' ? item.target : undefined,
@@ -1166,13 +1368,14 @@ export async function getTrainingCalendarEvents({
     from,
     to,
   );
-  return rows.flatMap((row) => {
+  const raw = rows.flatMap((row) => {
     try {
       return [JSON.parse(row.event_json) as TrainingCalendarEvent];
     } catch {
       return [];
     }
   });
+  return (await resolveSavedTrainingPlanAdjustments(raw)).events;
 }
 
 export async function getTrainingCalendarEventsForSource(sourceId: string): Promise<TrainingCalendarEvent[]> {
@@ -1181,11 +1384,958 @@ export async function getTrainingCalendarEventsForSource(sourceId: string): Prom
     `SELECT event_json FROM training_calendar_events
      WHERE source_id = ? ORDER BY start_at`, sourceId,
   );
-  return rows.flatMap((row) => {
+  const raw = rows.flatMap((row) => {
     try { return [JSON.parse(row.event_json) as TrainingCalendarEvent]; } catch { return []; }
+  });
+  return (await resolveSavedTrainingPlanAdjustments(raw)).events;
+}
+
+
+/**
+ * Changes are appended, never written into the generator's source. An
+ * overnight regeneration replays them only when the raw source still matches.
+ */
+export async function getRawTrainingCalendarEvent(
+  eventId: string,
+): Promise<TrainingCalendarEvent | null> {
+  await initializeDatabase();
+  const row = await db.getFirstAsync<{ event_json: string }>(
+    'SELECT event_json FROM training_calendar_events WHERE id = ?', eventId,
+  );
+  if (!row) return null;
+  try { return JSON.parse(row.event_json) as TrainingCalendarEvent; }
+  catch { return null; }
+}
+/**
+ * Explicit driver ensures integration tests exercise the same SQL and
+ * validation logic used by Expo SQLite. Each athlete profile owns its DB.
+ */
+const trainingAdjustmentDriver: TrainingAdjustmentSqlDriver = {
+  getFirst: async <T>(sql: string, params: Array<string | number | null>) =>
+    (await db.getFirstAsync(sql, ...params)) as T | null,
+  getAll: async <T>(sql: string, params: Array<string | number | null>) =>
+    (await db.getAllAsync(sql, ...params)) as T[],
+  run: async (sql: string, params: Array<string | number | null>) => {
+    await db.runAsync(sql, ...params);
+  },
+  transaction: async (fn: () => Promise<void>) => {
+    await db.withTransactionAsync(fn);
+  },
+  exclusiveTransaction: async <T>(
+    fn: (writer: TrainingAdjustmentSqlDriver) => Promise<T>,
+  ): Promise<T> => {
+    const active = db;
+    if (typeof active.withExclusiveTransactionAsync !== 'function') {
+      throw new Error('Exclusive strength review writes require native SQLite.');
+    }
+    let result!: T;
+    let complete = false;
+    await active.withExclusiveTransactionAsync(async (txn) => {
+      const writer: TrainingAdjustmentSqlDriver = {
+        getFirst: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getFirstAsync<Row>(query, ...params)) as Row | null,
+        getAll: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getAllAsync<Row>(query, ...params)) as Row[],
+        run: async (query: string, params: Array<string | number | null>) => {
+          await txn.runAsync(query, ...params);
+        },
+        transaction: async () => {
+          throw new Error('Nested strength review transactions are not allowed.');
+        },
+      };
+      result = await fn(writer);
+      complete = true;
+    });
+    if (!complete) throw new Error('Strength review event transaction did not complete.');
+    return result;
+  },
+  readSnapshot: async <T>(fn: (reader: TrainingAdjustmentSqlDriver) => Promise<T>): Promise<T> => {
+    // Expo's ordinary withTransactionAsync can interleave unrelated queries.
+    // Only the native exclusive transaction provides a dedicated txn handle.
+    const active = db;
+    if (typeof active.withExclusiveTransactionAsync !== 'function') {
+      throw new Error('Consistent strength review snapshots require native exclusive SQLite.');
+    }
+    let result!: T;
+    let complete = false;
+    await active.withExclusiveTransactionAsync(async (txn) => {
+      const reader: TrainingAdjustmentSqlDriver = {
+        getFirst: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getFirstAsync<Row>(query, ...params)) as Row | null,
+        getAll: async <Row>(query: string, params: Array<string | number | null>) =>
+          (await txn.getAllAsync<Row>(query, ...params)) as Row[],
+        run: async () => {
+          throw new Error('Strength review snapshot does not permit SQL writes.');
+        },
+        transaction: async () => {
+          throw new Error('Strength review snapshot does not permit nested transactions.');
+        },
+      };
+      result = await fn(reader);
+      complete = true;
+    });
+    if (!complete) {
+      throw new Error('Consistent strength review snapshot was not committed.');
+    }
+    return result;
+  },
+};
+/** Read-only per-athlete strength decision history. This does not enable
+ * approval in the UI; the fresh-safety approval workflow remains gated.
+ */
+export async function listDailyStrengthChoiceDecisions(
+  athleteId: string, blockId: string, sessionId: string,
+): Promise<StrengthChoiceDecision[]> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readStrengthChoiceAudit(trainingAdjustmentDriver, athleteId, blockId, sessionId);
   });
 }
 
+/** Read-only per-athlete unapproved exercise-level preview.
+ * No executable authorization or approval UI is exposed by this function.
+ */
+export async function getUnapprovedStrengthRevisionPreview(
+  athleteId: string, previewId: string,
+): Promise<StoredStrengthRevisionPreview | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readStrengthRevisionPreview(trainingAdjustmentDriver, athleteId, previewId);
+  });
+}
+
+/** Read-only preview lifecycle for the verified athlete; never applies an exercise. */
+export async function getUnapprovedStrengthRevisionReviewState(
+  athleteId: string, previewId: string,
+): Promise<StrengthPreviewReviewState> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readStrengthPreviewReviewState(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+  });
+}
+
+/** Athlete-scoped, read-only review queue. All entries remain unapproved. */
+export async function listUnapprovedStrengthReviewItems(
+  athleteId: string, evidence: CurrentStrengthReviewEvidence,
+  pageSize = 20, offset = 0,
+): Promise<UnapprovedStrengthReviewInboxItem[]> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return listUnapprovedStrengthReviewInbox(
+      trainingAdjustmentDriver, athleteId, evidence, pageSize, offset,
+    );
+  });
+}
+
+/** Single owner-locked read-only detail, including a fresh stale assessment.
+ * This does not approve or execute a workout.
+ */
+export async function getUnapprovedStrengthReviewDetail(
+  athleteId: string,
+  previewId: string,
+  evidence: CurrentStrengthReviewEvidence,
+): Promise<UnapprovedStrengthReviewDetail> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readUnapprovedStrengthReviewDetail(
+      trainingAdjustmentDriver, athleteId, previewId, evidence,
+    );
+  });
+}
+
+/**
+ * Re-reads the exact unapproved candidate, local safety history, readiness
+ * and restrictions within one athlete-owned exclusive SQLite transaction.
+ * It cannot approve or start a workout. The previous on-screen observation
+ * is compared for drift, not treated as a trusted authorization token.
+ */
+export async function recheckUnapprovedStrengthAuthorization(input: {
+  athleteId: string;
+  previewId: string;
+  evidence: CurrentStrengthReviewEvidence;
+  expectedObservationToken: string;
+}): Promise<StrengthAuthorizationDryRunResult> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    return inspectStrengthAuthorizationDryRun(trainingAdjustmentDriver, input);
+  });
+}
+
+/**
+ * Use the immutable proposal's original evaluation facts only to reconstruct
+ * its exact source binding. Never infer clinician verification from those
+ * fields: the transaction independently reads current restrictions and
+ * training history. A previous-day proposal cannot be confirmed.
+ */
+export async function getCurrentStrengthReviewForConfirmation(
+  athleteId: string, previewId: string,
+): Promise<UnapprovedStrengthReviewDetail> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+    if (!preview) throw new Error('Strength workout draft is missing.');
+    return readUnapprovedStrengthReviewDetail(
+      trainingAdjustmentDriver, athleteId, previewId,
+      preview.evidence.todayLocalDate === localCalendarDate(new Date())
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: localCalendarDate(new Date()) },
+    );
+  });
+}
+
+/**
+ * This records an explicit athlete authorization for ONE immutable routine
+ * workout version. It does not start a workout or override PT/recovery holds.
+ */
+export async function confirmRoutineStrengthWorkout(input: {
+  athleteId: string;
+  previewId: string;
+  authorizationId: string;
+  expectedObservationToken: string;
+  confirmations: AthleteStrengthAuthorizationConfirmations;
+}): Promise<StrengthWorkoutAuthorizationResult> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, input.previewId,
+    );
+    if (!preview) throw new Error('Strength workout draft is missing.');
+    if (preview.evidence.todayLocalDate !== localCalendarDate(new Date())) {
+      throw new Error('Workout confirmation requires a draft reviewed today.');
+    }
+    return authorizeRoutineStrengthWorkout(trainingAdjustmentDriver, {
+      ...input, evidence: preview.evidence,
+    });
+  });
+}
+
+/** Historical authorization only: a fresh start-time safety recheck remains mandatory. */
+export async function getRecordedAuthorizedStrengthWorkout(
+  athleteId: string, sessionId: string,
+): Promise<AuthorizedStrengthWorkoutRecord | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readAuthorizedRoutineWorkout(trainingAdjustmentDriver, athleteId, sessionId);
+  });
+}
+
+/**
+ * Athlete-owned withdrawal: durable consent revocation, never workout deletion.
+ * Not called by the live player or by an automated planner.
+ */
+export async function withdrawRecordedRoutineStrengthWorkout(input: {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+  withdrawalId: string;
+  athleteConfirmedWithdrawal: true;
+}): Promise<RoutineAuthorizationWithdrawal> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    return withdrawRoutineStrengthAuthorization(trainingAdjustmentDriver, input);
+  });
+}
+
+/** Read-only historical withdrawal state, scoped to the verified athlete DB. */
+export async function getRoutineStrengthWithdrawal(
+  athleteId: string, sessionId: string,
+): Promise<RoutineAuthorizationWithdrawal | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readRoutineAuthorizationWithdrawal(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
+  });
+}
+
+/**
+ * Fresh pre-start PREVIEW only. It is NOT a native workout start action.
+ * The original stored evidence is not upgraded to provider verification;
+ * a new calendar day without review remains a hold.
+ */
+export async function getRoutineStrengthPreStartScreen(input: {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+}): Promise<RoutineWorkoutStartScreen> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const record = await readAuthorizedRoutineWorkout(
+      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    );
+    if (!record) {
+      throw new Error('No athlete-confirmed routine strength authorization exists.');
+    }
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, record.previewId,
+    );
+    if (!preview) throw new Error('Strength authorization preview is missing.');
+    return inspectRoutineWorkoutStart(trainingAdjustmentDriver, {
+      ...input,
+      evidence: preview.evidence.todayLocalDate === localCalendarDate(new Date())
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: localCalendarDate(new Date()) },
+    });
+  });
+}
+
+/**
+ * One exclusive local SQL transaction: recheck exact workout, withdrawal,
+ * active safety context, readiness and displayed observation before recording
+ * a requested start. This does not launch the native player.
+ */
+export async function requestRoutineStrengthPreStartIntent(input: {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+  intentId: string;
+  expectedObservationToken: string;
+  athleteExplicitlyRequestedStart: true;
+}): Promise<RoutineStrengthStartIntent> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const authorized = await readAuthorizedRoutineWorkout(
+      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    );
+    if (!authorized) throw new Error('Routine start consent is missing.');
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, authorized.previewId,
+    );
+    if (!preview) throw new Error('Routine start review is missing.');
+    const currentLocalDate = localCalendarDate(new Date());
+    return recordRoutineStrengthStartIntent(trainingAdjustmentDriver, {
+      ...input,
+      evidence: preview.evidence.todayLocalDate === currentLocalDate
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: currentLocalDate },
+    });
+  });
+}
+
+/** Audit only: persisted pre-start intent is never executable approval. */
+export async function getRecordedRoutineStrengthStartIntent(
+  athleteId: string, sessionId: string,
+): Promise<RoutineStrengthStartIntent | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readRoutineStrengthStartIntent(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
+  });
+}
+
+/**
+ * Commit BOTH a routine start intent and its paused initial workout player
+ * recovery snapshot in one exclusive owner-scoped SQLite transaction.
+ * This does NOT hydrate localStorage, set React player state or start timers.
+ */
+interface VerifiedRoutineNativeStartInput {
+  athleteId: string;
+  sessionId: string;
+  expectedAuthorizationId: string;
+  intentId: string;
+  checkpointId: string;
+  expectedObservationToken: string;
+  athleteExplicitlyRequestedStart: true;
+}
+
+async function prepareRoutineNativeCheckpointWithOwnedHandle(
+  input: VerifiedRoutineNativeStartInput,
+): Promise<RoutineNativeStartCheckpoint> {
+  await initializeDatabase();
+  const authorized = await readAuthorizedRoutineWorkout(
+    trainingAdjustmentDriver, input.athleteId, input.sessionId,
+  );
+  if (!authorized) throw new Error('Routine native start consent is missing.');
+  const preview = await readStrengthRevisionPreview(
+    trainingAdjustmentDriver, input.athleteId, authorized.previewId,
+  );
+  if (!preview) throw new Error('Routine native start review is missing.');
+  const currentLocalDate = localCalendarDate(new Date());
+  return commitRoutineNativeStartCheckpoint(trainingAdjustmentDriver, {
+    ...input,
+    evidence: preview.evidence.todayLocalDate === currentLocalDate
+      ? preview.evidence
+      : { ...preview.evidence, todayLocalDate: currentLocalDate },
+  });
+}
+
+/** SQLite-only start recovery seed; does NOT hydrate or open the player. */
+export async function prepareRoutineNativeWorkoutCheckpoint(
+  input: VerifiedRoutineNativeStartInput,
+): Promise<RoutineNativeStartCheckpoint> {
+  return withVerifiedAthleteDatabase(input.athleteId,
+    () => prepareRoutineNativeCheckpointWithOwnedHandle(input));
+}
+
+/**
+ * Safe start handoff. Serialize the SQLite commit AND first paused local
+ * checkpoint write under the same athlete database activation/ownership lock.
+ * If either fails, React must remain untouched. SQLite history is retained
+ * if the second store fails, never silently repeated as a new start.
+ */
+export async function commitAndHydrateRoutineNativeWorkout(
+  input: VerifiedRoutineNativeStartInput,
+): Promise<RoutineNativeStartCheckpoint> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const existing = await loadLiveWorkoutSession(input.athleteId);
+    if (existing) {
+      throw new Error('An earlier athlete workout is already saved. Recover or finish it first.');
+    }
+    const prepared = await prepareRoutineNativeCheckpointWithOwnedHandle(input);
+    await persistFirstRoutineNativeCheckpoint(
+      prepared.initialLiveSession, input.athleteId,
+    );
+    const restored = await loadLiveWorkoutSession(input.athleteId);
+    if (JSON.stringify(restored) !== JSON.stringify(prepared.initialLiveSession)) {
+      throw new Error('Paused native player checkpoint verification failed after save.');
+    }
+    return prepared;
+  });
+}
+
+/**
+ * A verified original recovery seed only. A past prepared snapshot is not
+ * proof of current permission to execute, progress, or completion.
+ */
+export async function getRecordedRoutineNativeWorkoutCheckpoint(
+  athleteId: string, sessionId: string,
+): Promise<RoutineNativeStartCheckpoint | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    return readRoutineNativeStartCheckpoint(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
+  });
+}
+
+export type RoutineNativeRecoveryState = {
+  kind: 'not_started' | 'recoverable_missing' | 'already_saved' | 'held' | 'terminal';
+  blockers: string[];
+  checkpoint: RoutineNativeStartCheckpoint | null;
+};
+
+/** Active safety and recovery are checked against the exact original version. */
+async function assessOwnedRoutineSafety(
+  athleteId: string, sessionId: string,
+): Promise<RoutineActiveSafetyResult | null> {
+  await initializeDatabase();
+  const checkpoint = await readRoutineNativeStartCheckpoint(
+    trainingAdjustmentDriver, athleteId, sessionId,
+  );
+  if (!checkpoint) {
+    const priorIntent = await readRoutineStrengthStartIntent(
+      trainingAdjustmentDriver, athleteId, sessionId,
+    );
+    const terminalWithoutSeed = await trainingAdjustmentDriver.getFirst<{ id: string }>(
+      'SELECT id FROM strength_workout_native_start_terminal_events WHERE session_id = ? LIMIT 1',
+      [sessionId],
+    );
+    if (terminalWithoutSeed) throw new Error('Orphan terminal without the original native checkpoint.');
+    if (!priorIntent) return null;
+  }
+  const authorization = await readAuthorizedRoutineWorkout(
+    trainingAdjustmentDriver, athleteId, sessionId,
+  );
+  if (!authorization) throw new Error('Native routine authorization history is missing.');
+  const preview = await readStrengthRevisionPreview(
+    trainingAdjustmentDriver, athleteId, authorization.previewId,
+  );
+  if (!preview) throw new Error('Native routine exercise review history is missing.');
+  const date = localCalendarDate(new Date());
+  return assessRoutineNativeActiveSafety(trainingAdjustmentDriver, {
+    athleteId, sessionId,
+    evidence: preview.evidence.todayLocalDate === date
+      ? preview.evidence : { ...preview.evidence, todayLocalDate: date },
+  });
+}
+
+/**
+ * Local pre-resume observation; not a bearer token.
+ * Does NOT heal, restore, clear or replace the athlete's actual workout.
+ */
+export async function getRoutineNativeRecoveryState(
+  athleteId: string, sessionId: string,
+): Promise<RoutineNativeRecoveryState> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    const assessment = await assessOwnedRoutineSafety(athleteId, sessionId);
+    if (!assessment) return {
+      kind: 'not_started', blockers: [], checkpoint: null,
+    };
+    if (assessment.status === 'terminal') return {
+      kind: 'terminal', blockers: assessment.blockers, checkpoint: assessment.checkpoint,
+    };
+    if (!assessment.checkpoint) return {
+      kind: 'held', blockers: assessment.blockers.length
+        ? assessment.blockers
+        : ['A previous incomplete start cannot be replayed without its original checkpoint.'],
+      checkpoint: null,
+    };
+    const slot = await inspectLiveWorkoutSlot(athleteId);
+    const local = slot === 'valid' ? await loadLiveWorkoutSession(athleteId) : null;
+    const expected = assessment.checkpoint.initialLiveSession;
+    const matching = local?.workout.id === expected.workout.id
+      && local.startedAt === expected.startedAt
+      && local.planLink?.sessionId === sessionId;
+    if (slot === 'unreadable' || (slot === 'valid' && (!matching
+      || JSON.stringify(local?.workout) !== assessment.checkpoint.candidateSignature))) {
+      return {
+        kind: 'held',
+        blockers: ['An existing or unreadable player checkpoint must be recovered, not overwritten.'],
+        checkpoint: assessment.checkpoint,
+      };
+    }
+    if (local?.safetyHold) return {
+      kind: 'held', blockers: [local.safetyHold.reason],
+      checkpoint: assessment.checkpoint,
+    };
+    if (assessment.status === 'hold') return {
+      kind: 'held', blockers: assessment.blockers, checkpoint: assessment.checkpoint,
+    };
+    return {
+      kind: matching ? 'already_saved' : 'recoverable_missing',
+      blockers: [], checkpoint: assessment.checkpoint,
+    };
+  });
+}
+
+/**
+ * An athlete can explicitly recover ONLY a still-safe, never-hydrated initial
+ * paused checkpoint. Cannot replay a terminal event or replace progress.
+ * The source SQLite event remains unchanged and all current safety is checked.
+ */
+export async function recoverMissingRoutineNativeWorkout(input: {
+  athleteId: string; sessionId: string; athleteConfirmedRecovery: true;
+}): Promise<RoutineNativeStartCheckpoint> {
+  if (input.athleteConfirmedRecovery !== true) {
+    throw new Error('Recovering a paused workout requires explicit athlete confirmation.');
+  }
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    const assessment = await assessOwnedRoutineSafety(input.athleteId, input.sessionId);
+    if (!assessment || assessment.status !== 'eligible_for_explicit_recovery'
+      || !assessment.checkpoint) {
+      throw new Error('Native start recovery held: ' +
+        (assessment?.blockers.join(' ') || 'No safe original start exists.'));
+    }
+    if (await inspectLiveWorkoutSlot(input.athleteId) !== 'empty') {
+      throw new Error('An earlier player checkpoint exists. No data was replaced.');
+    }
+    await persistFirstRoutineNativeCheckpoint(
+      assessment.checkpoint.initialLiveSession, input.athleteId,
+    );
+    const restored = await loadLiveWorkoutSession(input.athleteId);
+    if (JSON.stringify(restored) !==
+      JSON.stringify(assessment.checkpoint.initialLiveSession)) {
+      throw new Error('Recovered player checkpoint failed exact verification.');
+    }
+    return assessment.checkpoint;
+  });
+}
+
+/**
+ * Athlete explicitly abandons an interrupted start BEFORE it ever had a
+ * persisted live-player checkpoint. Never discard or alter progressed data.
+ * The original immutable SQLite seed remains for audit and cannot be replayed.
+ */
+export async function discardUnhydratedRoutineNativeStart(input: {
+  athleteId: string;
+  sessionId: string;
+  athleteConfirmedDiscard: true;
+}): Promise<RoutineNativeTerminalEvent> {
+  if (input.athleteConfirmedDiscard !== true) {
+    throw new Error('Explicit athlete abandonment confirmation is required.');
+  }
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    if (await inspectLiveWorkoutSlot(input.athleteId) !== 'empty') {
+      throw new Error('Existing player data must not be discarded from the interrupted-start screen.');
+    }
+    const checkpoint = await readRoutineNativeStartCheckpoint(
+      trainingAdjustmentDriver, input.athleteId, input.sessionId,
+    );
+    if (!checkpoint) {
+      throw new Error('Original interrupted routine start is missing.');
+    }
+    return finishRoutineNativeStart(trainingAdjustmentDriver, {
+      athleteId: input.athleteId, sessionId: input.sessionId,
+      expectedCheckpointId: checkpoint.id,
+      terminalId: 'native-abandoned-' + new Date().toISOString() +
+        '-' + Math.random().toString(36).slice(2, 12),
+      disposition: 'discarded', athleteConfirmedDiscard: true,
+    });
+  });
+}
+
+/**
+ * Conservative gate for the older manual/planned workout player.
+ * A healthy ordinary-training user is not asked to obtain provider paperwork.
+ * Unresolved context, symptoms or rehabilitation history cannot be silently
+ * bypassed by the generic player. This is NOT exercise-level medical clearance.
+ */
+async function assessOwnedGenericWorkoutSafety(
+  athleteId: string,
+): Promise<{ kind: 'routine_training' | 'hold'; blockers: string[] }> {
+  await initializeDatabase();
+  if (!trainingAdjustmentDriver.readSnapshot) {
+    throw new Error('Consistent athlete-owned training safety snapshot is unavailable.');
+  }
+  return trainingAdjustmentDriver.readSnapshot(async reader => {
+    const context = await readAthleteTrainingSafetyContext(reader, athleteId);
+    const policy = evaluateTrainingSafetyPolicy(context);
+    if (policy.track !== 'routine_training_review') {
+      return {
+        kind: 'hold',
+        blockers: policy.reasons.length ? policy.reasons
+          : ['Review your training context before using the generic workout player.'],
+      };
+    }
+    return { kind: 'routine_training', blockers: [] };
+  });
+}
+
+export async function inspectGenericWorkoutSafety(
+  athleteId: string,
+): Promise<{ kind: 'routine_training' | 'hold'; blockers: string[] }> {
+  if (!athleteId?.trim()) {
+    throw new Error('Generic workout safety check requires the athlete profile.');
+  }
+  return withVerifiedAthleteDatabase(athleteId,
+    () => assessOwnedGenericWorkoutSafety(athleteId));
+}
+
+/**
+ * The legacy workout player also requires a serialized, owner-locked
+ * safety-to-recovery handoff. It is not an authorization for restricted
+ * rehabilitation or an exercise-level clinical prescription.
+ */
+export async function commitAndHydrateGenericWorkout(
+  athleteId: string, snapshot: LiveWorkoutSessionSnapshot,
+): Promise<void> {
+  if (!athleteId?.trim() || snapshot?.running !== false
+    || snapshot.stationIndex !== 0 || snapshot.phase !== 'work'
+    || snapshot.pendingCompletion || snapshot.safetyHold
+    || !snapshot.workout?.id?.trim()) {
+    throw new Error('Generic workout needs a verified paused initial checkpoint.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    const safety = await assessOwnedGenericWorkoutSafety(athleteId);
+    if (safety.kind !== 'routine_training') {
+      throw new Error('Training safety hold: ' + safety.blockers.join(' '));
+    }
+    assertCanStartLiveWorkout(athleteId);
+    await saveLiveWorkoutSession(snapshot, athleteId);
+    const restored = await loadLiveWorkoutSession(athleteId);
+    if (JSON.stringify(restored) !== JSON.stringify(snapshot)) {
+      throw new Error('Generic player recovery checkpoint failed durable verification.');
+    }
+  });
+}
+
+
+/**
+ * Recheck the current SQLite safety state every time a guarded routine tries
+ * to resume, and periodically during playback. A static initial consent is
+ * never a permanent permission. Generic non-authorized workouts are distinct.
+ */
+export async function recheckRoutineNativeActiveWorkout(input: {
+  athleteId: string;
+  sessionId: string;
+  startedAt: string;
+  workout: GeneratedWorkout;
+}): Promise<{ kind: 'not_applicable' | 'clear' | 'hold'; blockers: string[] }> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    const assessment = await assessOwnedRoutineSafety(input.athleteId, input.sessionId);
+    if (!assessment) {
+      const generic = await assessOwnedGenericWorkoutSafety(input.athleteId);
+      return generic.kind === 'hold'
+        ? { kind: 'hold', blockers: generic.blockers }
+        : { kind: 'not_applicable', blockers: [] };
+    }
+    const blockers = [...assessment.blockers];
+    const original = assessment.checkpoint?.initialLiveSession;
+    if (!original || assessment.status !== 'eligible_for_explicit_recovery') {
+      if (!blockers.length) blockers.push('Original routine workout cannot currently continue.');
+    }
+    if (original?.startedAt !== input.startedAt
+      || original.workout.id !== input.workout.id
+      || JSON.stringify(original.workout) !== JSON.stringify(input.workout)) {
+      blockers.push('The active workout differs from its athlete-confirmed exact prescription.');
+    }
+    const slot = await inspectLiveWorkoutSlot(input.athleteId);
+    const local = slot === 'valid'
+      ? await loadLiveWorkoutSession(input.athleteId) : null;
+    if (!local || local.startedAt !== input.startedAt
+      || local.workout.id !== input.workout.id
+      || local.planLink?.sessionId !== input.sessionId) {
+      blockers.push('The active athlete-owned recovery checkpoint is missing or mismatched.');
+    }
+    if (local?.safetyHold) blockers.push(local.safetyHold.reason);
+    return {
+      kind: blockers.length ? 'hold' : 'clear',
+      blockers,
+    };
+  });
+}
+
+/**
+ * Record explicit abandonment or canonical completion BEFORE removing a
+ * routine player's recovery checkpoint. A crashed cleanup is retryable; the
+ * append-only terminal event prevents the original seed from being replayed.
+ */
+export async function finalizeAndClearNativeWorkout(input: {
+  athleteId: string; sessionId: string | null;
+  startedAt: string;
+  disposition: 'discarded' | 'completed';
+}): Promise<RoutineNativeTerminalEvent | null> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    // A terminal retry must never clear a *different* live workout that
+    // occupied the athlete's slot since the original start was finalized.
+    // An unreadable slot is protected, not equivalent to an empty one.
+    const slot = await inspectLiveWorkoutSlot(input.athleteId);
+    if (slot === 'unreadable') {
+      throw new Error('Workout recovery checkpoint is unreadable; no athlete data was cleared.');
+    }
+    const live = slot === 'valid'
+      ? await loadLiveWorkoutSession(input.athleteId) : null;
+    if (live && (live.startedAt !== input.startedAt
+      || (live.planLink?.sessionId ?? null) !== input.sessionId)) {
+      throw new Error('Another workout owns the recovery checkpoint; unrelated data was preserved.');
+    }
+    let result: RoutineNativeTerminalEvent | null = null;
+    if (input.sessionId) {
+      const prepared = await readRoutineNativeStartCheckpoint(
+        trainingAdjustmentDriver, input.athleteId, input.sessionId,
+      );
+      if (prepared) {
+        if (prepared.initialLiveSession.startedAt !== input.startedAt
+          || (live && live.workout.id !== prepared.initialLiveSession.workout.id)) {
+          throw new Error('Workout completion or discard does not match the original start.');
+        }
+        result = await finishRoutineNativeStart(trainingAdjustmentDriver, {
+          athleteId: input.athleteId,
+          sessionId: input.sessionId,
+          expectedCheckpointId: prepared.id,
+          terminalId: 'native-terminal-' + new Date().toISOString() +
+            '-' + Math.random().toString(36).slice(2, 12),
+          disposition: input.disposition,
+          athleteConfirmedDiscard: input.disposition === 'discarded',
+        });
+      }
+    }
+    if (!live && !result) {
+      throw new Error('The original live checkpoint is absent; no other session can be cleared.');
+    }
+    if (live) await clearLiveWorkoutSession(input.athleteId);
+    return result;
+  });
+}
+
+/**
+ * The same dry-run evaluator, but using the exact stored proposal evidence
+ * for identity matching rather than accepting a UI statement of clearance.
+ * Provider claims inside that historical snapshot are still unverified.
+ */
+export async function recheckCurrentStrengthConfirmation(input: {
+  athleteId: string;
+  previewId: string;
+  expectedObservationToken: string;
+}): Promise<StrengthAuthorizationDryRunResult> {
+  return withVerifiedAthleteDatabase(input.athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, input.athleteId, input.previewId,
+    );
+    if (!preview) throw new Error('Strength workout draft is missing.');
+    return inspectStrengthAuthorizationDryRun(trainingAdjustmentDriver, {
+      ...input,
+      evidence: preview.evidence.todayLocalDate === localCalendarDate(new Date())
+        ? preview.evidence
+        : { ...preview.evidence, todayLocalDate: localCalendarDate(new Date()) },
+    });
+  });
+}
+
+export async function getRecordedAuthorizationForStrengthPreview(
+  athleteId: string, previewId: string,
+): Promise<AuthorizedStrengthWorkoutRecord | null> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+    if (!preview) throw new Error('Strength workout draft is missing.');
+    const record = await readAuthorizedRoutineWorkout(
+      trainingAdjustmentDriver, athleteId, preview.binding.sessionId,
+    );
+    return record?.previewId === previewId ? record : null;
+  });
+}
+
+/**
+ * Persist ONLY a reversible review-list disposition, never a workout dose
+ * decision. expectedLastEventId comes from the athlete's last viewed history;
+ * the backend compares it under an exclusive SQLite transaction.
+ */
+export async function setUnapprovedStrengthReviewDisposition(input: {
+  athleteId: string;
+  previewId: string;
+  action: 'dismiss' | 'restore';
+  expectedLastEventId: string | null;
+}): Promise<StrengthPreviewReviewState> {
+  const { athleteId, previewId, action, expectedLastEventId } = input;
+  if (!athleteId?.trim() || !previewId?.trim()
+    || !['dismiss', 'restore'].includes(action)
+    || (expectedLastEventId !== null
+      && (typeof expectedLastEventId !== 'string' || !expectedLastEventId.trim()))) {
+    throw new Error('Invalid athlete-owned strength review disposition request.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+    if (!preview) throw new Error('Unapproved strength review preview is missing.');
+    const createdAt = new Date().toISOString();
+    const event: StrengthPreviewReviewEvent = {
+      schemaVersion: 1,
+      id: `preview-review-${createdAt}-${Math.random().toString(36).slice(2, 13)}`,
+      athleteId, previewId, action, createdAt,
+      bindingSignature: JSON.stringify(preview.binding),
+      executableWorkoutApproved: false,
+    };
+    await appendStrengthPreviewReviewEvent(
+      trainingAdjustmentDriver, event, expectedLastEventId,
+    );
+    return readStrengthPreviewReviewState(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+  });
+}
+
+/**
+ * Athlete-entered concern, not a verified medical source. Only risk-increasing
+ * observations can be recorded through this mobile endpoint.
+ */
+/**
+ * Read-only athlete-wide training mode. This never approves an exercise dose,
+ * and a routine-training intent cannot erase historical injury restrictions.
+ */
+export async function getAthleteTrainingSafetyPolicy(
+  athleteId: string,
+): Promise<{ context: AthleteTrainingSafetyContext; policy: TrainingSafetyPolicy }> {
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    if (!trainingAdjustmentDriver.readSnapshot) {
+      throw new Error('Consistent training safety snapshot is unavailable.');
+    }
+    return trainingAdjustmentDriver.readSnapshot(async reader => {
+      const context = await readAthleteTrainingSafetyContext(reader, athleteId);
+      return { context, policy: evaluateTrainingSafetyPolicy(context) };
+    });
+  });
+}
+
+/**
+ * Explicitly record an athlete intent or a protected movement. This API
+ * cannot revoke protections, record clinician approval, or modify workouts.
+ */
+export async function recordAthleteTrainingSafetyContext(input: {
+  athleteId: string;
+  intent?: AthleteTrainingIntent;
+  protectedMovement?: ProtectedMovement;
+  expectedLastEventId: string | null;
+}): Promise<{ context: AthleteTrainingSafetyContext; policy: TrainingSafetyPolicy }> {
+  const { athleteId, intent, protectedMovement, expectedLastEventId } = input;
+  if (!athleteId?.trim()
+    || Boolean(intent) === Boolean(protectedMovement)
+    || (expectedLastEventId !== null
+      && (typeof expectedLastEventId !== 'string' || !expectedLastEventId.trim()))) {
+    throw new Error('Invalid athlete training safety update.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const timestamp = new Date().toISOString();
+    const event: TrainingSafetyContextEvent = {
+      schemaVersion: 1, athleteId,
+      id: `training-safety-${timestamp}-${Math.random().toString(36).slice(2, 13)}`,
+      kind: intent ? 'training_intent' : 'protect_movement',
+      intent: intent ?? null, protectedMovement: protectedMovement ?? null,
+      source: 'athlete_self_report', createdAt: timestamp,
+      executableWorkoutApproved: false,
+    };
+    await appendTrainingSafetyContextEvent(
+      trainingAdjustmentDriver, event, expectedLastEventId,
+    );
+    if (!trainingAdjustmentDriver.readSnapshot) {
+      throw new Error('Consistent training safety snapshot is unavailable.');
+    }
+    return trainingAdjustmentDriver.readSnapshot(async reader => {
+      const context = await readAthleteTrainingSafetyContext(reader, athleteId);
+      return { context, policy: evaluateTrainingSafetyPolicy(context) };
+    });
+  });
+}
+
+export async function flagUnverifiedStrengthReviewConcern(input: {
+  athleteId: string;
+  previewId: string;
+  kind: 'provider_restriction' | 'training_coverage';
+  expectedLastEventId: string | null;
+}): Promise<void> {
+  const { athleteId, previewId, kind, expectedLastEventId } = input;
+  if (!athleteId?.trim() || !previewId?.trim()
+    || !['provider_restriction', 'training_coverage'].includes(kind)
+    || (expectedLastEventId !== null
+      && (typeof expectedLastEventId !== 'string' || !expectedLastEventId.trim()))) {
+    throw new Error('Invalid athlete-owned evidence concern.');
+  }
+  return withVerifiedAthleteDatabase(athleteId, async () => {
+    await initializeDatabase();
+    const preview = await readStrengthRevisionPreview(
+      trainingAdjustmentDriver, athleteId, previewId,
+    );
+    if (!preview) throw new Error('Strength evidence concern draft is absent.');
+    const timestamp = new Date().toISOString();
+    const event: StrengthEvidenceProvenanceEvent = {
+      schemaVersion: 1, athleteId, previewId,
+      id: `evidence-concern-${timestamp}-${Math.random().toString(36).slice(2, 13)}`,
+      bindingSignature: JSON.stringify(preview.binding),
+      kind, source: 'athlete_self_report',
+      claim: kind === 'provider_restriction' ? 'reported_present' : 'partial',
+      sourceReference: null, observedAt: timestamp, recordedAt: timestamp,
+      expiresAt: null, verification: 'unverified',
+      executableWorkoutApproved: false,
+    };
+    await appendStrengthEvidenceProvenance(
+      trainingAdjustmentDriver, event, expectedLastEventId,
+    );
+  });
+}
+
+export async function listTrainingPlanAdjustmentEvents(
+  window?: { from: string; to: string },
+): Promise<PlanAdjustmentEvent[]> {
+  await initializeDatabase();
+  return readTrainingAdjustmentDecisions(trainingAdjustmentDriver, window);
+}
+export async function appendTrainingPlanAdjustmentEvent(
+  decision: PlanAdjustmentEvent,
+): Promise<void> {
+  await initializeDatabase();
+  await appendTrainingAdjustmentDecision(trainingAdjustmentDriver, decision);
+}
+export async function resolveSavedTrainingPlanAdjustments(
+  raw: TrainingCalendarEvent[],
+): Promise<{ events: TrainingCalendarEvent[]; staleEventIds: string[] }> {
+  await initializeDatabase();
+  return effectiveTrainingCalendarEvents(trainingAdjustmentDriver, raw);
+}
 
 export async function saveCustomExercise(exercise: Exercise): Promise<void> {
   await initializeDatabase();
@@ -1877,13 +3027,18 @@ async function migrateCompletedWorkoutsIntoLedger(): Promise<void> {
             exerciseId: item.exerciseId,
             name: item.exerciseSnapshot.name,
             equipmentId,
-            sets: [{
+            // Old completed_workouts rows have no per-exercise set logs.
+            // Partial completion states which fraction of the overall session
+            // was completed, NOT which individual exercises were performed.
+            // Preserve the prescribed exercise catalog without inventing a
+            // completed set for every movement in a partial legacy session.
+            sets: Number.isFinite(row.completion_fraction) && row.completion_fraction >= 1 ? [{
               id: `${row.id}_${item.exerciseId}_set_1`,
               reps: item.unit === 'seconds' ? undefined : item.target,
               seconds: item.unit === 'seconds' ? item.target : undefined,
               loadBasis: inferLoadBasis(equipmentId),
               completed: true,
-            }],
+            }] : [],
             bodyRegions: item.exerciseSnapshot.bodyRegions,
             movementPatterns: item.exerciseSnapshot.movementPatterns,
             matchConfidence: 'exact',
@@ -2039,20 +3194,24 @@ export async function listWorkoutLedgerEntries({
   from,
   to,
   limit = 100,
-}: { from?: string; to?: string; limit?: number } = {}): Promise<WorkoutLedgerEntry[]> {
+  offset = 0,
+}: { from?: string; to?: string; limit?: number; offset?: number } = {}): Promise<WorkoutLedgerEntry[]> {
   await initializeDatabase();
   const clauses: string[] = [];
   const args: Array<string | number> = [];
   if (from) { clauses.push('completed_at >= ?'); args.push(from); }
   if (to) { clauses.push('completed_at <= ?'); args.push(to); }
-  args.push(limit);
+  if (!Number.isInteger(limit) || limit < 1 || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid workout pagination.');
+  }
+  args.push(limit, offset);
   const rows = await db.getAllAsync<{
     id: string; source: WorkoutLedgerSource; name: string; workout_json: string | null;
     exercises_json: string; started_at: string; completed_at: string; completion_fraction: number;
     station_rounds_json: string; notes: string | null; planned_session_id: string | null;
     relation_to_plan: WorkoutPlanRelation; created_at: string; updated_at: string;
   }>(`SELECT * FROM workout_ledger ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
-      ORDER BY completed_at DESC LIMIT ?`, ...args);
+      ORDER BY completed_at DESC, id DESC LIMIT ? OFFSET ?`, ...args);
   return rows.flatMap((row) => {
     try {
       return [{
@@ -2073,6 +3232,28 @@ export async function listWorkoutLedgerEntries({
       }];
     } catch { return []; }
   });
+}
+
+/**
+ * Raw row counts include malformed JSON records. Compare against paged,
+ * successfully decoded rows to fail closed on unreadable stored evidence.
+ */
+export async function countTrainingHistorySourceRows(input: {
+  from: string;
+  to: string;
+}): Promise<{ workoutLedgerRows: number; enduranceActivityRows: number }> {
+  await initializeDatabase();
+  const [workouts, endurance] = await Promise.all([
+    db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM workout_ledger WHERE completed_at >= ? AND completed_at <= ?',
+      input.from, input.to,
+    ),
+    db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM endurance_activities WHERE start_at >= ? AND start_at <= ?',
+      input.from, input.to,
+    ),
+  ]);
+  return { workoutLedgerRows: workouts?.n ?? 0, enduranceActivityRows: endurance?.n ?? 0 };
 }
 
 export async function getWorkoutLedgerEntry(id: string): Promise<WorkoutLedgerEntry | null> {
@@ -2327,17 +3508,21 @@ export async function listEnduranceActivities({
   to,
   includeDeleted = false,
   limit = 500,
-}: { from?: string; to?: string; includeDeleted?: boolean; limit?: number } = {}): Promise<EnduranceActivity[]> {
+  offset = 0,
+}: { from?: string; to?: string; includeDeleted?: boolean; limit?: number; offset?: number } = {}): Promise<EnduranceActivity[]> {
   await initializeDatabase();
   const clauses: string[] = [];
   const args: Array<string | number> = [];
   if (from) { clauses.push('start_at >= ?'); args.push(from); }
   if (to) { clauses.push('start_at <= ?'); args.push(to); }
   if (!includeDeleted) clauses.push('deleted_at IS NULL');
-  args.push(limit);
+  if (!Number.isInteger(limit) || limit < 1 || !Number.isInteger(offset) || offset < 0) {
+    throw new Error('Invalid endurance pagination.');
+  }
+  args.push(limit, offset);
   const rows = await db.getAllAsync<{ activity_json: string }>(
     `SELECT activity_json FROM endurance_activities ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
-     ORDER BY start_at DESC LIMIT ?`, ...args,
+     ORDER BY start_at DESC, id DESC LIMIT ? OFFSET ?`, ...args,
   );
   return rows.flatMap((row) => {
     try { return [JSON.parse(row.activity_json) as EnduranceActivity]; } catch { return []; }
@@ -2877,9 +4062,53 @@ export async function getCloudOperationQueueStats(now=new Date()):Promise<CloudO
   return{pending:rows.filter(r=>r.status==='pending').length,retrying:rows.filter(r=>r.status==='retrying').length,dueNow:rows.filter(r=>new Date(r.next_attempt_at).getTime()<=now.getTime()).length,oldestCreatedAt:rows.map(r=>r.created_at).sort()[0]};
 }
 
-const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','cloud_operation_queue'] as const;
-export async function exportLocalData():Promise<Record<string,unknown[]>>{await initializeDatabase();const output:Record<string,unknown[]>={};for(const table of EXPORT_TABLES){try{output[table]=await db.getAllAsync<Record<string,unknown>>(`SELECT * FROM ${table}`)}catch{output[table]=[]}}return output;}
-export async function deleteAllLocalData():Promise<void>{await initializeDatabase();await db.withTransactionAsync(async()=>{for(const table of EXPORT_TABLES){try{await db.runAsync(`DELETE FROM ${table}`)}catch{}}});}
+const EXPORT_TABLES=['favorite_workouts','completed_workouts','body_region_exposures','performance_goals','weekly_training_plans','training_blocks','pt_profiles','training_check_ins','exercise_preferences','workout_feedback','exercise_load_history','exercise_performance_history','training_calendar_sources','training_calendar_events','custom_exercises','readiness_check_ins','workout_reflections','plan_change_snapshots','progression_targets','race_checklist_state','beta_feedback','equipment_profiles','workout_ledger','social_preferences','endurance_activities','planned_completed_matches','endurance_region_contributions','automatic_replan_records','integration_sync_state','training_intelligence_state','training_adjustment_history','training_plan_adjustment_events','daily_strength_choice_events','training_baseline_review_events','strength_revision_previews','strength_revision_preview_review_events','strength_evidence_provenance_events','training_safety_context_events','strength_workout_authorizations','strength_workout_authorization_withdrawals','strength_workout_start_intents','strength_workout_native_start_checkpoints','strength_workout_native_start_terminal_events','cloud_operation_queue'] as const;
+// Losing an immutable decision or preview journal during export/deletion is
+// never equivalent to having an empty history. The transaction must abort.
+const CRITICAL_AUDIT_EXPORT_TABLES = new Set<string>([
+  'training_adjustment_history',
+  'training_plan_adjustment_events',
+  'daily_strength_choice_events',
+  'training_baseline_review_events',
+  'strength_revision_previews',
+  'strength_revision_preview_review_events',
+  'strength_evidence_provenance_events',
+  'training_safety_context_events',
+  'strength_workout_authorizations',
+  'strength_workout_authorization_withdrawals',
+  'strength_workout_start_intents',
+  'strength_workout_native_start_checkpoints',
+  'strength_workout_native_start_terminal_events',
+]);
+export async function exportLocalData(): Promise<Record<string, unknown[]>> {
+  await initializeDatabase();
+  const output: Record<string, unknown[]> = {};
+  for (const table of EXPORT_TABLES) {
+    try {
+      output[table] = await db.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${table}`);
+    } catch {
+      if (CRITICAL_AUDIT_EXPORT_TABLES.has(table)) {
+        throw new Error('Cannot export critical audit history: ' + table);
+      }
+      output[table] = [];
+    }
+  }
+  return output;
+}
+export async function deleteAllLocalData(): Promise<void> {
+  await initializeDatabase();
+  await db.withTransactionAsync(async () => {
+    for (const table of EXPORT_TABLES) {
+      try {
+        await db.runAsync(`DELETE FROM ${table}`);
+      } catch {
+        if (CRITICAL_AUDIT_EXPORT_TABLES.has(table)) {
+          throw new Error('Cannot safely delete critical audit history: ' + table);
+        }
+      }
+    }
+  });
+}
 export async function countCompletedWorkouts():Promise<number>{await initializeDatabase();const row=await db.getFirstAsync<{total:number}>('SELECT COUNT(*) AS total FROM workout_ledger');return row?.total??0;}
 export async function getEnduranceTrainingBalanceBetween({
   from,
@@ -2898,4 +4127,51 @@ export async function getEnduranceTrainingBalanceBetween({
     from,
     to,
   );
+}
+
+/**
+ * Append-only athlete baseline decisions in the ACTIVE profile's SQLite DB.
+ * Do not store these in unscoped global settings or re-use data across users.
+ */
+export type TrainingBaselineReviewEvent =
+  | { kind: 'approval'; snapshot: ApprovedWeekSnapshot; createdAt: string }
+  | { kind: 'revocation'; planningWeekStart: string; reason: string; createdAt: string };
+
+export async function appendTrainingBaselineReviewEvent(
+  event: TrainingBaselineReviewEvent,
+): Promise<void> {
+  await initializeDatabase();
+  const week = event.kind === 'approval'
+    ? event.snapshot.planningWeekStart : event.planningWeekStart;
+  const id = event.kind + ':' + week + ':' + event.createdAt + ':'
+    + Math.random().toString(36).slice(2, 10);
+  await db.runAsync(
+    `INSERT INTO training_baseline_review_events
+     (id, planning_week_start, kind, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    id, week, event.kind, JSON.stringify(event), event.createdAt,
+  );
+}
+
+export async function getLatestTrainingBaselineReviewEvent(
+  planningWeekStart: string,
+): Promise<TrainingBaselineReviewEvent | null> {
+  await initializeDatabase();
+  const row = await db.getFirstAsync<{ payload_json: string }>(
+    `SELECT payload_json FROM training_baseline_review_events
+     WHERE planning_week_start = ?
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    planningWeekStart,
+  );
+  if (!row) return null;
+  try {
+    const event = JSON.parse(row.payload_json) as TrainingBaselineReviewEvent;
+    if (event.kind === 'approval' && event.snapshot?.schemaVersion === 1
+        && event.snapshot.planningWeekStart === planningWeekStart) return event;
+    if (event.kind === 'revocation' && event.planningWeekStart === planningWeekStart) {
+      return event;
+    }
+  } catch {}
+  // Corrupt/incompatible stored data must not be interpreted as approval.
+  return null;
 }

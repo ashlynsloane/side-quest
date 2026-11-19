@@ -1,0 +1,1012 @@
+import {
+  getRoutineStrengthAuthorizationReadiness,
+  type AuthorizedStrengthWorkoutRecord,
+  type StrengthReviewDoseChange,
+  type UnapprovedStrengthReviewDetail,
+} from '@circuit/planner';
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import {
+  getCurrentStrengthReviewForConfirmation,
+  getRecordedAuthorizationForStrengthPreview,
+  getRoutineStrengthPreStartScreen,
+  getRoutineNativeRecoveryState,
+  discardUnhydratedRoutineNativeStart,
+  type RoutineNativeRecoveryState,
+  confirmRoutineStrengthWorkout, setUnapprovedStrengthReviewDisposition,
+  flagUnverifiedStrengthReviewConcern, recheckCurrentStrengthConfirmation,
+} from '@/services/database';
+import { useAuth } from '@/state/auth-context';
+import { useWorkoutContext } from '@/state/workout-context';
+
+function duration(seconds: number): string {
+  const rounded = seconds / 60;
+  return Number.isInteger(rounded)
+    ? `${rounded} min` : `${Number(rounded.toFixed(1))} min`;
+}
+function dose(value: number | null, unit: string): string {
+  if (value === null) return 'Removed';
+  if (unit === 'seconds') return duration(value);
+  return `${value} ${unit}`;
+}
+function changeHeadline(change: StrengthReviewDoseChange): string {
+  switch (change.kind) {
+    case 'station_removed': return 'Station removed';
+    case 'exercise_removed': return 'Exercise removed';
+    case 'station_duration': return 'Station duration reduced';
+    case 'exercise_target': return 'Exercise target reduced';
+    case 'exercise_resistance': return 'Resistance reduced';
+  }
+}
+
+export default function StrengthReviewDetailScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const { beginAuthorizedRoutineWorkout, recoverAuthorizedRoutineWorkout, activeWorkout, workoutSessionReady } = useWorkoutContext();
+  const { previewId } = useLocalSearchParams<{ previewId?: string }>();
+  const athleteId = user?.id;
+  const currentAthlete = useRef(athleteId);
+  const currentPreview = useRef(previewId);
+  currentAthlete.current = athleteId;
+  currentPreview.current = previewId;
+  const [detail, setDetail] = useState<UnapprovedStrengthReviewDetail | null>(null);
+  const [authorized, setAuthorized] = useState<AuthorizedStrengthWorkoutRecord | null>(null);
+  const [reviewedDose, setReviewedDose] = useState(false);
+  const [reviewedTraining, setReviewedTraining] = useState(false);
+  const [reportedRestrictions, setReportedRestrictions] = useState(false);
+  const [savingAuthorization, setSavingAuthorization] = useState(false);
+  const [authorizationError, setAuthorizationError] = useState<string | null>(null);
+  const [startingWorkout, setStartingWorkout] = useState(false);
+  const [startWorkoutError, setStartWorkoutError] = useState<string | null>(null);
+  const [recoveryState, setRecoveryState] = useState<RoutineNativeRecoveryState | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingDisposition, setSavingDisposition] = useState(false);
+  const [savingConcern, setSavingConcern] = useState(false);
+  const [concernError, setConcernError] = useState<string | null>(null);
+  const [dispositionError, setDispositionError] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckStatus, setRecheckStatus] = useState<string | null>(null);
+  const [recheckError, setRecheckError] = useState<string | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    let live = true;
+    setDetail(null);
+    setAuthorized(null);
+    setReviewedDose(false);
+    setReviewedTraining(false);
+    setReportedRestrictions(false);
+    setSavingAuthorization(false);
+    setAuthorizationError(null);
+    setStartingWorkout(false);
+    setStartWorkoutError(null);
+    setRecoveryState(null);
+    setRecovering(false);
+    setRecoveryError(null);
+    setError(null);
+    setDispositionError(null);
+    setSavingDisposition(false);
+    setConcernError(null);
+    setSavingConcern(false);
+    setRechecking(false);
+    setRecheckStatus(null);
+    setRecheckError(null);
+    if (!athleteId || typeof previewId !== 'string' || !previewId.trim()) {
+      setLoading(false);
+      setError('A valid saved preview and athlete profile are required.');
+      return () => { live = false; };
+    }
+    setLoading(true);
+    void Promise.all([
+      getCurrentStrengthReviewForConfirmation(athleteId, previewId),
+      getRecordedAuthorizationForStrengthPreview(athleteId, previewId),
+    ]).then(([result, receipt]) => {
+      if (live) {
+        setDetail(result);
+        setAuthorized(receipt);
+      }
+    }).catch(() => {
+      if (live) {
+        setDetail(null);
+        setError('This preview or its history could not be verified. No exercise changes are available.');
+      }
+    }).finally(() => {
+      if (live) setLoading(false);
+    });
+    return () => { live = false; };
+  }, [athleteId, previewId]));
+
+  useEffect(() => {
+    if (!athleteId || !authorized) return;
+    let live = true;
+    void getRoutineNativeRecoveryState(athleteId, authorized.sessionId)
+      .then(result => { if (live) setRecoveryState(result); })
+      .catch(() => {
+        if (live) {
+          setRecoveryState({
+            kind: 'held', checkpoint: null,
+            blockers: ['Workout recovery audit is unavailable. No automatic start is allowed.'],
+          });
+        }
+      });
+    return () => { live = false; };
+  }, [athleteId, authorized?.id, authorized?.sessionId]);
+
+  async function refreshRecoveryStatus() {
+    if (!athleteId || !authorized) return;
+    try {
+      const result = await getRoutineNativeRecoveryState(
+        athleteId, authorized.sessionId,
+      );
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setRecoveryState(result);
+      }
+    } catch {
+      if (currentAthlete.current === athleteId) {
+        setRecoveryState({
+          kind: 'held', checkpoint: null,
+          blockers: ['Recovery history could not be verified. No start is permitted.'],
+        });
+      }
+    }
+  }
+
+  async function recoverInterruptedRoutine() {
+    if (!athleteId || !authorized || recovering || activeWorkout
+      || recoveryState?.kind !== 'recoverable_missing') return;
+    setRecovering(true);
+    setRecoveryError(null);
+    try {
+      await recoverAuthorizedRoutineWorkout({ sessionId: authorized.sessionId });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        router.push('/active-workout' as Href);
+      }
+    } catch (error) {
+      if (currentAthlete.current === athleteId) {
+        setRecoveryError(error instanceof Error ? error.message
+          : 'Exact interrupted start could not be safely restored.');
+        await refreshRecoveryStatus();
+      }
+    } finally {
+      if (currentAthlete.current === athleteId) setRecovering(false);
+    }
+  }
+
+  function confirmInterruptedRecovery() {
+    if (!authorized || recoveryState?.kind !== 'recoverable_missing') return;
+    Alert.alert(
+      'Recover the interrupted workout?',
+      'Restore the one exact, previously confirmed workout into a paused player. Current symptoms and restrictions will be rechecked. Any existing or progressed checkpoint prevents restoration.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Recover paused workout', onPress: () => { void recoverInterruptedRoutine(); } },
+      ],
+    );
+  }
+
+  async function discardInterruptedRoutine() {
+    if (!athleteId || !authorized || recovering || activeWorkout
+      || !['recoverable_missing', 'held'].includes(recoveryState?.kind ?? '')) return;
+    setRecovering(true);
+    setRecoveryError(null);
+    try {
+      await discardUnhydratedRoutineNativeStart({
+        athleteId, sessionId: authorized.sessionId, athleteConfirmedDiscard: true,
+      });
+      await refreshRecoveryStatus();
+    } catch (error) {
+      if (currentAthlete.current === athleteId) {
+        setRecoveryError(error instanceof Error ? error.message
+          : 'Interrupted workout cannot be discarded without verifying all saved data.');
+      }
+    } finally {
+      if (currentAthlete.current === athleteId) setRecovering(false);
+    }
+  }
+
+  function confirmDiscardInterruptedRoutine() {
+    if (!authorized || recovering || activeWorkout) return;
+    Alert.alert(
+      'Abandon the interrupted start?',
+      'Only an interrupted start with NO existing player checkpoint can be abandoned here. Its original audit remains, and it will never be automatically replayed. This does not delete completed training.',
+      [
+        { text: 'Keep start', style: 'cancel' },
+        { text: 'Abandon interrupted start', style: 'destructive',
+          onPress: () => { void discardInterruptedRoutine(); } },
+      ],
+    );
+  }
+
+  const recheckCurrentEvidence = async () => {
+    if (!athleteId || typeof previewId !== 'string' || !detail
+      || rechecking || savingConcern || savingDisposition
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setRechecking(true);
+    setRecheckError(null);
+    setRecheckStatus(null);
+    try {
+      const rechecked = await recheckCurrentStrengthConfirmation({
+        athleteId, previewId, expectedObservationToken: detail.observationToken,
+      });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setDetail(rechecked.current);
+        setRecheckStatus(rechecked.changedSinceViewed
+          ? 'Local evidence has changed since this draft was opened. Review the updated holds below. The workout remains unapproved.'
+          : 'Current local evidence matches the last view. This does not verify external restrictions or approve exercise.');
+      }
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setRecheckError(
+          'The exclusive safety recheck could not be verified. No workout changes are available.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setRechecking(false);
+    }
+  };
+
+  const authorizeConfirmedRoutineWorkout = async () => {
+    if (!athleteId || typeof previewId !== 'string' || !detail || authorized
+      || savingAuthorization || savingConcern || savingDisposition || rechecking
+      || !reviewedDose || !reviewedTraining || !reportedRestrictions
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId
+      || !getRoutineStrengthAuthorizationReadiness(detail).canRequestAuthorization) return;
+    setSavingAuthorization(true);
+    setAuthorizationError(null);
+    try {
+      const result = await confirmRoutineStrengthWorkout({
+        athleteId, previewId,
+        authorizationId: `strength-athlete-confirm-${new Date().toISOString()}-${Math.random().toString(36).slice(2, 12)}`,
+        expectedObservationToken: detail.observationToken,
+        confirmations: {
+          exactExercisesAndDoseReviewed: true,
+          recentTrainingHistoryReviewed: true,
+          noKnownUnreportedRestrictions: true,
+        },
+      });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setAuthorized(result.authorization);
+        setReviewedDose(false);
+        setReviewedTraining(false);
+        setReportedRestrictions(false);
+      }
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setAuthorizationError(
+          'Authorization could not be verified. The draft, restrictions or training history may have changed. Reopen this screen, review the updated evidence and confirm again.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setSavingAuthorization(false);
+    }
+  };
+
+  const confirmRoutineWorkout = () => {
+    if (!detail || authorized || savingAuthorization
+      || !reviewedDose || !reviewedTraining || !reportedRestrictions
+      || !getRoutineStrengthAuthorizationReadiness(detail).canRequestAuthorization) return;
+    Alert.alert(
+      'Authorize exact routine workout?',
+      `Confirm ${detail.summary.stationCountAfter} stations and ${duration(detail.summary.proposedSeconds)}. This saves one athlete-approved routine workout version. It will NOT start a workout. Current symptoms and restrictions must be rechecked before starting.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Authorize this workout', onPress: () => {
+          void authorizeConfirmedRoutineWorkout();
+        } },
+      ],
+    );
+  };
+
+  const startConfirmedRoutineWorkout = async () => {
+    if (!athleteId || !authorized || startingWorkout || !workoutSessionReady
+      || activeWorkout || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setStartingWorkout(true);
+    setStartWorkoutError(null);
+    try {
+      const current = await getRoutineStrengthPreStartScreen({
+        athleteId, sessionId: authorized.sessionId,
+        expectedAuthorizationId: authorized.id,
+      });
+      if (current.status !== 'eligible_for_atomic_start_gate'
+        || !current.observationToken || current.blockers.length > 0) {
+        throw new Error(current.blockers.join(' ')
+          || 'Current routine workout safety evidence does not permit starting.');
+      }
+      await beginAuthorizedRoutineWorkout({
+        sessionId: authorized.sessionId,
+        expectedAuthorizationId: authorized.id,
+        expectedObservationToken: current.observationToken,
+      });
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        router.push('/active-workout' as Href);
+      }
+    } catch (cause) {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setStartWorkoutError(cause instanceof Error ? cause.message
+          : 'The workout could not safely start. Previous checkpoint records remain preserved.');
+        await refreshRecoveryStatus();
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setStartingWorkout(false);
+    }
+  };
+
+  const confirmStartRoutineWorkout = () => {
+    if (!authorized || startingWorkout || !workoutSessionReady || activeWorkout) return;
+    Alert.alert(
+      'Start this exact routine workout?',
+      'Side Quest will recheck today’s readiness, symptoms, restrictions and the exact confirmed exercises. It will save the recovery checkpoint before opening a paused player. This is not medical clearance.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Check and start', onPress: () => { void startConfirmedRoutineWorkout(); } },
+      ],
+    );
+  };
+
+  const flagConcern = async (kind: 'provider_restriction' | 'training_coverage') => {
+    if (savingConcern || savingDisposition || rechecking || !detail || !athleteId
+      || typeof previewId !== 'string'
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setSavingConcern(true);
+    setConcernError(null);
+    try {
+      await flagUnverifiedStrengthReviewConcern({
+        athleteId, previewId, kind,
+        expectedLastEventId: kind === 'provider_restriction'
+          ? detail.provenance.restriction.latestEventId
+          : detail.provenance.coverage.latestEventId,
+      });
+      const updated = await getCurrentStrengthReviewForConfirmation(
+        athleteId, previewId,
+      );
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setDetail(updated);
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setConcernError(
+          'The concern could not be verified as saved. Reopen this draft before trying again.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setSavingConcern(false);
+    }
+  };
+
+  const confirmConcern = (kind: 'provider_restriction' | 'training_coverage') => {
+    if (!detail || savingConcern || savingDisposition || rechecking || !athleteId) return;
+    const restriction = kind === 'provider_restriction';
+    Alert.alert(
+      restriction ? 'Flag an active exercise restriction?' : 'Flag incomplete training history?',
+      restriction
+        ? 'Record that a restriction may apply to this draft. This report is not clinician verification or medical advice.'
+        : 'Record that training, injury, or recovery information may be missing. This does not verify any outside source.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Record concern', onPress: () => { void flagConcern(kind); } },
+      ],
+    );
+  };
+
+  const changeDisposition = async (action: 'dismiss' | 'restore') => {
+    if (savingDisposition || savingConcern || rechecking || !athleteId || !detail
+      || typeof previewId !== 'string'
+      || currentAthlete.current !== athleteId
+      || currentPreview.current !== previewId) return;
+    setSavingDisposition(true);
+    setDispositionError(null);
+    try {
+      await setUnapprovedStrengthReviewDisposition({
+        athleteId, previewId, action,
+        expectedLastEventId: detail.review.latestEventId,
+      });
+      const updated = await getCurrentStrengthReviewForConfirmation(
+        athleteId, previewId,
+      );
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setDetail(updated);
+    } catch {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) {
+        setDispositionError(
+          'The draft update could not be verified. Reopen this screen to refresh before trying again.',
+        );
+      }
+    } finally {
+      if (currentAthlete.current === athleteId
+        && currentPreview.current === previewId) setSavingDisposition(false);
+    }
+  };
+
+  const confirmDisposition = (action: 'dismiss' | 'restore') => {
+    if (!detail || savingDisposition || savingConcern || rechecking || !athleteId) return;
+    const dismiss = action === 'dismiss';
+    Alert.alert(
+      dismiss ? 'Dismiss this draft?' : 'Return draft to inbox?',
+      dismiss
+        ? 'This only changes the draft\'s review-list status. It does not modify your workouts.'
+        : 'The draft will become visible for review again. Stale evidence and all exercise restrictions remain in effect.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: dismiss ? 'Dismiss draft' : 'Return to inbox',
+          style: dismiss ? 'destructive' : 'default',
+          onPress: () => { void changeDisposition(action); },
+        },
+      ],
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.screen} edges={['left', 'right']}>
+      <View style={styles.header}>
+        <Pressable accessibilityRole="button" onPress={() => router.back()}
+          style={styles.back}><Text style={styles.backText}>‹ Reviews</Text></Pressable>
+        <Text style={styles.headerText}>Unapproved draft</Text>
+      </View>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.eyebrow}>EXERCISE COMPARISON · READ ONLY DOSE</Text>
+        <Text style={styles.title}>Before and after</Text>
+        <View style={styles.notice}>
+          <Text style={styles.noticeTitle}>
+            {authorized ? 'Routine version authorized — not started'
+              : 'Draft not yet authorized'}
+          </Text>
+          <Text style={styles.noticeText}>
+            {authorized
+              ? 'An exact athlete-confirmed routine workout version is saved. Requesting Start runs a fresh local safety check and saves a paused recovery checkpoint before opening the player.'
+              : 'This is a proposed exercise change, not a medical clearance. It cannot be started from this review screen.'}
+          </Text>
+        </View>
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator />
+            <Text style={styles.helper}>Verifying the saved proposal and audit history…</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.card}><Text style={styles.error}>{error}</Text></View>
+        ) : detail ? (
+          <>
+            {detail.stale ? (
+              <View style={styles.notice}>
+                <Text style={styles.noticeTitle}>Current review is blocked</Text>
+                <Text style={styles.noticeText}>
+                  This comparison is historical. The original source or current
+                  safety evidence is missing, changed, or unverified.
+                </Text>
+                {detail.reasons.slice(0, 5).map((reason, index) => (
+                  <Text key={index} style={styles.noticeText}>• {reason}</Text>
+                ))}
+              </View>
+            ) : null}
+            <View style={styles.card}>
+              <Text style={styles.cardEyebrow}>
+                {detail.status === 'stale' ? 'STALE / UNVERIFIED DRAFT' : detail.status === 'dismissed' ? 'DISMISSED DRAFT' : 'PENDING REVIEW'}
+              </Text>
+              <Text style={styles.cardTitle}>{detail.summary.sourceTitle}</Text>
+              <Text style={styles.helper}>Original session: {detail.summary.sourceDate}</Text>
+              <View style={styles.durationRow}>
+                <View style={styles.durationCell}>
+                  <Text style={styles.durationLabel}>Original</Text>
+                  <Text style={styles.durationValue}>{duration(detail.summary.originalSeconds)}</Text>
+                </View>
+                <Text style={styles.durationArrow}>→</Text>
+                <View style={styles.durationCell}>
+                  <Text style={styles.durationLabel}>Proposed</Text>
+                  <Text style={styles.durationValue}>{duration(detail.summary.proposedSeconds)}</Text>
+                </View>
+              </View>
+              <Text style={styles.helper}>
+                Proposed reduction: {duration(detail.summary.secondsReduced)}.
+                This is a comparison, not a prescription.
+              </Text>
+            </View>
+            <Text style={styles.sectionTitle}>Proposed changes</Text>
+            {detail.summary.changes.length === 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.helper}>
+                  No individually identifiable exercise or station reductions were saved.
+                  This does not prove the proposal is safe.
+                </Text>
+              </View>
+            ) : detail.summary.changes.map((change, index) => (
+              <View style={styles.card} key={`${change.stationId}:${change.exerciseId ?? 'station'}:${change.kind}:${index}`}>
+                <Text style={styles.cardEyebrow}>{changeHeadline(change).toUpperCase()}</Text>
+                <Text style={styles.cardTitle}>{change.label}</Text>
+                <Text style={styles.doseText}>
+                  {dose(change.before, change.unit)} → {dose(change.after, change.unit)}
+                </Text>
+              </View>
+            ))}
+            <Text style={styles.sectionTitle}>Your training context</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                {detail.trainingPolicy.track === 'routine_training_review'
+                  ? 'Ordinary training does not require clinical paperwork'
+                  : detail.trainingPolicy.track === 'restriction_aware_review'
+                    ? 'Training restrictions still need to be respected'
+                    : detail.trainingPolicy.track === 'rehabilitation_review'
+                      ? 'Rehabilitation needs injury-specific safeguards'
+                      : 'Training context has not been selected'}
+              </Text>
+              <Text style={styles.helper}>
+                {detail.trainingPolicy.track === 'routine_training_review'
+                  ? 'A healthy athlete can review routine training without a clinician sign-off. This specific exercise-revision draft is still not executable.'
+                  : 'Earlier reported limitations remain active even if you select general training. A good readiness score never clears a protected movement.'}
+              </Text>
+              {detail.trainingPolicy.reasons.slice(0, 4).map((reason, index) => (
+                <Text style={styles.helper} key={index}>• {reason}</Text>
+              ))}
+              <Text style={styles.noticeText}>
+                Catalog-tag matching is available as a conservative review
+                aid. Clinically validated restriction matching and executable
+                exercise approval are not enabled in this development build.
+              </Text>
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Review training context and protected movements"
+                style={styles.contextAction}
+                onPress={() => router.push('/training-safety-context' as Href)}>
+                <Text style={styles.contextActionText}>
+                  Review training context and protected movements
+                </Text>
+              </Pressable>
+            </View>
+            <Text style={styles.sectionTitle}>Fresh local safety recheck</Text>
+            <View style={styles.card}>
+              <Text style={styles.helper}>
+                Re-read this exact draft, current recovery check-ins, protected
+                movements and audit history together inside an exclusive
+                database transaction. This is not workout authorization.
+              </Text>
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Recheck draft evidence without approving workout"
+                disabled={rechecking || savingConcern || savingDisposition}
+                onPress={() => { void recheckCurrentEvidence(); }}
+                style={[styles.contextAction,
+                  rechecking && styles.disabledAction]}>
+                <Text style={styles.contextActionText}>
+                  {rechecking ? 'Rechecking local evidence…'
+                    : 'Recheck draft safety evidence'}
+                </Text>
+              </Pressable>
+              {recheckStatus ? (
+                <Text style={styles.helper}>{recheckStatus}</Text>
+              ) : null}
+              {recheckError ? (
+                <Text style={styles.error}>{recheckError}</Text>
+              ) : null}
+            </View>
+            <Text style={styles.sectionTitle}>Athlete-confirmed routine workout</Text>
+            <View style={styles.card}>
+              {authorized ? (
+                <>
+                  <Text style={styles.cardTitle}>Exact routine version authorized</Text>
+                  <Text style={styles.helper}>
+                    Authorization saved {authorized.createdAt.slice(0, 10)}.
+                    Only the recorded exercise prescription was authorized.
+                    Your original training plan is unchanged.
+                  </Text>
+                  <Text style={styles.noticeText}>
+                    This authorization is not clinician clearance. Any start or
+                    recovery must pass the current local safety check.
+                  </Text>
+                  <Pressable accessibilityRole="button"
+                    accessibilityLabel="Check safety and start the authorized routine workout"
+                    disabled={startingWorkout || recovering || !workoutSessionReady
+                      || Boolean(activeWorkout) || !recoveryState
+                      || recoveryState.kind !== 'not_started'}
+                    onPress={confirmStartRoutineWorkout}
+                    style={[styles.dispositionAction,
+                      (startingWorkout || recovering || !workoutSessionReady
+                        || Boolean(activeWorkout) || !recoveryState
+                        || recoveryState.kind !== 'not_started')
+                      && styles.disabledAction]}>
+                    <Text style={styles.dispositionText}>
+                      {startingWorkout ? 'Checking and saving workout…'
+                        : activeWorkout ? 'Finish the active workout first'
+                          : recoveryState?.kind === 'recoverable_missing'
+                            ? 'Recover the interrupted start below'
+                            : recoveryState?.kind === 'held'
+                              ? 'Workout start is on safety hold'
+                              : recoveryState?.kind === 'terminal'
+                                ? 'This workout has already been closed'
+                                : recoveryState?.kind === 'already_saved'
+                                  ? 'Existing paused workout is saved'
+                                  : 'Check safety and start this workout'}
+                    </Text>
+                  </Pressable>
+                  {startWorkoutError ? (
+                    <Text style={styles.error}>{startWorkoutError}</Text>
+                  ) : null}
+                  {recoveryState?.kind === 'recoverable_missing' ? (
+                    <Pressable accessibilityRole="button"
+                      accessibilityLabel="Recover existing interrupted start into paused player"
+                      disabled={recovering || Boolean(activeWorkout)}
+                      onPress={confirmInterruptedRecovery}
+                      style={styles.contextAction}>
+                      <Text style={styles.contextActionText}>
+                        {recovering ? 'Rechecking recovery…' : 'Recover paused workout'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {['recoverable_missing', 'held'].includes(recoveryState?.kind ?? '')
+                    && !activeWorkout ? (
+                    <Pressable accessibilityRole="button"
+                      disabled={recovering}
+                      onPress={confirmDiscardInterruptedRoutine}
+                      style={styles.concernAction}>
+                      <Text style={styles.concernText}>
+                        Abandon interrupted start (only if no player data exists)
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  {recoveryState?.kind === 'held'
+                    || recoveryState?.kind === 'terminal' ? (
+                    <Text style={styles.noticeText}>
+                      {recoveryState.blockers.join(' ')}
+                    </Text>
+                  ) : null}
+                  {recoveryError ? (
+                    <Text style={styles.error}>{recoveryError}</Text>
+                  ) : null}
+
+
+                </>
+              ) : getRoutineStrengthAuthorizationReadiness(detail)
+                .canRequestAuthorization ? (
+                <>
+                  <Text style={styles.cardTitle}>Confirm this exact workout</Text>
+                  <Text style={styles.helper}>
+                    Eligible only for uncomplicated routine training. Review
+                    the complete exercise list and current safety evidence
+                    before authorizing. No clinician paperwork is required
+                    merely because an athlete trains routinely.
+                  </Text>
+                  <Pressable accessibilityRole="checkbox"
+                    accessibilityState={{ checked: reviewedDose }}
+                    accessibilityLabel="I reviewed each exact exercise, dose, duration and resistance"
+                    disabled={savingAuthorization}
+                    onPress={() => setReviewedDose(value => !value)}
+                    style={styles.confirmRow}>
+                    <Text style={styles.confirmText}>
+                      {reviewedDose ? '☑' : '☐'} I reviewed every exercise,
+                      duration, target and load in this proposed workout.
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="checkbox"
+                    accessibilityState={{ checked: reviewedTraining }}
+                    accessibilityLabel="I reviewed my recent workout and recovery history"
+                    disabled={savingAuthorization}
+                    onPress={() => setReviewedTraining(value => !value)}
+                    style={styles.confirmRow}>
+                    <Text style={styles.confirmText}>
+                      {reviewedTraining ? '☑' : '☐'} I reviewed recent training,
+                      recovery and any unlogged sessions.
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="checkbox"
+                    accessibilityState={{ checked: reportedRestrictions }}
+                    accessibilityLabel="I have not omitted any known symptoms or movement restrictions"
+                    disabled={savingAuthorization}
+                    onPress={() => setReportedRestrictions(value => !value)}
+                    style={styles.confirmRow}>
+                    <Text style={styles.confirmText}>
+                      {reportedRestrictions ? '☑' : '☐'} I have not omitted any
+                      known symptoms, injuries or movement restrictions.
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button"
+                    accessibilityLabel="Authorize this exact routine workout without starting it"
+                    disabled={!reviewedDose || !reviewedTraining || !reportedRestrictions
+                      || savingAuthorization || savingConcern || savingDisposition || rechecking}
+                    onPress={confirmRoutineWorkout}
+                    style={[styles.dispositionAction,
+                      (!reviewedDose || !reviewedTraining || !reportedRestrictions
+                        || savingAuthorization || savingConcern || savingDisposition || rechecking)
+                      && styles.disabledAction]}>
+                    <Text style={styles.dispositionText}>
+                      {savingAuthorization ? 'Authorizing exact workout…'
+                        : 'Authorize this routine workout'}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.cardTitle}>Routine authorization not available</Text>
+                  <Text style={styles.helper}>
+                    This proposal is not eligible for athlete-only
+                    confirmation. The current holds must be resolved before
+                    a new version can be considered.
+                  </Text>
+                  {getRoutineStrengthAuthorizationReadiness(detail)
+                    .blockers.slice(0, 4).map((reason, index) => (
+                      <Text key={index} style={styles.helper}>{reason}</Text>
+                    ))}
+                </>
+              )}
+              {authorizationError ? (
+                <Text style={styles.error}>{authorizationError}</Text>
+              ) : null}
+              <Text style={styles.helper}>
+                A saved authorization is not an automatic workout start.
+                Rehabilitation and unresolved restrictions cannot use
+                this athlete-only pathway.
+              </Text>
+            </View>
+            <Text style={styles.sectionTitle}>What blocks workout approval?</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Not cleared for exercise</Text>
+              <Text style={styles.helper}>
+                {detail.preflight.blockingGateCount} prerequisites remain blocked,
+                unverified, or unavailable. Passing a local check does not mean
+                a clinician has approved the exercise.
+              </Text>
+              {detail.preflight.gates.map(gate => (
+                <View key={gate.id} style={styles.gateRow}>
+                  <Text style={styles.gateTitle}>{gate.title}</Text>
+                  <Text style={styles.gateStatus}>
+                    {gate.status === 'local_check_passed' ? 'LOCAL CHECK ONLY'
+                      : gate.status === 'blocked' ? 'BLOCKED'
+                        : gate.status === 'unverified' ? 'NOT VERIFIED'
+                          : gate.status === 'not_applicable'
+                            ? 'NOT REQUIRED FOR ROUTINE TRAINING'
+                            : 'NOT IMPLEMENTED'}
+                  </Text>
+                  <Text style={styles.helper}>{gate.detail}</Text>
+                </View>
+              ))}
+              <Text style={styles.noticeText}>
+                Side Quest cannot currently save or start this proposed workout.
+                Dismissing or restoring the draft only organizes the review inbox.
+              </Text>
+            </View>
+            <Text style={styles.sectionTitle}>Protected-movement review</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Exercise-specific restriction flags</Text>
+              <Text style={styles.helper}>
+                Training track: {detail.movementRestrictions.track.replaceAll('_', ' ')}.
+                Potential conflicts: {detail.movementRestrictions.potentialConflictCount}.
+                Individual reviews needed: {detail.movementRestrictions.needsIndividualReviewCount}.
+              </Text>
+              {detail.movementRestrictions.findings.map((finding, index) => (
+                <View style={styles.gateRow}
+                  key={finding.stationId + ':' + finding.exerciseId + ':' + index}>
+                  <Text style={styles.gateTitle}>{finding.exerciseName}</Text>
+                  <Text style={styles.gateStatus}>
+                    {finding.status === 'potential_conflict' ? 'POTENTIAL CONFLICT'
+                      : finding.status === 'needs_individual_review' ? 'NEEDS REVIEW'
+                        : finding.status === 'routine_not_applicable'
+                          ? 'NO RESTRICTION RECORDED'
+                          : 'NO TAGGED CONFLICT DETECTED'}
+                  </Text>
+                  <Text style={styles.helper}>{finding.explanation}</Text>
+                </View>
+              ))}
+              <Text style={styles.noticeText}>
+                Catalog tags cannot establish movement safety or medical clearance.
+                No exercise here can be started or confirmed from this screen.
+              </Text>
+            </View>
+            <Text style={styles.sectionTitle}>Evidence reconciliation</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>What still needs to be resolved</Text>
+              <Text style={styles.helper}>
+                {detail.reconciliation.unresolvedCount} unresolved checks.
+                These are review steps, not workout instructions or medical clearance.
+              </Text>
+              {detail.reconciliation.tasks.map(task => (
+                <View key={task.id} style={styles.gateRow}>
+                  <Text style={styles.gateTitle}>{task.title}</Text>
+                  <Text style={styles.gateStatus}>
+                    {task.kind === 'safety_hold' ? 'SAFETY HOLD'
+                      : task.kind === 'feature_unavailable'
+                        ? 'NOT AVAILABLE' : 'SOURCE NOT VERIFIED'}
+                  </Text>
+                  <Text style={styles.helper}>{task.nextStep}</Text>
+                </View>
+              ))}
+              <Text style={styles.noticeText}>
+                A local check-in cannot replace an authenticated provider
+                source. No task on this list automatically unlocks exercise.
+              </Text>
+            </View>
+            <Text style={styles.sectionTitle}>Report missing safety information</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Raise a concern</Text>
+              <Text style={styles.helper}>
+                Reports are recorded as unverified observations. They cannot
+                remove clinician restrictions or enable a workout.
+              </Text>
+              <Text style={styles.helper}>
+                Restriction reports: {detail.provenance.restriction.eventCount}.
+                Training-source reports: {detail.provenance.coverage.eventCount}.
+              </Text>
+              {detail.provenance.events.length ? (
+                <View style={styles.evidenceHistory}>
+                  <Text style={styles.gateTitle}>Unverified report history</Text>
+                  {detail.provenance.events.slice(-10).map(event => (
+                    <View key={event.id} style={styles.gateRow}>
+                      <Text style={styles.history}>
+                        {event.kind === 'provider_restriction'
+                          ? 'Exercise restriction' : 'Training-source coverage'}
+                        {' · '}{event.observedAt.slice(0, 10)}
+                      </Text>
+                      <Text style={styles.helper}>
+                        {event.claim === 'reported_present'
+                          ? 'Possible restriction reported'
+                          : event.claim === 'reported_none'
+                            ? 'No restriction claimed — not authenticated'
+                            : event.claim === 'partial'
+                              ? 'Incomplete history reported'
+                              : event.claim === 'claimed_complete'
+                                ? 'Complete history claimed — not authenticated'
+                                : 'Information unknown'}
+                        {' · Unverified'}
+                      </Text>
+                    </View>
+                  ))}
+                  {detail.provenance.events.length > 10 ? (
+                    <Text style={styles.helper}>
+                      Earlier reports remain preserved in the audit journal.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+              {concernError ? <Text style={styles.error}>{concernError}</Text> : null}
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Report an active strength exercise restriction"
+                disabled={savingConcern || savingDisposition || rechecking}
+                style={[styles.concernAction,
+                  savingConcern && styles.disabledAction]}
+                onPress={() => confirmConcern('provider_restriction')}>
+                <Text style={styles.concernText}>
+                  {savingConcern ? 'Saving concern…' : 'Flag an exercise restriction'}
+                </Text>
+              </Pressable>
+              <Pressable accessibilityRole="button"
+                accessibilityLabel="Report incomplete training or injury history"
+                disabled={savingConcern || savingDisposition || rechecking}
+                style={[styles.concernAction,
+                  savingConcern && styles.disabledAction]}
+                onPress={() => confirmConcern('training_coverage')}>
+                <Text style={styles.concernText}>
+                  {savingConcern ? 'Saving concern…' : 'Flag missing training history'}
+                </Text>
+              </Pressable>
+              <Text style={styles.helper}>
+                Concerns do not verify clinician documents. The draft stays
+                unapproved and recorded restrictions remain unresolved.
+              </Text>
+            </View>
+            <Text style={styles.sectionTitle}>Review history</Text>
+            <View style={styles.card}>
+              <Text style={styles.helper}>
+                {detail.review.events.length} recorded review event(s).
+                Current state: {detail.review.status === 'dismissed'
+                  ? 'Dismissed' : 'Pending review'}.
+              </Text>
+              {detail.review.events.map(event => (
+                <Text key={event.id} style={styles.history}>
+                  {event.action === 'dismiss' ? 'Dismissed' : 'Reopened as pending'}
+                  {' · '}{event.createdAt.slice(0, 10)}
+                </Text>
+              ))}
+              <Text style={styles.helper}>
+                A restored draft is still unapproved. No exercises or scheduled sessions were changed.
+              </Text>
+              {dispositionError ? (
+                <Text style={styles.error}>{dispositionError}</Text>
+              ) : null}
+              <Pressable accessibilityRole="button"
+                accessibilityLabel={detail.review.status === 'dismissed'
+                  ? 'Return unapproved draft to review inbox'
+                  : 'Dismiss unapproved draft from review inbox'}
+                disabled={savingDisposition || savingConcern || rechecking}
+                onPress={() => confirmDisposition(
+                  detail.review.status === 'dismissed' ? 'restore' : 'dismiss',
+                )}
+                style={[styles.dispositionAction,
+                  savingDisposition && styles.disabledAction]}>
+                <Text style={styles.dispositionText}>
+                  {savingDisposition ? 'Saving review status…'
+                    : detail.review.status === 'dismissed'
+                      ? 'Return draft to inbox' : 'Dismiss draft'}
+                </Text>
+              </Pressable>
+              <Text style={styles.helper}>
+                These controls organize saved drafts only. They cannot approve, start,
+                or modify a strength session. A stale draft remains stale after restoration.
+              </Text>
+            </View>
+            <Text style={styles.footer}>
+              Stored snapshots are not independent verification of current symptoms, readiness, or outside PT restrictions. Exercise-level approval and automatic progression remain disabled.
+            </Text>
+          </>
+        ) : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const colors = {
+  background: '#E4EBE3', paper: '#FFFDF8', ink: '#01234D',
+  muted: '#536761', border: '#B7CDC0', accent: '#153E2F',
+  warning: '#6E2C2C', soft: '#ECF3EA',
+};
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.background },
+  header: {
+    minHeight: 54, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.paper, borderBottomWidth: 1,
+    borderBottomColor: colors.border, paddingHorizontal: 18, gap: 8,
+  },
+  back: { paddingVertical: 10, paddingRight: 8 },
+  backText: { color: colors.accent, fontSize: 16, fontWeight: '800' },
+  headerText: { color: colors.ink, fontSize: 16, fontWeight: '800', flexShrink: 1 },
+  content: { padding: 20, gap: 14, paddingBottom: 64 },
+  eyebrow: { fontSize: 11, letterSpacing: 1.1, color: colors.accent, fontWeight: '800' },
+  title: { color: colors.ink, fontWeight: '800', fontSize: 28 },
+  notice: { padding: 16, borderRadius: 15, backgroundColor: colors.soft, gap: 6 },
+  noticeTitle: { fontSize: 16, fontWeight: '800', color: colors.warning },
+  noticeText: { fontSize: 13, lineHeight: 20, color: colors.ink },
+  card: { padding: 17, borderRadius: 16, backgroundColor: colors.paper, gap: 9,
+    borderWidth: 1, borderColor: colors.border },
+  cardEyebrow: { fontSize: 10, letterSpacing: 1, fontWeight: '800', color: colors.accent },
+  cardTitle: { fontSize: 17, fontWeight: '800', color: colors.ink },
+  helper: { fontSize: 13, lineHeight: 20, color: colors.muted },
+  error: { fontSize: 14, lineHeight: 21, color: colors.warning, fontWeight: '700' },
+  sectionTitle: { fontSize: 19, color: colors.ink, fontWeight: '800' },
+  durationRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  durationCell: { flex: 1, backgroundColor: colors.soft, padding: 13, borderRadius: 12 },
+  durationLabel: { fontSize: 11, color: colors.muted, fontWeight: '700' },
+  durationValue: { color: colors.ink, fontSize: 21, fontWeight: '800' },
+  durationArrow: { paddingHorizontal: 10, fontSize: 20, color: colors.accent },
+  doseText: { fontSize: 15, color: colors.ink, fontWeight: '800' },
+  history: { fontSize: 13, color: colors.ink, lineHeight: 20 },
+  evidenceHistory: { gap: 6, paddingVertical: 5 },
+  contextAction: { borderWidth: 1, borderColor: colors.accent,
+    borderRadius: 12, minHeight: 48, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10 },
+  contextActionText: { fontSize: 13, fontWeight: '800', color: colors.accent },
+  gateRow: { gap: 4, paddingVertical: 9, borderTopWidth: 1,
+    borderTopColor: colors.border },
+  gateTitle: { fontSize: 14, color: colors.ink, fontWeight: '800' },
+  gateStatus: { fontSize: 11, color: colors.warning, letterSpacing: 0.6,
+    fontWeight: '800' },
+  center: { padding: 32, gap: 12, alignItems: 'center' },
+  footer: { fontSize: 12, lineHeight: 19, color: colors.muted },
+  dispositionAction: { borderRadius: 12, minHeight: 48,
+    backgroundColor: colors.accent, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 15, paddingVertical: 11 },
+  dispositionText: { fontSize: 14, fontWeight: '800', color: colors.paper },
+  disabledAction: { opacity: 0.55 },
+  concernAction: { borderWidth: 1, borderColor: colors.warning,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  concernText: { fontSize: 13, fontWeight: '800', color: colors.warning },
+  confirmRow: { minHeight: 48, paddingVertical: 11,
+    paddingHorizontal: 10, borderWidth: 1,
+    borderColor: colors.border, borderRadius: 9 },
+  confirmText: { fontSize: 13, lineHeight: 20, color: colors.ink },
+});

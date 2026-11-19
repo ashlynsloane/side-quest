@@ -1,11 +1,18 @@
 import type { Exercise, GeneratedWorkout, WorkoutStation } from '@circuit/domain';
+import { DeferredWorkoutTogetherScreen } from '@/components/milestone-one-deferred-workout-together';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseDemoModal } from '@/components/exercise-demo-modal';
-import { saveCompletedWorkout } from '@/services/database';
+import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
+import {
+  inspectGenericWorkoutSafety,
+  saveCompletedWorkout,
+  withVerifiedAthleteDatabase,
+} from '@/services/database';
 import {
   finishWorkoutRoom,
   getWorkoutRoomByCode,
@@ -14,7 +21,9 @@ import {
   type SharedWorkoutRoom,
   type WorkoutRoomMember,
 } from '@/services/workout-together';
+import { boundedSharedWorkoutFraction } from '@/services/shared-workout-safe-fraction';
 import { useAuth } from '@/state/auth-context';
+import { useWorkoutContext } from '@/state/workout-context';
 import { useTheme } from '@/state/theme-context';
 import { typography, type AppPalette } from '@/theme';
 
@@ -24,11 +33,19 @@ type TimelineState =
   | { kind: 'complete'; remaining: 0; stationIndex: number; elapsed: number };
 
 export default function TogetherSessionScreen() {
+  if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) {
+    return <DeferredWorkoutTogetherScreen />;
+  }
+  return <TogetherSessionExperience />;
+}
+
+function TogetherSessionExperience() {
   useKeepAwake();
   const { code: rawCode } = useLocalSearchParams<{ code?: string }>();
   const code = String(rawCode ?? '').toUpperCase();
   const router = useRouter();
   const { user } = useAuth();
+  const { activeWorkout } = useWorkoutContext();
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const [room, setRoom] = useState<SharedWorkoutRoom | null>(null);
@@ -38,6 +55,18 @@ export default function TogetherSessionScreen() {
   const [demo, setDemo] = useState<Exercise | null>(null);
   const [error, setError] = useState<string | null>(null);
   const persisted = useRef(false);
+  const savingRef = useRef(false);
+  const completedAtRef = useRef<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [safetyStatus, setSafetyStatus] = useState<'checking' | 'clear' | 'hold'>('checking');
+  const [safetyReason, setSafetyReason] = useState<string | null>(null);
+  const safetyHeldRef = useRef(false);
+  const safetyRoomRef = useRef<string | null>(null);
+  const safetyBusyRef = useRef(false);
+  const lastSafeElapsedRef = useRef(0);
+  const lastClockTickRef = useRef<number | null>(null);
+  const foregroundRef = useRef(true);
 
   useEffect(() => {
     void (async () => {
@@ -55,44 +84,152 @@ export default function TogetherSessionScreen() {
   }, [code, user?.id]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(timer); }, []);
 
+  useEffect(() => {
+    if (!room?.id || !user?.id) return;
+    let live = true;
+    if (safetyRoomRef.current !== room.id) {
+      safetyRoomRef.current = room.id;
+      safetyHeldRef.current = false;
+      lastSafeElapsedRef.current = 0;
+      lastClockTickRef.current = null;
+      foregroundRef.current = true;
+      setSafetyStatus('checking');
+      setSafetyReason(null);
+    }
+    const check = async () => {
+      if (!live || safetyHeldRef.current || safetyBusyRef.current) return;
+      safetyBusyRef.current = true;
+      try {
+        if (activeWorkout || await inspectLiveWorkoutSlot(user.id) !== 'empty') {
+          throw new Error('Another saved or unreadable athlete workout checkpoint exists. Recover or finish it before continuing with the shared session.');
+        }
+        const decision = await inspectGenericWorkoutSafety(user.id);
+        if (!live) return;
+        if (decision.kind === 'hold') {
+          safetyHeldRef.current = true;
+          setSafetyStatus('hold');
+          setSafetyReason(decision.blockers.join(' ') ||
+            'The shared session cannot continue under current safety restrictions.');
+        } else {
+          setSafetyStatus('clear');
+        }
+      } catch (cause) {
+        if (!live) return;
+        safetyHeldRef.current = true;
+        setSafetyStatus('hold');
+        setSafetyReason(cause instanceof Error ? cause.message
+          : 'Athlete safety evidence cannot be verified.');
+      } finally { safetyBusyRef.current = false; }
+    };
+    void check();
+    const poll = setInterval(() => { void check(); }, 4000);
+    const foreground = AppState.addEventListener('change', status => {
+      if (status !== 'active') {
+        foregroundRef.current = false;
+        lastClockTickRef.current = null;
+        if (!safetyHeldRef.current) setSafetyStatus('checking');
+        return;
+      }
+      foregroundRef.current = true;
+      if (!safetyHeldRef.current) setSafetyStatus('checking');
+      void check();
+    });
+    return () => {
+      live = false;
+      clearInterval(poll);
+      foreground.remove();
+    };
+  }, [room?.id, user?.id, activeWorkout]);
+
   const state = useMemo(() => room?.startsAt ? timeline(room.workout, room.startsAt, now) : null, [room, now]);
+  useEffect(() => {
+    // Do not backfill a remote room clock after a delayed join, background
+    // suspension, blocked safety check, or skipped JS timer frames.
+    if (safetyStatus !== 'clear' || !foregroundRef.current || !state
+      || state.kind === 'countdown' || state.kind === 'complete') {
+      lastClockTickRef.current = null;
+      return;
+    }
+    if (lastClockTickRef.current !== null) {
+      const observedMilliseconds = Math.max(0, Math.min(1000, now - lastClockTickRef.current));
+      lastSafeElapsedRef.current += observedMilliseconds / 1000;
+    }
+    lastClockTickRef.current = now;
+  }, [now, safetyStatus, state?.kind]);
+
   const station = state && state.kind !== 'complete' && state.kind !== 'countdown' ? room?.workout.stations[state.stationIndex] ?? null : null;
 
-  const persist = useCallback(async (fraction: number) => {
-    if (!room || !user || persisted.current) return;
-    persisted.current = true;
-    const completedAt = new Date().toISOString();
+  const persist = useCallback(async (fraction: number): Promise<boolean> => {
+    if (!room || !user || savingRef.current) return false;
+    if (persisted.current) return true;
+    const safeFraction = boundedSharedWorkoutFraction(
+      fraction, lastSafeElapsedRef.current, room.workout.estimatedElapsedSeconds,
+    );
+    if (safeFraction <= 0) {
+      setSaveStatus('error');
+      setSaveError('This device has no observed, safety-cleared participation time. The shared room clock alone cannot create a completed workout.');
+      return false;
+    }
+    savingRef.current = true;
+    setSaveStatus('saving');
+    setSaveError(null);
+    const completedAt = completedAtRef.current ?? new Date().toISOString();
+    completedAtRef.current = completedAt;
     const substitutesPlan = member?.planRelation === 'substitute_next' && Boolean(member.plannedSessionId);
     const shared = room.workout.sharedContext;
-    await saveCompletedWorkout({
-      workout: room.workout,
-      startedAt: room.startsAt ?? room.createdAt,
-      completedAt,
-      completionFraction: fraction,
-      stationRounds: rounds,
-      plannedSessionId: substitutesPlan ? member?.plannedSessionId : undefined,
-      ledgerSource: 'workout_together',
-      relationToPlan: substitutesPlan ? 'replaced_planned' : 'additional',
-      idempotencyKey: `workout_together:${room.id}:${user.id}`,
-      friendSubstitution: substitutesPlan && member?.plannedSessionId && member.plannedSessionTitle ? {
-        kind: room.selectionMode === 'combined' ? 'combined_friend_workout' : 'friend_workout',
-        roomCode: room.code,
-        sourceUserIds: shared?.sourceUserIds ?? room.selectedCandidateUserIds,
-        sourceDisplayNames: shared?.sourceDisplayNames ?? [],
-        sourceSessionIds: shared?.sourceSessionIds ?? room.selectedSourceSessionIds,
-        originalSessionId: member.plannedSessionId,
-        originalSessionTitle: member.plannedSessionTitle,
-        replacementWorkoutName: room.workoutName,
-      } : undefined,
-    });
-    await markWorkoutRoomMemberComplete(room.id, user.id);
-    if (room.hostUserId === user.id && fraction >= .99) await finishWorkoutRoom(room.id, user.id);
+    try {
+      await withVerifiedAthleteDatabase(user.id, async () => {
+        await saveCompletedWorkout({
+          workout: room.workout,
+          startedAt: room.startsAt ?? room.createdAt,
+          completedAt,
+          completionFraction: safeFraction,
+          stationRounds: rounds,
+          plannedSessionId: substitutesPlan ? member?.plannedSessionId : undefined,
+          ledgerSource: 'workout_together',
+          relationToPlan: substitutesPlan ? 'replaced_planned' : 'additional',
+          idempotencyKey: `workout_together:${room.id}:${user.id}`,
+          friendSubstitution: substitutesPlan && member?.plannedSessionId && member.plannedSessionTitle ? {
+            kind: room.selectionMode === 'combined' ? 'combined_friend_workout' : 'friend_workout',
+            roomCode: room.code,
+            sourceUserIds: shared?.sourceUserIds ?? room.selectedCandidateUserIds,
+            sourceDisplayNames: shared?.sourceDisplayNames ?? [],
+            sourceSessionIds: shared?.sourceSessionIds ?? room.selectedSourceSessionIds,
+            originalSessionId: member.plannedSessionId,
+            originalSessionTitle: member.plannedSessionTitle,
+            replacementWorkoutName: room.workoutName,
+          } : undefined,
+        });
+      });
+      // Local canonical SQLite success is distinct from remote room status.
+      persisted.current = true;
+      setSaveStatus('saved');
+      try {
+        await markWorkoutRoomMemberComplete(room.id, user.id);
+        if (room.hostUserId === user.id && safeFraction >= .99) {
+          await finishWorkoutRoom(room.id, user.id);
+        }
+      } catch {
+        setSaveError('Your workout is saved locally, but room status could not synchronize.');
+      }
+      return true;
+    } catch (cause) {
+      // A failed canonical write must never be displayed as a saved workout,
+      // nor permanently suppress another explicit retry of the same identity.
+      setSaveStatus('error');
+      setSaveError(cause instanceof Error ? cause.message
+        : 'Shared workout could not be saved. Retry before leaving.');
+      return false;
+    } finally { savingRef.current = false; }
   }, [room, user, member, rounds]);
 
-  useEffect(() => { if (state?.kind === 'complete') void persist(1); }, [state?.kind, persist]);
+  useEffect(() => {
+    if (state?.kind === 'complete' && safetyStatus === 'clear'
+      && !safetyHeldRef.current) void persist(1);
+  }, [state?.kind, safetyStatus, persist]);
 
   function changeRounds(delta: number) {
-    if (!station) return;
+    if (!station || safetyStatus !== 'clear' || safetyHeldRef.current) return;
     setRounds((current) => ({ ...current, [station.id]: Math.max(0, (current[station.id] ?? 0) + delta) }));
   }
   function leaveEarly() {
@@ -100,15 +237,81 @@ export default function TogetherSessionScreen() {
     const fraction = Math.max(0, Math.min(1, state.elapsed / room.workout.estimatedElapsedSeconds));
     Alert.alert('Leave your shared workout?', 'This will not pause the other phones. Your completed portion can still be saved.', [
       { text: 'Stay', style: 'cancel' },
-      { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => { await persist(fraction); router.replace('/(tabs)/train' as Href); })() },
+      { text: 'Leave and save', style: 'destructive', onPress: () => void (async () => {
+        if (await persist(fraction)) router.replace('/(tabs)/train' as Href);
+      })() },
     ]);
+  }
+
+  async function saveHeldPortionAndExit() {
+    if (!room || saveStatus === 'saving') return;
+    const seconds = Math.max(0, lastSafeElapsedRef.current);
+    const elapsedFraction = room.workout.estimatedElapsedSeconds > 0
+      ? seconds / room.workout.estimatedElapsedSeconds : 0;
+    // A shared clock is not itself evidence of physical activity. Never
+    // count the period AFTER the safety hold as additional training dose.
+    const fraction = Math.max(0, Math.min(0.99, elapsedFraction));
+    if (await persist(fraction)) router.replace('/(tabs)/train' as Href);
+  }
+
+  function leaveHeldWithoutSaving() {
+    Alert.alert(
+      'Leave without saving this shared workout?',
+      'The other phones will keep their clock. Any rounds entered on this phone will not be recorded in your training history.',
+      [
+        { text: 'Keep workout record', style: 'cancel' },
+        { text: 'Leave without saving', style: 'destructive',
+          onPress: () => router.replace('/(tabs)/train' as Href) },
+      ],
+    );
   }
 
   if (error || !room || !state) return <SafeAreaView style={styles.safe}><View style={styles.center}><Text style={styles.title}>{error ? 'Could not open shared workout' : 'Synchronizing room…'}</Text>{error ? <Text style={styles.body}>{error}</Text> : null}<Pressable onPress={() => router.replace('/workout-together' as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Return</Text></Pressable></View></SafeAreaView>;
 
+  if (safetyStatus === 'checking') {
+    return <SafeAreaView style={styles.safe}><View style={styles.center}>
+      <Text style={styles.title}>Checking your training safety</Text>
+      <Text style={styles.body}>The shared clock does not authorize training. Your local restrictions must be checked before showing exercises.</Text>
+      <Pressable onPress={() => router.replace('/workout-room' as Href)} style={styles.secondary}>
+        <Text style={styles.secondaryText}>Return to room</Text>
+      </Pressable>
+    </View></SafeAreaView>;
+  }
+
+  if (safetyStatus === 'hold') {
+    return <SafeAreaView style={styles.safe}><View style={styles.center}>
+      <Text style={styles.title}>Your shared workout is on safety hold</Text>
+      <Text style={styles.body}>{safetyReason ?? 'Current training safety evidence could not be verified.'}</Text>
+      <Text style={styles.body}>Your phone must stop the exercises. The other athletes' clocks continue independently. You may save only the portion elapsed before your hold.</Text>
+      {saveError ? <Text style={styles.body}>{saveError}</Text> : null}
+      <Pressable disabled={saveStatus === 'saving'} onPress={() => { void saveHeldPortionAndExit(); }}
+        style={styles.primary}><Text style={styles.primaryText}>
+          {saveStatus === 'saving' ? 'Saving your portion…' : 'Save prior portion and leave'}
+        </Text></Pressable>
+      <Pressable onPress={() => router.push('/training-safety-context' as Href)}
+        style={styles.secondary}><Text style={styles.secondaryText}>Review training context</Text></Pressable>
+      <Pressable onPress={leaveHeldWithoutSaving} style={styles.secondary}>
+        <Text style={styles.secondaryText}>Leave without a workout record</Text>
+      </Pressable>
+    </View></SafeAreaView>;
+  }
+
   if (state.kind === 'countdown') return <SafeAreaView style={styles.safe}><View style={styles.countdown}><Text style={styles.eyebrow}>EVERY PHONE STARTS TOGETHER</Text><Text style={styles.countNumber}>{state.remaining}</Text><Text style={styles.countTitle}>{room.workoutName}</Text><Text style={styles.body}>Get to your first station. The shared clock begins automatically.</Text></View></SafeAreaView>;
 
-  if (state.kind === 'complete') return <SafeAreaView style={styles.safe}><View style={styles.complete}><Text style={styles.eyebrow}>SHARED WORKOUT COMPLETE</Text><Text style={styles.completeTitle}>Same session. Your own result.</Text><Text style={styles.body}>Your rounds and completion are stored only in your athlete profile. Any selected substitution is recorded against your own plan, not your friend’s.</Text><Pressable onPress={() => router.replace('/(tabs)/train' as Href)} style={styles.primary}><Text style={styles.primaryText}>Done</Text></Pressable></View></SafeAreaView>;
+  if (state.kind === 'complete') return <SafeAreaView style={styles.safe}><View style={styles.complete}>
+    <Text style={styles.eyebrow}>SHARED WORKOUT COMPLETE</Text>
+    <Text style={styles.completeTitle}>Same session. Your own result.</Text>
+    <Text style={styles.body}>Your completion is recorded only after your athlete-owned training ledger confirms the write.</Text>
+    {saveError ? <Text style={styles.body}>{saveError}</Text> : null}
+    <Pressable disabled={saveStatus === 'saving'} onPress={() => {
+      void (async () => {
+        if (await persist(1)) router.replace('/(tabs)/train' as Href);
+      })();
+    }} style={styles.primary}><Text style={styles.primaryText}>
+      {saveStatus === 'saving' ? 'Saving workout locally…'
+        : saveStatus === 'saved' ? 'Done' : 'Save workout before leaving'}
+    </Text></Pressable>
+  </View></SafeAreaView>;
 
   const currentStation = station!;
   return <SafeAreaView style={styles.safe}>

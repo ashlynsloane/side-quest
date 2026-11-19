@@ -7,6 +7,7 @@ import {
   listEquipmentProfiles,
 } from './database';
 import { getStravaConnection } from './strava';
+import { mustResumeFirstWeekSetup } from './first-week-provenance';
 
 export type OnboardingReviewKey = 'equipment' | 'restrictions' | 'training_intelligence';
 
@@ -17,6 +18,7 @@ export interface OnboardingState {
   reviewed: Record<OnboardingReviewKey, boolean>;
   completedAt?: string;
   firstRunBypassedAt?: string;
+  firstWeekSetupStartedAt?: string;
   updatedAt: string;
 }
 
@@ -105,6 +107,9 @@ export function clearOnboardingState(userId: string): void {
 export async function evaluateFirstRun(userId: string): Promise<{ needsOnboarding: boolean; state: OnboardingState }> {
   let state = loadOnboardingState(userId);
   if (state.completedAt || state.firstRunBypassedAt) return { needsOnboarding: false, state };
+  // A first-run athlete who has begun setup must finish or explicitly reset
+  // it; a partially saved goal is not evidence of established training data.
+  if (mustResumeFirstWeekSetup(state)) return { needsOnboarding: true, state };
 
   const [goal, completed, calendar, pt] = await Promise.all([
     getLatestPerformanceGoal().catch(() => null),

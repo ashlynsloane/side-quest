@@ -1,0 +1,43 @@
+# Separate synthetic athlete for actual iOS SIGKILL of pending strength
+# completion. Must never share profile or database with other native QA lanes.
+appId: com.sidequest.synthetic.qa
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-athlete-name"
+    timeout: 45000
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-name"
+- inputText: "Synthetic Crash Athlete A"
+# iOS 26's accessibility snapshot reports focused=false even while the
+# keyboard is open. Verify the actual field value, not its focused flag.
+- copyTextFrom:
+    id: "sidequest-qa-athlete-name"
+- assertTrue:
+    condition: ${maestro.copiedText === "Synthetic Crash Athlete A"}
+    label: "Synthetic athlete name matches the name input"
+- tapOn: "Create your beta profile"
+- waitForAnimationToEnd
+- tapOn:
+    id: "sidequest-qa-athlete-email"
+- inputText: "synthetic-save-interrupt-a@example.invalid"
+- copyTextFrom:
+    id: "sidequest-qa-athlete-email"
+- assertTrue:
+    condition: ${maestro.copiedText === "synthetic-save-interrupt-a@example.invalid"}
+    label: "Synthetic athlete email matches the email input"
+- tapOn: "Create your beta profile"
+- extendedWaitUntil:
+    visible:
+      id: "sidequest-qa-enter-beta"
+      enabled: true
+    timeout: 30000
+- tapOn:
+    id: "sidequest-qa-enter-beta"
+- extendedWaitUntil:
+    visible: "Build your first week."
+    timeout: 30000
+- takeScreenshot: "synthetic-completion-kill-profile-created"

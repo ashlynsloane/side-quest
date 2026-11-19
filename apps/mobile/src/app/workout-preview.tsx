@@ -16,11 +16,15 @@ import { WorkoutNameModal } from '@/components/workout-name-modal';
 import {
   isWorkoutFavorite,
   listExercisePreferences,
+  inspectGenericWorkoutSafety,
   saveExercisePreference,
   saveFavoriteWorkout,
 } from '@/services/database';
+import { inspectLiveWorkoutSlot } from '@/services/active-workout-persistence';
+import { inspectPlannedSessionCoherence } from '@/services/first-week-session-alignment';
 import { useExerciseCatalog } from '@/services/exercise-catalog';
 import { shareText, workoutText } from '@/services/sharing';
+import { MILESTONE_1_WORKOUT_TOGETHER_ENABLED } from '@/services/milestone-one-scope';
 import { createWorkoutRoom } from '@/services/workout-together';
 import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
@@ -40,6 +44,7 @@ export default function WorkoutPreviewScreen() {
     previewModifiedFromPlan,
     activeWorkout,
     activePlanLink,
+    workoutSessionReady,
     updatePreviewWorkout,
     beginWorkout,
   } = useWorkoutContext();
@@ -53,6 +58,8 @@ export default function WorkoutPreviewScreen() {
   const [roomBusy, setRoomBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [naming, setNaming] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
 
   useEffect(() => {
     if (!previewWorkout || originalWorkoutId.current === previewWorkout.id) return;
@@ -73,6 +80,7 @@ export default function WorkoutPreviewScreen() {
   }
 
   const workout = previewWorkout;
+  const plannedSessionCoherence = inspectPlannedSessionCoherence(workout, previewPlannedSession);
   const focusRegions = workout.targetRegions.slice(0, 4).map(formatRegion);
   const equipmentSummary = workout.requiredEquipment.length
     ? workout.requiredEquipment.slice(0, 3).map(formatRegion).join(' · ')
@@ -111,10 +119,50 @@ export default function WorkoutPreviewScreen() {
       && (activePlanLink?.sessionId ?? null) === (previewPlannedSession?.id ?? null),
   );
 
-  function start() {
-    if (!activeWorkout) {
-      beginWorkout(workout);
+  async function beginAndNavigate() {
+    if (!plannedSessionCoherence.ok) {
+      Alert.alert('Review planned workout', plannedSessionCoherence.message);
+      return;
+    }
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    try {
+      // Do not navigate until the original recovery checkpoint is durable.
+      // A duplicate tap cannot replace that checkpoint while it is saving.
+      await beginWorkout(workout);
       router.push('/active-workout' as Href);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message : 'Could not safely start this workout.';
+      const needsSafetyReview = message.startsWith('Training safety hold:');
+      Alert.alert(
+        needsSafetyReview ? 'Training safety review required'
+          : 'Previous workout needs attention',
+        message,
+        needsSafetyReview
+          ? [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Review training context', onPress: () => {
+              router.push('/training-safety-context' as Href);
+            } },
+          ]
+          : [{ text: 'OK' }],
+      );
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  }
+
+  function start() {
+    if (!plannedSessionCoherence.ok) {
+      Alert.alert('Review planned workout', plannedSessionCoherence.message);
+      return;
+    }
+    if (startingRef.current) return;
+    if (!activeWorkout) {
+      beginAndNavigate();
       return;
     }
     if (activeMatchesPreview) {
@@ -122,24 +170,46 @@ export default function WorkoutPreviewScreen() {
       return;
     }
     Alert.alert(
-      'Replace the active workout?',
-      `${activeWorkout.name} is paused and saved. Starting this workout will replace that active session.`,
+      'Current workout is saved',
+      `${activeWorkout.name} still has a recoverable workout checkpoint. Return to it and explicitly save the work performed or discard the session before starting a different workout. Nothing was replaced.`,
       [
-        { text: 'Keep current workout', style: 'cancel' },
-        { text: 'Resume current', onPress: () => router.push('/active-workout' as Href) },
-        { text: 'Replace and start', style: 'destructive', onPress: () => { beginWorkout(workout); router.push('/active-workout' as Href); } },
+        { text: 'Stay here', style: 'cancel' },
+        { text: 'Return to saved workout', onPress: () => router.push('/active-workout' as Href) },
       ],
     );
   }
 
   async function startTogether() {
+    if (!MILESTONE_1_WORKOUT_TOGETHER_ENABLED) return;
     if (!user || user.mode !== 'cloud' || !cloudEnabled) {
       Alert.alert('Cloud account required', 'Workout Together uses a private room so separate phones receive the same start clock.');
       return;
     }
+    if (!workoutSessionReady || activeWorkout) {
+      Alert.alert('Existing workout needs attention',
+        'Wait for workout recovery to finish, then save or discard your current workout before joining a shared session.');
+      return;
+    }
     setRoomBusy(true);
     try {
-      const room = await createWorkoutRoom({ workout, userId: user.id, displayName: user.displayName });
+      const slot = await inspectLiveWorkoutSlot(user.id);
+      if (slot !== 'empty') {
+        throw new Error('Another saved or unreadable workout checkpoint must be recovered before joining a shared session.');
+      }
+      const safety = await inspectGenericWorkoutSafety(user.id);
+      if (safety.kind !== 'routine_training') {
+        Alert.alert('Training safety review required',
+          safety.blockers.join(' ') || 'Shared workouts require reviewed ordinary training context.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Review training context',
+              onPress: () => router.push('/training-safety-context' as Href) },
+          ]);
+        return;
+      }
+      const room = await createWorkoutRoom({
+        workout, userId: user.id, displayName: user.displayName,
+      });
       router.push({ pathname: '/workout-room', params: { code: room.code } } as Href);
     } catch (cause) {
       Alert.alert('Could not create room', cause instanceof Error ? cause.message : String(cause));
@@ -180,6 +250,11 @@ export default function WorkoutPreviewScreen() {
           </View>
         </V23Card>
 
+        {!plannedSessionCoherence.ok ? <V23Card tone="muted">
+          <Text style={styles.overviewTitle}>Planned workout needs review</Text>
+          <Text style={styles.overviewBody}>{plannedSessionCoherence.message}</Text>
+          <Text style={styles.overviewBody}>No workout will be started until the focus and protected-area conflicts are resolved.</Text>
+        </V23Card> : null}
         {previewExplanation ? <CoachInsights explanation={previewExplanation} /> : null}
 
         {workout.recentLoadAdjustments.length ? <V23Card tone="muted" style={styles.adjustmentCard}>{workout.recentLoadAdjustments.map((item) => <Text key={item} style={styles.adjustment}>• {item}</Text>)}</V23Card> : null}
@@ -206,8 +281,15 @@ export default function WorkoutPreviewScreen() {
 
         <View style={styles.startPanel}>
           <View><Text style={styles.startTitle}>Ready when you are</Text><Text style={styles.startBody}>Edits and swaps are saved for this session.</Text></View>
-          <V23PrimaryButton onPress={start} icon="play">{activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
-          <Pressable onPress={() => void startTogether()} disabled={roomBusy} style={[styles.togetherButton, roomBusy && styles.disabled]}><Text style={styles.togetherButtonText}>{roomBusy ? 'Creating room…' : 'Start this workout together'}</Text></Pressable>
+          <V23PrimaryButton onPress={start} icon="play">{starting ? 'Saving workout…' : activeMatchesPreview ? 'Resume workout' : 'Start workout'}</V23PrimaryButton>
+          {MILESTONE_1_WORKOUT_TOGETHER_ENABLED ? (
+            <Pressable onPress={() => void startTogether()} disabled={roomBusy}
+              style={[styles.togetherButton, roomBusy && styles.disabled]}>
+              <Text style={styles.togetherButtonText}>
+                {roomBusy ? 'Creating room…' : 'Start this workout together'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </KeyboardSafeScreen>
 

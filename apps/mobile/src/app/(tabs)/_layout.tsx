@@ -18,11 +18,11 @@ export default function TabLayout() {
     tabBarStyle: { height: 76, paddingTop: 8, paddingBottom: 10, backgroundColor: tokens.tabBar, borderTopWidth: 1, borderTopColor: tokens.border },
     tabBarLabelStyle: { fontSize: 11.5, lineHeight: 15, fontWeight: '800' },
   }}>
-    <Tabs.Screen name="index" options={{ title: 'Today', tabBarIcon: ({ focused }) => <TabIcon kind="home" focused={focused} /> }} />
-    <Tabs.Screen name="plan" options={{ title: 'Week', tabBarIcon: ({ focused }) => <TabIcon kind="plan" focused={focused} /> }} />
-    <Tabs.Screen name="train" options={{ title: 'Train', tabBarIcon: ({ focused }) => <TabIcon kind="train" focused={focused} /> }} />
+    <Tabs.Screen name="index" options={{ title: 'Today', tabBarButtonTestID: 'sidequest-qa-today-tab', tabBarIcon: ({ focused }) => <TabIcon kind="home" focused={focused} /> }} />
+    <Tabs.Screen name="plan" options={{ title: 'Week', tabBarButtonTestID: 'sidequest-qa-week-tab', tabBarIcon: ({ focused }) => <TabIcon kind="plan" focused={focused} /> }} />
+    <Tabs.Screen name="train" options={{ title: 'Train', tabBarButtonTestID: 'sidequest-qa-train-tab', tabBarIcon: ({ focused }) => <TabIcon kind="train" focused={focused} /> }} />
     <Tabs.Screen name="coach" options={{ title: 'Coach', tabBarIcon: ({ focused }) => <TabIcon kind="insights" focused={focused} /> }} />
-    <Tabs.Screen name="profile" options={{ title: 'You', tabBarIcon: ({ focused }) => <TabIcon kind="profile" focused={focused} /> }} />
+    <Tabs.Screen name="profile" options={{ title: 'You', tabBarButtonTestID: 'sidequest-qa-profile-tab', tabBarIcon: ({ focused }) => <TabIcon kind="profile" focused={focused} /> }} />
     <Tabs.Screen name="library" options={{ href: null }} />
   </Tabs>;
 }
