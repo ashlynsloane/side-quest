@@ -33,6 +33,7 @@ export { evaluateStrengthLoad } from './strength-load-management';
 export { buildTrainingWeekEvidence, localTrainingDate, normalizeTrainingSport, crossesLocalTrainingMidnight, proposeCompletedWeekBaseline } from './core-training-week-evidence';
 export { buildFirstWeekTrainingSummary } from './first-week-training-summary';
 export { resolveFirstWeekCapacity } from './first-week-capacity';
+export { unverifiedEnduranceDisciplines } from './endurance-baseline-policy';
 export { createManualEnduranceActivity } from './manual-endurance';
 export type { ManualEnduranceInput } from './manual-endurance';
 export { addLocalCalendarDays, localCalendarDate, nextLocalMonday, localMondayOf } from './first-week-dates';
