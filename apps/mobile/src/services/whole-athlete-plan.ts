@@ -78,8 +78,14 @@ export async function generateAndPersistWholeAthleteBlock(
   const athleteCalendarEvents = calendarEvents.filter((event) => !isSideQuestGeneratedPlanEvent(event));
   const baselines = buildDisciplineBaselines(recentActivities, input.capacity, input.goal);
   const health = buildWholeAthleteHealthContext(input);
-  const absentGoalDisciplines = (['swim', 'bike', 'run'] as const).filter((discipline) => !input.goal.disciplines.includes(discipline));
-  const frequencyTargets = Object.fromEntries(absentGoalDisciplines.map((discipline) => [discipline, { min: 0, preferred: 0, max: 0 }])) as Partial<Record<TrainableDiscipline, { min: number; preferred: number; max: number }>>;
+  // A goal or available time is not evidence of a tolerated session dose.
+  // Do not emit synthetic default-duration swim/bike/run sessions without a
+  // discipline-specific recorded baseline. Existing strength sessions remain.
+  const unverifiedDisciplines = (['swim', 'bike', 'run'] as const).filter((discipline) =>
+    !input.goal.disciplines.includes(discipline) || !baselines[discipline]);
+  const frequencyTargets = Object.fromEntries(unverifiedDisciplines.map((discipline) =>
+    [discipline, { min: 0, preferred: 0, max: 0 }])) as Partial<Record<TrainableDiscipline,
+      { min: number; preferred: number; max: number }>>;
   if (input.capacity.runStatus === 'not_running') frequencyTargets.run = { min: 0, preferred: 0, max: 0 };
 
   const weeks: WholeAthleteWeekPlan[] = [];
@@ -180,8 +186,8 @@ export function buildWholeAthleteHealthContext(input: GenerateWholeAthleteBlockI
 
 export function buildDisciplineBaselines(
   activities: EnduranceActivity[],
-  capacity: WholeAthleteCapacityInput,
-  goal: PerformanceGoal,
+  _capacity: WholeAthleteCapacityInput,
+  _goal: PerformanceGoal,
 ): Partial<Record<TrainableDiscipline, DisciplineBaseline>> {
   const active = activities.filter((activity) => !activity.deletedAt);
   const weeks = LOOKBACK_DAYS / 7;
@@ -196,21 +202,10 @@ export function buildDisciplineBaselines(
     };
   }
 
-  if (!baselines.swim && !baselines.bike && !baselines.run && capacity.currentEnduranceHours > 0) {
-    const fallbackMinutes = capacity.currentEnduranceHours * 60;
-    const weights = goalFallbackWeights(goal);
-    for (const discipline of ['swim', 'bike', 'run'] as const) {
-      if (!goal.disciplines.includes(discipline) || weights[discipline] <= 0) continue;
-      const minutesPerWeek = Math.round(fallbackMinutes * weights[discipline]);
-      const sessionsPerWeek = discipline === 'run' && capacity.runStatus === 'return_to_run' ? 2 : discipline === 'run' && capacity.runStatus === 'not_running' ? 0 : 2;
-      if (sessionsPerWeek === 0) continue;
-      baselines[discipline] = {
-        sessionsPerWeek,
-        minutesPerWeek,
-        longestSessionMinutes: Math.round(minutesPerWeek / sessionsPerWeek * (discipline === 'bike' ? 1.4 : 1.15)),
-      };
-    }
-  }
+  // Never split aggregate availability or self-reported aggregate endurance
+  // hours into invented discipline-specific baselines. Only observed activities
+  // establish modality exposure. A separate athlete-reviewed baseline flow
+  // will be required for activities absent from this ledger.
   return baselines;
 }
 
@@ -315,13 +310,6 @@ async function sourceMetadata(): Promise<TrainingCalendarSource> {
     createdAt: now,
     updatedAt: now,
   };
-}
-
-function goalFallbackWeights(goal: PerformanceGoal): Record<'swim' | 'bike' | 'run', number> {
-  if (goal.type === 'swim_speed') return { swim: 1, bike: 0, run: 0 };
-  if (goal.type === 'swimrun') return { swim: 0.4, bike: 0, run: 0.6 };
-  if (goal.type.startsWith('triathlon_') || goal.type === 'ironman_70_3' || goal.type === 'ironman_full') return { swim: 0.25, bike: 0.45, run: 0.3 };
-  return { swim: 0, bike: 0, run: 1 };
 }
 
 function safeId(value: string): string {
