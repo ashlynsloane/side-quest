@@ -7,14 +7,24 @@ import { useAuth } from '@/state/auth-context';
 import { useTheme } from '@/state/theme-context';
 import { type AppPalette } from '@/theme';
 import {
+  FAST_START_LOCATIONS, PROTECTED_AREAS, CROSS_TRAINING_MODES,
+  fastStartPrimaryLocation, fastStartNeedsSpecificReview,
+  normalizeFastStartLocations, normalizeFastStartRestrictions,
+  normalizeProtectedAreas, normalizeCrossTrainingModes,
+  toggleFastStartLocation, toggleFastStartRestriction,
+  type FastStartLocation, type FastStartRestriction,
+  type ProtectedAreaDetail, type ProtectedArea, type ProtectedSide,
+  type CrossTrainingMode,
+} from '@/services/first-week-input-policy';
+import {
   firstWeekGoalReviewLabel, firstWeekPriorityForGoal, firstWeekUsesRacePriority,
 } from '@/services/first-week-goal-policy';
 
 type Step = 'welcome' | 'goal' | 'schedule' | 'equipment' | 'restrictions' | 'profile' | 'review';
 type GoalChoice = 'ironman_70_3' | 'triathlon_olympic' | 'road_half_marathon' | 'road_marathon' | 'trail_50k' | 'general_offseason';
 type PriorityChoice = 'finish' | 'perform' | 'race';
-type EquipmentChoice = 'home' | 'full_gym' | 'travel' | 'bodyweight';
-type RestrictionChoice = 'none' | 'lower_body' | 'upper_body' | 'back' | 'other';
+type EquipmentChoice = FastStartLocation;
+type RestrictionChoice = FastStartRestriction;
 type BackgroundChoice = 'swim' | 'bike' | 'run' | 'triathlon' | 'balanced';
 type RunStatusChoice = 'normal' | 'reduced' | 'return_to_run' | 'not_running';
 type InjuryChoice = 'none' | 'remote_bone_stress' | 'recent_bone_stress' | 'recurring_run';
@@ -31,7 +41,14 @@ const GOALS: Array<{ id: GoalChoice; label: string; detail: string }> = [
   { id: 'general_offseason', label: 'General strength', detail: 'Build strength without a race date.' },
 ];
 
-type OnboardingDraft = { step: Step; goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[]; equipment: EquipmentChoice; restriction: RestrictionChoice; background: BackgroundChoice; runStatus: RunStatusChoice; injury: InjuryChoice; strength: StrengthChoice };
+type OnboardingDraft = {
+  step: Step; goal: GoalChoice; priority: PriorityChoice; hours: number; days: number[];
+  equipment: EquipmentChoice; equipmentLocations?: EquipmentChoice[];
+  restriction: RestrictionChoice; restrictions?: RestrictionChoice[];
+  protectedAreas?: ProtectedAreaDetail[]; desiredModes?: CrossTrainingMode[];
+  expandedDetails?: boolean; background: BackgroundChoice; runStatus: RunStatusChoice;
+  injury: InjuryChoice; strength: StrengthChoice;
+};
 const DRAFT_KEY = 'sidequest.onboarding.first-week-draft.v1';
 type DraftStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
 const draftStorage = (globalThis as typeof globalThis & { localStorage?: DraftStorage }).localStorage;
@@ -52,13 +69,27 @@ export default function OnboardingScreen() {
   const [hours, setHours] = useState(initialDraft.hours ?? 10);
   const [days, setDays] = useState<number[]>(initialDraft.days ?? [1, 3, 5]);
   const [equipment, setEquipment] = useState<EquipmentChoice>(initialDraft.equipment ?? 'home');
-  const [restriction, setRestriction] = useState<RestrictionChoice>(initialDraft.restriction ?? 'none');
+  const [equipmentLocations, setEquipmentLocations] = useState<EquipmentChoice[]>(() =>
+    normalizeFastStartLocations(initialDraft.equipmentLocations, initialDraft.equipment ?? 'home'));
+  const [restrictions, setRestrictions] = useState<RestrictionChoice[]>(() =>
+    normalizeFastStartRestrictions(initialDraft.restrictions, initialDraft.restriction ?? 'none'));
+  const [protectedAreas, setProtectedAreas] = useState<ProtectedAreaDetail[]>(() =>
+    normalizeProtectedAreas(initialDraft.protectedAreas));
+  const [desiredModes, setDesiredModes] = useState<CrossTrainingMode[]>(() =>
+    normalizeCrossTrainingModes(initialDraft.desiredModes));
+  const [expandedDetails, setExpandedDetails] = useState(Boolean(initialDraft.expandedDetails));
   const [background, setBackground] = useState<BackgroundChoice>(initialDraft.background ?? 'balanced');
   const [runStatus, setRunStatus] = useState<RunStatusChoice>(initialDraft.runStatus ?? 'normal');
   const [injury, setInjury] = useState<InjuryChoice>(initialDraft.injury ?? 'none');
   const [strength, setStrength] = useState<StrengthChoice>(initialDraft.strength ?? 'intermediate');
 
-  useEffect(() => { saveDraft(draftKey, { step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength }); }, [draftKey, step, goal, priority, hours, days, equipment, restriction, background, runStatus, injury, strength]);
+  useEffect(() => { saveDraft(draftKey, {
+    step, goal, priority, hours, days, equipment, equipmentLocations,
+    restriction: restrictions[0] ?? 'none', restrictions, protectedAreas,
+    desiredModes, expandedDetails, background, runStatus, injury, strength,
+  }); }, [draftKey, step, goal, priority, hours, days, equipment,
+    equipmentLocations, restrictions, protectedAreas, desiredModes, expandedDetails,
+    background, runStatus, injury, strength]);
 
   const stepIndex = STEPS.indexOf(step);
   const progress = Math.max(0, stepIndex) / (STEPS.length - 1);
@@ -77,6 +108,10 @@ export default function OnboardingScreen() {
   const [navigationError, setNavigationError] = useState<string | null>(null);
   function finish() {
     setNavigationError(null);
+    if (fastStartNeedsSpecificReview(restrictions)) {
+      setNavigationError('An additional restriction cannot be mapped to exercises. Return to the protection step and select a known anatomical region or remove "Something else" before generating a session.');
+      return;
+    }
     try {
       // Expo Router owns query encoding. Avoid URLSearchParams inside native
       // Hermes: a thrown event-handler exception previously left users on the
@@ -85,7 +120,13 @@ export default function OnboardingScreen() {
         pathname: '/onboarding-first-week',
         params: {
           goal, priority: firstWeekPriorityForGoal(goal, priority), hours: String(hours), days: days.join(','),
-          equipment, restriction, background, runStatus, injury, strength,
+          equipment: fastStartPrimaryLocation(equipmentLocations, equipment),
+          equipmentLocations: equipmentLocations.join(','),
+          restriction: restrictions[0] ?? 'none',
+          restrictions: restrictions.join(','),
+          protectedAreas: JSON.stringify(protectedAreas),
+          desiredModes: desiredModes.join(','),
+          background, runStatus, injury, strength,
         },
       } as Href);
     } catch (caught) {
@@ -96,13 +137,35 @@ export default function OnboardingScreen() {
 
   return <AppScreen eyebrow={`STEP ${stepIndex + 1} OF ${STEPS.length}`} title={titleFor(step)} subtitle={subtitleFor(step)}>
     <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.max(8, progress * 100)}%` }]} /></View>
+    <Pressable accessibilityRole="button" onPress={() => setExpandedDetails((value) => !value)}
+      style={styles.detailsButton}><Text style={styles.detailsButtonText}>
+        {expandedDetails ? 'Show fewer setup options' : 'Expand setup details (optional)'}
+      </Text></Pressable>
     {step === 'welcome' ? <Welcome styles={styles} /> : null}
     {step === 'goal' ? <GoalStep goal={goal} priority={priority} setGoal={setGoal} setPriority={setPriority} styles={styles} /> : null}
     {step === 'schedule' ? <ScheduleStep hours={hours} setHours={setHours} days={days} toggleDay={toggleDay} styles={styles} /> : null}
-    {step === 'equipment' ? <EquipmentStep value={equipment} setValue={setEquipment} styles={styles} /> : null}
-    {step === 'restrictions' ? <RestrictionsStep value={restriction} setValue={setRestriction} styles={styles} /> : null}
-    {step === 'profile' ? <ProfileStep background={background} setBackground={setBackground} runStatus={runStatus} setRunStatus={setRunStatus} injury={injury} setInjury={setInjury} strength={strength} setStrength={setStrength} styles={styles} /> : null}
-    {step === 'review' ? <Review goal={goal} priority={priority} hours={hours} days={days} equipment={equipment} restriction={restriction} background={background} runStatus={runStatus} injury={injury} strength={strength} styles={styles} /> : null}
+    {step === 'equipment' ? <EquipmentStep value={equipment} setValue={setEquipment}
+      locations={equipmentLocations} setLocations={setEquipmentLocations} styles={styles} /> : null}
+    {step === 'restrictions' ? <RestrictionsStep restrictions={restrictions} setRestrictions={setRestrictions}
+      areas={protectedAreas} setAreas={setProtectedAreas}
+      expanded={expandedDetails} setExpanded={setExpandedDetails} styles={styles} /> : null}
+    {step === 'profile' ? <><ProfileStep background={background} setBackground={setBackground} runStatus={runStatus} setRunStatus={setRunStatus} injury={injury} setInjury={setInjury} strength={strength} setStrength={setStrength} styles={styles} />
+      <Pressable accessibilityRole="button" onPress={() => setExpandedDetails(true)} style={styles.detailsButton}>
+        <Text style={styles.detailsButtonText}>Add cardio and cross-training preferences</Text>
+      </Pressable>
+      {expandedDetails ? <View style={styles.profileStack}><Text style={styles.sectionLabel}>ACTIVITIES YOU WANT CONSIDERED (SELECT ALL)</Text>
+        <View style={styles.chipWrap}>{CROSS_TRAINING_MODES.map(({ id, label }) =>
+          <Pressable key={id} onPress={() => setDesiredModes((current) =>
+            current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+            style={[styles.chip, desiredModes.includes(id) && styles.chipActive]}>
+            <Text style={[styles.chipText, desiredModes.includes(id) && styles.chipTextActive]}>{label}</Text>
+          </Pressable>)}</View>
+        <Text style={styles.note}>Preferences are not completed training or medical clearance. Cardio dose and eligibility require review before scheduling.</Text>
+      </View> : null}</> : null}
+    {step === 'review' ? <Review goal={goal} priority={priority} hours={hours} days={days}
+      equipment={fastStartPrimaryLocation(equipmentLocations, equipment)} locations={equipmentLocations}
+      restrictions={restrictions} areas={protectedAreas} desiredModes={desiredModes}
+      background={background} runStatus={runStatus} injury={injury} strength={strength} styles={styles} /> : null}
     {navigationError ? <Text accessibilityRole="alert" style={{ color: palette.ink, paddingHorizontal: 10 }}>First-week navigation error: {navigationError}</Text> : null}
     <View style={styles.actions}>
       <Pressable onPress={back} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}><Text style={styles.secondaryText}>{step === 'welcome' ? 'Not now' : 'Back'}</Text></Pressable>
