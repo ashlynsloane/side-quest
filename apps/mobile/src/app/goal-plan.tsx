@@ -33,6 +33,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DEFAULT_EQUIPMENT } from '@/features/generate/default-request';
 import { suggestEnduranceSchedule } from '@/services/calendar-sync';
+import { firstWeekPriorityForGoal } from '@/services/first-week-goal-policy';
 import {
   getActiveTrainingCheckIn,
   getLatestPerformanceGoal,
@@ -281,6 +282,7 @@ export default function GoalPlanScreen() {
 
   function chooseGoal(type: PerformanceGoalType) {
     setGoalType(type);
+    if (type === 'general_offseason') setPriority('perform');
     const option = goalOption(type);
     if (type !== 'general_offseason') setEventDateText(dateFromWeeks(option.defaultWeeks));
     setTerrain(defaultTerrain(type));
@@ -356,7 +358,7 @@ export default function GoalPlanScreen() {
         weeksUntilEvent: weeks ?? 0,
         terrain: supportsTerrain(goalType) ? terrain : undefined,
         disciplines,
-        priority,
+        priority: firstWeekPriorityForGoal(goalType, priority),
         sessionsPerWeek: strengthRecommendation.sessionsPerWeek,
         defaultSessionMinutes: strengthRecommendation.sessionMinutes,
         capacityProfile: capacity,
