@@ -199,7 +199,7 @@ const TERRAIN_OPTIONS: Array<{ id: GoalTerrain; label: string }> = [
 
 export default function GoalPlanScreen() {
   const { exercises } = useExerciseCatalog();
-  const onboardingParams = useLocalSearchParams<{ onboarding?: string; goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string }>();
+  const onboardingParams = useLocalSearchParams<{ onboarding?: string; goal?: string; priority?: string; hours?: string; days?: string; equipment?: string; restriction?: string; runStatus?: string; injury?: string; strength?: string; background?: string }>();
   const fromOnboarding = onboardingParams.onboarding === '1';
 
   const router = useRouter();
@@ -208,7 +208,27 @@ export default function GoalPlanScreen() {
   const [eventDateText, setEventDateText] = useState(() => dateFromWeeks(12));
   const [priority, setPriority] = useState<PerformanceGoal['priority']>(() => isPriority(onboardingParams.priority) ? onboardingParams.priority : 'perform');
   const [terrain, setTerrain] = useState<GoalTerrain>('rolling');
-  const [capacity, setCapacity] = useState<AthleteCapacityProfile>({ totalWeeklyHours: parseHours(onboardingParams.hours), currentEnduranceHours: Math.max(0, parseHours(onboardingParams.hours) - 4), runStatus: 'normal', maxRunMilesLast12Weeks: 20, boneStressInjuryHistory: 'none', swimProficiency: 'average', bikeProficiency: 'average', runProficiency: 'average', strengthExperience: 'intermediate' });
+  const [capacity, setCapacity] = useState<AthleteCapacityProfile>(() => {
+    const status = onboardingParams.runStatus;
+    const runStatus = status === 'normal' || status === 'reduced'
+      || status === 'return_to_run' || status === 'not_running' ? status : 'not_running';
+    const background = onboardingParams.background;
+    const injury = onboardingParams.injury;
+    return {
+      totalWeeklyHours: parseHours(onboardingParams.hours),
+      // Unknown is NOT a measured zero. Evidence is intentionally unset until entered.
+      currentEnduranceHours: 0,
+      maxRunMilesLast12Weeks: 0, runMileageEvidence: 'unknown',
+      runStatus,
+      boneStressInjuryHistory: injury === 'recent_bone_stress' ? 'recent_or_current'
+        : injury === 'remote_bone_stress' ? 'remote' : 'none',
+      swimProficiency: background === 'swim' ? 'strong' : 'developing',
+      bikeProficiency: background === 'bike' ? 'strong' : 'developing',
+      runProficiency: background === 'run' ? 'strong' : 'developing',
+      strengthExperience: onboardingParams.strength === 'advanced' ? 'advanced'
+        : onboardingParams.strength === 'beginner' ? 'beginner' : 'intermediate',
+    };
+  });
   const [planLength, setPlanLength] = useState<TrainingBlockLength>(4);
   const [equipment, setEquipment] = useState<EquipmentId[]>(DEFAULT_EQUIPMENT);
   const [equipmentProfiles, setEquipmentProfiles] = useState<EquipmentProfile[]>([]);
@@ -590,7 +610,13 @@ export default function GoalPlanScreen() {
           <Text style={styles.inputLabel}>Total training hours available each week</Text>
           <TextInput value={String(capacity.totalWeeklyHours)} onChangeText={(value) => setCapacity((current) => ({ ...current, totalWeeklyHours: Number(value.replace(/[^0-9.]/g, '')) || 0 }))} keyboardType="decimal-pad" style={styles.input} placeholder="10" placeholderTextColor="#7a827c" />
           <Text style={styles.inputLabel}>Current swim + bike + run hours each week</Text>
-          <TextInput value={String(capacity.currentEnduranceHours)} onChangeText={(value) => setCapacity((current) => ({ ...current, currentEnduranceHours: Number(value.replace(/[^0-9.]/g, '')) || 0 }))} keyboardType="decimal-pad" style={styles.input} placeholder="6" placeholderTextColor="#7a827c" />
+          <TextInput value={capacity.enduranceHoursEvidence ? String(capacity.currentEnduranceHours) : ''}
+            onChangeText={(value) => setCapacity((current) => ({
+              ...current,
+              currentEnduranceHours: Number(value.replace(/[^0-9.]/g, '')) || 0,
+              enduranceHoursEvidence: value.trim() ? 'athlete_reported' : undefined,
+            }))} keyboardType="decimal-pad" style={styles.input} placeholder="Unknown — enter actual weekly hours" placeholderTextColor="#7a827c" />
+          <Text style={styles.helper}>Leave blank if unknown. Available training hours are not proof of completed or currently tolerated endurance training.</Text>
           <Text style={styles.inputLabel}>Current running status</Text>
           <View style={styles.chipRow}>{([['normal','Normal'],['reduced','Reduced'],['return_to_run','Return to run'],['not_running','Not running']] as const).map(([id,label]) => <Chip key={id} label={label} selected={capacity.runStatus === id} onPress={() => setCapacity((current) => ({ ...current, runStatus: id }))} />)}</View>
           <Pressable onPress={() => setShowAdvancedCapacity((value) => !value)} style={styles.advancedDisclosure}>
@@ -598,7 +624,14 @@ export default function GoalPlanScreen() {
           </Pressable>
           {showAdvancedCapacity ? <View style={styles.advancedPanel}>
           <Text style={styles.inputLabel}>Highest weekly run mileage in the last 12 weeks</Text>
-          <TextInput value={String(capacity.maxRunMilesLast12Weeks)} onChangeText={(value) => setCapacity((current) => ({ ...current, maxRunMilesLast12Weeks: Number(value.replace(/[^0-9.]/g, '')) || 0 }))} keyboardType="decimal-pad" style={styles.input} placeholder="20" placeholderTextColor="#7a827c" />
+          <TextInput value={capacity.runMileageEvidence === 'athlete_reported' || capacity.runMileageEvidence === 'source_observed'
+              ? String(capacity.maxRunMilesLast12Weeks) : ''}
+            onChangeText={(value) => setCapacity((current) => ({
+              ...current,
+              maxRunMilesLast12Weeks: Number(value.replace(/[^0-9.]/g, '')) || 0,
+              runMileageEvidence: value.trim() ? 'athlete_reported' : 'unknown',
+            }))} keyboardType="decimal-pad" style={styles.input} placeholder="Unknown — enter actual highest week" placeholderTextColor="#7a827c" />
+          <Text style={styles.helper}>A blank field means unknown, not zero running miles. Do not infer an approved return-to-run dose.</Text>
           <Text style={styles.inputLabel}>Bone-stress injury history</Text>
           <View style={styles.chipRow}>{([['none','None'],['remote','Past history'],['recent_or_current','Recent/current']] as const).map(([id,label]) => <Chip key={id} label={label} selected={capacity.boneStressInjuryHistory === id} onPress={() => setCapacity((current) => ({ ...current, boneStressInjuryHistory: id }))} />)}</View>
           <Text style={styles.inputLabel}>Discipline proficiency</Text>
