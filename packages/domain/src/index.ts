@@ -503,6 +503,14 @@ export interface PerformanceGoal {
     runProficiency: 'developing' | 'average' | 'strong';
     strengthExperience: 'beginner' | 'intermediate' | 'advanced';
   };
+  /** Provisional first-run choices; not observed dose or medical clearance. */
+  firstWeekSetup?: {
+    availableLocations: Array<'home' | 'full_gym' | 'travel' | 'bodyweight'>;
+    selectedLocation: 'home' | 'full_gym' | 'travel' | 'bodyweight';
+    protectedAreas: Array<{ area: string; side: PainAreaSide }>;
+    cardioInterests: Array<'swim' | 'bike' | 'run' | 'elliptical' | 'arc_trainer'>;
+    cardioDoseStatus: 'requires_review';
+  };
   phaseStrengthSessions?: Partial<Record<TrainingPhase, 0 | 1 | 2 | 3 | 4 | 5>>;
   strengthDoseMetadata?: {
     minutesPerWeek: number;
