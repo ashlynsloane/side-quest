@@ -234,7 +234,7 @@ async function buildFirstWeek(
     name: goalType === 'general_offseason' ? goalLabel(goalType) : `${goalLabel(goalType)} · first draft`,
     eventDate,
     weeksUntilEvent,
-    disciplines: disciplinesFor(goalType),
+    disciplines: disciplinesFor(goalType, parseDesiredModes(params)),
     priority: firstWeekPriorityForGoal(goalType, parsePriority(params.priority)),
     sessionsPerWeek,
     defaultSessionMinutes: recommendation.sessionMinutes,
@@ -283,7 +283,7 @@ async function buildFirstWeek(
     excludedMovementTags: fastStartMovementExclusions(protections.restrictions, protections.areas).tags,
     regionRestrictions: [],
     excludedMovementPatterns: fastStartMovementExclusions(protections.restrictions, protections.areas).patterns,
-    difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType), randomSeed: attempt.seed }, { exercises: safeExercises, recentRegionExposures, previousExerciseIds });
+    difficulty: params.strength === 'beginner' ? 'beginner' : params.strength === 'advanced' ? 'advanced' : 'intermediate', preferredStrengthDays: preferredDays, enduranceSchedule: enduranceScheduleFor(goalType, parseDesiredModes(params)), randomSeed: attempt.seed }, { exercises: safeExercises, recentRegionExposures, previousExerciseIds });
   if (!result.ok) throw new Error(result.messages.join(' '));
   const block = normalizeBlockSchedule(result.block, preferredDays, sessionsPerWeek);
   for (const week of block.weeks) {
@@ -378,8 +378,30 @@ function parseDesiredModes(params: Params) {
 function parseDays(value: string | undefined): Weekday[] { const values = (value ?? '1,3,5').split(',').map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < 7).map((index) => WEEKDAYS[index]); return [...new Set(values)].length >= 2 ? [...new Set(values)] : ['tuesday','thursday','saturday']; }
 function parseGoal(value: string | undefined): PerformanceGoalType { return value === 'triathlon_olympic' || value === 'road_half_marathon' || value === 'road_marathon' || value === 'trail_50k' || value === 'general_offseason' ? value : 'ironman_70_3'; }
 function parsePriority(value: string | undefined): PerformanceGoal['priority'] { return value === 'finish' || value === 'race' ? value : 'perform'; }
-function disciplinesFor(goal: PerformanceGoalType): EnduranceDiscipline[] { if (goal === 'ironman_70_3' || goal === 'triathlon_olympic') return ['swim','bike','run']; if (goal === 'general_offseason') return []; return ['run']; }
-function enduranceScheduleFor(goal: PerformanceGoalType): EnduranceSchedule { return disciplinesFor(goal).includes('swim') ? { keySwim:'tuesday', keyBike:'saturday', keyRun:'sunday' } : disciplinesFor(goal).includes('run') ? { keyRun:'sunday' } : {}; }
+function disciplinesFor(
+  goal: PerformanceGoalType,
+  desiredModes: ReturnType<typeof parseDesiredModes> = [],
+): EnduranceDiscipline[] {
+  if (goal === 'general_offseason') {
+    // Strength is still the goal, but an athlete may explicitly elect to
+    // include other sports. A session is generated only if that discipline
+    // has its own verified recent baseline in the whole-athlete planner.
+    return desiredModes.filter((mode): mode is EnduranceDiscipline =>
+      mode === 'swim' || mode === 'bike' || mode === 'run');
+  }
+  if (goal === 'ironman_70_3' || goal === 'triathlon_olympic') return ['swim','bike','run'];
+  return ['run'];
+}
+function enduranceScheduleFor(
+  goal: PerformanceGoalType, desiredModes: ReturnType<typeof parseDesiredModes> = [],
+): EnduranceSchedule {
+  const selected = disciplinesFor(goal, desiredModes);
+  return {
+    ...(selected.includes('swim') ? { keySwim:'tuesday' as const } : {}),
+    ...(selected.includes('bike') ? { keyBike:'saturday' as const } : {}),
+    ...(selected.includes('run') ? { keyRun:'sunday' as const } : {}),
+  };
+}
 function goalLabel(goal: PerformanceGoalType): string { const labels: Record<PerformanceGoalType, string> = { triathlon_sprint:'Sprint triathlon', triathlon_olympic:'Olympic triathlon', ironman_70_3:'Ironman 70.3', ironman_full:'Ironman distance', swimrun:'Swimrun', road_10k:'Road 10K', road_half_marathon:'Half marathon', road_marathon:'Marathon', trail_50k:'Trail 50K', trail_100k:'Trail 100K', swim_speed:'Swim faster', general_offseason:'General strength' }; return labels[goal]; }
 function addWeeks(weeks: number, referenceDate: Date = new Date()): string { const date = new Date(referenceDate.getTime()); date.setDate(date.getDate() + weeks * 7); return date.toISOString().slice(0,10); }
 function shortDate(value: string): string { const date = new Date(`${value}T12:00:00`); return date.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
