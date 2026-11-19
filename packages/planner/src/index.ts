@@ -506,6 +506,28 @@ function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
+/**
+ * A mandatory session focus must not be wholly excluded. Prefer all 'strong'
+ * anchors; light accessory/core regions cannot rescue an incompatible title.
+ * A 'keep_light' PT restriction is incompatible with a strong focus there.
+ * The exercise-level filtering remains the generation engine's job.
+ */
+export function isBlueprintCompatibleWithRestrictions(
+  targets: FocusTarget[],
+  excluded: Array<BodyRegion | JointRegion>,
+  regionRestrictions: RegionRestriction[] = [],
+): boolean {
+  const strong = targets.filter((target) => target.emphasis === 'strong');
+  const anchors = strong.length > 0 ? strong : targets.filter((target) => target.emphasis === 'moderate');
+  const relevant = anchors.length > 0 ? anchors : targets;
+  if (relevant.length === 0) return false;
+  const excludedSet = new Set<string>(excluded);
+  return relevant.some((target) => !excludedSet.has(target.region)
+    && !regionRestrictions.some((restriction) => restriction.region === target.region
+      && (restriction.mode === 'avoid'
+        || (restriction.mode === 'keep_light' && target.emphasis === 'strong'))));
+}
+
 export function generateWeeklyPlan(
   request: WeeklyPlanRequest,
   context: WeeklyPlanningContext,
@@ -531,7 +553,25 @@ export function generateWeeklyPlan(
     rampWeekIndex: context.strengthRampWeekIndex,
   });
   const safeSessionCount = strengthLoadDecision.allowedSessions;
-  const selectedBlueprints = selectBlueprints(blueprints, safeSessionCount, request.goal, phase);
+  // A session cannot keep its original purpose when all of its important
+  // focus regions have been excluded by the athlete or an active PT profile.
+  // Skip incompatible blueprints rather than letting the exercise generator
+  // substitute unrelated movements under a misleading title.
+  const compatibleBlueprints = blueprints.filter((blueprint) =>
+    isBlueprintCompatibleWithRestrictions(
+      blueprint.focusTargets, request.excludedRegions, request.regionRestrictions ?? [],
+    ));
+  if (compatibleBlueprints.length === 0) {
+    return {
+      ok: false, reason: 'WORKOUT_GENERATION_FAILED',
+      messages: ['No strength-session focus is compatible with the active body-region restrictions. Review the restrictions; nothing was prescribed.'],
+    };
+  }
+  const selectedBlueprints = selectBlueprints(
+    compatibleBlueprints,
+    Math.min(safeSessionCount, compatibleBlueprints.length) as 1 | 2 | 3 | 4 | 5,
+    request.goal, phase,
+  );
   const scheduledDays = scheduleSessionDays(request, selectedBlueprints, phase);
   const plannedExposures: RecentRegionExposure[] = [];
   const sessions: PlannedStrengthSession[] = [];
@@ -611,6 +651,9 @@ export function generateWeeklyPlan(
     warnings: [
       ...planWarnings(request, phase),
       ...(strengthLoadDecision.action === 'progress' ? [] : strengthLoadDecision.reasons),
+      ...(selectedBlueprints.length < safeSessionCount
+        ? [`${safeSessionCount - selectedBlueprints.length} strength session(s) deferred: their focus conflicts with active body-region restrictions; no unrelated substitute was prescribed.`]
+        : []),
     ],
   };
 
