@@ -5,8 +5,16 @@ const source = readFileSync(new URL('../../../apps/mobile/src/app/goal-plan.tsx'
   import.meta.url), 'utf8');
 const firstWeek = readFileSync(new URL('../../../apps/mobile/src/app/onboarding-first-week.tsx',
   import.meta.url), 'utf8');
+const onboarding = readFileSync(new URL('../../../apps/mobile/src/app/onboarding.tsx',
+  import.meta.url), 'utf8');
 
 describe('native first-week and advanced planner baseline evidence contract', () => {
+  it('isolates in-memory onboarding drafts when athlete identity changes', () => {
+    expect(onboarding).toContain('return <AthleteOnboardingDraft key={draftKey} draftKey={draftKey} />;');
+    expect(onboarding).toContain('function AthleteOnboardingDraft({ draftKey }: { draftKey: string })');
+    expect(onboarding).toContain('loadDraft(draftKey)');
+    expect(onboarding).toContain('saveDraft(draftKey, {');
+  });
   it('never converts available hours into fabricated completed endurance hours', () => {
     expect(source).not.toContain('Math.max(0, parseHours(onboardingParams.hours) - 4)');
     expect(source).not.toContain('maxRunMilesLast12Weeks: 20');
