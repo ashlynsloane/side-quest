@@ -11,6 +11,9 @@ describe('native first-week and advanced planner baseline evidence contract', ()
     expect(source).not.toContain('Math.max(0, parseHours(onboardingParams.hours) - 4)');
     expect(source).not.toContain('maxRunMilesLast12Weeks: 20');
     expect(source).toContain('currentEnduranceHours: 0,');
+    expect(firstWeek).toContain('currentEnduranceHours: 0,');
+    expect(firstWeek).not.toContain('assumedEnduranceAllocation');
+    expect(firstWeek).not.toContain("enduranceHoursEvidence: 'unverified_planning_assumption'");
     expect(source).toContain("runMileageEvidence: 'unknown'");
     expect(source).toContain("enduranceHoursEvidence: value.trim() ? 'athlete_reported' : undefined");
     expect(source).toContain("runMileageEvidence: value.trim() ? 'athlete_reported' : 'unknown'");
