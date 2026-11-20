@@ -15,6 +15,9 @@ describe('Milestone 1 synthetic first-run interface constraints', () => {
   it('migrates a legacy one-location draft without dropping its chosen venue', () => {
     expect(normalizeFastStartLocations(undefined, 'full_gym')).toEqual(['full_gym']);
     expect(normalizeFastStartRestrictions(undefined, 'upper_body')).toEqual(['upper_body']);
+    expect(normalizeFastStartRestrictions(['none'], 'upper_body')).toEqual(['none']);
+    expect(normalizeFastStartRestrictions(['none', 'back'], 'upper_body')).toEqual(['back']);
+    expect(normalizeFastStartRestrictions([], 'upper_body')).toEqual(['upper_body']);
     expect(normalizeProtectedAreas(undefined)).toEqual([]);
   });
   it('supports both home and full gym without mixing their equipment', () => {

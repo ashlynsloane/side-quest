@@ -20,8 +20,9 @@ run_flow() {
   maestro --udid="$MAESTRO_UDID" test \
     --format junit --output "maestro-evidence/${label}-junit.xml" \
     --test-output-dir="maestro-evidence/${label}" \
-    "$file" > "maestro-evidence/${label}-console.log" 2>&1
-  local result=$?
+    "$file" 2>&1 | tee "maestro-evidence/${label}-console.log"
+  # Capture the Maestro process, not tee: failed assertions must still fail CI.
+  local result=${PIPESTATUS[0]}
   if [[ "$result" -ne 0 ]] && node scripts/qa/native-driver-retry.mjs \
       "maestro-evidence/${label}-junit.xml" "maestro-evidence/${label}"; then
     # Only pre-interaction XCTest failures qualify. Preserve the original
@@ -32,10 +33,10 @@ run_flow() {
     maestro --udid="$MAESTRO_UDID" test \
       --format junit --output "maestro-evidence/${label}-junit.xml" \
       --test-output-dir="maestro-evidence/${label}-retry" \
-      "$file" > "maestro-evidence/${label}-console.log" 2>&1
-    result=$?
+      "$file" 2>&1 | tee "maestro-evidence/${label}-console.log"
+    result=${PIPESTATUS[0]}
   fi
-  tail -n 90 "maestro-evidence/${label}-console.log"
+  # The complete stdout/stderr is streamed and saved; no duplicate tail.
   return "$result"
 }
 

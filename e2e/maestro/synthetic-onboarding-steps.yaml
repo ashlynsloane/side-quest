@@ -51,6 +51,15 @@ appId: com.sidequest.synthetic.qa
     timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
+# Onboarding preserves its scroll offset between steps. The profile title
+# can be above the viewport even though navigation has succeeded. Scroll to
+# the actual title before asserting, rather than treating offscreen as absent.
+- scrollUntilVisible:
+    element:
+      text: "How do you respond to training?"
+    direction: UP
+    visibilityPercentage: 50
+    timeout: 20000
 - assertVisible: "How do you respond to training?"
 - scrollUntilVisible:
     element:
@@ -60,6 +69,12 @@ appId: com.sidequest.synthetic.qa
     timeout: 20000
 - tapOn:
     id: "sidequest-qa-onboarding-next"
+- scrollUntilVisible:
+    element:
+      text: "Ready to build."
+    direction: UP
+    visibilityPercentage: 50
+    timeout: 20000
 - assertVisible: "Ready to build."
 - scrollUntilVisible:
     element:

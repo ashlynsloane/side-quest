@@ -188,7 +188,10 @@ export function buildDisciplineBaselines(
   _capacity: WholeAthleteCapacityInput,
   _goal: PerformanceGoal,
 ): Partial<Record<TrainableDiscipline, DisciplineBaseline>> {
-  const active = activities.filter((activity) => !activity.deletedAt);
+  // A malformed or zero-length imported activity cannot establish completed
+  // training exposure, frequency, or tolerated session duration.
+  const active = activities.filter((activity) => !activity.deletedAt
+    && Number.isFinite(activity.movingTimeSeconds) && activity.movingTimeSeconds > 0);
   const weeks = LOOKBACK_DAYS / 7;
   const baselines: Partial<Record<TrainableDiscipline, DisciplineBaseline>> = {};
   for (const discipline of ['swim', 'bike', 'run'] as const) {
@@ -212,7 +215,9 @@ function previousWeekFromActivities(activities: EnduranceActivity[], nextWeekSta
   const start = addDays(nextWeekStart, -7);
   const end = addDays(nextWeekStart, -1);
   return activities
-    .filter((activity) => !activity.deletedAt && activity.startAt.slice(0, 10) >= start && activity.startAt.slice(0, 10) <= end)
+    .filter((activity) => !activity.deletedAt
+      && Number.isFinite(activity.movingTimeSeconds) && activity.movingTimeSeconds > 0
+      && activity.startAt.slice(0, 10) >= start && activity.startAt.slice(0, 10) <= end)
     .filter((activity) => activity.discipline === 'swim' || activity.discipline === 'bike' || activity.discipline === 'run')
     .map((activity) => completedActivityToUnified(activity));
 }

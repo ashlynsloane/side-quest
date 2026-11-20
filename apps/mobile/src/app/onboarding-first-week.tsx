@@ -166,7 +166,7 @@ export default function OnboardingFirstWeekScreen() {
       setState('building');
       setRetryAttempt((current) => current + 1);
     }}
-    style={styles.primary}><Text style={styles.primaryText}>Retry building this week</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
+    style={styles.primary}><Text style={styles.primaryText}>Retry building this week</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.replace({ pathname: '/goal-plan', params: { ...params, onboarding: '1' } } as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
 
   const week = block.weeks[0];
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -190,8 +190,16 @@ export default function OnboardingFirstWeekScreen() {
     </View>)}</Surface>
     {parseDesiredModes(params).length > 0 ? <Surface style={styles.noteCard}>
       <Text style={styles.sectionLabel}>CARDIO & CROSS-TRAINING REQUESTS</Text>
-      {fastStartCrossTrainingReview(parseDesiredModes(params)).map((entry) =>
-        <Text key={entry.mode} style={styles.body}>{entry.label}: not yet scheduled — review recent dose and movement eligibility</Text>)}
+      {fastStartCrossTrainingReview(parseDesiredModes(params)).map((entry) => {
+        // A requested sport can already have a *proposed* calendar session if
+        // the athlete has sport-specific recorded history. Never label that
+        // session completed, cleared, or unscheduled merely due to its origin.
+        const scheduled = entry.mode === 'swim' || entry.mode === 'bike' || entry.mode === 'run'
+          ? (firstWeek?.counts[entry.mode] ?? 0) > 0 : false;
+        return <Text key={entry.mode} style={styles.body}>{entry.label}: {scheduled
+          ? 'proposed in this week — confirm readiness and actual dose before training'
+          : 'not yet scheduled — review recent dose and movement eligibility'}</Text>;
+      })}
       <Text style={styles.body}>These are athlete-selected interests, not approved activities or invented training sessions. Return to plan editing to review actual readiness and scheduling.</Text>
     </Surface> : <Surface style={styles.noteCard}>
       <Text style={styles.sectionLabel}>CARDIO & CROSS-TRAINING</Text>
@@ -203,7 +211,7 @@ export default function OnboardingFirstWeekScreen() {
         ? <Text style={styles.body}>Reported protected areas are applied conservatively to the generated strength draft. These exclusions do not establish clinical clearance.</Text>
         : null}</View>
     <Pressable testID="sidequest-qa-review-first-week" accessibilityRole="button" onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
-    <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
+    <Pressable onPress={() => router.push({ pathname: '/goal-plan', params: { ...params, onboarding: '1' } } as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
 }
 
@@ -321,14 +329,12 @@ function buildCapacity(params: Params, totalHours: number): AthleteCapacityProfi
   const runStatus = params.runStatus === 'reduced' || params.runStatus === 'return_to_run'
     || params.runStatus === 'not_running' ? params.runStatus : 'normal';
 
-  // Fast-start asks about AVAILABLE training hours, not actual completed volume.
-  // Reserving some hours for the goal-specific endurance calendar is a SCHEDULING
-  // assumption, not a measured baseline and never eligibility for progression.
-  const assumedEnduranceAllocation = Math.max(0, totalHours - 3);
+  // Available training time is scheduling capacity, not completed endurance.
+  // Until a separate recent-training review, volume remains UNKNOWN. The
+  // numeric zero is only a safe placeholder, never evidence of zero training.
   return {
     totalWeeklyHours: totalHours,
-    currentEnduranceHours: assumedEnduranceAllocation,
-    enduranceHoursEvidence: 'unverified_planning_assumption',
+    currentEnduranceHours: 0,
     runStatus,
     // No retrospective running mileage was collected. Previously the code
     // fabricated 15/20/30 mi from background; zero is a conservative legacy

@@ -56,10 +56,16 @@ function loadDraft(key: string): Partial<OnboardingDraft> { try { const raw = dr
 function saveDraft(key: string, draft: OnboardingDraft): void { try { draftStorage?.setItem(key, JSON.stringify(draft)); } catch { /* setup can still continue without persistence */ } }
 
 export default function OnboardingScreen() {
-  const router = useRouter();
-  const { beginFirstWeek } = useOnboarding();
   const { user } = useAuth();
   const draftKey = `${DRAFT_KEY}.${user?.id ?? 'guest'}`;
+  // React keys remount the form when the account changes, preventing an
+  // athlete's in-memory draft from being shown or saved under another owner.
+  return <AthleteOnboardingDraft key={draftKey} draftKey={draftKey} />;
+}
+
+function AthleteOnboardingDraft({ draftKey }: { draftKey: string }) {
+  const router = useRouter();
+  const { beginFirstWeek } = useOnboarding();
   const { palette } = useTheme();
   const styles = useMemo(() => makeStyles(palette), [palette]);
   const initialDraft = useMemo(() => loadDraft(draftKey), [draftKey]);

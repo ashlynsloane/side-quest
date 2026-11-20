@@ -22,12 +22,20 @@ export function resolveFirstWeekCapacity(goal: PerformanceGoal): ResolvedFirstWe
         : trainingEvidence === 'athlete_reported' ? 'athlete_reported'
           : trainingEvidence === 'unverified_planning_assumption'
             ? 'provisional_availability' : 'unknown';
+    const validEnduranceHours = Number.isFinite(capacity.currentEnduranceHours)
+      && capacity.currentEnduranceHours >= 0;
+    const validatedEvidence = validEnduranceHours ? evidence : 'unknown';
     return {
-      totalWeeklyHours: Math.max(0, capacity.totalWeeklyHours),
-      currentEnduranceHours: Math.max(0, capacity.currentEnduranceHours),
+      totalWeeklyHours: Number.isFinite(capacity.totalWeeklyHours)
+        ? Math.max(0, capacity.totalWeeklyHours) : 0,
+      // Neither provisional availability nor missing evidence is a measured
+      // endurance baseline. Discard even nonzero legacy fabricated values.
+      currentEnduranceHours: validatedEvidence === 'provisional_availability' || validatedEvidence === 'unknown'
+        ? 0 : capacity.currentEnduranceHours,
       runStatus: capacity.runStatus,
       boneStressInjuryHistory: capacity.boneStressInjuryHistory,
-      evidence, needsRecentTrainingReview: evidence !== 'source_observed',
+      evidence: validatedEvidence,
+      needsRecentTrainingReview: validatedEvidence !== 'source_observed',
     };
   }
   // Existing legacy plans can lack any athlete-capacity profile. The previous

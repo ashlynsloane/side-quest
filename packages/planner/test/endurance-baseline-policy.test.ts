@@ -30,6 +30,9 @@ describe('whole-athlete first-week sport-specific dose eligibility', () => {
     expect(source).toContain('unverifiedEnduranceDisciplines(input.goal.disciplines, baselines)');
     expect(source).not.toContain('goalFallbackWeights');
     expect(source).not.toContain('const fallbackMinutes = capacity.currentEnduranceHours * 60');
+    expect(source).toContain('Number.isFinite(activity.movingTimeSeconds) && activity.movingTimeSeconds > 0');
+    expect(source).toContain('const athleteCalendarEvents = calendarEvents.filter');
+    expect(source).toContain('const baselines = buildDisciplineBaselines(recentActivities');
   });
   it('general strength can request bike, swim or run without fabricating their dose', () => {
     const firstWeek = readFileSync(new URL('../../../apps/mobile/src/app/onboarding-first-week.tsx',
