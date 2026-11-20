@@ -166,7 +166,7 @@ export default function OnboardingFirstWeekScreen() {
       setState('building');
       setRetryAttempt((current) => current + 1);
     }}
-    style={styles.primary}><Text style={styles.primaryText}>Retry building this week</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.replace(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
+    style={styles.primary}><Text style={styles.primaryText}>Retry building this week</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.replace({ pathname: '/goal-plan', params: { ...params, onboarding: '1' } } as Href)} style={styles.primary}><Text style={styles.primaryText}>Open advanced planner</Text><Text style={styles.arrow}>›</Text></Pressable><Pressable onPress={() => router.back()} style={styles.secondary}><Text style={styles.secondaryText}>Back to setup</Text></Pressable></AppScreen>;
 
   const week = block.weeks[0];
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -211,7 +211,7 @@ export default function OnboardingFirstWeekScreen() {
         ? <Text style={styles.body}>Reported protected areas are applied conservatively to the generated strength draft. These exclusions do not establish clinical clearance.</Text>
         : null}</View>
     <Pressable testID="sidequest-qa-review-first-week" accessibilityRole="button" onPress={() => router.replace('/(tabs)/plan' as Href)} style={styles.primary}><Text style={styles.primaryText}>Review provisional first week</Text><Text style={styles.arrow}>›</Text></Pressable>
-    <Pressable onPress={() => router.push(`/goal-plan?${new URLSearchParams({ ...params, onboarding: '1' }).toString()}` as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
+    <Pressable onPress={() => router.push({ pathname: '/goal-plan', params: { ...params, onboarding: '1' } } as Href)} style={styles.secondary}><Text style={styles.secondaryText}>Advanced edit</Text></Pressable>
   </AppScreen>;
 }
 
