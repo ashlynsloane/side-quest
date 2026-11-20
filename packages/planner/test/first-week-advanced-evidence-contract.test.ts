@@ -30,6 +30,10 @@ describe('native first-week and advanced planner baseline evidence contract', ()
     expect(firstWeek).toContain('inspectPlannedSessionCoherence(session.workout, session)');
     expect(firstWeek).toContain('No incompatible strength session was saved.');
   });
+  it('clears stale athlete setup context instead of retaining the previous goal', () => {
+    expect(source).toContain('setSavedFirstWeekSetup(goal?.firstWeekSetup);');
+    expect(source).not.toContain('if (goal?.firstWeekSetup) setSavedFirstWeekSetup(goal.firstWeekSetup);');
+  });
   it('uses native-safe parameter routing for editing or recovering first-week drafts', () => {
     expect(firstWeek).not.toContain('new URLSearchParams(');
     expect(firstWeek).toContain("router.replace({ pathname: '/goal-plan', params: { ...params, onboarding: '1' } } as Href)");
