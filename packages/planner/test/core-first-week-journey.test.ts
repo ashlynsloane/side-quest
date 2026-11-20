@@ -91,10 +91,32 @@ describe('training availability versus observed exposure', () => {
       bikeProficiency: 'average', runProficiency: 'developing',
       strengthExperience: 'intermediate',
     }));
-    expect(result.currentEnduranceHours).toBe(7);
+    // Legacy first-week drafts may contain (available hours - 3).
+    // That is not completed endurance and must not enter the baseline.
+    expect(result.currentEnduranceHours).toBe(0);
     expect(result.runStatus).toBe('return_to_run');
     expect(result.evidence).toBe('provisional_availability');
     expect(result.needsRecentTrainingReview).toBe(true);
+  });
+  it('does not turn ten available hours into ten completed endurance hours', () => {
+    const profile = {
+      totalWeeklyHours: 10, currentEnduranceHours: 10,
+      runStatus: 'normal' as const, maxRunMilesLast12Weeks: 0,
+      boneStressInjuryHistory: 'none' as const,
+      swimProficiency: 'average' as const, bikeProficiency: 'average' as const,
+      runProficiency: 'developing' as const, strengthExperience: 'intermediate' as const,
+    };
+    const unknown = resolveFirstWeekCapacity(goal(profile));
+    expect(unknown.totalWeeklyHours).toBe(10);
+    expect(unknown.currentEnduranceHours).toBe(0);
+    expect(unknown.evidence).toBe('unknown');
+    expect(unknown.needsRecentTrainingReview).toBe(true);
+    const reported = resolveFirstWeekCapacity(goal({
+      ...profile, currentEnduranceHours: 3,
+      enduranceHoursEvidence: 'athlete_reported',
+    }));
+    expect(reported.currentEnduranceHours).toBe(3);
+    expect(reported.evidence).toBe('athlete_reported');
   });
   it('never makes up endurance hours or normal run status on a legacy goal', () => {
     const result = resolveFirstWeekCapacity(goal());
