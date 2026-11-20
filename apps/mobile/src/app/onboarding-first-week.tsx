@@ -321,14 +321,12 @@ function buildCapacity(params: Params, totalHours: number): AthleteCapacityProfi
   const runStatus = params.runStatus === 'reduced' || params.runStatus === 'return_to_run'
     || params.runStatus === 'not_running' ? params.runStatus : 'normal';
 
-  // Fast-start asks about AVAILABLE training hours, not actual completed volume.
-  // Reserving some hours for the goal-specific endurance calendar is a SCHEDULING
-  // assumption, not a measured baseline and never eligibility for progression.
-  const assumedEnduranceAllocation = Math.max(0, totalHours - 3);
+  // Available training time is scheduling capacity, not completed endurance.
+  // Until a separate recent-training review, volume remains UNKNOWN. The
+  // numeric zero is only a safe placeholder, never evidence of zero training.
   return {
     totalWeeklyHours: totalHours,
-    currentEnduranceHours: assumedEnduranceAllocation,
-    enduranceHoursEvidence: 'unverified_planning_assumption',
+    currentEnduranceHours: 0,
     runStatus,
     // No retrospective running mileage was collected. Previously the code
     // fabricated 15/20/30 mi from background; zero is a conservative legacy
