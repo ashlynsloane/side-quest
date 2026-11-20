@@ -190,8 +190,16 @@ export default function OnboardingFirstWeekScreen() {
     </View>)}</Surface>
     {parseDesiredModes(params).length > 0 ? <Surface style={styles.noteCard}>
       <Text style={styles.sectionLabel}>CARDIO & CROSS-TRAINING REQUESTS</Text>
-      {fastStartCrossTrainingReview(parseDesiredModes(params)).map((entry) =>
-        <Text key={entry.mode} style={styles.body}>{entry.label}: not yet scheduled — review recent dose and movement eligibility</Text>)}
+      {fastStartCrossTrainingReview(parseDesiredModes(params)).map((entry) => {
+        // A requested sport can already have a *proposed* calendar session if
+        // the athlete has sport-specific recorded history. Never label that
+        // session completed, cleared, or unscheduled merely due to its origin.
+        const scheduled = entry.mode === 'swim' || entry.mode === 'bike' || entry.mode === 'run'
+          ? (firstWeek?.counts[entry.mode] ?? 0) > 0 : false;
+        return <Text key={entry.mode} style={styles.body}>{entry.label}: {scheduled
+          ? 'proposed in this week — confirm readiness and actual dose before training'
+          : 'not yet scheduled — review recent dose and movement eligibility'}</Text>;
+      })}
       <Text style={styles.body}>These are athlete-selected interests, not approved activities or invented training sessions. Return to plan editing to review actual readiness and scheduling.</Text>
     </Surface> : <Surface style={styles.noteCard}>
       <Text style={styles.sectionLabel}>CARDIO & CROSS-TRAINING</Text>
