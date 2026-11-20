@@ -64,7 +64,11 @@ describe('Synthetic athlete acceptance matrix: provenance', () => {
       const result = resolveFirstWeekCapacity(goal(profile));
       expect(result.evidence).toBe(expected);
       expect(result.needsRecentTrainingReview).toBe(expected !== 'source_observed');
-      expect(result.currentEnduranceHours).toBe(profile?.currentEnduranceHours ?? 0);
+      // Available-hours assumptions and missing evidence never count as
+      // completed endurance, even when legacy records carry a numeric value.
+      const verifiedHours = expected === 'source_observed' || expected === 'athlete_reported'
+        ? profile?.currentEnduranceHours ?? 0 : 0;
+      expect(result.currentEnduranceHours).toBe(verifiedHours);
     });
   it('legacy scheduling allowance is not labeled observed training', () => {
     const result = resolveFirstWeekCapacity(goal());
