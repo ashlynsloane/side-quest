@@ -24,7 +24,10 @@ export function resolveFirstWeekCapacity(goal: PerformanceGoal): ResolvedFirstWe
             ? 'provisional_availability' : 'unknown';
     return {
       totalWeeklyHours: Math.max(0, capacity.totalWeeklyHours),
-      currentEnduranceHours: Math.max(0, capacity.currentEnduranceHours),
+      // Neither provisional availability nor missing evidence is a measured
+      // endurance baseline. Discard even nonzero legacy fabricated values.
+      currentEnduranceHours: evidence === 'provisional_availability' || evidence === 'unknown'
+        ? 0 : Math.max(0, capacity.currentEnduranceHours),
       runStatus: capacity.runStatus,
       boneStressInjuryHistory: capacity.boneStressInjuryHistory,
       evidence, needsRecentTrainingReview: evidence !== 'source_observed',
