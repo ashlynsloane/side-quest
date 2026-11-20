@@ -118,6 +118,20 @@ describe('training availability versus observed exposure', () => {
     expect(reported.currentEnduranceHours).toBe(3);
     expect(reported.evidence).toBe('athlete_reported');
   });
+  it('rejects malformed observed endurance baselines rather than certifying them', () => {
+    const invalid = resolveFirstWeekCapacity(goal({
+      totalWeeklyHours: Number.NaN, currentEnduranceHours: Number.NaN,
+      enduranceHoursEvidence: 'source_observed',
+      runStatus: 'normal', maxRunMilesLast12Weeks: 0,
+      boneStressInjuryHistory: 'none',
+      swimProficiency: 'average', bikeProficiency: 'average',
+      runProficiency: 'average', strengthExperience: 'intermediate',
+    }));
+    expect(invalid.totalWeeklyHours).toBe(0);
+    expect(invalid.currentEnduranceHours).toBe(0);
+    expect(invalid.evidence).toBe('unknown');
+    expect(invalid.needsRecentTrainingReview).toBe(true);
+  });
   it('never makes up endurance hours or normal run status on a legacy goal', () => {
     const result = resolveFirstWeekCapacity(goal());
     expect(result.currentEnduranceHours).toBe(0);
