@@ -3,7 +3,7 @@ on:
   # A verified Release simulator binary now exists. Automatically rerun
   # the cheaper UI journeys on QA-only changes, using strict source SHA.
   push:
-    branches: [test/automated-athlete-acceptance-v1]
+    branches: [test/automated-athlete-acceptance-v1, fix/m1-availability-not-completed-endurance-20261120]
     paths:
       - 'e2e/maestro/*.yaml'
       - 'e2e/maestro/**/*.yaml'
@@ -51,7 +51,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || '["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill","completion-in-transaction-kill"]') }}
+        # The Milestone 1 fix branch first validates the staged full path.
+        # Existing QA branch retains independent fault-injection journeys.
+        journey: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.journey) || (github.ref_name == 'fix/m1-availability-not-completed-endurance-20261120' && '["full"]' || '["isolation","strength","live-isolation","owner-recovery","generation-isolation","completion-kill","completion-in-transaction-kill"]')) }}
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -81,7 +83,7 @@ jobs:
           RUN_ID="${{ inputs.native_build_run_id }}"
           if [ -z "$RUN_ID" ]; then
             RUN_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=sidequest-synthetic-ios-app&per_page=50" \
-              --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "test/automated-athlete-acceptance-v1")] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty')
+              --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == env.GITHUB_REF_NAME)] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty')
           fi
           if [ -z "$RUN_ID" ]; then
             echo "No previous native app artifact. Trigger the full native simulator workflow first." >&2
