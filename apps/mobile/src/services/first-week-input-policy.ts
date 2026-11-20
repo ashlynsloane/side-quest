@@ -71,7 +71,10 @@ export function normalizeFastStartRestrictions(
     (v): v is FastStartRestriction => allowed.has(v as FastStartRestriction));
   const result = [...new Set(next)];
   const actual = result.filter((v) => v !== 'none');
-  return actual.length > 0 ? actual : [legacy];
+  if (actual.length > 0) return actual;
+  // An explicit "none" selection overrides a legacy broad restriction.
+  // Only genuinely absent/invalid new selections should use the old value.
+  return result.includes('none') ? ['none'] : [legacy];
 }
 export function toggleFastStartRestriction(
   current: FastStartRestriction[], choice: FastStartRestriction,
