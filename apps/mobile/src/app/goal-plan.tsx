@@ -274,7 +274,9 @@ export default function GoalPlanScreen() {
       ensureDefaultEquipmentProfiles(),
     ]).then(([goal, savedBlock, savedPTProfile, savedCheckIn, savedCalendarEvents, savedEquipmentProfiles]) => {
       if (cancelled) return;
-      if (goal?.firstWeekSetup) setSavedFirstWeekSetup(goal.firstWeekSetup);
+      // Explicitly clear stale setup context when no goal/setup is stored.
+      // A previously loaded athlete or edited goal must not leak into a new plan.
+      setSavedFirstWeekSetup(goal?.firstWeekSetup);
       if (goal && !fromOnboarding) {
         setGoalType(goal.type);
         setEventDateText(goal.eventDate ?? dateFromWeeks(goal.weeksUntilEvent));
