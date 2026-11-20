@@ -6,6 +6,7 @@ on:
   pull_request:
     branches:
       - sq2-experience-rebuild
+      - review/m1-base-20261119
     paths:
       - 'packages/planner/**'
       - 'apps/mobile/**'
