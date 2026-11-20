@@ -33,5 +33,8 @@ describe('native first-week and advanced planner baseline evidence contract', ()
   it('retains modality interests but does not invent endurance minutes', () => {
     expect(firstWeek).toContain("cardioDoseStatus: 'requires_review'");
     expect(firstWeek).toContain('not yet scheduled — review recent dose and movement eligibility');
+    expect(firstWeek).toContain('firstWeek?.counts[entry.mode] ?? 0');
+    expect(firstWeek).toContain('proposed in this week — confirm readiness and actual dose before training');
+    expect(firstWeek).toContain("entry.mode === 'swim' || entry.mode === 'bike' || entry.mode === 'run'");
   });
 });
